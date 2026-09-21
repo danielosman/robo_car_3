@@ -1,0 +1,19 @@
+{
+  "name": "arducam-b0319-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RoboCar PicoA camera and VL53L8CX viewer over USB CDC.",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test src/protocol.test.ts src/viewer.test.ts"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12"
+  }
+}

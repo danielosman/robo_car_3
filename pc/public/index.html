@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboCar PicoA — Camera + VL53L8CX + OPT4048</title>
+<style>
+:root { color-scheme:dark; } * { box-sizing:border-box; }
+body { margin:0; padding:16px; font:14px/1.4 system-ui,sans-serif; background:#111; color:#ddd; }
+h1 { font-size:20px; margin:0 0 8px; } h2 { font-size:16px; margin:0 0 10px; }
+#connection { margin-bottom:16px; color:#aaa; }
+main { display:grid; grid-template-columns:repeat(2,minmax(0,640px)) minmax(0,300px); gap:24px; align-items:start; }
+.panel { width:100%; min-width:0; }
+@media (max-width:1650px) { main { grid-template-columns:repeat(2,minmax(0,640px)); } }
+@media (max-width:900px) { main { grid-template-columns:minmax(0,640px); } }
+#swatch { height:60px; border:1px solid #444; background:#000; margin-bottom:10px; }
+#optValues { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+#optValues td { padding:3px 6px; border-bottom:1px solid #2a2a2a; } #optValues td:last-child { text-align:right; }
+.big { font-size:28px; color:white; }
+canvas { display:block; width:100%; aspect-ratio:4/3; background:#000; border:1px solid #444; image-rendering:pixelated; }
+.controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:12px 0; }
+label { display:flex; gap:6px; align-items:center; max-width:100%; }
+button,select,input { background:#222; color:#ddd; border:1px solid #555; border-radius:5px; padding:5px; max-width:100%; }
+button { cursor:pointer; } select { min-width:0; } input[type=number] { width:65px; }
+.wide { width:100%; } .wide select { flex:1; } .note,.status { color:#aaa; font-size:12px; margin:8px 0; }
+#grid { width:100%; aspect-ratio:4/3; display:grid; gap:3px; background:#171717; border:1px solid #444; }
+.cell { display:flex; align-items:center; justify-content:center; flex-direction:column; background:#242424; color:white; font-size:16px; min-width:0; overflow:hidden; }
+.cell small { font-size:10px; color:#ccc; } .cell.warn { outline:1px solid #d9a448; outline-offset:-2px; }
+pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:180px; overflow:auto; background:#181818; padding:10px; }
+#logs { max-width:1304px; } .error { color:#ffb875; }
+</style>
+</head>
+<body>
+<h1>RoboCar — PicoA sensors</h1>
+<div id="connection">Connecting…</div>
+<main>
+<section class="panel">
+<h2>HM0360 camera</h2>
+<canvas id="cv" width="160" height="120"></canvas>
+<div class="status" id="cameraStatus">Waiting for camera</div>
+<div class="controls">
+<label class="wide">Capture <select id="bin">
+<option value="" selected disabled>Select mode — boot default: Sub4, no binning</option>
+<option value="3">160×120 — Sub4, no binning (boot default)</option>
+<option value="2">160×120 — Sub4 + V-bin</option>
+<option value="1">160×120 — direct Sub4 + H/V bin (experimental)</option>
+<option value="0">160×120 — legacy even-column workaround</option>
+<option value="4">320×120 — raw legacy capture</option>
+</select></label>
+<label>Gamma <input id="gamma" type="range" min="0.3" max="2.5" step="0.05" value="1"> <span id="gammaV">1.00</span></label>
+<label><input id="stretch" type="checkbox">Auto-stretch</label>
+</div>
+<fieldset><legend>Sensor exposure / tone (read back from the HM0360)</legend>
+<div class="controls">
+<label>Tone curve <select id="tone"><option value="0">Datasheet default</option><option value="1">Low</option><option value="2">Medium</option><option value="3">High</option><option value="-1" disabled>Custom / unknown</option></select></label>
+<label>Auto-exposure <select id="ae"><option value="1">On</option><option value="0">Off (manual)</option></select></label>
+</div>
+<div class="controls" id="manual">
+<label>Analog gain <select id="analog"><option value="0">1× (0 dB)</option><option value="1">2× (6 dB)</option><option value="2">4× (12 dB)</option><option value="3">8× (18 dB)</option><option value="4">16× (24 dB)</option></select></label>
+<label>Digital gain <select id="digital"><option value="64">1.0×</option><option value="80">1.25×</option><option value="96">1.5×</option><option value="128">2.0×</option><option value="160">2.5×</option><option value="192">3.0×</option><option value="255">3.98× (max)</option></select></label>
+<label class="wide">Exposure <input id="lines" type="range" min="1" max="1000" step="1" value="264" style="flex:1"> <span id="linesV">264</span> lines</label>
+</div>
+</fieldset>
+<div class="note">Selecting a capture mode also restarts streaming. Manual gain/exposure applies only with auto-exposure off;
+exposure is capped by the current frame length. H/V stripes remain experimental.</div>
+</section>
+<section class="panel">
+<h2>VL53L8CX — multizone ranging</h2>
+<div id="grid" aria-label="VL53 distance matrix"></div>
+<div class="status" id="tofStatus">Waiting for VL53L8CX initialization…</div>
+<div class="controls">
+<label>Result <select id="metric">
+<option value="distance">Distance (mm)</option><option value="status">Target status</option>
+<option value="signal">Signal (kcps/SPAD)</option><option value="sigma">Sigma (mm)</option>
+<option value="reflectance">Reflectance (%)</option><option value="ambient">Ambient (kcps/SPAD)</option>
+<option value="count">Detected targets</option><option value="spads">Enabled SPADs</option>
+</select></label>
+<label>Target <select id="target">
+<option value="closest">Closest valid</option><option value="farthest">Farthest valid returned</option>
+<option value="strongest">Strongest valid returned</option>
+<option value="0">Reported slot 1</option><option value="1">Reported slot 2</option>
+<option value="2">Reported slot 3</option><option value="3">Reported slot 4</option>
+</select></label>
+<label>Validity <select id="validity"><option value="normal">5 / 6 / 9</option><option value="strict">5 only</option><option value="all">All reported (diagnostic)</option></select></label>
+<label>Rotate view <select id="rotation"><option value="0">0° (raw zone order)</option><option value="90" selected>90° (PCB default)</option><option value="180">180°</option><option value="270">270°</option></select></label>
+</div>
+<div class="note">Farthest/strongest selection operates on up to four returned targets, not every object in a zone.
+Gray = no eligible target; amber border = status other than 5. Hover a cell for all targets.
+Distance colors: near red → far blue, fixed 0–4000 mm. Other metrics use a per-frame scale.
+90° view rotation matches the PCB mounting; this does not geometrically align ToF zones with camera pixels.</div>
+<fieldset><legend>Sensor settings (Apply stops, configures, then restarts ranging)</legend>
+<div class="controls">
+<label>Zones <select id="resolution"><option value="64">8×8</option><option value="16">4×4</option></select></label>
+<label>Hz <input id="hz" type="number" min="1" max="15" value="10"></label>
+<label>Sensor order <select id="order"><option value="1">Closest first</option><option value="2">Strongest first</option></select></label>
+<label>Mode <select id="ranging"><option value="1">Continuous</option><option value="3">Autonomous</option></select></label>
+<label>Integration ms <input id="integration" type="number" min="2" max="1000" value="5" disabled></label>
+<label>Sharpener % <input id="sharpener" type="number" min="0" max="99" value="5"></label>
+<button id="applyTof">Apply & start</button><button id="startTof">Start ToF</button><button id="stopTof">Stop ToF</button><button id="initTof">Reinitialize</button>
+</div>
+<div class="note">8×8: 1–15 Hz; 4×4: 1–60 Hz. Integration applies only to autonomous mode.
+Camera/USB load may lower the displayed update rate. LPn is held high by the carrier, not driven by PicoA.</div>
+</fieldset>
+<div id="tofMessage" class="note"></div>
+</section>
+<section class="panel">
+<h2>OPT4048 — light / color</h2>
+<div class="big"><span id="lux">—</span> lux</div>
+<div id="swatch" title="Approximate color from CIE xy at fixed brightness (not calibrated)"></div>
+<table id="optValues"><tbody>
+<tr><td>CIE x, y</td><td id="optXy">—</td></tr>
+<tr><td>CIE X / Y / Z</td><td id="optXyz">—</td></tr>
+<tr><td>CH0 (X) ADC</td><td id="optCh0">—</td></tr>
+<tr><td>CH1 (Y) ADC</td><td id="optCh1">—</td></tr>
+<tr><td>CH2 (Z) ADC</td><td id="optCh2">—</td></tr>
+<tr><td>CH3 (wide) ADC</td><td id="optCh3">—</td></tr>
+</tbody></table>
+<div class="status" id="optStatus">Waiting for OPT4048…</div>
+<div class="controls"><button id="initOpt">Reinitialize</button></div>
+<div class="note">Datasheet example XYZ matrix and lux factor; not board/cover-glass calibrated.
+Channel cell shows ADC counts (exponent); amber = CRC/range failure or overload.</div>
+</section>
+</main>
+<details id="logs" open><summary>Sensor / connection log</summary><pre id="log"></pre></details>
+<script type="module" src="/viewer.js"></script>
+</body>
+</html>

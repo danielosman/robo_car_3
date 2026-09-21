@@ -1,0 +1,44 @@
+.program hm0360_capture
+
+; HM0360 4-bit serial pixel capture for the Arducam B0319, resynced per line on
+; HREF. Sensor mode: 4-bit serial on D0-D3 (0x310F[6]=1), so each 8-bit pixel is
+; TWO 4-bit nibbles = 2 PCLK/pixel (clk_tb/2, 0x0300=0x01). Datasheet Fig 6.7
+; ("Output format on 4-bit data IO interface") confirms: 1st nibble then 2nd
+; nibble per pixel on D[3:0]; in MSB/LSB the chip puts the higher pixel bit on its
+; D3 pin and the lower on D0.
+;
+; WIRING (descending, because PCLK sits at GP11 and blocks an ascending D0..D3):
+;   camera D3->GP7  D2->GP8  D1->GP9  D0->GP10   PCLK=GP11  HREF=GP12  VSYNC=GP13
+; PIO `in pins` reads consecutive GPIOs UPWARD from the IN base, so IN base = GP7
+; and each `in pins, 4` yields [GP7,GP8,GP9,GP10] = [camD3,camD2,camD1,camD0] --
+; i.e. each nibble arrives BIT-REVERSED relative to the chip's D0..D3 order.
+;
+; We cancel that reversal in hardware: assemble the two nibbles into ISR[7:0] with
+; the default shift-LEFT, then `mov isr, ::isr` bit-reverses the 32-bit ISR so the
+; 8 valid bits land (corrected) in ISR[31:24]. We push manually (autopush OFF) and
+; the DMA reads the top byte (FIFO +3). Net: zero per-pixel CPU cost, and the only
+; remaining empirical knob is the sensor's 0x3112[3] MSB/LSB bit (try both on HW).
+;
+; Pin usage (absolute GPIO, set in C):
+;   IN base = GP7 (camD3), 4 data pins GP7-GP10   PCLK = GP11  HREF = GP12  VSYNC = GP13
+;
+; C pushes (pixels_per_line - 1) = (160 - 1) once; we hold it in Y and reload X
+; every line. Each loop iteration consumes 2 PCLK (one pixel = two nibbles).
+
+    pull block          ; OSR = pixels_per_line - 1 (from TX FIFO)
+    mov y, osr          ; Y = pixels_per_line - 1 (persistent)
+.wrap_target
+    wait 0 gpio 12      ; HREF low (between lines)
+    wait 1 gpio 12      ; HREF rising edge = start of active line
+    mov x, y            ; reload per-line pixel counter
+pix:
+    wait 1 gpio 11      ; PCLK high -- 1st nibble stable
+    in pins, 4          ; sample D[3:0] -> ISR[3:0]
+    wait 0 gpio 11      ; PCLK low
+    wait 1 gpio 11      ; PCLK high -- 2nd nibble stable
+    in pins, 4          ; sample D[3:0] -> ISR[7:4] (1st nibble shifted up)
+    wait 0 gpio 11      ; PCLK low
+    mov isr, ::isr      ; bit-reverse: 8 data bits -> ISR[31:24], wiring-corrected
+    push                ; manual push (autopush off); DMA reads top byte (+3)
+    jmp x-- pix         ; next pixel in the line
+.wrap

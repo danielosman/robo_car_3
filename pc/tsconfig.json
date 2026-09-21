@@ -1,0 +1,16 @@
+{
+  // For editor type-checking only. Node 22.18+/24 runs the .ts files directly via
+  // built-in type stripping (no emit, no build step) -- see `npm start`.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
+}
