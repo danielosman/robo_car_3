@@ -27,10 +27,16 @@ MLX90640, motors and the inter-Pico link are not implemented yet.
 
 ## Run
 
-1. Build with the Pico SDK / Pico VS Code extension; flash
-   `build/robo_car_3.uf2` onto **PicoA**, not the motor Pico.
+1. Build with the Pico VS Code extension (SDK/toolchain in `~/.pico-sdk/`, CMake/Ninja
+   from Homebrew) or from a terminal (`PICO_SDK_PATH` etc. are set in `~/.zshrc`):
+   ```sh
+   cmake -S . -B build -G Ninja   # first time or after deleting build/
+   cmake --build build
+   ```
+   Flash `build/robo_car_3.uf2` onto **PicoA**, not the motor Pico.
 2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/`.
-   With multiple Picos attached, use `npm start -- COM7` (replace with PicoA's port).
+   With multiple Picos attached, use `npm start -- /dev/tty.usbmodem1101` (replace with PicoA's port;
+   list candidates with `ls /dev/tty.usbmodem*`).
 3. Open **http://127.0.0.1:8080/**. Restart the Node app after reflashing/reconnecting.
    Sensor initialization and errors appear in the page log.
 
@@ -43,7 +49,7 @@ hardware behavior still needs PCB testing after changes.
 
 ## References used
 
-- [PCB review and A1 pin map](file:///C:/Users/daniel/Documents/robo_car_3/PCB_REVIEW.md).
+- [PCB review and A1 pin map](../../kicad/robo_car_3/PCB_REVIEW.md) (`~/kicad/robo_car_3/`).
   Camera pins match the old example; ToF INT moved **GP21 → GP20**, and the old
   GP20 LPn output was removed. SPI remains GP16–GP19.
 - [HM0360 V04 datasheet](../hm0360/doc/HM0360-datasheet_v4.pdf), especially §§3.3,
@@ -63,4 +69,8 @@ hardware behavior still needs PCB testing after changes.
   [OPT4048 project](../opt-4048/main.c) and [notes](../opt-4048/OPT4048_NOTES.md). ST's driver license is retained in
   [`lib/vl53l8cx/LICENSE.txt`](lib/vl53l8cx/LICENSE.txt).
 
-Local reference links assume the original sibling-project layout.
+Local reference links assume this layout (this repo is `~/code/robo_car_3`):
+
+- `~/kicad/robo_car_3/` — KiCad project and PCB review
+- `~/code/hm0360/`, `~/code/vl53l8cx/`, `~/code/arducam_b0319/`, `~/code/opt-4048/` —
+  sibling example projects (not yet copied to this Mac)

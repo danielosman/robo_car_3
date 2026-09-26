@@ -13,8 +13,8 @@ async function findPicoPath(): Promise<string> {
   if (process.argv[2]) return process.argv[2];
   const ports = await SerialPort.list();
   const candidates = ports.filter(p => (p.vendorId ?? "").toLowerCase() === "2e8a");
-  if (candidates.length > 1) throw new Error("Multiple Picos found. Use npm start -- COM7 (PicoA port).");
-  if (!candidates.length) throw new Error("No Pico found. Connect PicoA or specify its COM port.");
+  if (candidates.length > 1) throw new Error("Multiple Picos found. Use npm start -- /dev/tty.usbmodemXXXX (PicoA port).");
+  if (!candidates.length) throw new Error("No Pico found. Connect PicoA or specify its serial port.");
   return candidates[0].path;
 }
 async function main(): Promise<void> {
