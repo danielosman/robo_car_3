@@ -5,7 +5,7 @@
             "id": "pico",
             "type": "pickString",
             "description": "Which Pico firmware?",
-            "options": ["picoA"],
+            "options": ["picoA", "picoB"],
             "default": "picoA"
         }
     ],
