@@ -126,15 +126,15 @@ select a working mode and press Stream; the host no longer restarts it automatic
 
 ## References to reopen
 
-- Original PDF: `../hm0360/doc/HM0360-datasheet_v4.pdf`
+- Original PDF: `../../hm0360/doc/HM0360-datasheet_v4.pdf`
   - §3.3 / Figures 3.3–3.5: readout grouping, page 15.
   - §6.6 / Figure 6.7: 4-bit output, pages 35–36.
   - §10.6: monochrome controls, page 47.
   - §10.7: subsampling/binning controls, page 48.
   - §10.10–10.11: mono and output-format controls, page 49.
 - Summary (not a substitute for the PDF diagrams):
-  `../hm0360/doc/HM0360-datasheet.md`.
-- Historical experiments: `../arducam_b0319/SESSION_LOG.md`, especially
+  `../../hm0360/doc/HM0360-datasheet.md`.
+- Historical experiments: `../../arducam_b0319/SESSION_LOG.md`, especially
   June 20–21 entries. These contain mutually superseded hypotheses; treat observed
   results separately from the explanations attached to them.
 

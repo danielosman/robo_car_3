@@ -10,7 +10,7 @@
  * header only names the few registers the firmware pokes at runtime.
  *
  * 16-bit register address, 8-bit data. Module self-clocks (no XCLK pin) and has no
- * PWDN / POWER_EN pins (same connector as ../hm01b0).
+ * PWDN / POWER_EN pins (same connector as ../../hm01b0).
  *
  * The earlier hand-written "minimal global-only" init (flat-gray real image, now
  * superseded) is archived in doc/legacy-minimal-init.md.

@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 // Sensor tone-mapping LUTs (10-bit input -> 8-bit output), not sharpening.
-// Restored from ../hm0360/hm0360.c, HM0360 datasheet sections 4.10 / 10.12.
+// Restored from ../../hm0360/hm0360.c, HM0360 datasheet sections 4.10 / 10.12.
 // 0 = datasheet reset, 1 = low (our boot table), 2 = medium, 3 = high.
 static const uint8_t hm_tone_curves[4][16] = {
     {0x10,0x19,0x28,0x35,0x40,0x4a,0x54,0x5d,0x66,0x76,0x85,0x94,0xa1,0xbb,0xd3,0xea},

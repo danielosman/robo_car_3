@@ -20,13 +20,7 @@ set(PICO_BOARD pico2 CACHE STRING "Board type")
 include(pico_sdk_import.cmake)
 project(robo_car_3 C CXX ASM)
 pico_sdk_init()
-add_executable(robo_car_3 camera.c tof.c opt4048.c
-    lib/vl53l8cx/platform.c lib/vl53l8cx/vl53l8cx_api.c)
-target_include_directories(robo_car_3 PRIVATE lib/vl53l8cx)
-pico_set_program_name(robo_car_3 "robo_car_3")
-pico_set_program_version(robo_car_3 "0.1")
-pico_generate_pio_header(robo_car_3 ${CMAKE_CURRENT_LIST_DIR}/hm0360.pio)
-pico_enable_stdio_uart(robo_car_3 0)
-pico_enable_stdio_usb(robo_car_3 1)
-target_link_libraries(robo_car_3 pico_stdlib hardware_i2c hardware_pio hardware_dma hardware_spi)
-pico_add_extra_outputs(robo_car_3)
+
+# One build dir, one .uf2 per Pico: build/picoA/picoA.uf2, build/picoB/picoB.uf2.
+# PICO_BOARD is shared; switch to pico2_w here once a Pico 2 W is fitted.
+add_subdirectory(picoA)

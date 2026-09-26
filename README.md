@@ -1,14 +1,21 @@
 # RoboCar — custom PCB bring-up
 
-Eventually a robot car; currently a test project for **PicoA (Pico 2)** on the
+Eventually a robot car; currently a test project for the two Pico 2 boards on the
 custom PCB. The code is the source of truth for configuration and protocol details.
 
-## Working on the PCB
+| Folder | Pico | Role |
+|---|---|---|
+| `picoA/` | A1 | sensors: camera, ToF, color (MLX90640 planned) |
+| `pc/` | — | Node server + browser viewer for PicoA |
+
+Both firmwares build from the root CMake project into one `build/` folder.
+
+## PicoA — working on the PCB
 
 - **HM0360 / Arducam B0319 camera:** 4-bit capture over PIO/DMA, streamed over USB.
   Default: **160×120, Sub4, no binning**. Horizontal-binning stripes remain
   unresolved; experiments and the even-column workaround are available in the
-  viewer. See [follow-up notes](CAMERA_STRIPES_TODO.md).
+  viewer. See [follow-up notes](picoA/CAMERA_STRIPES_TODO.md).
 - **VL53L8CX ToF:** working **8×8** ranging over SPI0; default **10 Hz**, up to four
   targets per zone. LPn is not wired to the Pico—the Pololu carrier holds it high.
 - **OPT4048 color sensor:** I2C0 0x44 (GP4/5, 400 kHz), auto-range, 100 ms per
@@ -35,14 +42,15 @@ MLX90640, motors and the inter-Pico link are not implemented yet.
    ```
    If the extension downloads its own CMake/Ninja again, point `.vscode/settings.json` back
    at Homebrew's (one copy of each tool).
-   Flash `build/robo_car_3.uf2` onto **PicoA**, not the motor Pico.
+   Flash `build/picoA/picoA.uf2` onto **PicoA**, not the motor Pico. In VS Code, the
+   Run / Flash tasks and debug configs ask which Pico's firmware to use.
 2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/`.
    With multiple Picos attached, use `npm start -- /dev/tty.usbmodem1101` (replace with PicoA's port;
    list candidates with `ls /dev/tty.usbmodem*`).
 3. Open **http://127.0.0.1:8080/**. Restart the Node app after reflashing/reconnecting.
    Sensor initialization and errors appear in the page log.
 
-`camera.c` (also the main loop and serial commands) / `hm0360_init.h` /
+In `picoA/`: `camera.c` (also the main loop and serial commands) / `hm0360_init.h` /
 `hm0360_regs.h` / `hm0360_curves.h` (tone curves) / `hm0360.pio`: camera;
 `tof.c` / `lib/vl53l8cx/`: ST ULD integration;
 `opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in `pc/src/opt4048.ts`);
@@ -69,7 +77,7 @@ hardware behavior still needs PCB testing after changes.
   [HM0360 tone curves / exposure controls](../hm0360/hm0360.c),
   [ToF project](../vl53l8cx/vl53l8cx.c),
   [OPT4048 project](../opt-4048/main.c) and [notes](../opt-4048/OPT4048_NOTES.md). ST's driver license is retained in
-  [`lib/vl53l8cx/LICENSE.txt`](lib/vl53l8cx/LICENSE.txt).
+  [`picoA/lib/vl53l8cx/LICENSE.txt`](picoA/lib/vl53l8cx/LICENSE.txt).
 
 Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 
