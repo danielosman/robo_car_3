@@ -33,6 +33,8 @@ MLX90640, motors and the inter-Pico link are not implemented yet.
    cmake -S . -B build -G Ninja   # first time or after deleting build/
    cmake --build build
    ```
+   If the extension downloads its own CMake/Ninja again, point `.vscode/settings.json` back
+   at Homebrew's (one copy of each tool).
    Flash `build/robo_car_3.uf2` onto **PicoA**, not the motor Pico.
 2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/`.
    With multiple Picos attached, use `npm start -- /dev/tty.usbmodem1101` (replace with PicoA's port;
