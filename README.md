@@ -46,16 +46,19 @@ MLX90640 and the inter-Pico link are not implemented yet.
 
 ## PicoB — tilt → motor test (working on the PCB)
 
-- **Hardware so far:** one Pololu #2208 motor (298:1 LP 6V, exact 297.92:1) on the
-  left driver's AO1/AO2 — GP15 PWM (20 kHz), GP13/GP12 IN1/IN2, GP14 STBY — with a
-  Pololu #3081 magnetic encoder on J6 pins 1–4 (GP9/GP8). Adafruit #4502
+- **Hardware so far:** two Pololu #2208 motors (298:1 LP 6V, exact 297.92:1) on the
+  left driver — AO1/AO2 with PWMA on GP15, BO1/BO2 with PWMB on GP11 (both 20 kHz,
+  same duty), shared direction GP13/GP12 (AIN1+BIN1 / AIN2+BIN2 are tied on the
+  PCB), GP14 STBY. Only the AO motor has an encoder: Pololu #3081 on J6 pins 1–4
+  (GP9/GP8). If the BO motor spins the wrong way, swap its wires; direction can't
+  be set per channel in software. Adafruit #4502
   ISM330DHCX breakout on SPI0 (GP16–19, mode 3, 1 MHz). The motor needs battery
   power on J11; USB only powers the logic.
 - **IMU:** WHO_AM_I check, 416 Hz, ±2 g / ±250 dps (register values from the ST
   datasheet), gyro bias averaged at power-up. Tilt about X and Y comes from a
   complementary filter (gyro short-term, gravity long-term, 0.5 s time constant),
   so pushes along an axis barely register as tilt.
-- **Control:** tilt about the breakout's X axis drives the motor — ±15° dead zone,
+- **Control:** tilt about the breakout's X axis drives both left motors — ±15° dead zone,
   then power ramps linearly to 100 % at ±90°; the sign sets direction.
 - **Encoder:** quadrature decoded in GPIO interrupts, reported as output-shaft
   revolutions and RPM (12 CPR × 297.92 ≈ 3575 counts/rev). ~50 RPM at full tilt on
@@ -128,3 +131,8 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 - `~/kicad/robo_car_3/` — KiCad project and PCB review
 - `~/code/hm0360/`, `~/code/vl53l8cx/`, `~/code/arducam_b0319/`, `~/code/opt-4048/` —
   sibling example projects (not yet copied to this Mac)
+
+## Git conventions
+
+- Do not add Claude (or any AI assistant) as a co-author: no `Co-Authored-By:`
+  trailer in commit messages. Earlier commits that have one are left as they are.
