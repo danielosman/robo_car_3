@@ -46,30 +46,36 @@ MLX90640 and the inter-Pico link are not implemented yet.
 
 ## PicoB — tilt → motor test (working on the PCB)
 
-- **Hardware so far:** two Pololu #2208 motors (298:1 LP 6V, exact 297.92:1) on the
-  left driver — AO1/AO2 with PWMA on GP15, BO1/BO2 with PWMB on GP11 (both 20 kHz,
-  same duty), shared direction GP13/GP12 (AIN1+BIN1 / AIN2+BIN2 are tied on the
-  PCB), GP14 STBY. Only the AO motor has an encoder: Pololu #3081 on J6 pins 1–4
-  (GP9/GP8). If the BO motor spins the wrong way, swap its wires; direction can't
-  be set per channel in software. Adafruit #4502
+- **Hardware so far:** all four wheels — Pololu #2208 motors (298:1 LP 6V, exact
+  297.92:1), 20 kHz PWM, front on channel A and rear on channel B of each driver.
+  Left driver: PWMA GP15, PWMB GP11, direction GP13/GP12. Right driver: PWMA GP22,
+  PWMB GP28, direction GP27/GP26. GP14 is STBY for both. AIN1+BIN1 / AIN2+BIN2 are
+  tied on the PCB, so both motors on a side share direction: if a rear motor spins
+  opposite its front one, swap its wires. If a whole side runs backwards, flip
+  `LEFT_FORWARD` / `RIGHT_FORWARD` in `picoB/motor.c` (right starts at −1 because
+  its motors are mirrored). Only the front wheels get encoders; only the left-front
+  one (Pololu #3081, J6 pins 1–4, GP9/GP8) is connected and read. Adafruit #4502
   ISM330DHCX breakout on SPI0 (GP16–19, mode 3, 1 MHz). The motor needs battery
   power on J11; USB only powers the logic.
 - **IMU:** WHO_AM_I check, 416 Hz, ±2 g / ±250 dps (register values from the ST
   datasheet), gyro bias averaged at power-up. Tilt about X and Y comes from a
   complementary filter (gyro short-term, gravity long-term, 0.5 s time constant),
   so pushes along an axis barely register as tilt.
-- **Control:** tilt about the breakout's X axis drives both left motors — ±15° dead zone,
-  then power ramps linearly to 100 % at ±90°; the sign sets direction.
+- **Control:** tilt about the breakout's X axis picks a side, always driving forward.
+  The accelerometer reads +1 g along whichever axis points up, so tilt X is positive
+  with the breakout's +Y end raised: **+Y up → right wheels, +Y down → left wheels**;
+  the other side coasts. ±15° dead zone, then power ramps linearly to 100 % at ±90°.
 - **Encoder:** quadrature decoded in GPIO interrupts, reported as output-shaft
   revolutions and RPM (12 CPR × 297.92 ≈ 3575 counts/rev). ~50 RPM at full tilt on
   the battery, consistent with the datasheet's 45 RPM at 6 V.
 - **Serial (USB):** nothing is printed and the driver stays in standby until a
   serial monitor is open; closing it stops the motor. Send `g` to enable, `s` to
   stop, `z` to zero revolutions. 10 Hz lines (units in the header): tilt X/Y (deg),
-  accel ax/ay/az (g), gyro gx/gy/gz (deg/s), power, rev, rpm, RUN/STOP.
+  accel ax/ay/az (g), gyro gx/gy/gz (deg/s), left/right power, rev, rpm (left-front),
+  RUN/STOP.
 
 Keep the robot still for ~1 s after power-up (gyro bias). If the encoder counts
-backwards relative to motor direction, flip `DIRECTION` in `picoB/encoder.c`.
+backwards while the left wheels drive forward, flip `DIRECTION` in `picoB/encoder.c`.
 
 ## Run
 

@@ -1,7 +1,9 @@
-// PicoB bring-up: tilt the base about the IMU's X axis to drive the left-front
-// motor. +-15 deg dead zone, then power ramps linearly to 100 % at 90 deg.
-// Nothing is printed and the driver stays in standby until a serial monitor
-// is open; closing it stops the motor.
+// PicoB bring-up: tilt the base about the IMU's X axis to drive one side
+// forward. Breakout's +Y end tipped up (tilt X > 0) runs the right wheels,
+// tipped down (tilt X < 0) the left wheels; the other side coasts. +-15 deg
+// dead zone, then power ramps linearly to 100 % at 90 deg.
+// Nothing is printed and the drivers stay in standby until a serial monitor
+// is open; closing it stops the motors.
 #include <math.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -20,12 +22,11 @@ static float tilt_to_power(float deg) {
     float a = fabsf(deg);
     if (a < DEAD_ZONE_DEG) return 0;
     float p = (a - DEAD_ZONE_DEG) / (FULL_DEG - DEAD_ZONE_DEG);
-    if (p > 1) p = 1;
-    return deg < 0 ? -p : p;
+    return p > 1 ? 1 : p;
 }
 
 static void help(void) {
-    printf("Commands: g = go (enable motor), s = stop, z = zero revolutions\n");
+    printf("Commands: g = go (enable motors), s = stop, z = zero revolutions\n");
 }
 
 int main(void) {
@@ -45,11 +46,11 @@ int main(void) {
             while (stdio_usb_connected()) sleep_ms(100);
             continue;
         }
-        printf("Tilt about IMU X axis; dead zone +-%.0f deg, full power at +-%.0f deg\n",
-               DEAD_ZONE_DEG, FULL_DEG);
+        printf("Tilt about IMU X axis: +Y up = right wheels, +Y down = left wheels (forward);\n"
+               "dead zone +-%.0f deg, full power at +-%.0f deg\n", DEAD_ZONE_DEG, FULL_DEG);
         help();
-        printf("Units: tilt deg, accel g, gyro deg/s, rev = output-shaft turns, rpm = output shaft\n");
-        printf("Motor is STOPPED. Press g to enable.\n");
+        printf("Units: tilt deg, accel g, gyro deg/s, L/R power, rev/rpm = left-front output shaft\n");
+        printf("Motors are STOPPED. Press g to enable.\n");
 
         bool running = false;
         float tilt_x = 0, tilt_y = 0;
@@ -60,8 +61,8 @@ int main(void) {
 
         while (stdio_usb_connected()) {
             int c = getchar_timeout_us(0);
-            if (c == 'g') { running = true; motor_enable(true); printf("Motor ENABLED\n"); }
-            else if (c == 's') { running = false; motor_enable(false); printf("Motor STOPPED\n"); }
+            if (c == 'g') { running = true; motor_enable(true); printf("Motors ENABLED\n"); }
+            else if (c == 's') { running = false; motor_enable(false); printf("Motors STOPPED\n"); }
             else if (c == 'z') { encoder_reset(); last_count = 0; printf("Revolutions zeroed\n"); }
             else if (c == 'h' || c == '?') help();
 
@@ -83,8 +84,12 @@ int main(void) {
                 }
                 have_tilt = true;
             }
+            // At rest the accelerometer reads +1 g along whichever axis points up,
+            // so ay (and tilt X) is positive when the +Y end is raised.
             float power = running ? tilt_to_power(tilt_x) : 0;
-            motor_set(power);
+            float left = tilt_x < 0 ? power : 0;
+            float right = tilt_x > 0 ? power : 0;
+            motor_set(left, right);
 
             if (time_reached(next_print)) {
                 next_print = delayed_by_us(next_print, PRINT_US);
@@ -93,9 +98,9 @@ int main(void) {
                 float rpm = (count - last_count) / ENCODER_COUNTS_PER_REV * (60e6f / PRINT_US);
                 last_count = count;
                 printf("tiltX %+6.1f tiltY %+6.1f  ax %+4.1f ay %+4.1f az %+4.1f  gx %+6.1f gy %+6.1f gz %+6.1f  "
-                       "power %+4.0f%%  rev %+5.0f  rpm %+4.0f  %s\n",
+                       "L %3.0f%% R %3.0f%%  rev %+5.0f  rpm %+4.0f  %s\n",
                        tilt_x, tilt_y, s.ax, s.ay, s.az, s.gx, s.gy, s.gz,
-                       power * 100, revs, rpm, running ? "RUN" : "STOP");
+                       left * 100, right * 100, revs, rpm, running ? "RUN" : "STOP");
             }
         }
     }
