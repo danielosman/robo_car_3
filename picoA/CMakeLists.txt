@@ -21,3 +21,13 @@ pico_enable_stdio_uart(picoA_bringup 0)
 pico_enable_stdio_usb(picoA_bringup 1)
 target_link_libraries(picoA_bringup picoA_drivers)
 pico_add_extra_outputs(picoA_bringup)
+
+# Robot firmware (ROBOT_PLAN.md). M0: link to PicoB, debug console, square test.
+add_executable(picoA_app app/main.c app/body.c app/drive_test.c app/debug_console.c)
+pico_set_program_name(picoA_app "picoA_app")
+pico_set_program_version(picoA_app "0.1")
+pico_enable_stdio_uart(picoA_app 0) # UART0 is the link to PicoB
+pico_enable_stdio_usb(picoA_app 1)
+target_compile_options(picoA_app PRIVATE -Wall -Wextra -Wdouble-promotion)
+target_link_libraries(picoA_app common_link)
+pico_add_extra_outputs(picoA_app)

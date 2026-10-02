@@ -12,11 +12,12 @@ typedef struct {
     int direction; // flip if counts go negative when that wheel runs forward
 } enc_pins_t;
 
-// Same signs as LEFT_FORWARD / RIGHT_FORWARD in motor.c: the encoder turns
-// with its motor, so a mirrored side counts the other way.
+// Opposite to LEFT_FORWARD / RIGHT_FORWARD in motor.c. Measured in the M0 square
+// test: with the motor signs (verified in bring-up), both encoders counted
+// negative while driving forward, so both are flipped here.
 static const enc_pins_t pins[ENC_COUNT] = {
-    [ENC_LEFT_FRONT]  = {5, 4, -1}, // J6 9/11: ENC_RF_1, ENC_RF_2
-    [ENC_RIGHT_FRONT] = {9, 8,  1}, // J6 1/3:  ENC_LF_1, ENC_LF_2
+    [ENC_LEFT_FRONT]  = {5, 4,  1}, // J6 9/11: ENC_RF_1, ENC_RF_2
+    [ENC_RIGHT_FRONT] = {9, 8, -1}, // J6 1/3:  ENC_LF_1, ENC_LF_2
 };
 
 static volatile int32_t count[ENC_COUNT];

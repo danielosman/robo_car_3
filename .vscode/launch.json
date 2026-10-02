@@ -5,8 +5,8 @@
             "id": "pico",
             "type": "pickString",
             "description": "Which Pico firmware?",
-            "options": ["picoA/picoA_bringup", "picoB/picoB_bringup"],
-            "default": "picoA/picoA_bringup"
+            "options": ["picoA/picoA_app", "picoB/picoB_app", "picoA/picoA_bringup", "picoB/picoB_bringup"],
+            "default": "picoA/picoA_app"
         }
     ],
     "configurations": [

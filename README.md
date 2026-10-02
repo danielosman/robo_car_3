@@ -1,38 +1,98 @@
 # RoboCar
 
-Robot car firmware for the two Pico 2 boards on the custom PCB, plus PC tools.
+Firmware for a fully autonomous robot car on two Pico 2 boards and a custom PCB.
 PCB bring-up is complete (tag `pcb-bringup-v1`): every connected part was
-verified with the bring-up firmware and viewer described below. The real robot
-firmware (`app/` per Pico) and PC app (`pc/app/`) are next. The code is the
-source of truth for configuration and protocol details.
+verified with the bring-up firmware and viewer described below. The robot
+firmware (`app/` per Pico) is being built milestone by milestone to
+[ROBOT_PLAN.md](ROBOT_PLAN.md); a PC app comes later. The code is the source of
+truth for configuration and protocol details.
 
 ```
 robo_car_3/
 ├── CMakeLists.txt       # Pico SDK setup + add_subdirectory(picoA/picoB); PICO_BOARD for both
 ├── pico_sdk_import.cmake
 ├── .vscode/             # Run / Flash / Debug ask which firmware (picoA/… or picoB/…)
+├── run_tests.sh         # host tests, no Pico needed
+├── common/              # shared by both Picos: the inter-Pico link (+ host test)
 ├── picoA/               # A1 — sensors: camera, ToF, color (MLX90640 planned)
 │   ├── CMakeLists.txt   # picoA_drivers library + one executable per firmware
 │   ├── drivers/         # ToF, OPT4048, HM0360 registers/PIO; lib/vl53l8cx/ = ST ULD driver
-│   └── bringup/         # camera.c: PCB test firmware (camera driver + USB streaming)
+│   ├── bringup/         # camera.c: PCB test firmware (camera driver + USB streaming)
+│   └── app/             # robot firmware, the brain
 ├── picoB/               # A2 — motors, encoders, IMU
 │   ├── CMakeLists.txt   # picoB_drivers library + one executable per firmware
 │   ├── drivers/         # imu, motor, encoder
-│   └── bringup/         # main.c: tilt -> motor test firmware
+│   ├── bringup/         # main.c: tilt -> motor test firmware
+│   └── app/             # robot firmware, the body
 ├── pc/
 │   └── bringup/         # Node server + browser viewer for picoA_bringup
 └── build/               # one build dir for all firmwares (git-ignored)
-    ├── picoA/picoA_bringup.uf2
-    └── picoB/picoB_bringup.uf2
+    ├── picoA/picoA_app.uf2, picoA_bringup.uf2
+    └── picoB/picoB_app.uf2, picoB_bringup.uf2
 ```
 
-One configure and build produces every firmware. Drivers are shared: the real
-firmware will be a second executable in each Pico's `CMakeLists.txt` linking the
-same `picoX_drivers` library, so the bring-up firmware keeps building and can be
-used to re-test hardware (e.g. a new PCB revision). The camera driver is still
+One configure and build produces every firmware. Drivers are shared: each Pico's
+`CMakeLists.txt` builds the robot firmware and the bring-up firmware from the same
+`picoX_drivers` library, so the bring-up firmware keeps building and can be used
+to re-test hardware (e.g. a new PCB revision). The camera driver is still
 inside `picoA/bringup/camera.c`; it moves to `drivers/` when the app needs it.
-Code shared between the Picos (e.g. the inter-Pico UART protocol) will go in a
-`common/` folder.
+Code shared between the Picos (the inter-Pico link) is in `common/`.
+
+## Robot firmware (`picoA_app`, `picoB_app`) — in progress
+
+Built to [ROBOT_PLAN.md](ROBOT_PLAN.md); red flags found on the way are logged in
+[REDFLAGS.md](REDFLAGS.md). **M0 (link, wheel control, odometry) passed on the
+robot** (2 Oct 2026); M1 (calibration) is next.
+
+- **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
+  both Picos, 1 Mbaud, COBS frames with CRC-16.
+- **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed: the link
+  (framing, corruption, lost frames, resync), PicoB's wheel control (ramp, speed
+  limits, speed and turn-rate control with a weak motor and skid) and odometry
+  (straight, turning, gyro bias while still, tilt signs). Run it after every change.
+- **PicoB** (`picoB/app/`): wheel speed control per side on the front encoders, with
+  the turn rate trimmed by the gyro (`drive.c`); position from the encoders, heading
+  from the gyro with the bias re-measured whenever the robot stands still, tilt
+  (`odometry.c`). Motors stay off until PicoA greets it and switches them on; it
+  switches them off by itself if PicoA's drive commands stop for 250 ms.
+- **PicoA** (`picoA/app/`): `body.c` is PicoB as PicoA sees it; `debug_console.c`
+  prints a status line twice a second on USB (`g` motors on, `s` stop, `q` square
+  test, `l` link counters, `h` help); `drive_test.c` drives a 50 cm square.
+
+**M0 result** (square test on waxed wood, 50 cm sides at 10 cm/s, turns at 0.5 rad/s):
+
+| | Odometry | Measured | Difference |
+|---|---|---|---|
+| End position, forward | 1.3 cm | 2.0 cm | 0.7 cm |
+| End position, right | 1.1 cm | 1.4 cm | 0.3 cm |
+| Total turn | 362.6° | ~362–363° | < 1° |
+
+- Link: 0 bad and 0 lost frames. Speed held at 10.0 cm/s; turns at 26–32 °/s for a
+  28.6 °/s command; heading within ±0.2° along each straight leg.
+- The ~2.6° extra turn is the square test stopping each turn 0.5–1.8° late (the
+  odometry measured it correctly), not an odometry error.
+- **Roll dips to −3…−5° during turns in place:** the body leans on its tyres while
+  skid-turning. Harmless for floor detection (which uses pitch), and kept as a
+  **signal to use later**: e.g. a cross-check that the robot is really turning, or a
+  hint of floor grip (wood vs carpet).
+- Found on the robot and fixed: the IMU breakout is mounted turned 180° (X backward,
+  Y right); the app never started the encoders; both encoder signs were reversed
+  (see REDFLAGS.md).
+
+**M0 test** (repeat after changes to `drive`, `odometry` or the link):
+1. Flash `picoB_app` onto PicoB and `picoA_app` onto PicoA. Keep the robot still
+   for ~1 s after power-up (gyro bias). Battery on J11 for the motors.
+2. Open a serial monitor on **PicoA**. Expected: status lines with x/y/yaw, and
+   PicoB's messages as `B: ...`. "PicoB not connected (received 0 bytes)" means the
+   UART isn't working; `l` shows the link counters (`bad` and `lost` should stay ~0).
+3. Without motors, check the IMU orientation: lift the **front** → pitch goes
+   positive; lift the **left side** → roll goes positive; turn the robot **left** by
+   hand → yaw goes up. (Verified; `to_robot_frame()` in `picoB/app/odometry.c`.)
+4. On the floor with room for a 70 cm square: press `q`. The robot drives forward
+   50 cm and turns left 90°, four times, pausing between legs, then prints where
+   odometry thinks it is. Mark the start, measure the real end position and heading,
+   and compare. `s` stops at any time, and so does unplugging PicoA's USB or
+   closing the monitor.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 
@@ -95,7 +155,8 @@ MLX90640 and the inter-Pico link are not implemented yet.
 
 Keep the robot still for ~1 s after power-up (gyro bias). If an encoder counts
 backwards while its wheel drives forward, flip that encoder's `direction` in
-`picoB/drivers/encoder.c` (it uses the same sign as its side's motor).
+`picoB/drivers/encoder.c` (they are opposite to the motor signs, measured in the M0
+square test).
 
 ## Run
 
@@ -107,11 +168,13 @@ backwards while its wheel drives forward, flip that encoder's `direction` in
    ```
    If the extension downloads its own CMake/Ninja again, point `.vscode/settings.json` back
    at Homebrew's (one copy of each tool).
-   Flash `build/picoA/picoA_bringup.uf2` onto **PicoA** and
-   `build/picoB/picoB_bringup.uf2` onto **PicoB**. In VS Code, Run / Flash / Debug ask
-   which firmware to use (`picoA/picoA_bringup` or `picoB/picoB_bringup`); they flash
-   whichever Pico is on the USB cable, so pick the matching one.
-   The steps below are for PicoA; PicoB only needs a serial monitor (see above).
+   Robot firmware: `build/picoA/picoA_app.uf2` onto **PicoA**, `build/picoB/picoB_app.uf2`
+   onto **PicoB**. Bring-up: `picoA_bringup.uf2` / `picoB_bringup.uf2`. In VS Code, Run /
+   Flash / Debug ask which firmware to use (`picoA/picoA_app`, `picoB/picoB_app`, or
+   the bring-up ones); they flash whichever Pico is on the USB cable, so pick the
+   matching one.
+   The steps below are for the PicoA bring-up viewer; PicoB's bring-up only needs a
+   serial monitor (see above).
 2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/bringup/`.
    With multiple Picos attached, use `npm start -- /dev/tty.usbmodem1101` (replace with PicoA's port;
    list candidates with `ls /dev/tty.usbmodem*`).
