@@ -1,6 +1,9 @@
-// Both TB6612FNG drivers: left (channels A/B = left-front/left-rear) and right
-// (right-front/right-rear). The PCB ties AIN/BIN together per driver, so both
-// motors on a side always share direction; each has its own PWM pin.
+// Both TB6612FNG drivers, one per side (channel A = front, B = rear). The PCB
+// ties AIN/BIN together per driver, so both motors on a side always share
+// direction; each has its own PWM pin.
+// Wiring differs from the PCB labels: the left motors are plugged into J10
+// (MOT_DRV_R, the PCB's "right" driver MR_*) and the right motors into J9
+// (MOT_DRV_L, ML_*).
 #include <math.h>
 #include "pico/stdlib.h"
 #include "hardware/pwm.h"
@@ -9,18 +12,19 @@
 #define PIN_STBY 14 // M_STBY, both drivers
 #define PWM_WRAP 7499 // 150 MHz / 7500 = 20 kHz
 
-// The right motors are mounted mirrored, so the same IN1/IN2 polarity turns
-// them the other way. Flip a side's sign if "forward" drives it backwards.
-#define LEFT_FORWARD   1
-#define RIGHT_FORWARD -1
+// The two sides are mounted mirrored, so the same IN1/IN2 polarity turns them
+// opposite ways. Both sides ran forward with these signs (left on J10, right on
+// J9). Flip a side's sign if "forward" drives it backwards.
+#define LEFT_FORWARD  -1
+#define RIGHT_FORWARD  1
 
 typedef struct {
     uint pwm_front, pwm_rear, in1, in2;
     int forward;
 } side_t;
 
-static const side_t left  = {15, 11, 13, 12, LEFT_FORWARD};  // ML_PWMF 7B, ML_PWMB 5B, ML_IN1, ML_IN2
-static const side_t right = {22, 28, 27, 26, RIGHT_FORWARD}; // MR_PWMF 3A, MR_PWMB 6A, MR_IN1, MR_IN2
+static const side_t left  = {22, 28, 27, 26, LEFT_FORWARD};  // J10: MR_PWMF 3A, MR_PWMB 6A, MR_IN1, MR_IN2
+static const side_t right = {15, 11, 13, 12, RIGHT_FORWARD}; // J9:  ML_PWMF 7B, ML_PWMB 5B, ML_IN1, ML_IN2
 
 static void out(uint pin, bool v) { gpio_init(pin); gpio_set_dir(pin, GPIO_OUT); gpio_put(pin, v); }
 

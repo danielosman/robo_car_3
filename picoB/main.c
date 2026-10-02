@@ -49,7 +49,7 @@ int main(void) {
         printf("Tilt about IMU X axis: +Y up = right wheels, +Y down = left wheels (forward);\n"
                "dead zone +-%.0f deg, full power at +-%.0f deg\n", DEAD_ZONE_DEG, FULL_DEG);
         help();
-        printf("Units: tilt deg, accel g, gyro deg/s, L/R power, rev/rpm = left-front output shaft\n");
+        printf("Units: tilt deg, accel g, gyro deg/s, L/R power, revL/rpmL and revR/rpmR = front output shafts\n");
         printf("Motors are STOPPED. Press g to enable.\n");
 
         bool running = false;
@@ -57,13 +57,13 @@ int main(void) {
         bool have_tilt = false;
         absolute_time_t last_sample = get_absolute_time();
         absolute_time_t next_print = make_timeout_time_us(PRINT_US);
-        int32_t last_count = encoder_count();
+        int32_t last_count[ENC_COUNT] = {encoder_count(ENC_LEFT_FRONT), encoder_count(ENC_RIGHT_FRONT)};
 
         while (stdio_usb_connected()) {
             int c = getchar_timeout_us(0);
             if (c == 'g') { running = true; motor_enable(true); printf("Motors ENABLED\n"); }
             else if (c == 's') { running = false; motor_enable(false); printf("Motors STOPPED\n"); }
-            else if (c == 'z') { encoder_reset(); last_count = 0; printf("Revolutions zeroed\n"); }
+            else if (c == 'z') { encoder_reset(); last_count[0] = last_count[1] = 0; printf("Revolutions zeroed\n"); }
             else if (c == 'h' || c == '?') help();
 
             static imu_sample_t s;
@@ -93,14 +93,18 @@ int main(void) {
 
             if (time_reached(next_print)) {
                 next_print = delayed_by_us(next_print, PRINT_US);
-                int32_t count = encoder_count();
-                float revs = count / ENCODER_COUNTS_PER_REV;
-                float rpm = (count - last_count) / ENCODER_COUNTS_PER_REV * (60e6f / PRINT_US);
-                last_count = count;
+                float revs[ENC_COUNT], rpm[ENC_COUNT];
+                for (int i = 0; i < ENC_COUNT; i++) {
+                    int32_t count = encoder_count(i);
+                    revs[i] = count / ENCODER_COUNTS_PER_REV;
+                    rpm[i] = (count - last_count[i]) / ENCODER_COUNTS_PER_REV * (60e6f / PRINT_US);
+                    last_count[i] = count;
+                }
                 printf("tiltX %+6.1f tiltY %+6.1f  ax %+4.1f ay %+4.1f az %+4.1f  gx %+6.1f gy %+6.1f gz %+6.1f  "
-                       "L %3.0f%% R %3.0f%%  rev %+5.0f  rpm %+4.0f  %s\n",
+                       "L %3.0f%% R %3.0f%%  revL %+5.0f rpmL %+4.0f  revR %+5.0f rpmR %+4.0f  %s\n",
                        tilt_x, tilt_y, s.ax, s.ay, s.az, s.gx, s.gy, s.gz,
-                       left * 100, right * 100, revs, rpm, running ? "RUN" : "STOP");
+                       left * 100, right * 100, revs[ENC_LEFT_FRONT], rpm[ENC_LEFT_FRONT],
+                       revs[ENC_RIGHT_FRONT], rpm[ENC_RIGHT_FRONT], running ? "RUN" : "STOP");
             }
         }
     }
