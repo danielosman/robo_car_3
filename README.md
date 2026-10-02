@@ -149,4 +149,4 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 ## Git conventions
 
 - Do not add Claude (or any AI assistant) as a co-author: no `Co-Authored-By:`
-  trailer in commit messages. Earlier commits that have one are left as they are.
+  trailer in commit messages.
