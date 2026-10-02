@@ -1,8 +1,80 @@
 # RoboCar — robot app plan
 
-Status: **draft for review, no code yet.** This plan covers the real firmware
-(`picoA/app/`, `picoB/app/`, `common/`) of a **fully autonomous** robot, built on
-the drivers verified in the bring-up (tag `pcb-bringup-v1`).
+Status: **M0 passed on the robot (2 Oct 2026); M1 (calibration) is next.** This
+plan covers the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully
+autonomous** robot, built on the drivers verified in the bring-up (tag
+`pcb-bringup-v1`). Start a new session with "Where we are" below.
+
+## Where we are (handover for the next session)
+
+**Done:** PCB bring-up (tag `pcb-bringup-v1`), the plan (this file), and **M0**:
+the PicoA ↔ PicoB link, PicoB wheel control and odometry, PicoA's `body`, debug
+console and square test. M0 result: after a 50 cm square, odometry was within
+0.7 cm and < 1° of the measured end pose (details in the README). Commit
+`436233d` and later.
+
+**Next: M1, calibration** (§12). M0 showed the encoder distance and the gyro scale
+are already within ~1 %, so M1 is short:
+1. **Gyro drift:** robot standing still 5–10 min, then a turn; read yaw before and
+   after (the stationary freeze should keep it within ~0.5°).
+2. **Gyro scale:** 10 full turns in place against a mark on the floor (needs a
+   small "turn N × 360°" test in `drive_test`, key e.g. `r`); compare the printed
+   total with reality.
+3. **Encoder distance:** drive 2 m straight against a tape measure.
+4. **Carpet:** repeat the square and the turns on the carpet; check turn rate and
+   that the "wheels not following" stop doesn't trigger falsely.
+5. Write the numbers in the README; adjust `WHEEL_DIAMETER_M` (odometry.c) or a
+   gyro scale constant only if they're off by more than ~1 %.
+6. Also planned for M1: a host test for PicoA's `body` (fake link), the open item
+   in REDFLAGS.md.
+
+**Files:**
+
+| Where | What |
+|---|---|
+| `ROBOT_PLAN.md` | this plan: requirements, design, milestones, decisions |
+| `REDFLAGS.md` | APOSD red-flag log per milestone, plus bugs found on the robot |
+| `README.md` | hardware, wiring differences from the PCB, how to build/flash, M0 test steps and results |
+| `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
+| `picoB/app/` | `main.c` (messages, safety stops), `drive.*` (wheel control), `odometry.*` |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it), `debug_console.*`, `drive_test.*` (square test) |
+| `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
+| `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
+
+**Build, test, flash:**
+- `cmake -S . -B build -G Ninja` (first time), `cmake --build build`.
+- `./run_tests.sh`: host tests (link, drive, odometry); run after every change.
+- Flash `build/picoA/picoA_app.uf2` → PicoA, `build/picoB/picoB_app.uf2` → PicoB.
+  Only the Pico whose code changed needs reflashing; a change to `common/link_msgs.h`
+  means both. Keep the robot still ~1 s after PicoB starts (gyro bias).
+- Serial monitor on **PicoA's** USB: status line twice a second, PicoB's messages as
+  `B: ...`; keys `g` motors on, `s` stop, `q` square test, `l` link counters,
+  `h` help. Unplugging PicoA's USB or closing the monitor stops the robot.
+
+**Hardware facts learned while building** (beyond §3 and the README):
+- IMU breakout is mounted **turned 180° about Z: X backward, Y right, Z up**
+  (`to_robot_frame()` in `picoB/app/odometry.c`). At rest pitch/roll read ~±1°.
+- Encoder signs are **opposite to the motor signs** (`picoB/drivers/encoder.c`):
+  left +1, right −1; motors `LEFT_FORWARD −1`, `RIGHT_FORWARD +1`.
+- Full power is ~0.24 m/s; the drive limits commands to 0.2 m/s and 1.5 rad/s and
+  ramps at 0.4 m/s² / 3 rad/s².
+- In-place turns make the body roll −3…−5° (leaning on its tyres): a possible
+  signal for later (§12 Later).
+
+**How we work** (agreed with Daniel):
+- Plan first; no code until Daniel says go. Explain concepts plainly when asked.
+- Daniel tests on the robot and pastes the serial log; say exactly which Pico to
+  reflash, and what to look for.
+- Every logic module gets a host test; stubs fail if a driver is used before its
+  init (that's how the M0 encoder bug would have been caught).
+- Red-flag review at the end of each milestone, logged in REDFLAGS.md; deviations
+  from the PCB go in the README.
+- Commit and push only when Daniel asks. **No `Co-Authored-By` lines** in commits
+  (README convention).
+
+**Not yet implemented from §9:** TIME_PING/PONG (needed in M2), CALIBRATE,
+GYRO_SCALE (M5), STATUS, the slip flag. The console's `m` (print map) arrives with
+M2.
 
 ## 0. Overview
 
@@ -480,15 +552,18 @@ message.
 
 | Message | Direction | Rate | Contents | Notes |
 |---|---|---|---|---|
-| HELLO | both | at boot, 1 Hz until answered | protocol version, firmware name | Version mismatch: PicoB keeps the motors off |
-| DRIVE | A → B | 20 Hz | v (m/s), ω (rad/s) | **PicoB stops if no DRIVE for 250 ms** |
-| MOTORS | A → B | on change | enable / disable | |
-| ODOM | B → A | 50 Hz | t_B (µs, u32), x, y, yaw (not wrapped, so a full turn reads +2π), v, ω, pitch, roll, flags: stationary, slip, motors on, stopped by watchdog | |
+| HELLO ✅ | both | at boot, 1 Hz until answered | protocol version, is_reply | Version mismatch: PicoB keeps the motors off |
+| DRIVE ✅ | A → B | 20 Hz | v (m/s), ω (rad/s) | **PicoB stops if no DRIVE for 250 ms** |
+| MOTORS ✅ | A → B | on change, re-sent until PicoB agrees | on / off | On clears a safety stop |
+| ODOM ✅ | B → A | 50 Hz | t_B (µs, u32), x, y, yaw (not wrapped, so a full turn reads +2π), v, ω, pitch, roll, stationary, motors on, stop reason, IMU error | Stop reasons: no DRIVE, left/right wheels not following (jam, encoder). After a safety stop the motors stay off until PicoA switches them on |
 | TIME_PING / TIME_PONG | A → B / B → A | 1 Hz | t_A / t_A + t_B | PicoA works out PicoB's clock offset, so ToF and camera frames can be matched to the pose at the time they were taken |
 | CALIBRATE | A → B | on request | — | Hold still: gyro bias calibration |
 | GYRO_SCALE | A → B | after a full-turn check | scale correction | Stored by PicoB and applied to the gyro from then on |
 | STATUS | B → A | 2 Hz | wheel speeds, PWM, gyro bias and scale, error counters | |
-| LOG | B → A | rare | text | PicoA prints it in its own debug log, so one serial monitor shows both boards |
+| LOG ✅ | B → A | rare | text, ≤ 64 chars | PicoA prints it in its own debug log, so one serial monitor shows both boards |
+
+✅ = implemented in M0 (protocol version 2). The timing constants and stop reasons
+live in `common/link_msgs.h`.
 
 Bandwidth: ODOM ≈ 45 B × 50 Hz ≈ 2.3 kB/s; everything together is under 5 % of the
 link.
@@ -589,8 +664,8 @@ Each milestone ends with a test on the robot and a red-flag review.
 
 | | Milestone | Done when |
 |---|---|---|
-| M0 | **Foundations:** `common/link` (its byte and frame counters double as the first UART test: the link was never brought up on the PCB); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | The square test drives a 50 cm square; the pose in the debug log matches where the robot ends up |
-| M1 | **Calibration:** gyro bias drift and scale (turn 10 × 360° against a mark on the floor), effective track width, encoder distance on your floor | Measured numbers in the README |
+| M0 ✅ | **Foundations:** `common/link` (its byte and frame counters double as the first UART test: the link was never brought up on the PCB); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | **Passed 2 Oct 2026:** end pose within 0.7 cm and < 1° of odometry after a 50 cm square |
+| M1 | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % |
 | M2 | **Map:** per-zone floor calibration, map from ToF and odometry, map printed as text in the debug log | Open floor shows no obstacles, also while braking; walls stay put while turning |
 | M3 | **Movement detection** while stationary (ToF, then camera); exit side. Take the camera driver out of bring-up first (moved from M0: nothing earlier uses the camera) | Events in the debug log match what you do in front of the robot |
 | M4 | **Behaviour:** Investigate, Face open space, the Safety guard | Robot turns to movement, stops 50 cm away, then turns to face open space |
@@ -598,6 +673,11 @@ Each milestone ends with a test on the robot and a red-flag review.
 | M6 | **Correction against the map** | Heading and position drift corrected over a few minutes of operation |
 
 **Later (kept on purpose, not in v1):**
+- **Roll during turns:** in-place turns make the body roll −3…−5° as it leans on its
+  tyres (seen in M0). Could serve as a cross-check that the robot is really turning
+  (e.g. a wheel slipping without turning the body), or as a hint of floor grip
+  (waxed wood vs carpet).
+- **Slip flag** in ODOM: encoders vs gyro disagreeing while driving.
 - **Camera in the pose:** track keypoints (e.g. FAST corners on the 160 × 120
   image) while turning to measure the rotation angle, as a third opinion next to the
   gyro and encoders. Also a stationary check (unchanged image) to support gyro bias
@@ -621,3 +701,16 @@ Settled: robot dimensions and height, sensor positions, camera field of view,
 indoors on waxed wood with one carpet, no thermal camera for now, order of needs,
 fully autonomous with no PC app in v1, ToF zones with no target mark the first 1 m
 empty and leave farther cells alone, a blocked path counts as arrived, no battery sensor for now.
+
+Decided during M0:
+- Taking the camera driver out of bring-up moved from M0 to M3 (nothing earlier
+  uses the camera).
+- No separate UART echo test: the link's counters (`l` in the console) do that job.
+- **Safety stops** (PicoB): no DRIVE for 250 ms, or a front wheel not following its
+  target for 1 s (stopped, far too slow or turning the wrong way). After one, the
+  motors stay off until switched on again; PicoA does not restart them by itself.
+- **Losing PicoA's serial monitor stops the robot** (development rule while
+  everything is started from the console). Revisit in M4, when the behaviour drives
+  the robot on its own.
+- The square test's 0.5–1.8° overshoot per turn is not fixed: it's the test's stop
+  logic, and M4's behaviour steers to headings using the pose.
