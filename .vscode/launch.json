@@ -5,15 +5,15 @@
             "id": "pico",
             "type": "pickString",
             "description": "Which Pico firmware?",
-            "options": ["picoA", "picoB"],
-            "default": "picoA"
+            "options": ["picoA/picoA_bringup", "picoB/picoB_bringup"],
+            "default": "picoA/picoA_bringup"
         }
     ],
     "configurations": [
         {
             "name": "Pico Debug (Cortex-Debug)",
             "cwd": "${userHome}/.pico-sdk/openocd/0.12.0+dev/scripts",
-            "executable": "${workspaceFolder}/build/${input:pico}/${input:pico}.elf",
+            "executable": "${workspaceFolder}/build/${input:pico}.elf",
             "request": "launch",
             "type": "cortex-debug",
             "servertype": "openocd",
@@ -31,7 +31,7 @@
             // Also works fine for flash binaries
             "overrideLaunchCommands": [
                 "monitor reset init",
-                "load \"${workspaceFolder}/build/${input:pico}/${input:pico}.elf\""
+                "load \"${workspaceFolder}/build/${input:pico}.elf\""
             ],
             "openOCDLaunchCommands": [
                 "adapter speed 5000"
@@ -40,7 +40,7 @@
         {
             "name": "Pico Debug (Cortex-Debug with external OpenOCD)",
             "cwd": "${workspaceRoot}",
-            "executable": "${workspaceFolder}/build/${input:pico}/${input:pico}.elf",
+            "executable": "${workspaceFolder}/build/${input:pico}.elf",
             "request": "launch",
             "type": "cortex-debug",
             "servertype": "external",
@@ -54,7 +54,7 @@
             // Also works fine for flash binaries
             "overrideLaunchCommands": [
                 "monitor reset init",
-                "load \"${workspaceFolder}/build/${input:pico}/${input:pico}.elf\""
+                "load \"${workspaceFolder}/build/${input:pico}.elf\""
             ]
         }
     ]

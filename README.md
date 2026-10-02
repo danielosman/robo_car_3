@@ -1,28 +1,40 @@
-# RoboCar — custom PCB bring-up
+# RoboCar
 
-Eventually a robot car; currently a test project for the two Pico 2 boards on the
-custom PCB. The code is the source of truth for configuration and protocol details.
+Robot car firmware for the two Pico 2 boards on the custom PCB, plus PC tools.
+PCB bring-up is complete (tag `pcb-bringup-v1`): every connected part was
+verified with the bring-up firmware and viewer described below. The real robot
+firmware (`app/` per Pico) and PC app (`pc/app/`) are next. The code is the
+source of truth for configuration and protocol details.
 
 ```
 robo_car_3/
 ├── CMakeLists.txt       # Pico SDK setup + add_subdirectory(picoA/picoB); PICO_BOARD for both
 ├── pico_sdk_import.cmake
-├── .vscode/             # Run / Flash / Debug ask: picoA or picoB
+├── .vscode/             # Run / Flash / Debug ask which firmware (picoA/… or picoB/…)
 ├── picoA/               # A1 — sensors: camera, ToF, color (MLX90640 planned)
-│   ├── CMakeLists.txt
-│   └── lib/vl53l8cx/    # ST ULD driver
+│   ├── CMakeLists.txt   # picoA_drivers library + one executable per firmware
+│   ├── drivers/         # ToF, OPT4048, HM0360 registers/PIO; lib/vl53l8cx/ = ST ULD driver
+│   └── bringup/         # camera.c: PCB test firmware (camera driver + USB streaming)
 ├── picoB/               # A2 — motors, encoders, IMU
-│   └── CMakeLists.txt
-├── pc/                  # Node server + browser viewer for PicoA
-└── build/               # one build dir for both (git-ignored)
-    ├── picoA/picoA.uf2
-    └── picoB/picoB.uf2
+│   ├── CMakeLists.txt   # picoB_drivers library + one executable per firmware
+│   ├── drivers/         # imu, motor, encoder
+│   └── bringup/         # main.c: tilt -> motor test firmware
+├── pc/
+│   └── bringup/         # Node server + browser viewer for picoA_bringup
+└── build/               # one build dir for all firmwares (git-ignored)
+    ├── picoA/picoA_bringup.uf2
+    └── picoB/picoB_bringup.uf2
 ```
 
-One configure and build produces both firmwares. Code shared between the Picos
-(e.g. the inter-Pico UART protocol) will go in a `common/` folder.
+One configure and build produces every firmware. Drivers are shared: the real
+firmware will be a second executable in each Pico's `CMakeLists.txt` linking the
+same `picoX_drivers` library, so the bring-up firmware keeps building and can be
+used to re-test hardware (e.g. a new PCB revision). The camera driver is still
+inside `picoA/bringup/camera.c`; it moves to `drivers/` when the app needs it.
+Code shared between the Picos (e.g. the inter-Pico UART protocol) will go in a
+`common/` folder.
 
-## PicoA — working on the PCB
+## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 
 - **HM0360 / Arducam B0319 camera:** 4-bit capture over PIO/DMA, streamed over USB.
   Default: **160×120, Sub4, no binning**. Horizontal-binning stripes remain
@@ -44,7 +56,7 @@ One configure and build produces both firmwares. Code shared between the Picos
 
 MLX90640 and the inter-Pico link are not implemented yet.
 
-## PicoB — tilt → motor test (working on the PCB)
+## PicoB bring-up (`picoB_bringup`) — tilt → motor test, working on the PCB
 
 - **Hardware so far:** all four wheels — Pololu #2208 motors (298:1 LP 6V, exact
   297.92:1), 20 kHz PWM, front on channel A and rear on channel B of each driver.
@@ -53,7 +65,7 @@ MLX90640 and the inter-Pico link are not implemented yet.
   AIN1+BIN1 / AIN2+BIN2 are tied on the PCB, so both motors on a side share
   direction: if a rear motor spins opposite its front one, swap its wires. If a
   whole side runs backwards, flip `LEFT_FORWARD` / `RIGHT_FORWARD` in
-  `picoB/motor.c` (left is −1, right +1: both sides ran forward with these). Only the
+  `picoB/drivers/motor.c` (left is −1, right +1: both sides ran forward with these). Only the
   two front wheels have encoders (Pololu #3081): left-front on J6 pins 9–12
   (GP5/GP4), right-front on J6 pins 1–4 (GP9/GP8). There are no rear encoders.
   Adafruit #4502 ISM330DHCX breakout on SPI0 (GP16–19, mode 3, 1 MHz). The motors
@@ -83,7 +95,7 @@ MLX90640 and the inter-Pico link are not implemented yet.
 
 Keep the robot still for ~1 s after power-up (gyro bias). If an encoder counts
 backwards while its wheel drives forward, flip that encoder's `direction` in
-`picoB/encoder.c` (it uses the same sign as its side's motor).
+`picoB/drivers/encoder.c` (it uses the same sign as its side's motor).
 
 ## Run
 
@@ -95,22 +107,26 @@ backwards while its wheel drives forward, flip that encoder's `direction` in
    ```
    If the extension downloads its own CMake/Ninja again, point `.vscode/settings.json` back
    at Homebrew's (one copy of each tool).
-   Flash `build/picoA/picoA.uf2` onto **PicoA** and `build/picoB/picoB.uf2` onto
-   **PicoB**. In VS Code, Run / Flash / Debug ask which firmware to use (`picoA` or
-   `picoB`); they flash whichever Pico is on the USB cable, so pick the matching one.
+   Flash `build/picoA/picoA_bringup.uf2` onto **PicoA** and
+   `build/picoB/picoB_bringup.uf2` onto **PicoB**. In VS Code, Run / Flash / Debug ask
+   which firmware to use (`picoA/picoA_bringup` or `picoB/picoB_bringup`); they flash
+   whichever Pico is on the USB cable, so pick the matching one.
    The steps below are for PicoA; PicoB only needs a serial monitor (see above).
-2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/`.
+2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/bringup/`.
    With multiple Picos attached, use `npm start -- /dev/tty.usbmodem1101` (replace with PicoA's port;
    list candidates with `ls /dev/tty.usbmodem*`).
 3. Open **http://127.0.0.1:8080/**. Restart the Node app after reflashing/reconnecting.
    Sensor initialization and errors appear in the page log.
 
-In `picoA/`: `camera.c` (also the main loop and serial commands) / `hm0360_init.h` /
-`hm0360_regs.h` / `hm0360_curves.h` (tone curves) / `hm0360.pio`: camera;
-`tof.c` / `lib/vl53l8cx/`: ST ULD integration;
-`opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in `pc/src/opt4048.ts`);
-In `picoB/`: `main.c` (tilt filter, control, serial), `imu.c`, `motor.c`, `encoder.c`.
-`pc/`: USB parsing (`src/protocol.ts`), server (`src/main.ts`) and viewer (`public/`). Run `npm test` in `pc/` for software checks;
+In `picoA/`: `bringup/camera.c` (camera driver, main loop and serial commands) with
+`drivers/hm0360_init.h` / `hm0360_regs.h` / `hm0360_curves.h` (tone curves) /
+`hm0360.pio`: camera; `drivers/tof.c` / `drivers/lib/vl53l8cx/`: ST ULD integration;
+`drivers/opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in
+`pc/bringup/src/opt4048.ts`).
+In `picoB/`: `bringup/main.c` (tilt filter, control, serial), `drivers/imu.c`,
+`drivers/motor.c`, `drivers/encoder.c`.
+`pc/bringup/`: USB parsing (`src/protocol.ts`), server (`src/main.ts`) and viewer
+(`public/`). Run `npm test` in `pc/bringup/` for software checks;
 hardware behavior still needs PCB testing after changes.
 
 ## References used
@@ -138,7 +154,7 @@ hardware behavior still needs PCB testing after changes.
   [HM0360 tone curves / exposure controls](../hm0360/hm0360.c),
   [ToF project](../vl53l8cx/vl53l8cx.c),
   [OPT4048 project](../opt-4048/main.c) and [notes](../opt-4048/OPT4048_NOTES.md). ST's driver license is retained in
-  [`picoA/lib/vl53l8cx/LICENSE.txt`](picoA/lib/vl53l8cx/LICENSE.txt).
+  [`picoA/drivers/lib/vl53l8cx/LICENSE.txt`](picoA/drivers/lib/vl53l8cx/LICENSE.txt).
 
 Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 

@@ -2,10 +2,10 @@
 
 ## Current status
 
-Camera firmware is in `camera.c`; initialization is in `hm0360_init.h`;
-PIO capture is in `hm0360.pio`; the shared camera/ToF browser viewer is under `pc/`.
+Camera firmware is in `bringup/camera.c`; initialization is in `drivers/hm0360_init.h`;
+PIO capture is in `drivers/hm0360.pio`; the shared camera/ToF browser viewer is under `pc/bringup/`.
 The current camera boot default is **160×120 Sub4, no binning**.
-VL53L8CX integration is separate in `tof.c`.
+VL53L8CX integration is separate in `drivers/tof.c`.
 
 On the custom PCB, **direct Sub4 + H/V binning (160×120) still shows vertical
 stripes**. Leave investigation paused for now; use the legacy even-column

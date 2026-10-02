@@ -21,7 +21,7 @@ include(pico_sdk_import.cmake)
 project(robo_car_3 C CXX ASM)
 pico_sdk_init()
 
-# One build dir, one .uf2 per Pico: build/picoA/picoA.uf2, build/picoB/picoB.uf2.
+# One build dir for all firmwares, e.g. build/picoA/picoA_bringup.uf2, build/picoB/picoB_bringup.uf2.
 # PICO_BOARD is shared; switch to pico2_w here once a Pico 2 W is fitted.
 add_subdirectory(picoA)
 add_subdirectory(picoB)
