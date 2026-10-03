@@ -42,22 +42,35 @@ Code shared between the Picos (the inter-Pico link) is in `common/`.
 
 Built to [ROBOT_PLAN.md](ROBOT_PLAN.md); red flags found on the way are logged in
 [REDFLAGS.md](REDFLAGS.md). **M0 (link, wheel control, odometry) passed on the
-robot** (2 Oct 2026); M1 (calibration) is next.
+robot** (2 Oct 2026). **M1 (calibration): in progress**: tilt stop and gyro drift
+done; turns and 2 m straight to repeat once the front-right motor is fixed.
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16.
-- **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed: the link
-  (framing, corruption, lost frames, resync), PicoB's wheel control (ramp, speed
-  limits, speed and turn-rate control with a weak motor and skid) and odometry
-  (straight, turning, gyro bias while still, tilt signs). Run it after every change.
+- **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
+  at the first failure: the link (framing, corruption, lost frames, resync), PicoB's
+  wheel control (ramp, speed limits, speed and turn-rate control with a weak motor
+  and skid, safety stops), odometry (straight, turning, gyro bias while still, tilt
+  signs) and `brain` (greeting, MOTORS and DRIVE, safety stops reported once),
+  PicoA's `body` (greeting, DRIVE and MOTORS repeats incl. lost messages, safety
+  stops, PicoB restarting, timeout) and robot tests (against a simulated robot,
+  incl. early stops). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on the front encoders, with
   the turn rate trimmed by the gyro (`drive.c`); position from the encoders, heading
   from the gyro with the bias re-measured whenever the robot stands still, tilt
-  (`odometry.c`). Motors stay off until PicoA greets it and switches them on; it
-  switches them off by itself if PicoA's drive commands stop for 250 ms.
+  (`odometry.c`); the link protocol and safety stops (`brain.c`, PicoA as PicoB
+  sees it). Motors stay off until PicoA greets it and switches them on; it switches
+  them off by itself if PicoA's drive commands stop for 250 ms, a front wheel
+  doesn't follow its target for 1 s, or the robot tilts more than 15°
+  (`picoB/app/drive.h`).
 - **PicoA** (`picoA/app/`): `body.c` is PicoB as PicoA sees it; `debug_console.c`
-  prints a status line twice a second on USB (`g` motors on, `s` stop, `q` square
-  test, `l` link counters, `h` help); `drive_test.c` drives a 50 cm square.
+  prints a status line every 15 s on USB (none while a test runs) and takes keys:
+  `g` motors on, `s` stop, `p` status now, `t` last test result, `l` link
+  counters, `h` help; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
+  forward / back (`robot_test.c`). Unplugging the USB doesn't stop the robot, so a
+  test can run without the cable. A test that stops early says why and what it
+  measured so far. The keys and the last result are printed ~1 s after you plug
+  in (sooner gets lost on the Mac), and again with `t`.
 
 **M0 result** (square test on waxed wood, 50 cm sides at 10 cm/s, turns at 0.5 rad/s):
 
@@ -91,8 +104,51 @@ robot** (2 Oct 2026); M1 (calibration) is next.
 4. On the floor with room for a 70 cm square: press `q`. The robot drives forward
    50 cm and turns left 90°, four times, pausing between legs, then prints where
    odometry thinks it is. Mark the start, measure the real end position and heading,
-   and compare. `s` stops at any time, and so does unplugging PicoA's USB or
-   closing the monitor.
+   and compare. `s` stops at any time.
+
+**M1 results so far** (3 Oct 2026, waxed wood):
+
+| Test | Result |
+|---|---|
+| Tilt stop | Works: lifting one side stopped the square test with "tilted more than 15 deg" |
+| Gyro drift, 10 min still | Bias −0.328 °/s, wandering only 0.009 °/s (−0.3328 … −0.3239). Even if all of that happened during one minute of driving: 0.5° of heading. Yaw frozen while still (0.00°). **No change needed** |
+| 10 turns | Turn rate held at 28.6 °/s (the command) for 7 turns, then "right wheels not following". No gyro-scale result yet |
+| 2 m straight | Ran, but the result was lost (see below) |
+| Square (twice) | Odometry end pose 3.6 / −1.9 cm, 363.4° and −0.5 / −3.3 cm, 364.7°; real end pose not measured |
+
+- **Front-right motor sticks** (hardware): it sometimes doesn't start, then runs
+  normally once moving; the rear-right wheel did the work in the turns, and the
+  square test then kept stopping with "right wheels not following". The controller
+  reaches full power within ~0.6 s and the rear-right motor on the same driver turns,
+  so it's the motor, gearbox, its wiring or driver channel A, not the PWM level or
+  the software. Checks: hub rubbing on the gearbox or fibres on the shaft, swap the
+  two right motors on J9 (does the fault follow the motor?), wiggle the wires while
+  driving, voltage at the motor terminals while stuck, battery voltage.
+- **Console bugs found:** the welcome text and the last test result, printed the
+  moment the USB connects, don't show up on the Mac (probably sent before the monitor
+  reads); later tests then overwrite the stored result. Planned: print them ~1 s
+  after connecting, and a key `t` to reprint the last result. Unexplained: after
+  `f` and `g` were pressed (motors in a safety stop), nothing was printed, not even
+  "Forward test…" / "Motors on", though the robot did drive about 2 m.
+
+**M1 test** (calibration; both Picos need the M1 firmware, protocol v4). Paste the
+serial log of each step:
+1. **Tilt stop:** press `q` and lift one side of the robot past 15°. Expected:
+   `B: Motors off: tilted too far` and the test stops. `g` switches the
+   motors on again.
+2. **Gyro drift, `d`:** robot on the floor, don't touch it for 10 min. Every 15 s:
+   yaw (should stay put) and gyro bias. At the end: how far the bias wandered.
+3. **Gyro scale, `r`:** a mark on the floor in line with the robot's front. It turns
+   10 × 360° left (~2 min), one line per turn, and stops at 3600° by the gyro.
+   Estimate how far it ended from the mark (N° short = gyro reads N/36 % too much).
+   It also prints the effective track width from the wheels.
+4. **Encoder distance, `f` / `b`:** tape measure along a 2 m path, robot at 0. Press
+   `f`, then unplug the USB: it drives 2 m and stops. Measure where it really got
+   to, plug back in and read its own numbers. `b` drives back.
+   **First check that PicoA keeps running on the battery with the USB unplugged**
+   (if it doesn't, PicoB stops after 250 ms with "drive commands stopped arriving").
+5. **Carpet:** `r`, `f` and `q` again on the carpet, the square across its edge.
+   Look for false safety stops and a slower turn rate.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

@@ -92,3 +92,5 @@ void imu_calibrate_gyro(int samples) {
     }
     bias_x = x / samples; bias_y = y / samples; bias_z = z / samples;
 }
+
+float imu_gyro_bias_z(void) { return bias_z; }

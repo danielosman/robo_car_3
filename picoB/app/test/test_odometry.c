@@ -8,8 +8,8 @@
 #include "../odometry.c"
 
 #define RATE_HZ 416.0f
-#define RAD(d)  ((d) * 0.017453293f)
-#define DEG(r)  ((r) * 57.29578f)
+#define RAD(d)  ((d) * RAD_PER_DEG)
+#define DEG(r)  ((r) * DEG_PER_RAD)
 
 static float gyro_bias_dps;      // the real sensor's leftover bias
 static double count_l, count_r;  // exact simulated encoder positions
@@ -19,8 +19,8 @@ static void simulate(float seconds, float left_mps, float right_mps, float turn_
     int n = (int)(seconds * RATE_HZ + 0.5f);
     for (int i = 0; i < n; i++) {
         fake_now_us += (uint64_t)(1e6f / RATE_HZ);
-        count_l += left_mps / RATE_HZ / M_PER_COUNT;
-        count_r += right_mps / RATE_HZ / M_PER_COUNT;
+        count_l += (double)(left_mps / RATE_HZ / M_PER_COUNT);
+        count_r += (double)(right_mps / RATE_HZ / M_PER_COUNT);
         fake_counts[ENC_LEFT_FRONT] = (int32_t)count_l;
         fake_counts[ENC_RIGHT_FRONT] = (int32_t)count_r;
         fake_imu.gz = turn_dps + gyro_bias_dps;
@@ -42,6 +42,7 @@ int main(void) {
     assert(!o->stationary);
     assert(fabsf(o->x_m - 0.5f) < 0.005f && fabsf(o->y_m) < 0.001f);
     assert(fabsf(o->v_mps - 0.1f) < 0.002f);
+    assert(fabsf(o->wheel_left_m - 0.5f) < 0.001f && fabsf(o->wheel_right_m - 0.5f) < 0.001f);
     printf("straight 50 cm: x %.1f cm, y %.1f cm\n", (double)(o->x_m * 100), (double)(o->y_m * 100));
 
     // Turn left in place, 90 deg at 30 deg/s (wheels opposite): position stays put.
@@ -69,6 +70,12 @@ int main(void) {
     simulate(3, -0.06f, 0.06f, 30);
     float turn_error = DEG(o->yaw_rad - yaw0) - 90;
     assert(fabsf(turn_error) < 0.3f);
+    // The reported bias is the power-up calibration plus what was learned since.
+    assert(fabsf(DEG(o->gyro_bias_radps) - 0.5f) < 0.01f);
+    fake_imu_bias_z = 0.2f;
+    simulate(0.01f, 0, 0, 0);
+    assert(fabsf(DEG(o->gyro_bias_radps) - 0.7f) < 0.01f);
+    fake_imu_bias_z = 0;
     printf("gyro bias 0.5 deg/s: drift over 60 s still %.2f deg, next 90 deg turn off by %.2f deg "
            "(without bias tracking: 30 deg and 1.5 deg)\n", (double)still_drift, (double)turn_error);
     gyro_bias_dps = 0;

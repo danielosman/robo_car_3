@@ -32,10 +32,10 @@ static void run(float seconds) { for (int i = 0; i < (int)(seconds / DT_S + 0.5f
 
 static void check_ramp(float seconds) {
     for (int i = 0; i < (int)(seconds / DT_S + 0.5f); i++) {
-        float v0 = v, w0 = w, l0 = fake_left_power, r0 = fake_right_power;
+        float v0 = v_mps, w0 = w_radps, l0 = fake_left_power, r0 = fake_right_power;
         step();
-        assert(fabsf(v - v0) <= ACCEL_MPS2 * DT_S + 1e-6f);
-        assert(fabsf(w - w0) <= TURN_ACCEL_RADPS2 * DT_S + 1e-6f);
+        assert(fabsf(v_mps - v0) <= ACCEL_MPS2 * DT_S + 1e-6f);
+        assert(fabsf(w_radps - w0) <= TURN_ACCEL_RADPS2 * DT_S + 1e-6f);
         assert(fabsf(fake_left_power - l0) <= 0.12f);   // no power jumps
         assert(fabsf(fake_right_power - r0) <= 0.12f);
     }
@@ -51,7 +51,7 @@ int main(void) {
     drive_enable(true);
     drive_set(0.1f, 0);
     check_ramp(0.25f);
-    assert(fabsf(v - 0.1f) < 1e-6f);
+    assert(fabsf(v_mps - 0.1f) < 1e-6f);
     check_ramp(1.75f);
     assert(fabsf(wheel_l - 0.1f) < 0.005f && fabsf(wheel_r - 0.1f) < 0.005f);
     printf("straight: wheels %.3f / %.3f m/s (target 0.100), powers %.2f / %.2f\n",
@@ -61,7 +61,7 @@ int main(void) {
     drive_set(0, 0);
     check_ramp(0.25f);
     run(0.1f);
-    assert(v == 0 && fake_left_power == 0 && fake_right_power == 0);
+    assert(v_mps == 0 && fake_left_power == 0 && fake_right_power == 0);
 
     // A weaker left motor: the wheel loops and the gyro trim keep it straight.
     left_gain = 0.8f;
@@ -111,9 +111,24 @@ int main(void) {
     wheel_l = wheel_r = 0;
     drive_enable(true);
 
+    // Tilted past 15° (lifted, tipping over): motors off at once; 10° is fine.
+    drive_set(0.1f, 0);
+    run(1);
+    odom.roll_rad = -0.17f;
+    run(0.5f);
+    assert(drive_enabled());
+    odom.pitch_rad = 0.27f;
+    step();
+    assert(!drive_enabled() && drive_fault() == DRIVE_TILTED && fake_left_power == 0);
+    printf("tilted 15.5 deg: motors off\n");
+    odom.pitch_rad = odom.roll_rad = 0;
+    wheel_l = wheel_r = 0;
+    drive_enable(true);
+    assert(drive_fault() == DRIVE_OK);
+
     // Commands are limited to safe speeds.
     drive_set(5, -9);
-    assert(v_target == MAX_V_MPS && w_target == -MAX_W_RADPS);
+    assert(v_target_mps == MAX_V_MPS && w_target_radps == -MAX_W_RADPS);
 
     // Switching off stops at once, no ramp.
     run(0.5f);

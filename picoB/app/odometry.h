@@ -12,7 +12,9 @@ typedef struct {
     float v_mps, w_radps;    // forward speed, turn rate
     float pitch_rad, roll_rad;
     float wheel_left_mps, wheel_right_mps; // front wheels, + = forward
+    float wheel_left_m, wheel_right_m;     // front wheels' total distance, + = forward
     bool stationary;         // wheels and gyro still for 0.5 s
+    float gyro_bias_radps;   // subtracted from the yaw gyro: power-up calibration plus re-measurements while still
 } odom_t;
 
 // Starts the IMU and measures the gyro bias: the robot must stand still for ~1 s.

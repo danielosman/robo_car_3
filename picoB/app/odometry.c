@@ -3,10 +3,10 @@
 #include "imu.h"
 #include "encoder.h"
 #include "odometry.h"
+#include "units.h"
 
 #define WHEEL_DIAMETER_M  0.090f
-#define M_PER_COUNT       (3.14159265f * WHEEL_DIAMETER_M / ENCODER_COUNTS_PER_REV)
-#define DEG_TO_RAD        0.017453293f
+#define M_PER_COUNT       (PI_F * WHEEL_DIAMETER_M / ENCODER_COUNTS_PER_REV)
 #define MAX_DT_S          0.1f   // longer gaps (a stalled loop) are not trusted
 
 #define WHEEL_SPEED_TAU_S 0.03f  // low-pass on wheel speeds from encoder steps
@@ -47,6 +47,8 @@ static void update_wheels(float dt) {
     float dr = (float)(right - last_right) * M_PER_COUNT;
     last_left = left;
     last_right = right;
+    o.wheel_left_m += dl;
+    o.wheel_right_m += dr;
     float k = dt / (WHEEL_SPEED_TAU_S + dt);
     o.wheel_left_mps += k * (dl / dt - o.wheel_left_mps);
     o.wheel_right_mps += k * (dr / dt - o.wheel_right_mps);
@@ -70,7 +72,9 @@ static void update_heading(float yaw_rate_raw_dps, float dt) {
         yaw_bias_dps += dt / BIAS_TAU_S * (yaw_rate_raw_dps - yaw_bias_dps);
         rate_dps = 0;
     }
-    o.w_radps = rate_dps * DEG_TO_RAD;
+    // The IMU is mounted Z up, so its z bias is the robot's yaw bias with the same sign.
+    o.gyro_bias_radps = (imu_gyro_bias_z() + yaw_bias_dps) * RAD_PER_DEG;
+    o.w_radps = rate_dps * RAD_PER_DEG;
     o.yaw_rad += o.w_radps * dt;
 }
 
@@ -87,8 +91,8 @@ static void update_tilt(const float accel_g[3], const float gyro_dps[3], float d
     }
     float w = dt / (TILT_TAU_S + dt);
     // Nose up is a negative rotation about the left (y) axis; left side up is positive about x.
-    o.pitch_rad = (1 - w) * (o.pitch_rad - gyro_dps[1] * DEG_TO_RAD * dt) + w * accel_pitch;
-    o.roll_rad = (1 - w) * (o.roll_rad + gyro_dps[0] * DEG_TO_RAD * dt) + w * accel_roll;
+    o.pitch_rad = (1 - w) * (o.pitch_rad - gyro_dps[1] * RAD_PER_DEG * dt) + w * accel_pitch;
+    o.roll_rad = (1 - w) * (o.roll_rad + gyro_dps[0] * RAD_PER_DEG * dt) + w * accel_roll;
 }
 
 void odom_update(void) {

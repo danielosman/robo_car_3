@@ -22,12 +22,16 @@ pico_enable_stdio_usb(picoA_bringup 1)
 target_link_libraries(picoA_bringup picoA_drivers)
 pico_add_extra_outputs(picoA_bringup)
 
-# Robot firmware (ROBOT_PLAN.md). M0: link to PicoB, debug console, square test.
-add_executable(picoA_app app/main.c app/body.c app/drive_test.c app/debug_console.c)
+# Robot firmware (ROBOT_PLAN.md). M1: link to PicoB, debug console, calibration tests.
+add_executable(picoA_app app/main.c app/body.c app/robot_test.c app/debug_console.c)
 pico_set_program_name(picoA_app "picoA_app")
 pico_set_program_version(picoA_app "0.1")
 pico_enable_stdio_uart(picoA_app 0) # UART0 is the link to PicoB
 pico_enable_stdio_usb(picoA_app 1)
 target_compile_options(picoA_app PRIVATE -Wall -Wextra -Wdouble-promotion)
+# A serial monitor that has the port open but isn't reading would make printf wait
+# up to 500 ms (SDK default), longer than PicoB's 250 ms DRIVE timeout: text may be
+# lost, drive commands may not.
+target_compile_definitions(picoA_app PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=5000)
 target_link_libraries(picoA_app common_link)
 pico_add_extra_outputs(picoA_app)

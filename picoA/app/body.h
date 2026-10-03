@@ -13,6 +13,7 @@ void body_init(void);          // starts the link
 void body_update(void);        // call every loop iteration
 // PicoB has greeted us with our protocol version and its reports are arriving.
 bool body_connected(void);
-const odom_report_t *body_odom(void); // latest report; all zero until the first one
+const odom_report_t *body_odom(void);     // latest report; all zero until the first one
+const status_report_t *body_status(void); // latest status (2 Hz); all zero until the first one
 void body_motors(bool on);     // on also clears PicoB's safety stop
 void body_drive(float v_mps, float w_radps); // + = forward / turn left; held until changed
