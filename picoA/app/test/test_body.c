@@ -4,7 +4,9 @@
 // against a fake link with the test playing PicoB. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon/test/fakes -Icommon -o build/test_body picoA/app/test/test_body.c && build/test_body
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "../body.c"
 
 // The fake PicoB.
@@ -149,6 +151,39 @@ int main(void) {
     run(10 * LINK_ODOM_PERIOD_US / 1000 + 20);
     assert(!body_connected());
 
-    printf("OK: body greets, repeats DRIVE, re-sends MOTORS, respects safety stops, times out\n");
+    // Clock sync: PicoB's clock is far off (and wraps soon), runs 50 ppm fast, and
+    // each report arrives 0-3 ms late on top of its time on the wire. After a few
+    // seconds, the report's time on PicoA's clock is within 0.3 ms.
+    uint64_t b_start_us = fake_now_us;
+    uint32_t b_clock0 = 0xFFF00000u;       // wraps after ~1 s
+    srand(1);
+    float worst_ms = 0;
+    for (int i = 0; i < 500; i++) {        // 10 s of reports
+        uint64_t sent_us = fake_now_us;
+        b_odom.t_us = b_clock0 + (uint32_t)((sent_us - b_start_us) * 1000050ull / 1000000ull);
+        fake_now_us += ODOM_WIRE_US + (uint64_t)(rand() % 3000);
+        fake_link_deliver(MSG_ODOM, &b_odom, sizeof b_odom);
+        body_update();
+        float err_ms = (float)(int32_t)(body_odom_time_us() - (uint32_t)sent_us) * 1e-3f;
+        if (i >= 150) worst_ms = fmaxf(worst_ms, fabsf(err_ms));
+        fake_now_us = sent_us + LINK_ODOM_PERIOD_US;
+    }
+    assert(worst_ms < 0.3f);
+    printf("clock sync: report times within %.2f ms after 3 s (0-3 ms random delay, 50 ppm drift)\n", (double)worst_ms);
+
+    // PicoB restarts (its clock starts again from 0): right again within a second.
+    b_hello(LINK_PROTOCOL_VERSION, false);
+    b_start_us = fake_now_us;
+    for (int i = 0; i < 50; i++) {
+        uint64_t sent_us = fake_now_us;
+        b_odom.t_us = (uint32_t)(sent_us - b_start_us);
+        fake_now_us += ODOM_WIRE_US + (uint64_t)(rand() % 3000);
+        fake_link_deliver(MSG_ODOM, &b_odom, sizeof b_odom);
+        body_update();
+        if (i >= 40) assert(fabsf((float)(int32_t)(body_odom_time_us() - (uint32_t)sent_us)) < 1000);
+        fake_now_us = sent_us + LINK_ODOM_PERIOD_US;
+    }
+
+    printf("OK: body greets, repeats DRIVE, re-sends MOTORS, respects safety stops, times out, syncs clocks\n");
     return 0;
 }

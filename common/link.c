@@ -12,7 +12,6 @@
 #define UART    uart0
 #define PIN_TX  0
 #define PIN_RX  1
-#define BAUD    1000000
 
 #define RAW_MAX   (2 + LINK_MAX_BODY + 2)
 #define FRAME_MAX (RAW_MAX + RAW_MAX / 254 + 2) // COBS overhead and the 0x00
@@ -84,7 +83,7 @@ static void on_uart_irq(void) {
 }
 
 void link_init(void) {
-    uart_init(UART, BAUD);
+    uart_init(UART, LINK_BAUD);
     uart_set_format(UART, 8, 1, UART_PARITY_NONE);
     uart_set_hw_flow(UART, false, false);
     uart_set_fifo_enabled(UART, true);

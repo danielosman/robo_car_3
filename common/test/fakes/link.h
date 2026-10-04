@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <string.h>
 #define LINK_MAX_BODY 64
+#define LINK_BAUD     1000000
 typedef struct { uint8_t type; uint8_t len; uint8_t body[LINK_MAX_BODY]; } link_msg_t;
 
 static bool fake_link_started;

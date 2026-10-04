@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "pico/stdlib.h"
 #include "link.h"
@@ -7,6 +8,15 @@
 #define DRIVE_PERIOD_US   (LINK_DRIVE_TIMEOUT_US / 5) // a lost DRIVE or two doesn't stop the robot
 #define MOTORS_RETRY_US   200000
 #define REPORT_TIMEOUT_US (10 * LINK_ODOM_PERIOD_US)
+// Clock offset (PicoA - PicoB): the smallest arrival delay over the last few
+// seconds is the one with no waiting in buffers or loops. Blocks of 1 s, so the
+// estimate follows the clocks drifting apart.
+#define OFFSET_BLOCK_US   1000000
+#define OFFSET_BLOCKS     4
+#define OFFSET_JUMP_US    100000  // a bigger change means PicoB restarted its clock: start over
+// The shortest possible delay: an ODOM frame on the wire (COBS, type, sequence,
+// CRC and the delimiter add 6 bytes).
+#define ODOM_WIRE_US      ((uint32_t)((sizeof(odom_report_t) + 6) * 10 * 1000000ull / LINK_BAUD))
 
 static bool greeted;
 static bool motors_wanted;
@@ -15,6 +25,36 @@ static drive_msg_t drive;
 static odom_report_t odom;
 static status_report_t status;
 static absolute_time_t last_report, next_drive, next_motors, next_hello;
+static uint32_t block_min[OFFSET_BLOCKS], block_start_us, offset_us;
+static int blocks_full;    // completed blocks in block_min, up to OFFSET_BLOCKS
+static bool clock_known;
+
+static void restart_clock(void) { clock_known = false; blocks_full = 0; }
+
+// d = arrival on PicoA's clock - PicoB's clock at sending. The two clocks wrap at
+// the same time, so differences of uint32 values stay right across wraps.
+static void track_clock(uint32_t d, uint32_t now_us) {
+    if (clock_known && (uint32_t)abs((int32_t)(d - offset_us)) > OFFSET_JUMP_US) restart_clock();
+    if (!clock_known) {
+        clock_known = true;
+        block_start_us = now_us;
+        block_min[0] = offset_us = d;
+        return;
+    }
+    uint32_t *current = &block_min[blocks_full % OFFSET_BLOCKS];
+    if (now_us - block_start_us >= OFFSET_BLOCK_US) {
+        block_start_us = now_us;
+        blocks_full++;
+        current = &block_min[blocks_full % OFFSET_BLOCKS];
+        *current = d;
+    } else if ((int32_t)(d - *current) < 0) {
+        *current = d;
+    }
+    int n = blocks_full < OFFSET_BLOCKS ? blocks_full + 1 : OFFSET_BLOCKS;
+    offset_us = *current;
+    for (int i = 0; i < n; i++)
+        if ((int32_t)(block_min[i] - offset_us) < 0) offset_us = block_min[i];
+}
 
 static void send_hello(bool is_reply) {
     hello_msg_t h = {.version = LINK_PROTOCOL_VERSION, .is_reply = is_reply};
@@ -34,6 +74,7 @@ static void on_hello(const hello_msg_t *h) {
         return;
     }
     if (!h->is_reply && greeted) printf("PicoB restarted\n");
+    if (!h->is_reply) restart_clock();
     greeted = true;
     if (!h->is_reply) send_hello(true);
 }
@@ -47,6 +88,7 @@ static void on_message(const link_msg_t *m) {
         if (m->len == sizeof odom) {
             memcpy(&odom, m->body, sizeof odom);
             last_report = get_absolute_time();
+            track_clock(time_us_32() - odom.t_us, time_us_32());
         }
         break;
     case MSG_STATUS:
@@ -100,6 +142,8 @@ bool body_connected(void) {
 }
 
 const odom_report_t *body_odom(void) { return &odom; }
+
+uint32_t body_odom_time_us(void) { return odom.t_us + offset_us - ODOM_WIRE_US; }
 
 const status_report_t *body_status(void) { return &status; }
 

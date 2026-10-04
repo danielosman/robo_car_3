@@ -4,12 +4,9 @@
 #include "pico/stdlib.h"
 #include "units.h"
 #include "body.h"
+#include "motion.h"
 #include "robot_test.h"
 
-#define SPEED_MPS        0.10f
-#define MIN_SPEED_MPS    0.03f
-#define TURN_RADPS       0.50f      // ~29°/s
-#define MIN_TURN_RADPS   0.15f
 #define FULL_TURN_RAD    (2 * PI_F)
 #define SQUARE_SIDE_M    0.50f
 #define STRAIGHT_M       2.0f
@@ -116,7 +113,7 @@ static int turns_done;
 
 static void turns_intro(void) {
     printf("Turn test: %d turns left in place (~%.0f min), stopping at %d deg by the gyro\n", TURNS,
-           (double)(TURNS * FULL_TURN_RAD / TURN_RADPS / 60), TURNS * 360);
+           (double)(TURNS * FULL_TURN_RAD / MOTION_TURN_RADPS / 60), TURNS * 360);
 }
 
 static void turns_begin(const odom_report_t *o) { (void)o; turns_done = 0; }
@@ -154,7 +151,7 @@ static const step_t back_steps[] = {{MOVE_FORWARD, .distance_m = -STRAIGHT_M}};
 static void straight_intro(void) {
     float d_m = test->steps[0].distance_m;
     printf("%s: %.0f m straight %s (~%.0f s). You can unplug the USB now.\n", test->name,
-           (double)fabsf(d_m), d_m > 0 ? "ahead" : "back", (double)(fabsf(d_m) / SPEED_MPS));
+           (double)fabsf(d_m), d_m > 0 ? "ahead" : "back", (double)(fabsf(d_m) / MOTION_SPEED_MPS));
 }
 
 static void straight_result(const odom_report_t *o, bool complete) {
@@ -261,8 +258,7 @@ static void begin(void) {
     begin_step();
 }
 
-// Runs the current step; returns true when it's complete. Moves slow down near
-// the end so the robot stops close to the target.
+// Runs the current step; returns true when it's complete.
 static bool run_step(const odom_report_t *o) {
     const step_t *s = &test->steps[step_i];
     switch (s->kind) {
@@ -270,14 +266,14 @@ static bool run_step(const odom_report_t *o) {
         float dir = s->distance_m < 0 ? -1.0f : 1.0f;
         float remaining_m = fabsf(s->distance_m) - hypotf(o->x_m - step_start.x_m, o->y_m - step_start.y_m);
         if (remaining_m <= 0) return true;
-        body_drive(dir * fminf(SPEED_MPS, fmaxf(MIN_SPEED_MPS, remaining_m)), 0);
+        body_drive(motion_speed(dir * remaining_m), 0);
         return false;
     }
     case MOVE_TURN: {
         float dir = s->angle_rad < 0 ? -1.0f : 1.0f;
         float remaining_rad = fabsf(s->angle_rad) - dir * (o->yaw_rad - step_start.yaw_rad);
         if (remaining_rad <= 0) return true;
-        body_drive(0, dir * fminf(TURN_RADPS, fmaxf(MIN_TURN_RADPS, 2 * remaining_rad)));
+        body_drive(0, motion_turn_rate(dir * remaining_rad));
         return false;
     }
     case HOLD_STILL:

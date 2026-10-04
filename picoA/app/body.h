@@ -7,6 +7,7 @@
 // (a safety stop, see odom_report_t.stop_reason), they stay off until the next
 // body_motors(true).
 #include <stdbool.h>
+#include <stdint.h>
 #include "link_msgs.h"
 
 void body_init(void);          // starts the link
@@ -14,6 +15,10 @@ void body_update(void);        // call every loop iteration
 // PicoB has greeted us with our protocol version and its reports are arriving.
 bool body_connected(void);
 const odom_report_t *body_odom(void);     // latest report; all zero until the first one
+// When the latest report was measured, on PicoA's clock (time_us_32()). PicoB's
+// clock is translated from the reports' t_us: within ~0.1 ms once a few seconds of
+// reports have arrived, and kept right as the two clocks drift apart.
+uint32_t body_odom_time_us(void);
 const status_report_t *body_status(void); // latest status (2 Hz); all zero until the first one
 void body_motors(bool on);     // on also clears PicoB's safety stop
 void body_drive(float v_mps, float w_radps); // + = forward / turn left; held until changed

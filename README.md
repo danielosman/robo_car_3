@@ -44,7 +44,9 @@ Built to [ROBOT_PLAN.md](ROBOT_PLAN.md); red flags found on the way are logged i
 [REDFLAGS.md](REDFLAGS.md). **M0 (link, wheel control, odometry) passed on the
 robot** (2 Oct 2026). **M1 (calibration): in progress**: tilt stop and gyro drift
 done; turns and 2 m straight to repeat. **4 Oct: new motors, all four encoders
-connected and checked** (see "Motor change" below); square test passed again.
+connected and checked** (see "Motor change" below); square test passed again. **M2
+(map): written 4 Oct, three robot runs; the start-up scan works, the map is being
+checked against the room** (steps below; not committed yet).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16.
@@ -64,10 +66,22 @@ connected and checked** (see "Motor change" below); square test passed again.
   them off by itself if PicoA's drive commands stop for 250 ms, any wheel
   doesn't follow its side's target for 1 s, or the robot tilts more than 15°
   (`picoB/app/drive.h`).
+- **PicoA map (M2):** `rangefinder.c` turns the VL53L8CX's 64 zones (8 × 8, 15 Hz)
+  into rays in the robot frame and tells floor from obstacles (≥ 2 cm above the
+  floor); `world_map.c` keeps 10 cm cells, 4 layers, 4 × 4 m around the robot, with
+  the 240 s timers; `pose.c` gives the pose at the moment a frame was measured;
+  `surroundings.c` feeds the frames to the map; `behaviour.c` runs the start-up
+  scan. PicoB's clock is translated from the ODOM reports in `body.c` (no extra
+  message, PicoB unchanged).
+- **Start-up scan:** the first time a serial monitor opens on PicoA after
+  power-up (or with `n`), the robot turns 390° in place, learns the floor from what
+  the lower zones see all around (fresh every start, nothing stored), prints the
+  map, turns to face the most open direction and prints its heading.
 - **PicoA** (`picoA/app/`): `body.c` is PicoB as PicoA sees it; `debug_console.c`
   prints a status line every 15 s on USB (none while a test runs) and takes keys:
   `g` motors on, `s` stop, `p` status now, `t` last test result, `l` link
-  counters, `h` help; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
+  counters, `h` help; map: `n` start-up scan again, `m` print the map, `z` one ToF
+  frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
   forward / back (`robot_test.c`). Unplugging the USB doesn't stop the robot, so a
   test can run without the cable. A test that stops early says why and what it
   measured so far. The keys and the last result are printed ~1 s after you plug
@@ -171,6 +185,49 @@ serial log of each step:
    (if it doesn't, PicoB stops after 250 ms with "drive commands stopped arriving").
 5. **Carpet:** `r`, `f` and `q` again on the carpet, the square across its edge.
    Look for false safety stops and a slower turn rate.
+
+**M2 test** (map; flash only **PicoA** with `picoA_app`, PicoB stays as it is):
+1. Robot on the floor with ~1 m of room around it, battery on. Keep it still ~1 s
+   after power-up (gyro bias).
+2. Plug the USB into PicoA and open the serial monitor. After ~1 s: the keys, then
+   "Start-up scan: turning 390 deg…". The robot turns ~14 s.
+3. Expected: "Floor learned in 32 of 32 zones … rows 5-8 see it at … cm", then
+   the map (40 × 40 cells, up = where the robot faced when the scan started, the
+   robot at the centre), then "Most open direction…", a short turn, "Facing
+   heading …".
+4. Check the map against the room: walls and furniture legs where they are, `.`
+   on the open floor, no `##` in the middle of open floor. Within ~1 m obstacles
+   show as `##`; farther walls as `''` (only their part above 12 cm is seen).
+5. `z` prints one ToF frame (cm, as the robot sees it; `?N` = unsure, VL53
+   status N). Checked 4 Oct: a hand on the robot's left shortens the left column.
+6. Drive the square (`q`) and press `m`: the walls must stay where they were, and
+   braking must not draw obstacles on the open floor. Paste the serial log.
+
+Known limits (from the geometry): each zone is 5.6° tall and reports the nearest
+surface in it, so a low obstacle reads like the floor behind it until it is close
+(an 8 cm box shows up at ~40 cm, not at 60 cm); a low obstacle can fall between
+two zone rows at some distances; layer 0 (2–12 cm, what blocks the robot) is only
+seen within ~1 m.
+
+First robot run (4 Oct): the sensor is not mirrored (hand test), but most zones
+were thrown away (only the first of up to 4 targets was looked at), and the floor
+rows read the near edge of their floor patch (6th row 35 cm instead of 48), which
+drew a ring of false obstacles at ~60 cm and scattered far `''`. Fixed: closest
+sure target, the 5th row learns the floor too, each floor zone learns its own
+angle and scatter, readings that may be the floor at a zone's lower edge are free
+space. The map's up is now the scan's start.
+
+Second run (4 Oct): good map; PicoB stopped ("drive commands stopped arriving")
+after the map print, and one false obstacle ~35 cm ahead-left (maybe the USB
+cable). Fixed since, not yet run: the motors are off while the map is built and
+printed, and at the end; `m` switches them off before printing; the 5th row no
+longer takes far walls for its floor. `z` now also shows what each zone decided
+and what each floor zone learned: if a false obstacle stays, point the robot at
+it and paste `z`.
+
+Third run (4 Oct): the start-up scan ran to the end without a stop; floor rows
+6-8 learned (~45 / 30 / 22 cm), the 5th row not (it sees walls); the false obstacle
+ahead-left is gone. Since: an unlearned 5th row is used like the rows above.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 
@@ -283,7 +340,8 @@ while the wheel turns: encoder wiring or power. Paste a few lines of each side.
 
 In `picoA/`: `bringup/camera.c` (camera driver, main loop and serial commands) with
 `drivers/hm0360_init.h` / `hm0360_regs.h` / `hm0360_curves.h` (tone curves) /
-`hm0360.pio`: camera; `drivers/tof.c` / `drivers/lib/vl53l8cx/`: ST ULD integration;
+`hm0360.pio`: camera; `drivers/tof.c` / `drivers/lib/vl53l8cx/`: ST ULD integration
+(`bringup/tof_stream.c`: the viewer's ToF packets and commands);
 `drivers/opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in
 `pc/bringup/src/opt4048.ts`).
 In `picoB/`: `bringup/main.c` (tilt filter, control, serial), `drivers/imu.c`,

@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #define LINK_MAX_BODY 64
+#define LINK_BAUD     1000000 // 10 bits per byte on the wire (8N1): 10 us per byte
 
 typedef struct {
     uint8_t type;

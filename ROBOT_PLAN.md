@@ -1,8 +1,8 @@
 # RoboCar — robot app plan
 
-Status: **M0 passed on the robot (2 Oct 2026). M1 (calibration) in progress:
-tilt stop and gyro drift done (3 Oct). 4 Oct: new motors, all four encoders
-connected, checked and used; square test passed again. Next: turns and 2 m straight.** This
+Status: **M0 passed (2 Oct 2026). M1 (calibration) passed on waxed wood with the
+new motors (4 Oct); back and carpet left for later. M2 (map): written 4 Oct (§14),
+three robot runs, the start-up scan works; checking the map; not committed yet.** This
 plan covers the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully
 autonomous** robot, built on the drivers verified in the bring-up (tag
 `pcb-bringup-v1`). Start a new session with "Where we are" below.
@@ -46,25 +46,20 @@ GP7/GP6, left GP3/GP2), odometry averages front and rear per side,
 `drive`'s wheel stop judges each wheel, the bring-up prints every wheel. All four
 encoder signs checked (+ forward).
 
+**M1 results with the new motors (4 Oct, waxed wood):** square 1.2 / −1.2 cm,
+362.6°, the real end pose practically the same; 10 turns without stops, effective
+track width 28.6 cm, gyro 0.42 % low (15° over 3600°: no correction), real drift
+~15 cm over 10 turns that odometry doesn't see (M6); 2 m forward 200.2 cm by
+odometry, ~200.5 cm real (+0.15 %): no change. `b` and the carpet: Daniel tests
+them later. (PicoA had still been on protocol v3: both Picos are now on v4.)
+
 **Next session, in this order:**
-1. ~~Square test with the new motors~~ passed 4 Oct: odometry 1.2 / −1.2 cm,
-   362.6°, the real end pose practically the same. (PicoA had still been on
-   protocol v3: both Picos are now on v4.)
-   ~~10 turns~~ done 4 Oct: no stops, effective track width 28.6 cm on wood, gyro
-   0.42 % low (15° over 3600°: no correction), real drift ~15 cm over 10 turns that
-   odometry doesn't see (M6).
-   ~~2 m forward~~ done 4 Oct: 200.2 cm by odometry, ~200.5 cm real (+0.15 %): no
-   change. Still to do: `b`, then the carpet (step 5). Then the M0 square test again
-   (odometry now uses four encoders) before the M1 tests.
-2. ~~Console fixes~~ done 3 Oct (REFACTORING.md S5): welcome text and last result
-   ~1 s after the USB connects, key `t`.
-3. **Open question for Daniel:** after the turn test's safety stop, pressing `f` and
-   `g` printed nothing ("Forward test…", "Motors on"), though the robot drove ~2 m.
-   Did the robot start on the first `f`? Find out why the output went silent.
-4. Repeat tests 3–5 (`r`, `f`/`b`, carpet).
-5. ~~Code review~~ (3 Oct): every REFACTORING.md item applied the same day (protocol
-   v4: **reflash both Picos**). Watch on the robot: `l` link counters after a long
-   test (S3, USB print timeout), and that a test stopped early prints why (S4).
+1. **M2:** see §14 (decisions, what's done, the three robot runs, findings) and its
+   "Next session" list at the end of this file. M2 code is not committed yet.
+2. Still open from M1: after the 3 Oct turn test's safety stop, `f` and `g` printed
+   nothing ("Forward test…", "Motors on"), though the robot drove ~2 m. Not seen
+   since the console fixes; watch for it. Also watch `l` link counters after a long
+   test (S3, USB print timeout).
 
 **Files:**
 
@@ -72,11 +67,11 @@ encoder signs checked (+ forward).
 |---|---|
 | `ROBOT_PLAN.md` | this plan: requirements, design, milestones, decisions |
 | `REDFLAGS.md` | APOSD red-flag log per milestone, plus bugs found on the robot |
-| `REFACTORING.md` | code review of M0+M1 (standards + spec): proposed fixes, not yet applied |
-| `README.md` | hardware, wiring differences from the PCB, how to build/flash, M0 test steps and results |
+| `REFACTORING.md` | code review of M0+M1 (standards + spec): all applied 3 Oct |
+| `README.md` | hardware, wiring differences from the PCB, how to build/flash, M0-M2 test steps and results |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it), `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
 
@@ -118,7 +113,7 @@ encoder signs checked (+ forward).
 - Commit and push only when Daniel asks. **No `Co-Authored-By` lines** in commits
   (README convention).
 
-**Not yet implemented from §9:** TIME_PING/PONG (needed in M2), CALIBRATE,
+**Not yet implemented from §9:** CALIBRATE,
 GYRO_SCALE (M5), STATUS beyond the gyro bias, the slip flag. The console's `m` (print map) arrives with
 M2.
 
@@ -605,7 +600,7 @@ message.
 | DRIVE ✅ | A → B | 20 Hz | v (m/s), ω (rad/s) | **PicoB stops if no DRIVE for 250 ms** |
 | MOTORS ✅ | A → B | on change, re-sent until PicoB has acted on it | on / off, request number | On clears a safety stop. PicoB echoes the last request it acted on in ODOM and ignores repeats, so a repeat can't undo a safety stop (M1) |
 | ODOM ✅ | B → A | 50 Hz | t_B (µs, u32), x, y, yaw (not wrapped, so a full turn reads +2π), v, ω, pitch, roll, wheel distances per side, stationary, motors on, stop reason, IMU error | Stop reasons: no DRIVE, left/right wheels not following (jam, encoder), tilt > 15°. After a safety stop the motors stay off until PicoA switches them on |
-| TIME_PING / TIME_PONG | A → B / B → A | 1 Hz | t_A / t_A + t_B | PicoA works out PicoB's clock offset, so ToF and camera frames can be matched to the pose at the time they were taken |
+| ~~TIME_PING / TIME_PONG~~ | | | | **Not needed (M2):** ODOM already carries t_B; PicoA notes each report's arrival on its own clock, and the smallest difference over the last 4 s (minus the frame's 0.5 ms on the wire) is the offset. Within ~0.15 ms in the host test; follows drift; resets when PicoB restarts (`body.c`) |
 | CALIBRATE | A → B | on request | — | Hold still: gyro bias calibration |
 | GYRO_SCALE | A → B | after a full-turn check | scale correction | Stored by PicoB and applied to the gyro from then on |
 | STATUS ✅ | B → A | 2 Hz | gyro bias (M1); later wheel speeds, PWM, gyro scale, error counters | |
@@ -774,3 +769,87 @@ Decided during M1:
 - Calibration tests are console keys in one firmware (`d`, `r`, `f`, `b`), each
   printing progress and a result; the status line drops to every 15 s so long tests
   stay readable.
+
+---
+
+## 14. M2: the map (4 Oct 2026)
+
+Goal (§12): **an open floor shows no obstacles, also while braking; walls stay put
+while turning.** Everything runs on PicoA; PicoB doesn't change.
+
+**Decided with Daniel (4 Oct):**
+- **No floor calibration in flash:** the floor is learned fresh at every start,
+  during the start-up turn. Each floor zone records how far its ray drops before it
+  ends (the sensor height, on a floor) all around; the 75th percentile is the
+  floor, because obstacles only make readings shorter. Frames of the turn are kept
+  and mapped once the floor is known.
+- **Clock sync without a new message** (§9): from ODOM's t_B. Long-term, as Daniel
+  wants it, and no PicoB flash.
+- **ToF 8 × 8 at 15 Hz**, closest target first, continuous mode.
+- **`m` prints the full 4 × 4 m** (40 × 40 cells).
+- **The first need now (§7):** when a serial monitor first opens after power-up
+  (later: always at power-up), the robot turns 390°, prints the map, turns to the
+  most open direction (average free distance in layer 0 across ±25°, every 10°) and
+  prints its heading. `n` repeats it.
+- The sensor orientation is the bring-up viewer's 90° rotation (verified there).
+
+**Done (4 Oct):** `tof` split (sensor part in `drivers/`, USB streaming in
+`bringup/tof_stream.c`); clock sync in `body`; `pose`, `rangefinder`, `world_map`,
+`surroundings`, `behaviour`, `motion.h` (shared with `robot_test`); console keys
+`n`, `m`, `z`. Host tests: rangefinder, world map, pose, clock sync, and the
+start-up scan end to end in a simulated room (walls 59/59, floor 182/182 free, 0
+false obstacles, the box seen, facing the most open direction).
+
+**Found in the host tests (geometry, not bugs):**
+- Layer 0 (2–12 cm) is only seen within ~1 m: farther, the rows above the horizon
+  pass higher than 12 cm and the row below reaches the floor first. Walls beyond
+  show only above 12 cm (`''` on the map); for free space, layer 0 there is unknown.
+- A low obstacle can fall between two rows: a 3 cm box at exactly 25 cm (the 6th
+  row passes over it, the 7th hits it 0.7 cm up, like the floor). Approaching, it
+  shows up at 27–34 cm (6th row) and 16–20 cm (7th).
+- The ToF distance is treated as along the ray; if the sensor reports the
+  perpendicular distance instead, side zones read up to 6 % short. The floor
+  learning absorbs it for the floor; check on the robot with a wall at a known
+  distance.
+
+**First robot run (4 Oct) and fixes:** the sensor is not mirrored (hand test on
+`z`). Problems found: only the first of up to 4 targets per zone was used, so most
+zones were "unsure"; the floor rows report the near edge of their 5.6° floor patch
+(6th row ~35 cm, not 48), which drew a ring of false obstacles at ~60 cm; the row
+just above the floor rows reaches the floor at its lower edge when the robot nods
+(far `''`); the map's up was PicoB's power-up heading. Fixed: closest sure target;
+rows 4-7 (5th-8th) learn the floor; each floor zone learns its effective angle
+(from the sensor height and where it sees the floor) and its scatter, and judges
+obstacles along that angle; readings that may be floor at a zone's lower edge are
+free space; the scan's start is the map's origin (`pose_set_origin`). The
+simulated sensor in the end-to-end test now reports the nearest point of each zone,
+with noise and the robot 0.9° nose-down. Consequence: a low obstacle reads like
+the floor behind it until close (an 8 cm box shows up at ~40 cm).
+
+**Second robot run (4 Oct):** much better map (most zones valid, floor rows
+21 / 29 / 38-43 cm, no ring). Problems: PicoB stopped with "drive commands stopped
+arriving" after the map print (mapping ~220 frames plus printing 3.4 KB keeps the
+loop busy > 250 ms); a false `##` ~35 cm ahead-left (Daniel: nothing there; maybe
+the USB cable). Fixed since (not yet run on the robot): motors off while the map is
+built and printed, on again to face open space, off at the end; `m` switches the
+motors off before printing; ties in "most open" pick the middle of the widest open
+sector; a floor zone whose learned floor is farther than 1.25 x where its centre
+meets a flat floor isn't learned (the 5th row in a room mostly sees walls; taking
+those as the floor made real floor readings at 60-90 cm look like obstacles);
+`z` also prints what each zone makes of the frame (#N obstacle N cm up, . free)
+and what each floor zone learned (floor cm / obstacle from cm).
+
+**Third robot run (4 Oct):** the whole start-up scan ran without a stop (motors
+off for the map, on for the turn, off at the end). Floor learned in 24 of 32 zones:
+rows 6-8 at ~45 / 30 / 22 cm, the 5th row rightly not (it sees walls 2-3 m away).
+The false obstacle next to the robot ahead-left is gone. Change after it: an
+unlearned 5th row is used like the rows above it (far readings that may be floor
+at its lower edge are free space, closer ones obstacles) instead of being dropped.
+
+**Next session, in this order:**
+1. Daniel checks the third run's map against the room (the `##` cluster ~50-60 cm
+   right, the `########` ~45 cm behind-right: real?) and runs the latest
+   `picoA_app` (5th row used again; only PicoA).
+2. The rest of the M2 test: `q` then `m` (walls stay put, no obstacles from
+   braking).
+3. M2 red-flag review; commit (M2 is uncommitted; last commit `a3c93de`).

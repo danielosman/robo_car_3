@@ -52,3 +52,23 @@ all items applied. Item numbers refer to REFACTORING.md.
 | `run_tests.sh` | (bug found while fixing) | `set -e` doesn't stop at a failing command left of `&&`, or inside a function called left of `||`: a test that failed to compile still let the script pass | **Fixed:** compile and run as separate commands; checked by breaking a compile and an assertion |
 | Wheel pairs | Data clumps | `wheel_left_*` / `wheel_right_*` travel together (F3) | **Accepted** until a third use appears |
 
+
+### M1 close: motor change (4 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| PicoB `odometry.h` | Information leakage | `odom_t.wheel_mps[ENC_COUNT]` exposes the encoder driver's wheel enum to every user of odometry | **Accepted:** only `drive` reads it, and the per-wheel stop needs each wheel; a second wheel enum in odometry would be repetition |
+| PicoB `drivers/encoder` | Nonobvious code | `encoder_count()` drains the PIO FIFO and waits for one fresh count (~50 ns) | **Fixed:** comment at `raw_count()` says why |
+| PicoB `drivers/encoder` | (bug avoided) | A PIO state machine started with an unknown previous pin state counts a false step | **Avoided:** the current pins are loaded as the previous state before starting |
+
+### M2 while coding (4 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| PicoA `robot_test`, `behaviour` | Repetition | Both turn to a target angle with the same slow-down profile | **Fixed:** `motion.h` (`motion_turn_rate`, `motion_speed`), used by both |
+| PicoA `drivers/tof` | Special-general mixture | The driver built the bring-up's USB packets and parsed its commands | **Fixed:** the driver only starts the sensor and returns frames; the streaming is `bringup/tof_stream.c` |
+| PicoA `surroundings` | Pass-through module (considered) | Between rangefinder, pose and world_map | **Accepted:** it owns real knowledge: which pose a frame belongs to, and keeping the start-up turn's frames until the floor is known |
+| PicoA `rangefinder` | Conjoined methods (considered) | `forget_floor` / `learn_floor` / `finish_floor` only make sense in order | **Accepted:** learning spans a whole turn of frames; one call can't do it. Documented as one sequence in the header |
+| PicoA `world_map` | Special-general mixture (considered) | `map_print()` is console output inside the map | **Accepted:** printing needs the cell size and window, which only the map knows (§10) |
+| PicoA `debug_console` | (design) | The start-up scan is triggered by the console (first monitor connection) | **Accepted for M2** (Daniel: start when the monitor opens); moves to `main`/`behaviour` when the robot starts on its own |
+| PicoA `body` | Information leakage (avoided) | The clock offset could have been worked out in `pose` | **Avoided:** PicoB's clock is part of "PicoB as PicoA sees it"; `body_odom_time_us()` hides it |

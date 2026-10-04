@@ -9,7 +9,7 @@
 #include "hardware/dma.h"
 #include "hm0360_regs.h"
 #include "hm0360.pio.h"
-#include "tof.h"
+#include "tof_stream.h"
 #include "opt4048.h"
 #include "hm0360_curves.h"
 
@@ -217,11 +217,11 @@ int main(void) {
     printf("\nRoboCar PicoA HM0360 + VL53L8CX + OPT4048 test\n");
     bool camera_ready = camera_init();
     opt4048_init();
-    tof_init(); // Other sensors remain usable even if the camera is absent.
+    tof_stream_init(); // Other sensors remain usable even if the camera is absent.
     printf("Ready: S/X/C camera, M+byte mode, H camera settings, T ToF, O init OPT4048\n");
     bool streaming = false;
     while (true) {
-        tof_poll();
+        tof_stream_poll();
         opt4048_poll();
         if (camera_ready && time_reached(next_camera_status)) {
             camera_status(); next_camera_status = make_timeout_time_ms(1500);
@@ -240,7 +240,7 @@ int main(void) {
             break;
         }
         case 'T': {
-            char line[80]; read_line(line, sizeof line); tof_command(line); break;
+            char line[80]; read_line(line, sizeof line); tof_stream_command(line); break;
         }
         case 'S':
             streaming = camera_ready;

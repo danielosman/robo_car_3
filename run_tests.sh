@@ -1,7 +1,7 @@
 #!/bin/sh
 # Host tests (no Pico needed): the link; PicoB's wheel control, odometry and
-# brain (PicoA as PicoB sees it); PicoA's body (PicoB as PicoA sees it) and robot
-# tests. Each compiles one module against stubs and fakes and runs it:
+# brain (PicoA as PicoB sees it); PicoA's rangefinder, world map, pose, the
+# start-up scan end to end, body (PicoB as PicoA sees it) and robot tests. Each compiles one module against stubs and fakes and runs it:
 # hardware stubs in picoB/app/test/stubs and common/test/stubs, the fake clock
 # and fake link in common/test/fakes. Stops at the first failure.
 set -e
@@ -25,6 +25,15 @@ build test_odometry picoB/app/test/test_odometry.c -IpicoB/app/test/stubs $APP
 build/test_odometry
 build test_brain picoB/app/test/test_brain.c -IpicoB/app/test/stubs $APP
 build/test_brain
+build test_rangefinder picoA/app/test/test_rangefinder.c -IpicoA/app/test/stubs $APP
+build/test_rangefinder
+build test_world_map picoA/app/test/test_world_map.c -IpicoA/app/test/stubs $APP
+build/test_world_map
+build test_pose picoA/app/test/test_pose.c $APP
+build/test_pose
+# The start-up scan end to end; prints the map it made of the simulated room.
+build test_behaviour picoA/app/test/test_behaviour.c -IpicoA/app/test/stubs $APP
+build/test_behaviour
 build test_body picoA/app/test/test_body.c $APP
 build/test_body
 build test_robot_test picoA/app/test/test_robot_test.c $APP
