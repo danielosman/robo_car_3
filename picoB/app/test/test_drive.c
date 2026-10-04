@@ -13,6 +13,7 @@
 
 static float wheel_l, wheel_r;   // simulated wheel speeds
 static float left_gain = 1, right_gain = 1;
+static float rear_left_gain = 1; // on top of left_gain: 0 = the rear-left motor is stuck
 static odom_t odom;
 
 // One 10 ms step: the controller runs, then the simulated robot responds.
@@ -22,7 +23,11 @@ static void step(void) {
     float k = DT_S / (MOTOR_TAU_S + DT_S);
     wheel_l += k * (fake_left_power * left_gain * FULL_SPEED - wheel_l);
     wheel_r += k * (fake_right_power * right_gain * FULL_SPEED - wheel_r);
-    odom.wheel_left_mps = wheel_l;
+    // Each side's wheels roll together, except a stuck rear-left wheel, which skids.
+    odom.wheel_mps[ENC_LEFT_FRONT] = wheel_l;
+    odom.wheel_mps[ENC_LEFT_REAR] = wheel_l * rear_left_gain;
+    odom.wheel_mps[ENC_RIGHT_FRONT] = odom.wheel_mps[ENC_RIGHT_REAR] = wheel_r;
+    odom.wheel_left_mps = 0.5f * (odom.wheel_mps[ENC_LEFT_FRONT] + odom.wheel_mps[ENC_LEFT_REAR]);
     odom.wheel_right_mps = wheel_r;
     odom.v_mps = 0.5f * (wheel_l + wheel_r);
     odom.w_radps = (wheel_r - wheel_l) / (TRACK_M * SKID);
@@ -98,6 +103,18 @@ int main(void) {
     wheel_l = wheel_r = 0;
     drive_enable(true);                   // switching on again clears the fault
     assert(drive_fault() == DRIVE_OK);
+
+    // A stuck rear-left wheel (or its encoder unplugged) while the front-left one
+    // turns: the side's average is still half the target, but the wheel is caught.
+    rear_left_gain = 0;
+    drive_set(0.1f, 0);
+    steps = 0;
+    while (drive_enabled() && steps < 300) { step(); steps++; }
+    assert(!drive_enabled() && drive_fault() == DRIVE_LEFT_NOT_FOLLOWING);
+    printf("stuck rear-left wheel: motors off after %.2f s\n", (double)(steps * DT_S));
+    rear_left_gain = 1;
+    wheel_l = wheel_r = 0;
+    drive_enable(true);
 
     // Reversed encoders (what the first square test on the robot found): the speed
     // loop runs away the wrong way; caught within ~1 s.

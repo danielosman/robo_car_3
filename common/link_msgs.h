@@ -42,7 +42,7 @@ typedef struct __attribute__((packed)) {
 
 // Why PicoB switched the motors off by itself. The motors stay off until PicoA
 // switches them on again, which clears the reason. Texts fit in a LOG message.
-// The wheel stops: a front wheel didn't follow its target (jammed, no encoder
+// The wheel stops: a wheel on that side didn't follow its target (jammed, no encoder
 // signal, or turning the wrong way). Tilt: pitch or roll too large (lifted,
 // tipping over, climbing something). The limits are in picoB/app/drive.h.
 enum { STOP_NONE, STOP_NO_DRIVE, STOP_LEFT_WHEELS, STOP_RIGHT_WHEELS, STOP_TILT };
@@ -65,7 +65,7 @@ typedef struct __attribute__((packed)) {
     float yaw_rad;           // not wrapped: a full left turn adds 2π
     float v_mps, w_radps;
     float pitch_rad, roll_rad;
-    float wheel_left_m, wheel_right_m; // front wheels' total distance, + = forward
+    float wheel_left_m, wheel_right_m; // each side's total distance (front and rear averaged), + = forward
     bool stationary;         // wheels and gyro still for 0.5 s
     bool motors_on;
     uint8_t stop_reason;     // STOP_*: why PicoB switched the motors off by itself

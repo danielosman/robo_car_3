@@ -3,7 +3,8 @@
 // tipped down (tilt X < 0) the left wheels; the other side coasts. +-15 deg
 // dead zone, then power ramps linearly to 100 % at 90 deg.
 // Nothing is printed and the drivers stay in standby until a serial monitor
-// is open; closing it stops the motors.
+// is open; closing it stops the motors. Each wheel's revolutions and rpm are
+// printed with the sign encoder.c gives them: + must mean forward.
 #include <math.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -49,7 +50,8 @@ int main(void) {
         printf("Tilt about IMU X axis: +Y up = right wheels, +Y down = left wheels (forward);\n"
                "dead zone +-%.0f deg, full power at +-%.0f deg\n", DEAD_ZONE_DEG, FULL_DEG);
         help();
-        printf("Units: tilt deg, accel g, gyro deg/s, L/R power, revL/rpmL and revR/rpmR = front output shafts\n");
+        printf("Units: tilt deg, accel g, gyro deg/s, L/R power; per wheel (LF LR RF RR = left/right front/rear)\n"
+               "output-shaft revolutions / rpm, + = forward\n");
         printf("Motors are STOPPED. Press g to enable.\n");
 
         bool running = false;
@@ -57,13 +59,14 @@ int main(void) {
         bool have_tilt = false;
         absolute_time_t last_sample = get_absolute_time();
         absolute_time_t next_print = make_timeout_time_us(PRINT_US);
-        int32_t last_count[ENC_COUNT] = {encoder_count(ENC_LEFT_FRONT), encoder_count(ENC_RIGHT_FRONT)};
+        int32_t last_count[ENC_COUNT];
+        for (int i = 0; i < ENC_COUNT; i++) last_count[i] = encoder_count(i);
 
         while (stdio_usb_connected()) {
             int c = getchar_timeout_us(0);
             if (c == 'g') { running = true; motor_enable(true); printf("Motors ENABLED\n"); }
             else if (c == 's') { running = false; motor_enable(false); printf("Motors STOPPED\n"); }
-            else if (c == 'z') { encoder_reset(); last_count[0] = last_count[1] = 0; printf("Revolutions zeroed\n"); }
+            else if (c == 'z') { encoder_reset(); for (int i = 0; i < ENC_COUNT; i++) last_count[i] = 0; printf("Revolutions zeroed\n"); }
             else if (c == 'h' || c == '?') help();
 
             static imu_sample_t s;
@@ -101,10 +104,12 @@ int main(void) {
                     last_count[i] = count;
                 }
                 printf("tiltX %+6.1f tiltY %+6.1f  ax %+4.1f ay %+4.1f az %+4.1f  gx %+6.1f gy %+6.1f gz %+6.1f  "
-                       "L %3.0f%% R %3.0f%%  revL %+5.0f rpmL %+4.0f  revR %+5.0f rpmR %+4.0f  %s\n",
+                       "L %3.0f%% R %3.0f%%  LF %+5.0f/%+4.0f  LR %+5.0f/%+4.0f  RF %+5.0f/%+4.0f  RR %+5.0f/%+4.0f  %s\n",
                        tilt_x, tilt_y, s.ax, s.ay, s.az, s.gx, s.gy, s.gz,
-                       left * 100, right * 100, revs[ENC_LEFT_FRONT], rpm[ENC_LEFT_FRONT],
-                       revs[ENC_RIGHT_FRONT], rpm[ENC_RIGHT_FRONT], running ? "RUN" : "STOP");
+                       left * 100, right * 100,
+                       revs[ENC_LEFT_FRONT], rpm[ENC_LEFT_FRONT], revs[ENC_LEFT_REAR], rpm[ENC_LEFT_REAR],
+                       revs[ENC_RIGHT_FRONT], rpm[ENC_RIGHT_FRONT], revs[ENC_RIGHT_REAR], rpm[ENC_RIGHT_REAR],
+                       running ? "RUN" : "STOP");
             }
         }
     }

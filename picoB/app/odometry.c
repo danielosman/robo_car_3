@@ -20,7 +20,7 @@ static odom_t o;
 static bool imu_ok, have_tilt;
 static float yaw_bias_dps;       // on top of the power-up calibration in imu.c
 static float still_s;
-static int32_t last_left, last_right;
+static int32_t last_count[ENC_COUNT];
 static uint64_t last_us;
 
 // How the ISM330DHCX breakout is mounted: Z up, X backward, Y right (turned 180°
@@ -35,23 +35,28 @@ bool odom_init(void) {
     imu_ok = imu_init();
     if (imu_ok) imu_calibrate_gyro(400); // ~1 s at 416 Hz
     encoder_init();
-    last_left = encoder_count(ENC_LEFT_FRONT);
-    last_right = encoder_count(ENC_RIGHT_FRONT);
+    for (int i = 0; i < ENC_COUNT; i++) last_count[i] = encoder_count(i);
     last_us = time_us_64();
     return imu_ok;
 }
 
 static void update_wheels(float dt) {
-    int32_t left = encoder_count(ENC_LEFT_FRONT), right = encoder_count(ENC_RIGHT_FRONT);
-    float dl = (float)(left - last_left) * M_PER_COUNT;
-    float dr = (float)(right - last_right) * M_PER_COUNT;
-    last_left = left;
-    last_right = right;
+    float step_m[ENC_COUNT];
+    float k = dt / (WHEEL_SPEED_TAU_S + dt);
+    for (int i = 0; i < ENC_COUNT; i++) {
+        int32_t count = encoder_count(i);
+        step_m[i] = (float)(count - last_count[i]) * M_PER_COUNT;
+        last_count[i] = count;
+        o.wheel_mps[i] += k * (step_m[i] / dt - o.wheel_mps[i]);
+    }
+    // Both wheels of a side roll together (skid steering), so averaging them halves
+    // the counting steps and evens out a wheel that slips for a moment.
+    float dl = 0.5f * (step_m[ENC_LEFT_FRONT] + step_m[ENC_LEFT_REAR]);
+    float dr = 0.5f * (step_m[ENC_RIGHT_FRONT] + step_m[ENC_RIGHT_REAR]);
     o.wheel_left_m += dl;
     o.wheel_right_m += dr;
-    float k = dt / (WHEEL_SPEED_TAU_S + dt);
-    o.wheel_left_mps += k * (dl / dt - o.wheel_left_mps);
-    o.wheel_right_mps += k * (dr / dt - o.wheel_right_mps);
+    o.wheel_left_mps = 0.5f * (o.wheel_mps[ENC_LEFT_FRONT] + o.wheel_mps[ENC_LEFT_REAR]);
+    o.wheel_right_mps = 0.5f * (o.wheel_mps[ENC_RIGHT_FRONT] + o.wheel_mps[ENC_RIGHT_REAR]);
     o.v_mps = 0.5f * (o.wheel_left_mps + o.wheel_right_mps);
 
     // Distance from the encoders, direction from the gyro heading halfway through the step.

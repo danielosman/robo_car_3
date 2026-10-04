@@ -43,7 +43,8 @@ Code shared between the Picos (the inter-Pico link) is in `common/`.
 Built to [ROBOT_PLAN.md](ROBOT_PLAN.md); red flags found on the way are logged in
 [REDFLAGS.md](REDFLAGS.md). **M0 (link, wheel control, odometry) passed on the
 robot** (2 Oct 2026). **M1 (calibration): in progress**: tilt stop and gyro drift
-done; turns and 2 m straight to repeat once the front-right motor is fixed.
+done; turns and 2 m straight to repeat. **4 Oct: new motors, all four encoders
+connected and checked** (see "Motor change" below); square test passed again.
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16.
@@ -55,13 +56,13 @@ done; turns and 2 m straight to repeat once the front-right motor is fixed.
   PicoA's `body` (greeting, DRIVE and MOTORS repeats incl. lost messages, safety
   stops, PicoB restarting, timeout) and robot tests (against a simulated robot,
   incl. early stops). Run it after every change.
-- **PicoB** (`picoB/app/`): wheel speed control per side on the front encoders, with
+- **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the side (averaged), with
   the turn rate trimmed by the gyro (`drive.c`); position from the encoders, heading
   from the gyro with the bias re-measured whenever the robot stands still, tilt
   (`odometry.c`); the link protocol and safety stops (`brain.c`, PicoA as PicoB
   sees it). Motors stay off until PicoA greets it and switches them on; it switches
-  them off by itself if PicoA's drive commands stop for 250 ms, a front wheel
-  doesn't follow its target for 1 s, or the robot tilts more than 15°
+  them off by itself if PicoA's drive commands stop for 250 ms, any wheel
+  doesn't follow its side's target for 1 s, or the robot tilts more than 15°
   (`picoB/app/drive.h`).
 - **PicoA** (`picoA/app/`): `body.c` is PicoB as PicoA sees it; `debug_console.c`
   prints a status line every 15 s on USB (none while a test runs) and takes keys:
@@ -106,6 +107,27 @@ done; turns and 2 m straight to repeat once the front-right motor is fixed.
    odometry thinks it is. Mark the start, measure the real end position and heading,
    and compare. `s` stops at any time.
 
+**Square test after the motor change** (4 Oct 2026, new motors, four encoders,
+waxed wood): odometry end pose 1.2 cm forward, 1.2 cm right, 362.6°; the real end
+pose practically the same. No safety stops.
+
+**10 turns after the motor change** (4 Oct, waxed wood): all 10 turns, no stops;
+gyro 3600.5° in 126 s (28.5 °/s for a 28.6 °/s command); wheels −898.3 / +898.7 cm;
+**effective track width 28.6 cm** (geometric 22.5 cm: the wheels skid 27 %); the
+centre moved 0.1 cm by odometry.
+- **Gyro scale:** the robot ended ~15° past the mark: the gyro reads **0.42 % too
+  little** (~1.5° per full turn). Under 1 %: **no correction** (M5's full-turn check
+  will correct it from the room).
+- **Drift while turning in place:** the robot really ended ~15 cm back and 5 cm
+  right (~1.5 cm per turn), which odometry can't see: equal and opposite wheel
+  distances read as no movement. Small for one 390° scan; M6 (correction against
+  the map) handles the build-up.
+
+**2 m straight after the motor change** (4 Oct, waxed wood, USB unplugged):
+odometry 200.2 cm (wheels 199.9 / 200.5 cm), heading −0.1°, 0.1 cm sideways; real
+~200.5 cm: **+0.15 %**, so `WHEEL_DIAMETER_M` stays 9.0 cm. PicoA kept running on
+the battery; the result was printed on reconnecting and with `t`.
+
 **M1 results so far** (3 Oct 2026, waxed wood):
 
 | Test | Result |
@@ -116,7 +138,7 @@ done; turns and 2 m straight to repeat once the front-right motor is fixed.
 | 2 m straight | Ran, but the result was lost (see below) |
 | Square (twice) | Odometry end pose 3.6 / −1.9 cm, 363.4° and −0.5 / −3.3 cm, 364.7°; real end pose not measured |
 
-- **Front-right motor sticks** (hardware): it sometimes doesn't start, then runs
+- **Front-right motor sticks** (hardware; motor changed on 4 Oct, see "Motor change"): it sometimes doesn't start, then runs
   normally once moving; the rear-right wheel did the work in the turns, and the
   square test then kept stopping with "right wheels not following". The controller
   reaches full power within ~0.6 s and the rear-right motor on the same driver turns,
@@ -174,24 +196,38 @@ MLX90640 and the inter-Pico link are not implemented yet.
 
 ## PicoB bring-up (`picoB_bringup`) — tilt → motor test, working on the PCB
 
-- **Hardware so far:** all four wheels — Pololu #2208 motors (298:1 LP 6V, exact
-  297.92:1), 20 kHz PWM, front on channel A and rear on channel B of each driver.
+- **Hardware so far:** all four wheels — GA46-N20E-0043 N20 gearmotors (298:1,
+  50 RPM at 6 V) with Hall encoders (see "Motor change" below), 20 kHz PWM, front on channel A and rear on channel B of each driver.
   Left wheels: J10, driver pins PWMA GP22, PWMB GP28, direction GP27/GP26. Right
   wheels: J9, PWMA GP15, PWMB GP11, direction GP13/GP12. GP14 is STBY for both.
   AIN1+BIN1 / AIN2+BIN2 are tied on the PCB, so both motors on a side share
   direction: if a rear motor spins opposite its front one, swap its wires. If a
   whole side runs backwards, flip `LEFT_FORWARD` / `RIGHT_FORWARD` in
-  `picoB/drivers/motor.c` (left is −1, right +1: both sides ran forward with these). Only the
-  two front wheels have encoders (Pololu #3081): left-front on J6 pins 9–12
-  (GP5/GP4), right-front on J6 pins 1–4 (GP9/GP8). There are no rear encoders.
+  `picoB/drivers/motor.c` (left is −1, right +1: both sides ran forward with these). All four
+  wheels have encoders: J6 pins 1–8 are the right wheels (front 1–4 on GP9/GP8,
+  rear 5–8 on GP7/GP6), pins 9–16 the left wheels (front 9–12 on GP5/GP4, rear
+  13–16 on GP3/GP2).
   Adafruit #4502 ISM330DHCX breakout on SPI0 (GP16–19, mode 3, 1 MHz). The motors
   need battery power on J11; USB only powers the logic.
 - **Differences from the PCB / PCB review:** the left/right labels are swapped on
   the motor and encoder connectors. The left motors are on **J10 (MOT_DRV_R, MR_\*
-  nets)** and the right motors on **J9 (MOT_DRV_L, ML_\*)**. The left-front encoder
-  is on **J6 pins 9–12 (ENC_RF_\*)** and the right-front one on **J6 pins 1–4
-  (ENC_LF_\*)**. J6 pins 5–8 and 13–16 (rear encoders) are unused. The firmware
-  follows the actual wiring, not the net names.
+  nets)** and the right motors on **J9 (MOT_DRV_L, ML_\*)**. The encoders follow
+  the motors: left-front on **J6 9–12 (ENC_RF_\*)**, left-rear on **J6 13–16
+  (ENC_RB_\*)**, right-front on **J6 1–4 (ENC_LF_\*)**, right-rear on **J6 5–8
+  (ENC_LB_\*)**. The firmware follows the actual wiring, not the net names.
+- **Motor change (4 Oct 2026):** all four motors replaced (the old ones were
+  Pololu #2208, 298:1 LP 6V, front ones with #3081 encoder boards) by
+  **GA46-N20E-0043**: N20 gearmotor, 298:1 (medium power), 50 RPM at 6 V, stall
+  0.6 A (the TB6612FNG gives 1.2 A per channel, so fine), with a Hall encoder
+  board (green power LED, powered from 3V3_B on J6). Encoder: **7 pulses per
+  channel per motor turn = 28 counts** on every edge, × 298 = **8344 counts per
+  wheel turn**, inferred from the first run (126 rpm with the old 12-count
+  constant = 54 rpm) and confirmed: ~55 rpm on all four wheels at full power,
+  lifted (≈ 0.26 m/s, about the same as the old motors).
+  All four encoders are connected. Signs: **all four checked** (+ =
+  forward). The left encoders' power was first wired reversed (LEDs off, boards
+  cool); they work normally since the fix. Check with `picoB_bringup` (below) before the
+  robot firmware: its wheel stop would otherwise switch the motors off within 1 s.
 - **IMU:** WHO_AM_I check, 416 Hz, ±2 g / ±250 dps (register values from the ST
   datasheet), gyro bias averaged at power-up. Tilt about X and Y comes from a
   complementary filter (gyro short-term, gravity long-term, 0.5 s time constant),
@@ -200,19 +236,27 @@ MLX90640 and the inter-Pico link are not implemented yet.
   The accelerometer reads +1 g along whichever axis points up, so tilt X is positive
   with the breakout's +Y end raised: **+Y up → right wheels, +Y down → left wheels**;
   the other side coasts. ±15° dead zone, then power ramps linearly to 100 % at ±90°.
-- **Encoders:** both front wheels, quadrature decoded in GPIO interrupts, reported as
-  output-shaft revolutions and RPM (12 CPR × 297.92 ≈ 3575 counts/rev). ~50 RPM at full tilt on
-  the battery, consistent with the datasheet's 45 RPM at 6 V.
+- **Encoders:** all four wheels, quadrature counted by PIO (`drivers/quadrature.pio`,
+  one state machine of `pio0` per wheel, every edge of both channels; internal
+  pull-ups on), reported as output-shaft revolutions and RPM (28 × 298 = 8344
+  counts/rev). With the old motors: ~50 RPM at full tilt on the battery,
+  consistent with the datasheet's 45 RPM at 6 V; new motors: ~55 RPM.
 - **Serial (USB):** nothing is printed and the driver stays in standby until a
   serial monitor is open; closing it stops the motor. Send `g` to enable, `s` to
   stop, `z` to zero revolutions. 10 Hz lines (units in the header): tilt X/Y (deg),
-  accel ax/ay/az (g), gyro gx/gy/gz (deg/s), left/right power, revL/rpmL (left-front),
-  revR/rpmR (right-front), RUN/STOP.
+  accel ax/ay/az (g), gyro gx/gy/gz (deg/s), left/right power, then revolutions/rpm per
+  wheel: LF, LR, RF, RR (left/right, front/rear; + = forward), RUN/STOP.
 
-Keep the robot still for ~1 s after power-up (gyro bias). If an encoder counts
-backwards while its wheel drives forward, flip that encoder's `direction` in
-`picoB/drivers/encoder.c` (they are opposite to the motor signs, measured in the M0
-square test).
+Keep the robot still for ~1 s after power-up (gyro bias).
+
+**Encoder direction check** (after any motor or encoder change), robot lifted so
+the wheels turn freely: flash `picoB_bringup`, open a serial monitor, press `g`.
+Tilt the +Y end of the IMU breakout up: the right wheels drive forward and **RF and
+RR rpm must be positive**. Tilt it down: the left wheels, **LF and LR positive**. A
+wheel that turns backwards is a motor wire (swap it; a whole side backwards:
+`LEFT_FORWARD` / `RIGHT_FORWARD` in `motor.c`). A wheel that turns forward with
+negative rpm: flip its `direction` in `picoB/drivers/encoder.c`. An rpm stuck at 0
+while the wheel turns: encoder wiring or power. Paste a few lines of each side.
 
 ## Run
 
@@ -243,7 +287,7 @@ In `picoA/`: `bringup/camera.c` (camera driver, main loop and serial commands) w
 `drivers/opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in
 `pc/bringup/src/opt4048.ts`).
 In `picoB/`: `bringup/main.c` (tilt filter, control, serial), `drivers/imu.c`,
-`drivers/motor.c`, `drivers/encoder.c`.
+`drivers/motor.c`, `drivers/encoder.c` with `drivers/quadrature.pio`.
 `pc/bringup/`: USB parsing (`src/protocol.ts`), server (`src/main.ts`) and viewer
 (`public/`). Run `npm test` in `pc/bringup/` for software checks;
 hardware behavior still needs PCB testing after changes.
@@ -265,7 +309,7 @@ hardware behavior still needs PCB testing after changes.
   §§9.11–9.33 (registers) and the initialization procedure (p. 37);
   [Adafruit #4502 notes](../../kicad/robo_car_3/specs/adafruit_4502_ISM330DHCX.txt).
 - [Pololu Micro Metal Gearmotors datasheet Rev 6.2](../../kicad/robo_car_3/specs/pololu_2208_micro_metal_gearmotors_datasheet.pdf):
-  298:1 LP 6V data and the 12 CPR encoder.
+  298:1 LP 6V data and the 12 CPR encoder (the motors before 4 Oct).
 - [OPT4048 datasheet (TI SBOSA84)](https://www.ti.com/lit/ds/symlink/opt4048.pdf),
   especially §§8.3.4.5 (CRC) and 9.2.4 (XYZ / lux conversion).
 - Source examples: [camera project](../arducam_b0319/arducam_b0319.c),

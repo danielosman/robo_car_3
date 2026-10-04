@@ -1,7 +1,7 @@
 #pragma once
 // Drives the four wheels at a commanded forward speed and turn rate. Each side's
-// wheel speed is closed-loop on its front encoder (the rear motor gets the same
-// power), and the turn rate is trimmed with the gyro, so turning is accurate on
+// wheel speed is closed-loop on its two encoders, averaged (both motors on a
+// side get the same power), and the turn rate is trimmed with the gyro, so turning is accurate on
 // wood or carpet despite skid steering. Commands are limited to safe speeds and
 // ramped to limit wheel slip.
 #include <stdbool.h>
@@ -18,7 +18,7 @@ void drive_update(const odom_t *odom);      // call every ~10 ms
 
 typedef enum { DRIVE_OK, DRIVE_LEFT_NOT_FOLLOWING, DRIVE_RIGHT_NOT_FOLLOWING, DRIVE_TILTED } drive_fault_t;
 // Why drive_update() switched the motors off by itself; cleared by drive_enable(true).
-// Not following: a side's front wheel didn't follow its target for
+// Not following: a wheel on that side didn't follow the side's target for
 // DRIVE_FOLLOW_TIME_S: stopped (jammed, no encoder signal), far too slow, or
 // turning the wrong way (reversed encoder or motor). Tilted: pitch or roll beyond
 // DRIVE_MAX_TILT_DEG (lifted, tipping over).

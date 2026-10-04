@@ -1,8 +1,8 @@
 # RoboCar — robot app plan
 
 Status: **M0 passed on the robot (2 Oct 2026). M1 (calibration) in progress:
-tilt stop and gyro drift done (3 Oct); turns and 2 m straight waiting for Daniel to
-fix the front-right motor.** This
+tilt stop and gyro drift done (3 Oct). 4 Oct: new motors, all four encoders
+connected, checked and used; square test passed again. Next: turns and 2 m straight.** This
 plan covers the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully
 autonomous** robot, built on the drivers verified in the bring-up (tag
 `pcb-bringup-v1`). Start a new session with "Where we are" below.
@@ -37,10 +37,25 @@ tests for `body` and `robot_test`. **Daniel runs the tests** (steps in the READM
 needed. 3 ✗ stopped at turn 7 of 10, "right wheels not following". 4 ✗ the robot
 drove, but the result was lost. 5 not done.
 
+**4 Oct: motor change.** Daniel replaced all four motors with GA46-N20E-0043 N20
+gearmotors, 298:1, with Hall encoders (50 RPM at 6 V, 0.6 A stall; 28 counts per
+motor turn, 8344 per wheel turn: ~55 rpm at full power, as expected) and
+connected all four encoders (J6 1–8 right wheels, 9–16 left). Coded the same day:
+the encoder driver counts all four in PIO instead of GPIO interrupts (rear: right
+GP7/GP6, left GP3/GP2), odometry averages front and rear per side,
+`drive`'s wheel stop judges each wheel, the bring-up prints every wheel. All four
+encoder signs checked (+ forward).
+
 **Next session, in this order:**
-1. Ask Daniel how the **front-right motor** fix went (it sometimes didn't start,
-   then ran fine; the rear-right did the work; a hardware fault: motor, gearbox,
-   wiring or driver channel A, see the README's checks).
+1. ~~Square test with the new motors~~ passed 4 Oct: odometry 1.2 / −1.2 cm,
+   362.6°, the real end pose practically the same. (PicoA had still been on
+   protocol v3: both Picos are now on v4.)
+   ~~10 turns~~ done 4 Oct: no stops, effective track width 28.6 cm on wood, gyro
+   0.42 % low (15° over 3600°: no correction), real drift ~15 cm over 10 turns that
+   odometry doesn't see (M6).
+   ~~2 m forward~~ done 4 Oct: 200.2 cm by odometry, ~200.5 cm real (+0.15 %): no
+   change. Still to do: `b`, then the carpet (step 5). Then the M0 square test again
+   (odometry now uses four encoders) before the M1 tests.
 2. ~~Console fixes~~ done 3 Oct (REFACTORING.md S5): welcome text and last result
    ~1 s after the USB connects, key `t`.
 3. **Open question for Daniel:** after the turn test's safety stop, pressing `f` and
@@ -81,12 +96,16 @@ drove, but the result was lost. 5 not done.
 **Hardware facts learned while building** (beyond §3 and the README):
 - IMU breakout is mounted **turned 180° about Z: X backward, Y right, Z up**
   (`to_robot_frame()` in `picoB/app/odometry.c`). At rest pitch/roll read ~±1°.
-- Encoder signs are **opposite to the motor signs** (`picoB/drivers/encoder.c`):
-  left +1, right −1; motors `LEFT_FORWARD −1`, `RIGHT_FORWARD +1`.
+- Encoder signs (old #3081 boards, front only) were **opposite to the motor signs**
+  (`picoB/drivers/encoder.c`): left +1, right −1; motors `LEFT_FORWARD −1`,
+  `RIGHT_FORWARD +1`. To re-check after the 4 Oct motor change, rear ones too.
 - Full power is ~0.24 m/s; the drive limits commands to 0.2 m/s and 1.5 rad/s and
   ramps at 0.4 m/s² / 3 rad/s².
 - In-place turns make the body roll −3…−5° (leaning on its tyres): a possible
   signal for later (§12 Later).
+- In-place turns slide the body ~1.5 cm per turn (10 turns: 15 cm back, 5 cm
+  right) while odometry sees ~0: the wheels skid symmetrically. Gyro scale 0.42 %
+  low; effective track width 28.6 cm on waxed wood (geometric 22.5 cm).
 
 **How we work** (agreed with Daniel):
 - Plan first; no code until Daniel says go. Explain concepts plainly when asked.
@@ -150,7 +169,7 @@ is the design. §13 lists what's settled.
 |---|---|
 | R1 | **Map.** PicoA keeps a map of the surroundings from the VL53L8CX: 10 × 10 × 10 cm cells, 4 × 4 m (the sensor's range is 4 m), 4 height layers. |
 | R2 | **Cell memory.** Each cell holds a timer of at most 240 s that counts down in real time. Each reading that sees the cell occupied adds 60 s; each reading that sees it empty removes 60 s. At 0 the cell is empty. One noisy empty reading only takes a solid cell from 240 to 180, so it stays occupied; four empty readings in a row clear it quickly. |
-| R3 | **Pose.** Estimate the robot's pose from the front-wheel encoders (wheels Ø 9 cm, 1 cm wide), the IMU and, later, the camera. Start without the camera and without a Kalman filter; keep both as future steps. |
+| R3 | **Pose.** Estimate the robot's pose from the wheel encoders (all four since 4 Oct) (wheels Ø 9 cm, 1 cm wide), the IMU and, later, the camera. Start without the camera and without a Kalman filter; keep both as future steps. |
 | R4 | **Protocol.** Design the PicoA ↔ PicoB protocol. |
 | R5 | **Attracted by movement.** Detect movement with the camera and the VL53 while the robot stands still. Any movement means something in the surroundings moved. |
 | R6 | **Direction of movement.** Know where the movement went, including whether it left the field of view to the left or the right. |
@@ -177,11 +196,11 @@ is the design. §13 lists what's settled.
 | | Value | Source |
 |---|---|---|
 | Size | **23.5 cm wide × 19 cm long × 10 cm high**, wheels included; front edge 9.5 cm ahead of the centre | you |
-| Wheels | Ø 9 cm, 1 cm wide; 282.7 mm per revolution, 3 575 counts/rev → **12.6 counts/mm** | you, encoder bring-up |
+| Wheels | Ø 9 cm, 1 cm wide; 282.7 mm per revolution, 8 344 counts/rev → **29.5 counts/mm** (3 575 before the 4 Oct motor change) | you, encoder bring-up |
 | Track width | **≈ 22.5 cm** (23.5 − 1, wheel centre to wheel centre) | derived |
 | Wheelbase | **≈ 10 cm** (19 − 9) | derived |
 | Turning in place | outermost point sweeps **≈ 15 cm** radius | derived |
-| Top speed | ~50 RPM at full power → **~0.24 m/s** | bring-up |
+| Top speed | ~50 RPM at full power → **~0.24 m/s** (old motors; the new ones ~55 RPM lifted, ≈ 0.26 m/s) | bring-up |
 | VL53L8CX | **2.5 cm ahead of the centre, 3 cm right** of the centre line, **7 cm** above the floor; facing forward, no tilt; 45° × 45°, 8 × 8 zones of 5.6° | you, datasheet |
 | Camera | **2.5 cm ahead of the centre**, on the centre line, **8.5 cm** above the floor; facing forward, no tilt; HFOV 53.1°, VFOV 41.1°, DFOV 64°, f 2.59 mm | you |
 | Smallest obstacle | **2 cm** high. Bumps up to ~1 cm are driven over (Ø 9 cm wheels); the extra 1 cm is margin for noise and pitch | you, §4.2 |
@@ -370,13 +389,14 @@ remain:
 
 ### 5.2 Distance: encoders (PicoB)
 
-The average of the two front encoders, applied along the current heading.
+The average of the left and right side, each side the average of its front and
+rear encoder, applied along the current heading.
 
 ### 5.3 Rotation from the encoders: secondary
 
 While turning in place, rotation = (right wheel distance − left wheel distance) /
 track width. With the geometric track width of 22.5 cm, a full turn is π × 22.5 ≈
-**70.7 cm per wheel (~8 900 counts)**. The counts are precise, but **skid
+**70.7 cm per wheel (~20 900 counts)**. The counts are precise, but **skid
 steering** makes them inaccurate: in a turn the wheels slide sideways, so the
 wheels travel further than the geometry says. The *effective* track width is
 larger than 22.5 cm and depends on the floor (our short wheelbase helps). M1
@@ -584,7 +604,7 @@ message.
 | HELLO ✅ | both | at boot, 1 Hz until answered | protocol version, is_reply | Version mismatch: PicoB keeps the motors off |
 | DRIVE ✅ | A → B | 20 Hz | v (m/s), ω (rad/s) | **PicoB stops if no DRIVE for 250 ms** |
 | MOTORS ✅ | A → B | on change, re-sent until PicoB has acted on it | on / off, request number | On clears a safety stop. PicoB echoes the last request it acted on in ODOM and ignores repeats, so a repeat can't undo a safety stop (M1) |
-| ODOM ✅ | B → A | 50 Hz | t_B (µs, u32), x, y, yaw (not wrapped, so a full turn reads +2π), v, ω, pitch, roll, front wheel distances, stationary, motors on, stop reason, IMU error | Stop reasons: no DRIVE, left/right wheels not following (jam, encoder), tilt > 15°. After a safety stop the motors stay off until PicoA switches them on |
+| ODOM ✅ | B → A | 50 Hz | t_B (µs, u32), x, y, yaw (not wrapped, so a full turn reads +2π), v, ω, pitch, roll, wheel distances per side, stationary, motors on, stop reason, IMU error | Stop reasons: no DRIVE, left/right wheels not following (jam, encoder), tilt > 15°. After a safety stop the motors stay off until PicoA switches them on |
 | TIME_PING / TIME_PONG | A → B / B → A | 1 Hz | t_A / t_A + t_B | PicoA works out PicoB's clock offset, so ToF and camera frames can be matched to the pose at the time they were taken |
 | CALIBRATE | A → B | on request | — | Hold still: gyro bias calibration |
 | GYRO_SCALE | A → B | after a full-turn check | scale correction | Stored by PicoB and applied to the gyro from then on |
@@ -622,7 +642,7 @@ the names are open to change.
 
 | Module | Interface | Hides |
 |---|---|---|
-| `drive` | `drive_set(v, ω)`, `drive_stop()`, `drive_update()` | side → driver mapping, forward signs, per-side wheel speed PI, effective track width, ramping, PWM, rear motors following the front ones |
+| `drive` | `drive_set(v, ω)`, `drive_stop()`, `drive_update()` | side → driver mapping, forward signs, per-side wheel speed PI, effective track width, ramping, PWM, both motors on a side sharing direction and power, the per-wheel stop |
 | `odometry` | `odom_update()`, `odom_get(&odom)`, `odom_set_gyro_scale(s)` | gyro integration, bias and scale correction, stationary detection, encoder scaling, slip flag, tilt filter. Also provides the measured wheel speeds `drive` needs, so the wheel diameter lives in one place |
 | `brain` (M1) | `brain_init(imu_ok)`, `brain_update()`, `brain_log(fmt, …)` | PicoA as PicoB sees it: the link protocol from PicoB's side, greeting and version lock, applying MOTORS and DRIVE, the safety stops (no DRIVE, `drive` faults) and reporting each once, report rates |
 
@@ -738,8 +758,9 @@ Decided during M0:
 - Taking the camera driver out of bring-up moved from M0 to M3 (nothing earlier
   uses the camera).
 - No separate UART echo test: the link's counters (`l` in the console) do that job.
-- **Safety stops** (PicoB): no DRIVE for 250 ms, or a front wheel not following its
-  target for 1 s (stopped, far too slow or turning the wrong way). After one, the
+- **Safety stops** (PicoB): no DRIVE for 250 ms, or a wheel not following its
+  target for 1 s (stopped, far too slow or turning the wrong way; front wheels until
+  4 Oct, all four since). After one, the
   motors stay off until switched on again; PicoA does not restart them by itself.
 - ~~Losing PicoA's serial monitor stops the robot.~~ Dropped in M1: the 2 m test
   runs with the USB unplugged (Daniel's cable is too short). PicoB's own stops

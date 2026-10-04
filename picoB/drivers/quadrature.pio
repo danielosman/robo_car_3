@@ -1,0 +1,43 @@
+; Quadrature decoder: one state machine per encoder counts every edge of both
+; channels in Y, with no CPU work per edge. Pins: base = channel B, base + 1 =
+; channel A, so a 2-pin read gives state = A << 1 | B.
+; Each loop: push the count (noblock: the CPU drains the FIFO for the newest),
+; build index = previous state << 2 | new state in ISR and jump into the table
+; at address 0 with it. Invalid (double) steps and no change count 0.
+; Must be loaded at offset 0 (the jump table). Needs: IN shift left, OUT shift
+; right, no autopush/autopull, OSR's low 2 bits = the pin state at start.
+
+.program quadrature
+.origin 0
+    jmp update      ; 00 -> 00
+    jmp decrement   ; 00 -> 01
+    jmp increment   ; 00 -> 10
+    jmp update      ; 00 -> 11 invalid
+    jmp increment   ; 01 -> 00
+    jmp update      ; 01 -> 01
+    jmp update      ; 01 -> 10 invalid
+    jmp decrement   ; 01 -> 11
+    jmp decrement   ; 10 -> 00
+    jmp update      ; 10 -> 01 invalid
+    jmp update      ; 10 -> 10
+    jmp increment   ; 10 -> 11
+    jmp update      ; 11 -> 00 invalid
+    jmp increment   ; 11 -> 01
+    jmp decrement   ; 11 -> 10
+    jmp update      ; 11 -> 11
+decrement:
+    jmp y--, update ; jumps or falls through to update either way
+public update:
+.wrap_target
+    mov isr, y
+    push noblock
+    out isr, 2      ; ISR = previous state (OSR's low 2 bits)
+    in pins, 2      ; ISR = previous << 2 | new
+    mov osr, isr
+    mov pc, isr
+increment:          ; y + 1 = ~(~y - 1)
+    mov y, ~y
+    jmp y--, increment_done
+increment_done:
+    mov y, ~y
+.wrap

@@ -12,17 +12,22 @@
 #define DEG(r)  ((r) * DEG_PER_RAD)
 
 static float gyro_bias_dps;      // the real sensor's leftover bias
-static double count_l, count_r;  // exact simulated encoder positions
+static double count[ENC_COUNT];  // exact simulated encoder positions
+static float rear_left_slip = 1; // the rear-left wheel turns this much faster than its side
 
 // Simulates the robot for `seconds`: wheel speeds in m/s, true turn rate in deg/s.
 static void simulate(float seconds, float left_mps, float right_mps, float turn_dps) {
     int n = (int)(seconds * RATE_HZ + 0.5f);
+    float wheel_mps[ENC_COUNT] = {
+        [ENC_LEFT_FRONT] = left_mps, [ENC_LEFT_REAR] = left_mps * rear_left_slip,
+        [ENC_RIGHT_FRONT] = right_mps, [ENC_RIGHT_REAR] = right_mps,
+    };
     for (int i = 0; i < n; i++) {
         fake_now_us += (uint64_t)(1e6f / RATE_HZ);
-        count_l += (double)(left_mps / RATE_HZ / M_PER_COUNT);
-        count_r += (double)(right_mps / RATE_HZ / M_PER_COUNT);
-        fake_counts[ENC_LEFT_FRONT] = (int32_t)count_l;
-        fake_counts[ENC_RIGHT_FRONT] = (int32_t)count_r;
+        for (int w = 0; w < ENC_COUNT; w++) {
+            count[w] += (double)(wheel_mps[w] / RATE_HZ / M_PER_COUNT);
+            fake_counts[w] = (int32_t)count[w];
+        }
         fake_imu.gz = turn_dps + gyro_bias_dps;
         fake_imu_fresh = true;
         odom_update();
@@ -43,7 +48,20 @@ int main(void) {
     assert(fabsf(o->x_m - 0.5f) < 0.005f && fabsf(o->y_m) < 0.001f);
     assert(fabsf(o->v_mps - 0.1f) < 0.002f);
     assert(fabsf(o->wheel_left_m - 0.5f) < 0.001f && fabsf(o->wheel_right_m - 0.5f) < 0.001f);
+    assert(fabsf(o->wheel_mps[ENC_LEFT_REAR] - 0.1f) < 0.002f && fabsf(o->wheel_mps[ENC_RIGHT_REAR] - 0.1f) < 0.002f);
     printf("straight 50 cm: x %.1f cm, y %.1f cm\n", (double)(o->x_m * 100), (double)(o->y_m * 100));
+
+    // A side's distance is the average of its front and rear wheel: the rear-left
+    // wheel spinning 10 % faster (slipping) moves the left side 5 % further.
+    simulate(1, 0, 0, 0);
+    float left0 = o->wheel_left_m, right0 = o->wheel_right_m, x_before = o->x_m;
+    rear_left_slip = 1.1f;
+    simulate(1, 0.1f, 0.1f, 0);
+    assert(fabsf(o->wheel_left_m - left0 - 0.105f) < 0.001f && fabsf(o->wheel_right_m - right0 - 0.1f) < 0.001f);
+    assert(fabsf(o->wheel_left_mps - 0.105f) < 0.002f && fabsf(o->wheel_mps[ENC_LEFT_REAR] - 0.11f) < 0.002f);
+    assert(fabsf(o->x_m - x_before - 0.1025f) < 0.001f);
+    rear_left_slip = 1;
+    printf("rear-left wheel 10 %% faster: left side %.1f cm for 10 cm\n", (double)((o->wheel_left_m - left0) * 100));
 
     // Turn left in place, 90 deg at 30 deg/s (wheels opposite): position stays put.
     simulate(1, 0, 0, 0);

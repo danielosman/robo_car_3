@@ -7,7 +7,8 @@ target_sources(picoB_drivers INTERFACE
     ${CMAKE_CURRENT_LIST_DIR}/drivers/motor.c
     ${CMAKE_CURRENT_LIST_DIR}/drivers/encoder.c)
 target_include_directories(picoB_drivers INTERFACE ${CMAKE_CURRENT_LIST_DIR}/drivers)
-target_link_libraries(picoB_drivers INTERFACE pico_stdlib hardware_spi hardware_pwm)
+target_link_libraries(picoB_drivers INTERFACE pico_stdlib hardware_spi hardware_pwm hardware_pio)
+pico_generate_pio_header(picoB_drivers ${CMAKE_CURRENT_LIST_DIR}/drivers/quadrature.pio)
 
 # Bring-up: tilt -> motor test with IMU and encoder readout over USB serial.
 add_executable(picoB_bringup bringup/main.c)
