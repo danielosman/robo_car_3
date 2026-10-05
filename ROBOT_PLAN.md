@@ -1,122 +1,75 @@
 # RoboCar — robot app plan
 
-Status: **M0 passed (2 Oct 2026). M1 (calibration) passed on waxed wood with the
-new motors (4 Oct); back and carpet left for later. M2 (map) passed on the robot
-(5 Oct, §14); red-flag review done; after it the map was reworked the same day
-(no gaps, no fading, drops, floor seen, blind spots), tested on the robot.** This
-plan covers the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully
-autonomous** robot, built on the drivers verified in the bring-up (tag
-`pcb-bringup-v1`). Start a new session with "Where we are" below.
+Status: **M0 ✅ (link, wheel control, odometry), M1 ✅ (calibration on waxed wood;
+`b` and the carpet still to test), M2 ✅ (map, §14). Next: M3.** This plan covers
+the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully autonomous**
+robot, built on the drivers verified in the bring-up (tag `pcb-bringup-v1`). It
+describes the current design; what happened in each session is in
+[CHANGELOG.md](CHANGELOG.md). Start a new session with "Where we are" below.
 
 ## Where we are (handover for the next session)
 
-**Done:** PCB bring-up (tag `pcb-bringup-v1`), the plan (this file), and **M0**:
-the PicoA ↔ PicoB link, PicoB wheel control and odometry, PicoA's `body`, debug
-console and square test. M0 result: after a 50 cm square, odometry was within
-0.7 cm and < 1° of the measured end pose (details in the README). Commit
-`436233d` and later.
-
-**Now: M1, calibration** (§12). M0 showed the encoder distance and the gyro scale
-are already within ~1 %, so M1 is short. Written (3 Oct): the tests below as
-console keys (`robot_test.c`), STATUS with the gyro bias, wheel distances in ODOM,
-a 15° tilt stop on PicoB, the status line every 15 s, no stop on USB unplug, host
-tests for `body` and `robot_test`. **Daniel runs the tests** (steps in the README):
-1. **Tilt stop:** `q`, lift one side past 15°: the motors go off.
-2. **Gyro drift, `d`:** 10 min still; yaw and gyro bias every 15 s, then how far
-   the bias wandered.
-3. **Gyro scale, `r`:** 10 × 360° left against a mark on the floor, stopping at
-   3600° by the gyro; also the effective track width.
-4. **Encoder distance, `f` / `b`:** 2 m straight with the USB unplugged, against a
-   tape measure.
-5. **Carpet:** `r`, `f` and `q` on the carpet (square across its edge): false
-   safety stops, turn rate, distance, track width.
-6. Then: numbers in the README; adjust `WHEEL_DIAMETER_M` (odometry.c) or add a
-   gyro scale constant only if they're off by more than ~1 %; red-flag review.
-
-**Results on 3 Oct** (details in the README): 1 ✅ tilt stop works. 2 ✅ gyro bias
-−0.328 °/s, wandering 0.009 °/s over 10 min (≤ 0.5° per minute of driving): no change
-needed. 3 ✗ stopped at turn 7 of 10, "right wheels not following". 4 ✗ the robot
-drove, but the result was lost. 5 not done.
-
-**4 Oct: motor change.** Daniel replaced all four motors with GA46-N20E-0043 N20
-gearmotors, 298:1, with Hall encoders (50 RPM at 6 V, 0.6 A stall; 28 counts per
-motor turn, 8344 per wheel turn: ~55 rpm at full power, as expected) and
-connected all four encoders (J6 1–8 right wheels, 9–16 left). Coded the same day:
-the encoder driver counts all four in PIO instead of GPIO interrupts (rear: right
-GP7/GP6, left GP3/GP2), odometry averages front and rear per side,
-`drive`'s wheel stop judges each wheel, the bring-up prints every wheel. All four
-encoder signs checked (+ forward).
-
-**M1 results with the new motors (4 Oct, waxed wood):** square 1.2 / −1.2 cm,
-362.6°, the real end pose practically the same; 10 turns without stops, effective
-track width 28.6 cm, gyro 0.42 % low (15° over 3600°: no correction), real drift
-~15 cm over 10 turns that odometry doesn't see (M6); 2 m forward 200.2 cm by
-odometry, ~200.5 cm real (+0.15 %): no change. `b` and the carpet: Daniel tests
-them later. (PicoA had still been on protocol v3: both Picos are now on v4.)
-
 **Next session, in this order:**
-1. **M2 is done** (§14; code in `1d81812`, review `bf30030`, map rework after it).
-   Read §14 from "Gaps and drops" on: what the map symbols mean now and why. Then
-   §14's "Next session" list (M1 leftovers, then M3).
-2. Still open from M1: after the 3 Oct turn test's safety stop, `f` and `g` printed
-   nothing ("Forward test…", "Motors on"), though the robot drove ~2 m. Not seen
-   since the console fixes; watch for it. Also watch `l` link counters after a long
-   test (S3, USB print timeout).
+1. Open from M1: the `b` test and the carpet tests (README, "M1"); on the carpet
+   also `n` (floor learned, no false `?`).
+2. M3 (movement detection), starting with moving the camera driver out of
+   bring-up.
+3. M4 then adds: drive forward only while rows 7-8 see the floor right ahead
+   (`map_floor_seen`; `:` or `?` ahead means stop), and face the farthest drivable
+   corridor (§14).
 
 **Files:**
 
 | Where | What |
 |---|---|
-| `ROBOT_PLAN.md` | this plan: requirements, design, milestones, decisions |
+| `ROBOT_PLAN.md` | this plan: requirements, design, milestones, decisions (current state) |
+| `README.md` | hardware, wiring differences from the PCB, how to build/flash, the map symbols, measured robot facts, robot test procedures (current state) |
+| `CHANGELOG.md` | what happened session by session: robot runs, results, fixes |
 | `REDFLAGS.md` | APOSD red-flag log per milestone, plus bugs found on the robot |
-| `REFACTORING.md` | code review of M0+M1 (standards + spec): all applied 3 Oct |
-| `README.md` | hardware, wiring differences from the PCB, how to build/flash, M0-M2 test steps and results |
+| `REFACTORING.md` | code review of M0+M1 (standards + spec), all applied |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
 
 **Build, test, flash:**
 - `cmake -S . -B build -G Ninja` (first time), `cmake --build build`.
 - `./run_tests.sh`: host tests (link; PicoB drive, odometry, brain; PicoA body,
-  robot_test); run after every change. It stops at the first failure.
+  robot_test, rangefinder, world map, pose, start-up scan); run after every change.
+  It stops at the first failure.
 - Flash `build/picoA/picoA_app.uf2` → PicoA, `build/picoB/picoB_app.uf2` → PicoB.
   Only the Pico whose code changed needs reflashing; a change to `common/link_msgs.h`
   means both. Keep the robot still ~1 s after PicoB starts (gyro bias).
-- Serial monitor on **PicoA's** USB: status line every 15 s (none while a test
-  runs), PicoB's messages as `B: ...`; keys `g` motors on, `s` stop, `p` status now,
-  `l` link counters, `h` help; tests `q` square, `d` drift, `r` 10 turns, `f` / `b`
-  2 m forward / back. Unplugging the USB doesn't stop the robot; the last test
-  result is printed again on reconnecting.
+- Serial monitor on **PicoA's** USB: keys and the map symbols in the README.
 
-**Hardware facts learned while building** (beyond §3 and the README):
+**Hardware facts** (beyond §3 and the README):
 - IMU breakout is mounted **turned 180° about Z: X backward, Y right, Z up**
   (`to_robot_frame()` in `picoB/app/odometry.c`). At rest pitch/roll read ~±1°.
-- Encoder signs (old #3081 boards, front only) were **opposite to the motor signs**
-  (`picoB/drivers/encoder.c`): left +1, right −1; motors `LEFT_FORWARD −1`,
-  `RIGHT_FORWARD +1`. To re-check after the 4 Oct motor change, rear ones too.
-- Full power is ~0.24 m/s; the drive limits commands to 0.2 m/s and 1.5 rad/s and
+- Motor signs `LEFT_FORWARD −1`, `RIGHT_FORWARD +1` (`picoB/drivers/motor.c`); all
+  four encoder signs checked, + = forward (`picoB/drivers/encoder.c`).
+- Full power is ~0.26 m/s; the drive limits commands to 0.2 m/s and 1.5 rad/s and
   ramps at 0.4 m/s² / 3 rad/s².
 - In-place turns make the body roll −3…−5° (leaning on its tyres): a possible
-  signal for later (§12 Later).
-- In-place turns slide the body ~1.5 cm per turn (10 turns: 15 cm back, 5 cm
-  right) while odometry sees ~0: the wheels skid symmetrically. Gyro scale 0.42 %
-  low; effective track width 28.6 cm on waxed wood (geometric 22.5 cm).
+  signal for later (§12 Later), and slide it ~1.5 cm per turn while odometry sees
+  ~0 (the wheels skid symmetrically). Gyro scale 0.42 % low; effective track width
+  28.6 cm on waxed wood (geometric 22.5 cm).
 
 **How we work** (agreed with Daniel):
 - Plan first; no code until Daniel says go. Explain concepts plainly when asked.
 - Daniel tests on the robot and pastes the serial log; say exactly which Pico to
   reflash, and what to look for.
 - Every logic module gets a host test; stubs fail if a driver is used before its
-  init (that's how the M0 encoder bug would have been caught).
+  init.
 - Red-flag review at the end of each milestone, logged in REDFLAGS.md; deviations
   from the PCB go in the README.
+- README and this plan show only the current state; session results, robot runs
+  and fixes go in CHANGELOG.md.
 - Commit and push only when Daniel asks. **No `Co-Authored-By` lines** in commits
   (README convention).
 
-**Not yet implemented from §9:** CALIBRATE,
-GYRO_SCALE (M5), STATUS beyond the gyro bias, the slip flag.
+**Not yet implemented from §9:** CALIBRATE, GYRO_SCALE (M5), STATUS beyond the gyro
+bias, the slip flag.
 
 ## 0. Overview
 
@@ -131,9 +84,9 @@ open space.
 To do that it needs three things:
 
 - **A short-term memory of its surroundings.** PicoA builds a 4 × 4 m map of 10 cm
-  cells from the VL53L8CX. Each cell remembers whether something is there and how
-  recently it was seen. Repeated sightings make a cell more certain, and old
-  knowledge fades.
+  cells from the VL53L8CX. Each cell remembers whether something is there, whether
+  the floor was seen, and when it was last measured. A cell changes only when it
+  is measured again; old cells are a reason to look again, not to forget.
 - **Knowing where it is.** PicoB tracks the robot's position and heading from the
   gyro (heading) and the wheel encoders (distance). PicoA corrects heading drift
   using the VL53: after each full turn it compares the start of the turn with the
@@ -164,13 +117,13 @@ is the design. §13 lists what's settled.
 | # | Requirement |
 |---|---|
 | R1 | **Map.** PicoA keeps a map of the surroundings from the VL53L8CX: 10 × 10 × 10 cm cells, 4 × 4 m (the sensor's range is 4 m), 4 height layers. |
-| R2 | **Cell memory** (revised 5 Oct). A cell changes only when it is measured, never with time, and remembers when it was last measured. A reading that sees it occupied makes it occupied; it becomes empty only after **6 empty readings in a row** (a sighting in between starts the count again). Curiosity about old cells is the behaviour's job, using the age, not the map forgetting. (Was: a 240 s timer counting down, +60 s per sighting, −60 s per empty reading.) |
-| R3 | **Pose.** Estimate the robot's pose from the wheel encoders (all four since 4 Oct) (wheels Ø 9 cm, 1 cm wide), the IMU and, later, the camera. Start without the camera and without a Kalman filter; keep both as future steps. |
+| R2 | **Cell memory.** A cell changes only when it is measured, never with time, and remembers when it was last measured. A reading that sees it occupied makes it occupied; it becomes empty only after **6 empty readings in a row** (a sighting in between starts the count again). Curiosity about old cells is the behaviour's job, using the age, not the map forgetting. |
+| R3 | **Pose.** Estimate the robot's pose from the wheel encoders (all four) (wheels Ø 9 cm, 1 cm wide), the IMU and, later, the camera. Start without the camera and without a Kalman filter; keep both as future steps. |
 | R4 | **Protocol.** Design the PicoA ↔ PicoB protocol. |
 | R5 | **Attracted by movement.** Detect movement with the camera and the VL53 while the robot stands still. Any movement means something in the surroundings moved. |
 | R6 | **Direction of movement.** Know where the movement went, including whether it left the field of view to the left or the right. |
 | R7 | **Go to it.** Turn toward the movement and drive toward it until 50 cm away. |
-| R8 | **Keep the map fresh.** When cells behind the robot expire, rotate 360° to see them again. |
+| R8 | **Keep the map fresh.** When cells around the robot haven't been seen for a while (or never), rotate 360° to see them again. |
 | R9 | **Changes are movement.** If a refresh shows that something changed, investigate it like movement. |
 | R10 | **Code quality.** Deep modules per *A Philosophy of Software Design* (APOSD). Track its red flags and fix them in a review pass. |
 | R11 | **Cheap maths.** Precision isn't critical; use dot products where possible. |
@@ -192,11 +145,11 @@ is the design. §13 lists what's settled.
 | | Value | Source |
 |---|---|---|
 | Size | **23.5 cm wide × 19 cm long × 10 cm high**, wheels included; front edge 9.5 cm ahead of the centre | you |
-| Wheels | Ø 9 cm, 1 cm wide; 282.7 mm per revolution, 8 344 counts/rev → **29.5 counts/mm** (3 575 before the 4 Oct motor change) | you, encoder bring-up |
+| Wheels | Ø 9 cm, 1 cm wide; 282.7 mm per revolution, 8 344 counts/rev → **29.5 counts/mm** | you, encoder bring-up |
 | Track width | **≈ 22.5 cm** (23.5 − 1, wheel centre to wheel centre) | derived |
 | Wheelbase | **≈ 10 cm** (19 − 9) | derived |
 | Turning in place | outermost point sweeps **≈ 15 cm** radius | derived |
-| Top speed | ~50 RPM at full power → **~0.24 m/s** (old motors; the new ones ~55 RPM lifted, ≈ 0.26 m/s) | bring-up |
+| Top speed | ~55 RPM at full power, lifted → **~0.26 m/s** | bring-up |
 | VL53L8CX | **2.5 cm ahead of the centre, 3 cm right** of the centre line, **7 cm** above the floor; facing forward, no tilt; 45° × 45°, 8 × 8 zones of 5.6° | you, datasheet |
 | Camera | **2.5 cm ahead of the centre**, on the centre line, **8.5 cm** above the floor; facing forward, no tilt; HFOV 53.1°, VFOV 41.1°, DFOV 64°, f 2.59 mm | you |
 | Smallest obstacle | **2 cm** high. Bumps up to ~1 cm are driven over (Ø 9 cm wheels); the extra 1 cm is margin for noise and pitch | you, §4.2 |
@@ -233,9 +186,9 @@ left) in the robot frame; normalise it and use dot products. This assumes the
   that fall off the edge are forgotten. Circular indexing, so nothing is copied.
   Hits beyond the window edge (> 2 m in some directions) are simply not stored.
 - Per cell: `observed_at` (u16 seconds of robot time), misses still needed to clear
-  it, sightings since it was last free, the no-floor mark (layer 0).
-  6 400 cells × 4 B = **~26 KB** of PicoA's 520 KB. A sweep every few minutes clamps
-  old timestamps so the u16 wrap (18 h) never matters.
+  it, sightings since it was last free, and in layer 0 the no-floor count and
+  "floor seen". 6 400 cells × 8 B = **~51 KB** of PicoA's 520 KB. A sweep every
+  minute caps ages at ~8 h, so the u16 wrap (18 h) never matters.
 
 ### 4.2 Floor and layers: no false obstacles from the floor
 
@@ -254,9 +207,9 @@ layer boundary breaks exactly as you suspected: near the floor, 1 cm of range
 error or 1° of pitch moves a hit across the boundary. Instead, **floor detection
 works in range, per zone:**
 
-1. **Calibrate each zone's floor distance once** on an open floor: median of 2 s of
-   readings, stored. This absorbs the cone shape, the sensor's distance
-   convention and the floor's reflectivity.
+1. **Learn each zone's floor distance** at every start, during the start-up turn
+   (§14). This absorbs the cone shape, the sensor's distance convention and the
+   floor's reflectivity.
 2. **Adjust for pitch** using PicoB's pitch (the robot nods when accelerating and
    braking).
 3. A reading is an **obstacle only if it is shorter than the floor by more than a
@@ -275,7 +228,9 @@ works in range, per zone:**
 4. The 5th row (floor at 143 cm, 51 cm per degree of pitch) can't do this. Its ray
    is still 2 cm above the floor at ~100 cm, so **any hit closer than ~95 cm is an
    obstacle at least 2 cm tall**. Farther hits on that row aren't used for
-   obstacles, and its floor readings are ignored.
+   obstacles.
+5. **Drops:** rows 7-8 must see their floor; no return, or one beyond their floor
+   patch, marks "no floor" (`?`, §14).
 
 The result: small floor bumps and cables lower than ~2 cm are invisible to the
 map, which is what we want, since the wheels drive over them.
@@ -307,9 +262,10 @@ boundary.
 | NO_FLOOR | layer 0: a floor ray (rows 7-8) expected the floor here and got no return, or one more than 15 % beyond the far end of the zone's floor patch (a drop? a dark floor?), 3 times with the floor not seen here in between; stays until the floor is seen here (`?` on the map) |
 | FREE | observed, not occupied |
 
-**Changed 5 Oct (Daniel):** nothing changes with time. A cell once seen stays as
-last measured; `observed_at` keeps how old that is (for the refresh, R8). Exploring
-means: fill the blanks, avoid `?`, look again at old cells.
+Nothing changes with time: a cell once seen stays as last measured; `observed_at`
+keeps how old that is (for the refresh, R8). Layer 0 also keeps whether the floor
+was seen (`.` vs `:` on the print). Exploring means: fill the blanks, avoid `?`,
+look again at old cells.
 
 ### 4.4 Update rule (your R2)
 
@@ -336,7 +292,7 @@ pose. Walk along the ray in half-cell steps: cells before the measured distance 
 a miss, and the cell at the distance gets a hit (or a miss, if §4.2 says it's
 floor). **A ray that reaches the floor clears layer 0 all the way to it**, also
 where it is under 2 cm: anything standing on the floor 2 cm or taller would have
-blocked it (5 Oct; before, the last stretch of every floor ray stayed unknown). **Zones with no target mark the first 1 m of the ray as misses and leave farther cells untouched**: "saw nothing" is only trusted close up. Cost: 64 rays ×
+blocked it. **Zones with no target mark the first 1 m of the ray as misses and leave farther cells untouched**: "saw nothing" is only trusted close up. Cost: 64 rays ×
 ≤ 40 steps ≈ 2 500 cell updates per frame, which is trivial.
 
 ### 4.6 Changes (R9)
@@ -350,7 +306,7 @@ scanning.
 
 ### 4.7 Questions the map answers
 
-- **Staleness (R8):** "how much of the ring 0.3–1.5 m around the robot is UNKNOWN,
+- **Staleness (R8):** "how much of the ring 0.3–1.5 m around the robot is UNKNOWN or old,
   per 45° sector?" The behaviour uses that to decide when to scan and which way to
   turn first.
 - **Free distance (R12):** "from this point, in this direction, how far until an
@@ -531,7 +487,7 @@ PicoB.
 
 | Priority | Behaviour | When | What it does |
 |---|---|---|---|
-| 1 | **Scan** (R8) | too much of the surroundings UNKNOWN (e.g. > 30 % of near cells, or a rear sector mostly unknown), or right after power-up | Stop, then turn 390° at ~30°/s (~13 s) with the full-turn check (§5.4). Map changes found during it become Investigate events |
+| 1 | **Scan** (R8) | too much of the surroundings unknown or old (e.g. > 30 % of near cells, or a rear sector), or right after power-up | Stop, then turn 390° at ~30°/s (~13 s) with the full-turn check (§5.4). Map changes found during it become Investigate events |
 | 2 | **Investigate** (R7, R9) | an event < 30 s old | Turn toward the bearing (the sign of the cross product picks the direction; dot > cos 5° counts as aligned), then drive toward the target. **Stop when the front edge is 50 cm from it** (ToF range on that bearing). For EXITED: turn ~40° past the edge of the field of view on that side, then watch. A new event re-targets. |
 | 3 | **Face open space** (R12) | nothing to scan or investigate | Turn toward the direction with the most free space ahead, then stand still and watch for movement (R5). Movement detection runs whenever the robot is still, whatever the behaviour |
 
@@ -607,15 +563,14 @@ message.
 | DRIVE ✅ | A → B | 20 Hz | v (m/s), ω (rad/s) | **PicoB stops if no DRIVE for 250 ms** |
 | MOTORS ✅ | A → B | on change, re-sent until PicoB has acted on it | on / off, request number | On clears a safety stop. PicoB echoes the last request it acted on in ODOM and ignores repeats, so a repeat can't undo a safety stop (M1) |
 | ODOM ✅ | B → A | 50 Hz | t_B (µs, u32), x, y, yaw (not wrapped, so a full turn reads +2π), v, ω, pitch, roll, wheel distances per side, stationary, motors on, stop reason, IMU error | Stop reasons: no DRIVE, left/right wheels not following (jam, encoder), tilt > 15°. After a safety stop the motors stay off until PicoA switches them on |
-| ~~TIME_PING / TIME_PONG~~ | | | | **Not needed (M2):** ODOM already carries t_B; PicoA notes each report's arrival on its own clock, and the smallest difference over the last 4 s (minus the frame's 0.5 ms on the wire) is the offset. Within ~0.15 ms in the host test; follows drift; resets when PicoB restarts (`body.c`) |
+| (clock sync) | | | | **No message needed:** ODOM already carries t_B; PicoA notes each report's arrival on its own clock, and the smallest difference over the last 4 s (minus the frame's 0.5 ms on the wire) is the offset. Within ~0.15 ms in the host test; follows drift; resets when PicoB restarts (`body.c`) |
 | CALIBRATE | A → B | on request | — | Hold still: gyro bias calibration |
 | GYRO_SCALE | A → B | after a full-turn check | scale correction | Stored by PicoB and applied to the gyro from then on |
 | STATUS ✅ | B → A | 2 Hz | gyro bias (M1); later wheel speeds, PWM, gyro scale, error counters | |
 | LOG ✅ | B → A | rare | text, ≤ 64 chars | PicoA prints it in its own debug log, so one serial monitor shows both boards |
 
-✅ = implemented (M0: protocol version 2; M1: version 3 adds STATUS, wheel
-distances and the tilt stop; version 4 the MOTORS request numbers). The timing constants and stop reasons
-live in `common/link_msgs.h`.
+✅ = implemented (protocol version 4). The timing constants and stop reasons live in
+`common/link_msgs.h`.
 
 Bandwidth: ODOM ≈ 45 B × 50 Hz ≈ 2.3 kB/s; everything together is under 5 % of the
 link.
@@ -718,9 +673,9 @@ Each milestone ends with a test on the robot and a red-flag review.
 
 | | Milestone | Done when |
 |---|---|---|
-| M0 ✅ | **Foundations:** `common/link` (its byte and frame counters double as the first UART test: the link was never brought up on the PCB); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | **Passed 2 Oct 2026:** end pose within 0.7 cm and < 1° of odometry after a 50 cm square |
-| M1 | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % |
-| M2 ✅ | **Map:** per-zone floor calibration, map from ToF and odometry, map printed as text in the debug log | **Passed 5 Oct 2026:** open floor clean also after the square's braking; walls and furniture stayed put; placed objects mapped |
+| M0 ✅ | **Foundations:** `common/link` (its byte and frame counters double as the UART test); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | End pose within ~1 cm and ~1° of odometry after a 50 cm square |
+| M1 ✅ | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % (none needed on waxed wood; carpet still to measure) |
+| M2 ✅ | **Map:** per-zone floor learning, map from ToF and odometry, drops, map printed as text in the debug log (§14) | Open floor shows no obstacles, also while braking; walls stay put while turning; drops marked |
 | M3 | **Movement detection** while stationary (ToF, then camera); exit side. Take the camera driver out of bring-up first (moved from M0: nothing earlier uses the camera) | Events in the debug log match what you do in front of the robot |
 | M4 | **Behaviour:** Investigate, Face open space, the Safety guard | Robot turns to movement, stops 50 cm away, then turns to face open space |
 | M5 | **Staleness, 390° scan with the full-turn check, map changes** | Heading error after a scan ~1–2°; move an object while the robot isn't looking and the robot finds it |
@@ -728,7 +683,7 @@ Each milestone ends with a test on the robot and a red-flag review.
 
 **Later (kept on purpose, not in v1):**
 - **Roll during turns:** in-place turns make the body roll −3…−5° as it leans on its
-  tyres (seen in M0). Could serve as a cross-check that the robot is really turning
+  tyres. Could serve as a cross-check that the robot is really turning
   (e.g. a wheel slipping without turning the body), or as a hint of floor grip
   (waxed wood vs carpet).
 - **Slip flag** in ODOM: encoders vs gyro disagreeing while driving.
@@ -756,200 +711,103 @@ indoors on waxed wood with one carpet, no thermal camera for now, order of needs
 fully autonomous with no PC app in v1, ToF zones with no target mark the first 1 m
 empty and leave farther cells alone, a blocked path counts as arrived, no battery sensor for now.
 
-Decided during M0:
-- Taking the camera driver out of bring-up moved from M0 to M3 (nothing earlier
-  uses the camera).
+Decided along the way:
+- The camera driver comes out of bring-up in M3 (nothing earlier uses the camera).
 - No separate UART echo test: the link's counters (`l` in the console) do that job.
-- **Safety stops** (PicoB): no DRIVE for 250 ms, or a wheel not following its
-  target for 1 s (stopped, far too slow or turning the wrong way; front wheels until
-  4 Oct, all four since). After one, the
-  motors stay off until switched on again; PicoA does not restart them by itself.
-- ~~Losing PicoA's serial monitor stops the robot.~~ Dropped in M1: the 2 m test
-  runs with the USB unplugged (Daniel's cable is too short). PicoB's own stops
-  remain.
+- **Safety stops** (PicoB): no DRIVE for 250 ms, a wheel not following its target
+  for 1 s (stopped, far too slow or turning the wrong way; each of the four wheels),
+  or pitch or roll beyond 15° (lifted, tipping over, climbing; normal driving stays
+  within ~5°). After one, the motors stay off until switched on again; PicoA does
+  not restart them by itself.
+- Losing PicoA's serial monitor doesn't stop the robot (the 2 m test runs with the
+  USB unplugged); PicoB's own stops remain.
 - The square test's 0.5–1.8° overshoot per turn is not fixed: it's the test's stop
   logic, and M4's behaviour steers to headings using the pose.
-
-Decided during M1:
-- **Tilt stop** (PicoB): pitch or roll beyond 15° switches the motors off at once
-  (lifted, tipping over, climbing). Normal driving stays within ~5°.
 - Calibration tests are console keys in one firmware (`d`, `r`, `f`, `b`), each
-  printing progress and a result; the status line drops to every 15 s so long tests
+  printing progress and a result; the status line comes every 15 s so long tests
   stay readable.
+- Map decisions (floor learning at every start, nothing fading, drops from rows 7-8
+  only, floor assumed in the blind spots): §14.
 
 ---
 
-## 14. M2: the map (4 Oct 2026)
+## 14. The map as built (M2)
 
 Goal (§12): **an open floor shows no obstacles, also while braking; walls stay put
-while turning.** Everything runs on PicoA; PicoB doesn't change.
+while turning.** Everything runs on PicoA. How it works now:
 
-**Decided with Daniel (4 Oct):**
-- **No floor calibration in flash:** the floor is learned fresh at every start,
-  during the start-up turn. Each floor zone records how far its ray drops before it
-  ends (the sensor height, on a floor) all around; the 75th percentile is the
-  floor, because obstacles only make readings shorter. Frames of the turn are kept
-  and mapped once the floor is known.
-- **Clock sync without a new message** (§9): from ODOM's t_B. Long-term, as Daniel
-  wants it, and no PicoB flash.
-- **ToF 8 × 8 at 15 Hz**, closest target first, continuous mode.
-- **`m` prints the full 4 × 4 m** (40 × 40 cells).
-- **The first need now (§7):** when a serial monitor first opens after power-up
-  (later: always at power-up), the robot turns 390°, prints the map, turns to the
-  most open direction (average free distance in layer 0 across ±25°, every 10°) and
-  prints its heading. `n` repeats it.
-- The sensor orientation is the bring-up viewer's 90° rotation (verified there).
+**Sensor and frames.** ToF 8 × 8 at 15 Hz, continuous; each zone gives its closest
+sure target (status 5, 6, 9). The sensor is turned 90° on the PCB (the bring-up
+viewer's rotation); not mirrored. Each frame is placed with the pose at the moment
+it was measured (`pose_at`); PicoB's clock comes from ODOM's t_B (§9).
 
-**Done (4 Oct):** `tof` split (sensor part in `drivers/`, USB streaming in
-`bringup/tof_stream.c`); clock sync in `body`; `pose`, `rangefinder`, `world_map`,
-`surroundings`, `behaviour`, `motion.h` (shared with `robot_test`); console keys
-`n`, `m`, `z`. Host tests: rangefinder, world map, pose, clock sync, and the
-start-up scan end to end in a simulated room (walls 59/59, floor 182/182 free, 0
-false obstacles, the box seen, facing the most open direction).
+**Start-up scan** (the first need, §7): when a serial monitor first opens after
+power-up (later: always at power-up), or with `n`: the map is cleared and the
+robot's heading becomes the map's x axis (up on the print); it turns 390°, keeping
+the frames; the floor is learned from them and they are mapped; motors off while
+the map is built and printed (it takes longer than PicoB's 250 ms DRIVE timeout);
+then it turns to the most open direction (average free distance in layer 0 across
+the camera's ±25°, every 10°; ties: the middle of the widest open sector) and
+stops with the motors off.
 
-**Found in the host tests (geometry, not bugs):**
-- Layer 0 (2–12 cm) is only seen within ~1 m: farther, the rows above the horizon
-  pass higher than 12 cm and the row below reaches the floor first. Walls beyond
-  show only above 12 cm (`''` on the map); for free space, layer 0 there is unknown.
-- A low obstacle can fall between two rows: a 3 cm box at exactly 25 cm (the 6th
-  row passes over it, the 7th hits it 0.7 cm up, like the floor). Approaching, it
-  shows up at 27–34 cm (6th row) and 16–20 cm (7th).
-- The ToF distance is treated as along the ray; if the sensor reports the
-  perpendicular distance instead, side zones read up to 6 % short. The floor
-  learning absorbs it for the floor; check on the robot with a wall at a known
-  distance.
+**Floor learning** (fresh at every start, nothing stored). Each floor zone (rows
+5-8) takes only readings that fit its patch of floor (between its upper and lower
+edges, ±2°, converted to the robot level with the pitch): shorter ones are
+obstacles, longer ones drops. Of those, a long and common distance (around the
+75th percentile) is the floor; the zone learns its effective angle (where a ray
+from 7 cm meets the floor there) and its scatter (its obstacle margin, at least
+2 cm). A zone whose floor comes out beyond 1.25 × where its centre meets a flat
+floor isn't learned (the 5th row in a room mostly sees walls). Rows 7-8 must
+always have a floor: where none was learned they take the floor the sensor's 7 cm
+height gives. Why learn at all: a zone reports the nearest surface in its 5.6°
+patch, so the 6th row reads 35-53 cm where its centre's geometry says 48; rows 7-8
+are close to geometry.
 
-**First robot run (4 Oct) and fixes:** the sensor is not mirrored (hand test on
-`z`). Problems found: only the first of up to 4 targets per zone was used, so most
-zones were "unsure"; the floor rows report the near edge of their 5.6° floor patch
-(6th row ~35 cm, not 48), which drew a ring of false obstacles at ~60 cm; the row
-just above the floor rows reaches the floor at its lower edge when the robot nods
-(far `''`); the map's up was PicoB's power-up heading. Fixed: closest sure target;
-rows 4-7 (5th-8th) learn the floor; each floor zone learns its effective angle
-(from the sensor height and where it sees the floor) and its scatter, and judges
-obstacles along that angle; readings that may be floor at a zone's lower edge are
-free space; the scan's start is the map's origin (`pose_set_origin`). The
-simulated sensor in the end-to-end test now reports the nearest point of each zone,
-with noise and the robot 0.9° nose-down. Consequence: a low obstacle reads like
-the floor behind it until close (an 8 cm box shows up at ~40 cm).
+**What each ray says** (`rangefinder_scan`):
+- Rows 1-4 (and an unlearned 5th row): an obstacle if the hit is ≥ 2 cm above the
+  floor and not possibly the floor at the zone's lower edge; else clear up to it.
+  No target: clear for 1 m. The 5th row: hits only closer than 0.95 m.
+- Rows 6-8 (learned): floor if the reading fits the floor (clear to it, and the
+  floor seen over the zone's patch, from where its lower edge meets the floor to
+  the reading); an obstacle if shorter by more than the zone's margin.
+- Rows 7-8: **no floor** when there is no return, or one more than 15 % beyond the
+  far end of the zone's floor patch (pitch included). Row 8 sees the floor ~14 cm
+  ahead of the front edge: at 10 cm/s, 3 readings (0.2 s) plus braking (~1.3 cm)
+  stop ~10 cm short of an edge.
+- Row 6: far or missing readings tell nothing (on the shiny floor they are often
+  reflections, e.g. the wall); nose up doesn't stretch its patch (it would reach
+  1.6 m), nose down shortens it.
 
-**Second robot run (4 Oct):** much better map (most zones valid, floor rows
-21 / 29 / 38-43 cm, no ring). Problems: PicoB stopped with "drive commands stopped
-arriving" after the map print (mapping ~220 frames plus printing 3.4 KB keeps the
-loop busy > 250 ms); a false `##` ~35 cm ahead-left (Daniel: nothing there; maybe
-the USB cable). Fixed since (not yet run on the robot): motors off while the map is
-built and printed, on again to face open space, off at the end; `m` switches the
-motors off before printing; ties in "most open" pick the middle of the widest open
-sector; a floor zone whose learned floor is farther than 1.25 x where its centre
-meets a flat floor isn't learned (the 5th row in a room mostly sees walls; taking
-those as the floor made real floor readings at 60-90 cm look like obstacles);
-`z` also prints what each zone makes of the frame (#N obstacle N cm up, . free)
-and what each floor zone learned (floor cm / obstacle from cm).
+**Cells** (§4.3, §4.4): a hit makes a cell occupied, 6 readings in a row through
+it clear it; nothing changes with time; each cell keeps the time of its last
+measurement. A ray that reaches the floor clears layer 0 all the way to it (below
+2 cm it passes under anything that would block the robot). Layer 0 also keeps
+"floor seen" (from floor readings, and within 15 cm of the robot: it stands and
+turns there) and the no-floor count (`?` after 3, the floor not seen in between;
+seeing the floor resets it). Free distance (`map_free_distance`) stops at
+occupied, `?` and unknown cells; `:` counts as free.
 
-**Third robot run (4 Oct):** the whole start-up scan ran without a stop (motors
-off for the map, on for the turn, off at the end). Floor learned in 24 of 32 zones:
-rows 6-8 at ~45 / 30 / 22 cm, the 5th row rightly not (it sees walls 2-3 m away).
-The false obstacle next to the robot ahead-left is gone. Change after it: an
-unlearned 5th row is used like the rows above it (far readings that may be floor
-at its lower edge are free space, closer ones obstacles) instead of being dropped.
-
-**M2 result (5 Oct, latest `picoA_app`):** the start-up map matches the room
-(the `##` right and behind are table and sofa legs and a real object); using the
-unlearned 5th row again made the area behind-left free out to the walls. Daniel
-placed objects to the left, then `n` and `q`: they were mapped where they were,
-the robot faced away from them, and after the square (odometry 1.1 / −1.5 cm,
-363.0°) `m` showed walls and objects in place and no obstacles from braking.
-**M2 passed.** Red-flag review: REDFLAGS.md, "M2 review pass" (no behaviour
-change; reflashing PicoA is optional).
-
-**Found in the M2 test, open:**
-- **Gaps in the free area:** isolated unknown cells inside the free area, often in
-  radial lines. `map_free_distance()` stops at them, so the robot undercounts open
-  directions (it turned away from a more open front-right). Find the cause first
-  (cells between rays? floor rays dropping below 2 cm before they end, so their
-  last stretch never clears layer 0?), then fill or tolerate the gaps.
-- **Noisy map changes:** 1584 after one scan and a square. M5 must filter them.
-
-**Gaps and drops (5 Oct, after M2, only PicoA):** floor rays clear layer 0 up to
-where they meet the floor; rows 6-8 report `RAY_NO_FLOOR` where the floor should
-be when they get no return or one > 15 % beyond the far end of their floor patch
-(the 6th row sees floor anywhere from 35 to 71 cm: a first version used 20 % past
-its usual 45-48 cm and drew a ring of `?` at ~50 cm), and the map shows `?` after 3
-such readings with no floor seen in between (the shiny floor sometimes reflects a
-6th-row zone to the wall: `z` showed 184 cm, the wall's distance, about once in 24
-readings), until the floor is seen there. Then (Daniel): the 6th row doesn't tell
-drops at all, its far or missing readings tell nothing; only rows 7-8 (steady at
-28-31 and 20-22 cm) do. Row 8 sees the floor ~14 cm ahead of the front edge: at
-10 cm/s, 3 readings (0.2 s) plus braking (~1.3 cm) still stop ~10 cm short.
-
-**Desk test (5 Oct):** a start-up scan 10-15 cm from a desk's edge learned the
-floor in only 9 of 32 zones (rows 6-7 none): half the turn looked over the edge,
-and the long readings spoiled the floor. Without a floor rows 7-8 can't tell a
-drop, and the map showed `.` beyond the edge (nothing in the way, but no floor
-either). Fixed: floor learning only takes readings that fit the zone's patch of
-floor (±2° of its edges), so obstacles and drops are left out; rows 7-8 assume the
-floor the sensor's 7 cm height gives where nothing was learned; each layer-0 cell
-marks where the floor was seen (the end of a floor ray, cleared by `?`), and the map
-prints `.` only there, `:` for free without floor seen (far away, or over a drop).
-Host tests: learning next to a desk's edge, learning with the floor never seen.
-**For M4:** drive forward only while rows 7-8 see the floor right ahead
-(`map_floor_seen`); `:` or `?` ahead means stop. Choosing where to look may use `:`.
-Floor learning stays (Daniel asked): the 6th row reads 35-53 cm where geometry says
-48, which drew false obstacles in the first run; rows 7-8 are close to geometry.
-
-**Desk test again, with the fixes:** rows 7-8 learned (29 / 21 cm), a line of `?`
-along the desk's edges ahead and to the right, `:` beyond them, `.` only on the
-desk next to the robot. On the living-room floor: no `?` ring, free area solid,
-2.0 m free on average; 2 `?` in front of a white glossy cupboard (reflections off
-the shiny floor; accepted: right in front of an obstacle, and on the safe side).
-**For M4 (Daniel):** the robot should point along the farthest path it can
-actually drive: a corridor the robot's width (23.5 cm plus margin) straight ahead,
-through `.` and `:` (rows 7-8 confirm the floor while driving), stopped by `##`,
-`?` and blank; today's "most open" (average over the camera's ±25°) is for where
-to look. **Nothing changes with
-time** (R2 revised): an obstacle stays until 6 readings in a row see through it;
-each cell keeps the time of its last measurement. Host tests: drops, no false `?`
-while nodding with noise, floor rays, `?` cleared only by seeing the floor, 6
-misses, an hour without change. Not yet run on the robot.
-
-**Removed object (5 Oct):** `n`, object removed, one turn with `r`, `m`: the object
-ahead cleared, the rest stayed. `:` showed right next to the robot and between the
-floor rows' rings: only a floor ray's end point counted as floor seen, and the
-lowest row reaches the floor 17 cm ahead of the sensor at the nearest. Fixed
-(Daniel: assume floor in the blind spots, the robot turned there and didn't fall):
-within 15 cm of the robot (its turning circle) is floor with nothing on it, and a
-floor ray marks floor seen over its zone's whole patch (from where the zone's lower
-edge meets the floor to the reading). Host test: floor seen in 53 of 55 cells
-within 45 cm of the robot in the simulated room. On the robot the disc was solid,
-but `.` also reached 1-1.6 m to the left: with the robot nodding nose up ~3°, the
-6th row's patch reached 1.6 m, so its far readings (walls, reflections) counted as
-floor. Fixed: nose up no longer stretches the 6th row's patch (only nose down
-shortens it); floor seen now reaches at most ~85 cm.
-
-**Last robot run (5 Oct, latest firmware):** solid `.` disc ~50-60 cm around the
-robot, `:` beyond, no `.` farther out; obstacles where earlier maps had them.
-
-**Learned on the way (keep in mind):**
-- `.` / `:` / `?` / `##` / blank mean: floor seen / nothing in the way but floor
-  unseen / floor missing where rows 7-8 expected it / obstacle / never seen.
-- The VL53 status 12 zones (top right, later top left) move with the scene: two
-  surfaces at almost the same distance in a zone, harmless.
-- The waxed floor reflects: the 6th row sometimes reads the wall (184 cm), rows 7-8
-  read "beyond the floor" in front of a white glossy cupboard (2 `?`).
-- A flat face often fills 2 cells (`####`): zone width (5.6°, ~5 cm at 50 cm),
-  range noise, the changing view in the turn, cell edges. Since nothing fades and
-  rays can't pass through the face, the back cell stays. Harmless; possible later
-  refinement: clear a cell behind a face when the face is seen again from closer.
+**Known behaviour on the robot** (see also the README's measured facts):
+- A flat face often fills 2 cells (`####`): zone width (~5 cm at 50 cm), range
+  noise, the changing view during the turn, cell edges; rays can't pass through
+  the face, so the back cell stays. Possible refinement: clear a cell behind a face
+  when the face is seen again from closer.
 - With 6 misses to clear, a false `##` stays until the robot looks through it 6
-  times; watch for stray `##` that never go away.
-- Scans on a desk: keep a hand ready (the robot slides ~1.5 cm per turn).
-- `n` clears the map and resets "up"; to see a removed object clear, turn without
-  `n` (`r`, then `s` after one turn, then `m`).
+  times.
+- Glossy furniture on the waxed floor can give a few `?` right in front of it
+  (accepted: next to an obstacle, and on the safe side).
+- Map changes (§4.6) are counted but noisy (~1600 after one scan and a square): M5
+  must filter them (e.g. a change counts only if it persists or clusters).
 
-**Next session, in this order:**
-1. Still open from M1: `b` and the carpet tests (carpet: check floor learning and
-   `?` on it too).
-2. M3 (movement detection), starting with moving the camera driver out of
-   bring-up.
-3. M4 then adds: drive only while rows 7-8 see the floor ahead; face the farthest
-   drivable corridor.
+**Geometry limits:** layer 0 (2-12 cm) is only seen within ~1 m (farther walls show
+only above 12 cm, `''`); a low obstacle reads like the floor behind it until close
+(an 8 cm box shows up at ~40 cm); a 3 cm box at exactly 25 cm falls between the 6th
+and 7th rows (seen at 27-34 cm and 16-20 cm while approaching); if the sensor
+reports perpendicular rather than along-the-ray distance, side zones read up to
+6 % short (the floor learning absorbs it for the floor).
+
+**For M4 (Daniel):** the robot should face the farthest path it can actually drive:
+a corridor the robot's width (23.5 cm plus margin) straight ahead, through `.` and
+`:` (rows 7-8 confirm the floor while driving), stopped by `##`, `?` and blank.
+Today's "most open" (average over the camera's ±25°) is for where to look. Drive
+forward only while rows 7-8 see the floor right ahead.
