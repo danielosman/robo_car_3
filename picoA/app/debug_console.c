@@ -9,17 +9,19 @@
 #include "surroundings.h"
 #include "world_map.h"
 #include "pose.h"
+#include "wifi_console.h"
 #include "debug_console.h"
 
 #define STATUS_PERIOD_US  15000000 // not while a test or the scan runs: they print their own progress
 #define GREETING_DELAY_US 1000000  // the Mac drops what arrives the moment the port opens
 // printf takes doubles; the (double) casts below are for printing only.
 
-static bool was_connected, greeted, scan_started;
+static bool usb_was_connected, wifi_was_connected, greeted;
 static absolute_time_t next_status, greeting_time;
 
 static void help(void) {
     printf("Keys: g = motors on, s = stop (motors off), p = print status now, l = link counters, h = help\n"
+           "WiFi: w = connect (or show how it is connected)\n"
            "Map: n = start-up scan again (390 deg turn), m = print the map, z = one ToF frame\n"
            "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
            "       t = print the last test result again\n");
@@ -126,31 +128,27 @@ static void print_status(void) {
 }
 
 void debug_console_update(void) {
-    bool connected = stdio_usb_connected();
-    if (connected && !was_connected) {
+    bool usb = stdio_usb_connected(), wifi = wifi_console_connected();
+    if ((usb && !usb_was_connected) || (wifi && !wifi_was_connected)) {
         greeted = false;
         greeting_time = make_timeout_time_us(GREETING_DELAY_US);
     }
     // Losing the monitor doesn't stop the robot: a test can run with the cable
     // pulled. PicoB's safety stops (wheels, tilt) still apply.
-    was_connected = connected;
-    if (!connected) return;
+    usb_was_connected = usb;
+    wifi_was_connected = wifi;
+    if (!usb && !wifi) return;
     if (!greeted) {
         if (!time_reached(greeting_time)) return;
         greeted = true;
         greet();
         next_status = make_timeout_time_us(STATUS_PERIOD_US);
-        // The first time a serial monitor opens after power-up, the robot looks around.
-        if (!scan_started && !robot_test_running()) {
-            scan_started = true;
-            behaviour_scan();
-        }
     }
 
     switch (getchar_timeout_us(0)) {
     case 'g': body_motors(true); printf("Motors on\n"); break;
     case 's': behaviour_stop(); robot_test_stop(); body_motors(false); printf("Stopped, motors off\n"); break;
-    case 'n': robot_test_stop(); scan_started = true; behaviour_scan(); break;
+    case 'n': robot_test_stop(); behaviour_scan(); break;
     case 'm': print_map(); break;
     case 'z': print_frame(); break;
     case 'q': start_test(ROBOT_TEST_SQUARE); break;
@@ -158,7 +156,8 @@ void debug_console_update(void) {
     case 'r': start_test(ROBOT_TEST_TURNS); break;
     case 'f': start_test(ROBOT_TEST_FORWARD); break;
     case 'b': start_test(ROBOT_TEST_BACK); break;
-    case 'p': print_status(); break;
+    case 'p': print_status(); wifi_console_print_status(); break;
+    case 'w': wifi_console_start(); break;
     case 't': print_last_result(); break;
     case 'l': print_link(); break;
     case 'h': case '?': help(); break;

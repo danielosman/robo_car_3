@@ -4,8 +4,9 @@ Firmware for a fully autonomous robot car on two Pico 2 boards and a custom PCB.
 PCB bring-up is complete (tag `pcb-bringup-v1`): every connected part was
 verified with the bring-up firmware and viewer described below. The robot
 firmware (`app/` per Pico) is being built milestone by milestone to
-[ROBOT_PLAN.md](ROBOT_PLAN.md); a PC app comes later. The code is the source of
-truth for configuration and protocol details.
+[ROBOT_PLAN.md](ROBOT_PLAN.md). PicoA (a Pico 2 W) also sends its console over
+WiFi to a server on the PC ([ROBOT_WIFI.md](ROBOT_WIFI.md)). The code is the source
+of truth for configuration and protocol details.
 
 ```
 robo_car_3/
@@ -25,7 +26,8 @@ robo_car_3/
 │   ├── bringup/         # main.c: tilt -> motor test firmware
 │   └── app/             # robot firmware, the body
 ├── pc/
-│   └── bringup/         # Node server + browser viewer for picoA_bringup
+│   ├── bringup/         # Node server + browser viewer for picoA_bringup
+│   └── robot/           # Node server + browser console for picoA_app over WiFi
 └── build/               # one build dir for all firmwares (git-ignored)
     ├── picoA/picoA_app.uf2, picoA_bringup.uf2
     └── picoB/picoB_app.uf2, picoB_bringup.uf2
@@ -49,8 +51,8 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, PicoB's wheel control, odometry and `brain`,
-  PicoA's `body`, robot tests, rangefinder, world map, pose and the start-up scan
-  in a simulated room. Run it after every change.
+  PicoA's `body`, robot tests, rangefinder, world map, pose, the start-up scan
+  in a simulated room and the WiFi console (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
   from the encoders, heading from the gyro with the bias re-measured whenever the
@@ -67,18 +69,26 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   a frame was measured; `surroundings.c` feeds the frames to the map;
   `behaviour.c` runs the start-up scan. PicoB's clock is translated from the ODOM
   reports in `body.c`.
-- **Start-up scan:** the first time a serial monitor opens on PicoA after
-  power-up (or with `n`), the robot turns 390° in place, learns the floor from what
+- **Start-up (`main.c`):** powered up on USB (a computer, not a charger), PicoA
+  waits for the serial monitor and keys: no scan, no WiFi. Without USB it connects
+  to WiFi, then does the start-up scan whether that worked or not (ROBOT_WIFI.md).
+- **Start-up scan:** at power-up without USB, or with `n`, the robot turns 390° in place, learns the floor from what
   the lower zones see all around (fresh every start, nothing stored), prints the
   map, turns to face the most open direction and prints its heading. `n` clears
   the map and makes the robot's heading the map's up.
-- **PicoA console** (`debug_console.c`): a status line every 15 s on USB (none
-  while a test runs); keys `g` motors on, `s` stop, `p` status now, `t` last test
-  result, `l` link counters, `h` help; map: `n` start-up scan again, `m` print the
+- **PicoA console** (`debug_console.c`), on USB and over WiFi: a status line every
+  15 s (none while a test runs); keys `g` motors on, `s` stop, `p` status now (with
+  a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; map: `n` start-up scan again, `m` print the
   map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
   forward / back (`robot_test.c`). Unplugging the USB doesn't stop the robot. A
   test that stops early says why and what it measured so far. The keys and the
-  last result are printed ~1 s after you plug in (sooner gets lost on the Mac).
+  last result are printed ~1 s after a serial monitor opens or the robot server
+  connects (sooner gets lost on the Mac).
+- **WiFi console** (`wifi_console.c`, [ROBOT_WIFI.md](ROBOT_WIFI.md)): joins the
+  network in `picoA/app/wifi_config.h` (git-ignored: copy
+  `wifi_config.example.h`), finds the server by its UDP announcements, sends
+  everything printed and takes keys; reconnects by itself, and losing it doesn't
+  stop the robot.
 
 ### The map as printed (`m`)
 
@@ -156,8 +166,9 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
 **M2** (map; only PicoA):
 1. Robot on the floor with ~1 m of room around it, battery on. Keep it still ~1 s
    after power-up (gyro bias).
-2. Plug the USB into PicoA and open the serial monitor. After ~1 s: the keys, then
-   "Start-up scan: turning 390 deg…". The robot turns ~14 s.
+2. Plug the USB into PicoA and open the serial monitor. After ~1 s: the keys. Press
+   `n`: "Start-up scan: turning 390 deg…". The robot turns ~14 s. (Without USB it
+   scans by itself after trying the WiFi.)
 3. Expected: "Floor learned in N of 32 zones … rows 5-8 see it at … cm" (rows 7-8
    learned, or "assumed from the sensor's height"), the map, "Most open
    direction…", a short turn, "Facing heading …".
@@ -169,6 +180,19 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
    braking draws no obstacles. To see a removed object clear, turn without `n`
    (`r`, `s` after one turn, `m`).
 7. At a table edge (held, motors off), `m`: `?` along the edge, `:` beyond it.
+
+**WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
+1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,
+   build, flash `picoA_app`.
+2. Robot on USB, serial monitor open: nothing happens at start-up.
+3. `npm ci` then `npm start` in `pc/robot/`; open **http://127.0.0.1:8080/** ("Waiting
+   for robot…"). The first time, allow `node` to accept incoming connections.
+4. Press `w` in the serial monitor: "WiFi: connecting…", "WiFi: connected, IP …",
+   "Server: found at …", "Server: connected". The page shows "Robot connected" and
+   the keys.
+5. Press `p` and `m` on the page: the answers show on the page and in the serial
+   monitor. Unplug the USB (battery on): the page keeps working.
+6. Power up without USB: the statuses and then the start-up scan show on the page.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 
@@ -256,10 +280,12 @@ while the wheel turns: encoder wiring or power. Paste a few lines of each side.
    from Homebrew) or from a terminal (`PICO_SDK_PATH` etc. are set in `~/.zshrc`):
    ```sh
    cmake -S . -B build -G Ninja   # first time or after deleting build/
+   # if build/CMakeCache.txt still says PICO_BOARD pico2: add -DPICO_BOARD=pico2_w once
    cmake --build build
    ```
    If the extension downloads its own CMake/Ninja again, point `.vscode/settings.json` back
-   at Homebrew's (one copy of each tool).
+   at Homebrew's (one copy of each tool). `PICO_BOARD` is `pico2_w` for every
+   firmware (PicoA's WiFi); PicoB's firmware runs the same on its plain Pico 2.
    Robot firmware: `build/picoA/picoA_app.uf2` onto **PicoA**, `build/picoB/picoB_app.uf2`
    onto **PicoB**. Bring-up: `picoA_bringup.uf2` / `picoB_bringup.uf2`. In VS Code, Run /
    Flash / Debug ask which firmware to use (`picoA/picoA_app`, `picoB/picoB_app`, or
@@ -315,6 +341,13 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 - `~/kicad/robo_car_3/` — KiCad project and PCB review
 - `~/code/hm0360/`, `~/code/vl53l8cx/`, `~/code/arducam_b0319/`, `~/code/opt-4048/` —
   sibling example projects (not yet copied to this Mac)
+
+## Docs
+
+README.md, [ROBOT_PLAN.md](ROBOT_PLAN.md) and [ROBOT_WIFI.md](ROBOT_WIFI.md) show
+**only the current state**: how things are and how to use and test them. They hold
+no history. What happened (sessions, robot runs, results, fixes) goes only in
+[CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 ## Git conventions
 

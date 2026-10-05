@@ -23,9 +23,9 @@ target_link_libraries(picoA_bringup picoA_drivers)
 pico_add_extra_outputs(picoA_bringup)
 
 # Robot firmware (ROBOT_PLAN.md). M2: link to PicoB, map from the ToF sensor,
-# start-up scan, debug console, calibration tests.
+# start-up scan, debug console (USB and WiFi, ROBOT_WIFI.md), calibration tests.
 add_executable(picoA_app app/main.c app/body.c app/pose.c app/rangefinder.c app/world_map.c
-    app/surroundings.c app/behaviour.c app/robot_test.c app/debug_console.c)
+    app/surroundings.c app/behaviour.c app/robot_test.c app/debug_console.c app/wifi_console.c)
 pico_set_program_name(picoA_app "picoA_app")
 pico_set_program_version(picoA_app "0.1")
 pico_enable_stdio_uart(picoA_app 0) # UART0 is the link to PicoB
@@ -35,5 +35,7 @@ target_compile_options(picoA_app PRIVATE -Wall -Wextra -Wdouble-promotion)
 # up to 500 ms (SDK default), longer than PicoB's 250 ms DRIVE timeout: text may be
 # lost, drive commands may not.
 target_compile_definitions(picoA_app PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=5000)
-target_link_libraries(picoA_app common_link picoA_drivers)
+target_include_directories(picoA_app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/app) # lwipopts.h
+target_compile_definitions(picoA_app PRIVATE CYW43_HOST_NAME=\"robocar\") # as the router lists it
+target_link_libraries(picoA_app common_link picoA_drivers pico_cyw43_arch_lwip_threadsafe_background)
 pico_add_extra_outputs(picoA_app)

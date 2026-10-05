@@ -1,0 +1,18 @@
+{
+  "name": "robocar-robot-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RoboCar PicoA console over WiFi: the robot connects here, the browser shows it (ROBOT_WIFI.md).",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test src/robot.test.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.12"
+  }
+}

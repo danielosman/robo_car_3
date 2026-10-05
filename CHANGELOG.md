@@ -5,6 +5,25 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
+## 5 Oct 2026 (evening): WiFi console (ROBOT_WIFI.md), working on the robot
+
+Daniel wants no USB cable while the robot drives around. PicoA is a Pico 2 W, so
+`PICO_BOARD` is now `pico2_w` for every firmware. New: `picoA/app/wifi_console.*`
+(joins the WiFi, finds the PC server by its UDP broadcasts, sends the console and
+takes keys over TCP, heartbeats both ways, reconnects by itself; a second stdio
+output and input next to USB, so `debug_console.c` keeps its `printf`s) with a
+host test against a fake WiFi chip and lwIP; `pc/robot/` (Node server and browser
+page: status bar, a button per key, the log, a log file per run). Start-up
+changed: on USB PicoA does nothing until a key (`n` scans, `w` connects to WiFi);
+without USB it tries the WiFi, then scans. The scan no longer starts when a
+serial monitor opens. Host tests and the server tests pass.
+
+**On the robot:** worked first time. Powered up without the USB cable, PicoA joined
+the WiFi, found the server, did the start-up scan (shown on the page), and took
+keys from the page. While setting up, Claude's copy of the template overwrote
+Daniel's `wifi_config.h` (Daniel re-entered it); the first rebuild didn't pick up
+the new file because the build had never seen it (recompiled; tracked since).
+
 ## 5 Oct 2026: M2 passed; the map reworked
 
 **M2 test (latest `picoA_app` of 4 Oct, waxed wood, living room).** The start-up

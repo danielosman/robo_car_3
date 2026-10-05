@@ -1,7 +1,8 @@
 #!/bin/sh
 # Host tests (no Pico needed): the link; PicoB's wheel control, odometry and
 # brain (PicoA as PicoB sees it); PicoA's rangefinder, world map, pose, the
-# start-up scan end to end, body (PicoB as PicoA sees it) and robot tests. Each compiles one module against stubs and fakes and runs it:
+# start-up scan end to end, body (PicoB as PicoA sees it), robot tests and the
+# WiFi console. Each compiles one module against stubs and fakes and runs it:
 # hardware stubs in picoB/app/test/stubs and common/test/stubs, the fake clock
 # and fake link in common/test/fakes. Stops at the first failure.
 set -e
@@ -41,3 +42,6 @@ build test_robot_test picoA/app/test/test_robot_test.c $APP
 # out of the way, but show everything if the test fails.
 build/test_robot_test > build/test_robot_test.log || { cat build/test_robot_test.log; exit 1; }
 grep -v '^Drift [0-9]' build/test_robot_test.log
+build test_wifi_console picoA/app/test/test_wifi_console.c -IpicoA/app/test/stubs $APP
+build/test_wifi_console > build/test_wifi_console.log || { cat build/test_wifi_console.log; exit 1; }
+grep -v '^WiFi:\|^Server:' build/test_wifi_console.log

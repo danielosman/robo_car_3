@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboCar console</title>
+<style>
+:root { color-scheme:dark; } * { box-sizing:border-box; }
+html, body { height:100%; }
+body { margin:0; display:flex; flex-direction:column; font:14px/1.4 system-ui,sans-serif; background:#111; color:#ddd; }
+header { padding:10px 16px; border-bottom:1px solid #333; display:flex; flex-direction:column; gap:8px; }
+.top { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+h1 { font-size:18px; margin:0; }
+#status { padding:3px 10px; border-radius:12px; background:#333; }
+#status.connected { background:#1f4d2b; color:#bff5cc; } #status.lost { background:#5a2a1a; color:#ffd2bf; }
+#server { color:#888; font-size:12px; }
+.keys { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.keys span { color:#888; font-size:12px; margin-left:6px; }
+button { background:#222; color:#ddd; border:1px solid #555; border-radius:5px; padding:4px 8px; cursor:pointer; }
+button kbd { font:bold 13px ui-monospace,monospace; color:#fff; margin-right:4px; }
+button.stop { background:#6b1d1d; border-color:#b33; }
+button:disabled { opacity:.45; cursor:default; }
+#log { flex:1; margin:0; padding:10px 16px; overflow:auto; white-space:pre; font:13px/1.35 ui-monospace,Menlo,monospace; }
+#log .note { color:#7aa7d9; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>RoboCar</h1>
+    <div id="status">Server not reachable</div>
+    <div id="server"></div>
+    <label><input type="checkbox" id="follow" checked> follow</label>
+    <button id="clear">Clear page</button>
+  </div>
+  <div class="keys" id="keys"></div>
+</header>
+<pre id="log"></pre>
+<script src="console.js"></script>
+</body>
+</html>

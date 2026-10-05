@@ -27,6 +27,7 @@ describes the current design; what happened in each session is in
 | `CHANGELOG.md` | what happened session by session: robot runs, results, fixes |
 | `REDFLAGS.md` | APOSD red-flag log per milestone, plus bugs found on the robot |
 | `REFACTORING.md` | code review of M0+M1 (standards + spec), all applied |
+| `ROBOT_WIFI.md` | PicoA's console over WiFi to `pc/robot/` (a browser page), and what PicoA does at power-up |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
 | `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
@@ -41,7 +42,10 @@ describes the current design; what happened in each session is in
 - Flash `build/picoA/picoA_app.uf2` → PicoA, `build/picoB/picoB_app.uf2` → PicoB.
   Only the Pico whose code changed needs reflashing; a change to `common/link_msgs.h`
   means both. Keep the robot still ~1 s after PicoB starts (gyro bias).
-- Serial monitor on **PicoA's** USB: keys and the map symbols in the README.
+- The console: a serial monitor on **PicoA's** USB, or without the cable the
+  browser page of `pc/robot/` over WiFi (`npm start` there, ROBOT_WIFI.md); keys and
+  the map symbols in the README. On USB at power-up PicoA waits (`n` scans, `w`
+  joins the WiFi); without USB it joins the WiFi, then scans.
 
 **Hardware facts** (beyond §3 and the README):
 - IMU breakout is mounted **turned 180° about Z: X backward, Y right, Z up**
@@ -63,8 +67,8 @@ describes the current design; what happened in each session is in
   init.
 - Red-flag review at the end of each milestone, logged in REDFLAGS.md; deviations
   from the PCB go in the README.
-- README and this plan show only the current state; session results, robot runs
-  and fixes go in CHANGELOG.md.
+- README, this plan and ROBOT_WIFI.md show only the current state; history
+  (session results, robot runs, fixes) goes only in CHANGELOG.md.
 - Commit and push only when Daniel asks. **No `Co-Authored-By` lines** in commits
   (README convention).
 
@@ -532,12 +536,12 @@ grid) is in §12.
   │         └─► world_map ────┼─► behaviour         │                          │
   │ pose ◄── ODOM ◄───────────┼──────────│ ◄─────── │ odometry: gyro heading,  │
   │   (full-turn + map correction)       │   ODOM   │   encoders, tilt         │
-  │ debug log ─► USB serial              │          │                          │
+  │ debug log ─► USB serial, WiFi        │          │                          │
   └──────────────────────────────────────┘          └──────────────────────────┘
 ```
 
 - **PicoA (brain):** camera, ToF, map, movement detection, pose
-  correction, behaviour, and a debug log on its USB serial.
+  correction, behaviour, and a debug log on its USB serial and over WiFi.
 - **PicoB (body):** wheel speed control, odometry, tilt, and its own safety stop.
 - PicoB never decides where to go; PicoA never touches the motors.
 
@@ -576,7 +580,8 @@ Bandwidth: ODOM ≈ 45 B × 50 Hz ≈ 2.3 kB/s; everything together is under 5 %
 link.
 
 **No PC app in v1:** the robot is fully autonomous. During development, PicoA's
-USB serial prints a readable debug log (pose, events, behaviour changes, link
+console (USB serial, or over WiFi to the browser page of `pc/robot/`, ROBOT_WIFI.md)
+prints a readable debug log (pose, events, behaviour changes, link
 errors, PicoB's LOG lines) and accepts a few single-key commands in a serial
 monitor, like the bring-up firmware (`s` stop, `g` go, `m` print the map near the
 robot as text). A PC link with the same framing comes later (§12).
@@ -698,7 +703,7 @@ Each milestone ends with a test on the robot and a red-flag review.
   fitted: stop scanning and chasing below 6.4 V (3.2 V/cell), motors off below
   6.0 V (3.0 V/cell). Until then the BMS cutting the power (2.5–3.0 V/cell) is the
   only protection, so keep an eye on run time.
-- **PC link:** the robot sends its map, pose and events to a PC app (`pc/app/`), and the PC can send commands back. Same framing as the inter-Pico link, its own message set; USB first, wireless (Pico 2 W) possibly later.
+- **PC link:** the robot sends its map, pose and events to the PC as data (not text), and the page of `pc/robot/` draws them. Same framing as the inter-Pico link, its own message set, over the WiFi connection that carries the console today (ROBOT_WIFI.md).
 
 ---
 
@@ -741,8 +746,8 @@ sure target (status 5, 6, 9). The sensor is turned 90° on the PCB (the bring-up
 viewer's rotation); not mirrored. Each frame is placed with the pose at the moment
 it was measured (`pose_at`); PicoB's clock comes from ODOM's t_B (§9).
 
-**Start-up scan** (the first need, §7): when a serial monitor first opens after
-power-up (later: always at power-up), or with `n`: the map is cleared and the
+**Start-up scan** (the first need, §7): at power-up without USB, after trying the
+WiFi (ROBOT_WIFI.md), or with `n`: the map is cleared and the
 robot's heading becomes the map's x axis (up on the print); it turns 390°, keeping
 the frames; the floor is learned from them and they are mapped; motors off while
 the map is built and printed (it takes longer than PicoB's 250 ms DRIVE timeout);

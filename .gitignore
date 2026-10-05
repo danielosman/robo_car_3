@@ -2,3 +2,5 @@ build/
 node_modules/
 .claude/settings.local.json
 .cache/
+picoA/app/wifi_config.h
+pc/robot/logs/
