@@ -94,13 +94,18 @@ bool rangefinder_poll(range_frame_t *frame) {
 }
 
 static int floor_index(int ray) { return ray - FIRST_FLOOR_ROW * RANGEFINDER_COLS; }
+static bool floor_learned(int ray) { return floor_down_rad[floor_index(ray)] != 0; }
+
+// A floor seen down_rad below horizontal from the sensor's height: how far along the ray, and back.
+static float floor_range_m(float down_rad) { return SENSOR_Z_M / sinf(down_rad); }
+static float floor_angle_rad(float range_m) { return asinf(SENSOR_Z_M / range_m); }
 
 // Just above the floor rows, a zone's lower edge can still reach the floor far
 // away (the robot sits a little nose-down, and nods): such a reading may be the floor.
-static bool maybe_floor(int row, float pitch_rad, float range_m) {
-    float edge_down_rad = ((float)row - 3.0f) * ZONE_RAD - pitch_rad;
+static bool maybe_floor(int ray, float pitch_rad, float range_m) {
+    float edge_down_rad = zone_down_rad[ray] + ZONE_RAD / 2 - pitch_rad;
     if (edge_down_rad <= 0) return false;
-    return range_m >= EDGE_FLOOR_SHARE * SENSOR_Z_M / sinf(edge_down_rad);
+    return range_m >= EDGE_FLOOR_SHARE * floor_range_m(edge_down_rad);
 }
 
 void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan) {
@@ -112,12 +117,12 @@ void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan)
         int row = i / RANGEFINDER_COLS;
         // The 5th row's floor is often not learned (in a room it mostly sees walls):
         // then it's used like the rows above it.
-        bool floor_row = row >= FIRST_FLOOR_ROW && !(row == HORIZON_ROW && floor_down_rad[floor_index(i)] == 0);
+        bool floor_row = row >= FIRST_FLOOR_ROW && !(row == HORIZON_ROW && !floor_learned(i));
         ray_t *ray = &scan->ray[i];
         uint16_t mm = frame->range_mm[i];
         ray->kind = RAY_UNUSED;
         if (mm == RANGE_INVALID) continue;
-        if (floor_row && (mm == RANGE_NO_TARGET || floor_down_rad[floor_index(i)] == 0)) continue;
+        if (floor_row && (mm == RANGE_NO_TARGET || !floor_learned(i))) continue;
         if (row == HORIZON_ROW && !floor_row && mm == RANGE_NO_TARGET) continue; // its floor may be near: no "1 m clear"
         float range_m = mm == RANGE_NO_TARGET ? NO_TARGET_CLEAR_M : (float)mm * 0.001f;
         float d[3];
@@ -128,7 +133,7 @@ void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan)
         float min_height_m = floor_row ? obstacle_min_m[floor_index(i)] : OBSTACLE_MIN_M;
         bool obstacle = mm != RANGE_NO_TARGET && ray->z_m >= min_height_m &&
                         (row != HORIZON_ROW || range_m < HORIZON_MAX_HIT_M) &&
-                        (floor_row || !maybe_floor(row, pitch_rad, range_m));
+                        (floor_row || !maybe_floor(i, pitch_rad, range_m));
         ray->kind = obstacle ? RAY_HIT : RAY_CLEAR;
     }
 }
@@ -147,9 +152,9 @@ void rangefinder_learn_floor(const range_frame_t *frame, float pitch_rad) {
         // from the sensor's height meets a floor this far away, plus the pitch.
         float range_m = (float)mm * 0.001f;
         if (range_m <= SENSOR_Z_M) continue; // can't be the floor
-        float level_down = asinf(SENSOR_Z_M / range_m) + pitch_rad;
+        float level_down = floor_angle_rad(range_m) + pitch_rad;
         if (level_down <= 0) continue;
-        samples[z][n_samples[z]++] = SENSOR_Z_M / sinf(level_down);
+        samples[z][n_samples[z]++] = floor_range_m(level_down);
     }
 }
 
@@ -175,10 +180,10 @@ int rangefinder_finish_floor(void) {
         while (hi > lo && v[hi - 1] > r75 * (1 + FLOOR_WINDOW)) hi--;
         float floor_m = v[lo + (hi - lo) / 2], short_m = v[lo + (hi - lo) / 10];
         if (floor_m <= SENSOR_Z_M) continue;
-        float down = asinf(SENSOR_Z_M / floor_m), nominal = zone_down_rad[z + FIRST_FLOOR_ROW * RANGEFINDER_COLS];
+        float down = floor_angle_rad(floor_m), nominal = zone_down_rad[z + FIRST_FLOOR_ROW * RANGEFINDER_COLS];
         // A zone reports the nearest surface, so it sees the floor no farther than its
         // centre would (some slack for tilt), and not below its lower edge.
-        if (floor_m > FLOOR_MAX_SHARE * SENSOR_Z_M / sinf(nominal) || down > nominal + ZONE_RAD) continue;
+        if (floor_m > FLOOR_MAX_SHARE * floor_range_m(nominal) || down > nominal + ZONE_RAD) continue;
         floor_down_rad[z] = down;
         obstacle_min_m[z] = fmaxf(OBSTACLE_MIN_M, (floor_m - short_m) * sinf(down) + SCATTER_MARGIN_M);
         learned++;
@@ -192,7 +197,7 @@ float rangefinder_floor_distance(int row) {
     for (int col = 0; col < RANGEFINDER_COLS; col++) {
         int z = floor_index(row * RANGEFINDER_COLS + col);
         if (row < FIRST_FLOOR_ROW || floor_down_rad[z] == 0) continue;
-        sum_m += SENSOR_Z_M / sinf(floor_down_rad[z]);
+        sum_m += floor_range_m(floor_down_rad[z]);
         n++;
     }
     return n ? sum_m / (float)n : 0;
@@ -202,7 +207,7 @@ bool rangefinder_zone_floor(int ray, float *floor_m, float *obstacle_min_height_
     if (ray < FIRST_FLOOR_ROW * RANGEFINDER_COLS || ray >= RANGEFINDER_RAYS) return false;
     int z = floor_index(ray);
     if (floor_down_rad[z] == 0) return false;
-    *floor_m = SENSOR_Z_M / sinf(floor_down_rad[z]);
+    *floor_m = floor_range_m(floor_down_rad[z]);
     *obstacle_min_height_m = obstacle_min_m[z];
     return true;
 }

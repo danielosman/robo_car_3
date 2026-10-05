@@ -45,8 +45,7 @@ Built to [ROBOT_PLAN.md](ROBOT_PLAN.md); red flags found on the way are logged i
 robot** (2 Oct 2026). **M1 (calibration): in progress**: tilt stop and gyro drift
 done; turns and 2 m straight to repeat. **4 Oct: new motors, all four encoders
 connected and checked** (see "Motor change" below); square test passed again. **M2
-(map): written 4 Oct, three robot runs; the start-up scan works, the map is being
-checked against the room** (steps below; not committed yet).
+(map) passed on the robot** (5 Oct 2026; results below the M2 test steps).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16.
@@ -228,6 +227,23 @@ it and paste `z`.
 Third run (4 Oct): the start-up scan ran to the end without a stop; floor rows
 6-8 learned (~45 / 30 / 22 cm), the 5th row not (it sees walls); the false obstacle
 ahead-left is gone. Since: an unlearned 5th row is used like the rows above.
+
+**M2 result** (5 Oct 2026, waxed wood, living room):
+- Start-up scan with the latest firmware: the map matches the room (walls 1.5-2 m
+  away, the table and sofa legs, an object ~40 cm behind); no `##` on open floor.
+  Using the unlearned 5th row again turned the area behind-left from unknown into
+  free out to the walls.
+- Objects placed to the robot's left, then `n` and `q`: the scan mapped them and
+  the robot faced away from them; after the square, `m` showed the walls and
+  objects where they were and no obstacles from braking. Square: odometry 1.1 /
+  −1.5 cm, 363.0° (as on 4 Oct).
+- **Open:** isolated unknown cells inside the free area (often in radial lines)
+  cut the free distance short, so the robot can pick a less open direction than
+  the map shows (here it turned away from a more open front-right). Map changes
+  counted 1584 after one scan and a square: too noisy as they stand for M5.
+- `**` on the map is 30 cm ahead of the robot: with 10 cm cells it shows the
+  heading to about ±20°. `n` clears the map and makes the robot's heading at its
+  start the map's up.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

@@ -72,3 +72,18 @@ all items applied. Item numbers refer to REFACTORING.md.
 | PicoA `world_map` | Special-general mixture (considered) | `map_print()` is console output inside the map | **Accepted:** printing needs the cell size and window, which only the map knows (§10) |
 | PicoA `debug_console` | (design) | The start-up scan is triggered by the console (first monitor connection) | **Accepted for M2** (Daniel: start when the monitor opens); moves to `main`/`behaviour` when the robot starts on its own |
 | PicoA `body` | Information leakage (avoided) | The clock offset could have been worked out in `pose` | **Avoided:** PicoB's clock is part of "PicoB as PicoA sees it"; `body_odom_time_us()` hides it |
+
+### M2 review pass (5 Oct 2026)
+
+Checklist §11 over `rangefinder`, `world_map`, `pose`, `surroundings`, `behaviour`
+and the M2 parts of `debug_console`. No behaviour changed; host tests pass.
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| PicoA `rangefinder` | Repetition / nonobvious code | The floor geometry (sensor height ↔ angle ↔ distance along the ray) written out as `SENSOR_Z_M / sinf(…)` and `asinf(SENSOR_Z_M / …)` in six places; "is this floor zone learned" as `floor_down_rad[floor_index(i)] == 0` in three; a zone's lower edge as `(row - 3.0f) * ZONE_RAD`, which only works because zone centres are `(row - 3.5f)` | **Fixed:** `floor_range_m()`, `floor_angle_rad()`, `floor_learned()`; the lower edge is `zone_down_rad[ray] + ZONE_RAD / 2` |
+| PicoA `world_map` | Repetition | "One update per cell per scan" written out in the hit loop and in `clear_along()` | **Fixed:** `first_this_scan()` |
+| PicoA `behaviour` | Information leakage (considered) | `FREE_MAX_M` (2 m) restates the map's reach | **Accepted:** `map_free_distance()` already stops at the window's edge; the cap is behaviour's own choice, so every heading is scored over the same distance (the window's edge is 1.5-2.5 m away depending on where it was last centred) |
+| PicoA `surroundings`, `debug_console` | Information leakage (considered) | They know which rows are floor rows (`rangefinder_first_floor_row()`, `rangefinder_floor_zones()`) to print the learned floor | **Accepted:** diagnostics only, like `link_stats()` in M1; the decisions stay in `rangefinder` |
+| PicoA `rangefinder` | Nonobvious code (considered) | `HORIZON_ROW` and `FIRST_FLOOR_ROW` are both row 4 | **Accepted:** two facts about the same row (it learns the floor; its floor is too far for obstacles beyond 0.95 m); one name for both would hide one of them |
+| PicoA `world_map` | (to watch, M5) | "Map changes so far: 1584" after one scan and a square: ~2 per frame, so change detection as it stands is noisy (cells at edges and far walls flipping between free and occupied) | **Open:** nothing uses changes until M5, which has to filter them (e.g. a change only counts if it persists, or clusters) |
+| PicoA `world_map`, `behaviour` | (found on the robot) | Isolated unknown cells inside the free area (often in radial lines) stop `map_free_distance()`, so the robot undercounts open directions | **Open:** cause to find and fix before M4 (ROBOT_PLAN §14, next session) |

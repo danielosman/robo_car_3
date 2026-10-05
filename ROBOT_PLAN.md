@@ -1,8 +1,8 @@
 # RoboCar — robot app plan
 
 Status: **M0 passed (2 Oct 2026). M1 (calibration) passed on waxed wood with the
-new motors (4 Oct); back and carpet left for later. M2 (map): written 4 Oct (§14),
-three robot runs, the start-up scan works; checking the map; not committed yet.** This
+new motors (4 Oct); back and carpet left for later. M2 (map) passed on the robot
+(5 Oct, §14); red-flag review done.** This
 plan covers the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully
 autonomous** robot, built on the drivers verified in the bring-up (tag
 `pcb-bringup-v1`). Start a new session with "Where we are" below.
@@ -54,8 +54,8 @@ odometry, ~200.5 cm real (+0.15 %): no change. `b` and the carpet: Daniel tests
 them later. (PicoA had still been on protocol v3: both Picos are now on v4.)
 
 **Next session, in this order:**
-1. **M2:** see §14 (decisions, what's done, the three robot runs, findings) and its
-   "Next session" list at the end of this file. M2 code is not committed yet.
+1. **M2 is done** (§14; code in `1d81812`, review fixes after it). Next: the open
+   points in §14's "Next session" list, then M3.
 2. Still open from M1: after the 3 Oct turn test's safety stop, `f` and `g` printed
    nothing ("Forward test…", "Motors on"), though the robot drove ~2 m. Not seen
    since the console fixes; watch for it. Also watch `l` link counters after a long
@@ -114,8 +114,7 @@ them later. (PicoA had still been on protocol v3: both Picos are now on v4.)
   (README convention).
 
 **Not yet implemented from §9:** CALIBRATE,
-GYRO_SCALE (M5), STATUS beyond the gyro bias, the slip flag. The console's `m` (print map) arrives with
-M2.
+GYRO_SCALE (M5), STATUS beyond the gyro bias, the slip flag.
 
 ## 0. Overview
 
@@ -713,7 +712,7 @@ Each milestone ends with a test on the robot and a red-flag review.
 |---|---|---|
 | M0 ✅ | **Foundations:** `common/link` (its byte and frame counters double as the first UART test: the link was never brought up on the PCB); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | **Passed 2 Oct 2026:** end pose within 0.7 cm and < 1° of odometry after a 50 cm square |
 | M1 | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % |
-| M2 | **Map:** per-zone floor calibration, map from ToF and odometry, map printed as text in the debug log | Open floor shows no obstacles, also while braking; walls stay put while turning |
+| M2 ✅ | **Map:** per-zone floor calibration, map from ToF and odometry, map printed as text in the debug log | **Passed 5 Oct 2026:** open floor clean also after the square's braking; walls and furniture stayed put; placed objects mapped |
 | M3 | **Movement detection** while stationary (ToF, then camera); exit side. Take the camera driver out of bring-up first (moved from M0: nothing earlier uses the camera) | Events in the debug log match what you do in front of the robot |
 | M4 | **Behaviour:** Investigate, Face open space, the Safety guard | Robot turns to movement, stops 50 cm away, then turns to face open space |
 | M5 | **Staleness, 390° scan with the full-turn check, map changes** | Heading error after a scan ~1–2°; move an object while the robot isn't looking and the robot finds it |
@@ -846,10 +845,25 @@ The false obstacle next to the robot ahead-left is gone. Change after it: an
 unlearned 5th row is used like the rows above it (far readings that may be floor
 at its lower edge are free space, closer ones obstacles) instead of being dropped.
 
+**M2 result (5 Oct, latest `picoA_app`):** the start-up map matches the room
+(the `##` right and behind are table and sofa legs and a real object); using the
+unlearned 5th row again made the area behind-left free out to the walls. Daniel
+placed objects to the left, then `n` and `q`: they were mapped where they were,
+the robot faced away from them, and after the square (odometry 1.1 / −1.5 cm,
+363.0°) `m` showed walls and objects in place and no obstacles from braking.
+**M2 passed.** Red-flag review: REDFLAGS.md, "M2 review pass" (no behaviour
+change; reflashing PicoA is optional).
+
+**Found in the M2 test, open:**
+- **Gaps in the free area:** isolated unknown cells inside the free area, often in
+  radial lines. `map_free_distance()` stops at them, so the robot undercounts open
+  directions (it turned away from a more open front-right). Find the cause first
+  (cells between rays? floor rays dropping below 2 cm before they end, so their
+  last stretch never clears layer 0?), then fill or tolerate the gaps.
+- **Noisy map changes:** 1584 after one scan and a square. M5 must filter them.
+
 **Next session, in this order:**
-1. Daniel checks the third run's map against the room (the `##` cluster ~50-60 cm
-   right, the `########` ~45 cm behind-right: real?) and runs the latest
-   `picoA_app` (5th row used again; only PicoA).
-2. The rest of the M2 test: `q` then `m` (walls stay put, no obstacles from
-   braking).
-3. M2 red-flag review; commit (M2 is uncommitted; last commit `a3c93de`).
+1. Plan, then fix, the gaps in the free area (above).
+2. Still open from M1: `b` and the carpet tests.
+3. M3 (movement detection), starting with moving the camera driver out of
+   bring-up.

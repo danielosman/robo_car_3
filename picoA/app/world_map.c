@@ -109,6 +109,13 @@ static point_t to_world(const pose_t *p, float x_m, float y_m, float z_m) {
     return (point_t){p->x_m + c * x_m - s * y_m, p->y_m + s * x_m + c * y_m, z_m};
 }
 
+// One update per cell per scan: true the first time this scan reaches the cell.
+static bool first_this_scan(cell_t *c) {
+    if (c->frame == frame_id) return false;
+    c->frame = frame_id;
+    return true;
+}
+
 // Every cell the line from a to b passes through, before b, gets a miss, unless
 // this scan already updated it (a hit always wins).
 static void clear_along(point_t a, point_t b, uint16_t now) {
@@ -120,9 +127,7 @@ static void clear_along(point_t a, point_t b, uint16_t now) {
         int ix = cell_index(a.x + f * dx), iy = cell_index(a.y + f * dy), l = layer_of(a.z + f * dz);
         if (l < 0 || !in_window(ix, iy)) continue;
         cell_t *c = cell_at(l, ix, iy);
-        if (c->frame == frame_id) continue;
-        c->frame = frame_id;
-        miss(c, now);
+        if (first_this_scan(c)) miss(c, now);
     }
 }
 
@@ -155,9 +160,7 @@ void map_add_scan(const scan_t *scan, const pose_t *pose) {
         int ix = cell_index(end.x), iy = cell_index(end.y), l = layer_of(end.z);
         if (l < 0 || !in_window(ix, iy)) continue;
         cell_t *c = cell_at(l, ix, iy);
-        if (c->frame == frame_id) continue;
-        c->frame = frame_id;
-        hit(c, now);
+        if (first_this_scan(c)) hit(c, now);
     }
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         const ray_t *r = &scan->ray[i];
