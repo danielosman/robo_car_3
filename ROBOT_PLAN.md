@@ -2,7 +2,8 @@
 
 Status: **M0 passed (2 Oct 2026). M1 (calibration) passed on waxed wood with the
 new motors (4 Oct); back and carpet left for later. M2 (map) passed on the robot
-(5 Oct, §14); red-flag review done.** This
+(5 Oct, §14); red-flag review done; after it the map was reworked the same day
+(no gaps, no fading, drops, floor seen, blind spots), tested on the robot.** This
 plan covers the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully
 autonomous** robot, built on the drivers verified in the bring-up (tag
 `pcb-bringup-v1`). Start a new session with "Where we are" below.
@@ -54,8 +55,9 @@ odometry, ~200.5 cm real (+0.15 %): no change. `b` and the carpet: Daniel tests
 them later. (PicoA had still been on protocol v3: both Picos are now on v4.)
 
 **Next session, in this order:**
-1. **M2 is done** (§14; code in `1d81812`, review fixes after it). Next: the open
-   points in §14's "Next session" list, then M3.
+1. **M2 is done** (§14; code in `1d81812`, review `bf30030`, map rework after it).
+   Read §14 from "Gaps and drops" on: what the map symbols mean now and why. Then
+   §14's "Next session" list (M1 leftovers, then M3).
 2. Still open from M1: after the 3 Oct turn test's safety stop, `f` and `g` printed
    nothing ("Forward test…", "Motors on"), though the robot drove ~2 m. Not seen
    since the console fixes; watch for it. Also watch `l` link counters after a long
@@ -910,11 +912,44 @@ each cell keeps the time of its last measurement. Host tests: drops, no false `?
 while nodding with noise, floor rays, `?` cleared only by seeing the floor, 6
 misses, an hour without change. Not yet run on the robot.
 
+**Removed object (5 Oct):** `n`, object removed, one turn with `r`, `m`: the object
+ahead cleared, the rest stayed. `:` showed right next to the robot and between the
+floor rows' rings: only a floor ray's end point counted as floor seen, and the
+lowest row reaches the floor 17 cm ahead of the sensor at the nearest. Fixed
+(Daniel: assume floor in the blind spots, the robot turned there and didn't fall):
+within 15 cm of the robot (its turning circle) is floor with nothing on it, and a
+floor ray marks floor seen over its zone's whole patch (from where the zone's lower
+edge meets the floor to the reading). Host test: floor seen in 53 of 55 cells
+within 45 cm of the robot in the simulated room. On the robot the disc was solid,
+but `.` also reached 1-1.6 m to the left: with the robot nodding nose up ~3°, the
+6th row's patch reached 1.6 m, so its far readings (walls, reflections) counted as
+floor. Fixed: nose up no longer stretches the 6th row's patch (only nose down
+shortens it); floor seen now reaches at most ~85 cm.
+
+**Last robot run (5 Oct, latest firmware):** solid `.` disc ~50-60 cm around the
+robot, `:` beyond, no `.` farther out; obstacles where earlier maps had them.
+
+**Learned on the way (keep in mind):**
+- `.` / `:` / `?` / `##` / blank mean: floor seen / nothing in the way but floor
+  unseen / floor missing where rows 7-8 expected it / obstacle / never seen.
+- The VL53 status 12 zones (top right, later top left) move with the scene: two
+  surfaces at almost the same distance in a zone, harmless.
+- The waxed floor reflects: the 6th row sometimes reads the wall (184 cm), rows 7-8
+  read "beyond the floor" in front of a white glossy cupboard (2 `?`).
+- A flat face often fills 2 cells (`####`): zone width (5.6°, ~5 cm at 50 cm),
+  range noise, the changing view in the turn, cell edges. Since nothing fades and
+  rays can't pass through the face, the back cell stays. Harmless; possible later
+  refinement: clear a cell behind a face when the face is seen again from closer.
+- With 6 misses to clear, a false `##` stays until the robot looks through it 6
+  times; watch for stray `##` that never go away.
+- Scans on a desk: keep a hand ready (the robot slides ~1.5 cm per turn).
+- `n` clears the map and resets "up"; to see a removed object clear, turn without
+  `n` (`r`, then `s` after one turn, then `m`).
+
 **Next session, in this order:**
-1. Not yet tried on the robot: move an object away while the robot looks at it
-   (it clears within a second); one behind it stays.
-2. Still open from M1: `b` and the carpet tests.
-3. M3 (movement detection), starting with moving the camera driver out of
+1. Still open from M1: `b` and the carpet tests (carpet: check floor learning and
+   `?` on it too).
+2. M3 (movement detection), starting with moving the camera driver out of
    bring-up.
-4. M4 then adds: drive only while rows 7-8 see the floor ahead; face the farthest
+3. M4 then adds: drive only while rows 7-8 see the floor ahead; face the farthest
    drivable corridor.

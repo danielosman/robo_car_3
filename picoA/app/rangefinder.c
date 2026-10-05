@@ -137,7 +137,9 @@ void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan)
             float down_rad = floor_down_rad[floor_index(i)];
             if (down_rad - pitch_rad <= 0) continue;
             float floor_m = floor_range_m(down_rad - pitch_rad);
-            float far_down_rad = zone_down_rad[i] - ZONE_RAD / 2 - pitch_rad;
+            // The 6th row's far end grazes the floor: nose up 3°, it would reach 1.6 m.
+            // Its far readings are often reflections, so nose up doesn't stretch it.
+            float far_down_rad = zone_down_rad[i] - ZONE_RAD / 2 - (tells_drop ? pitch_rad : fminf(pitch_rad, 0));
             bool beyond_floor = far_down_rad > 0 && (float)mm * 0.001f > DROP_SHARE * floor_range_m(far_down_rad);
             if (mm == RANGE_NO_TARGET || beyond_floor) {
                 if (!tells_drop) continue; // the 6th row: tells nothing
@@ -163,6 +165,12 @@ void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan)
                         (row != HORIZON_ROW || range_m < HORIZON_MAX_HIT_M) &&
                         (floor_row || !maybe_floor(i, pitch_rad, range_m));
         ray->kind = obstacle ? RAY_HIT : must_see_floor ? RAY_FLOOR : RAY_CLEAR;
+        if (ray->kind == RAY_FLOOR) {
+            float near_down_rad = zone_down_rad[i] + ZONE_RAD / 2 - pitch_rad;
+            float near_m = SENSOR_Z_M / tanf(near_down_rad); // along the floor
+            ray->floor_from_x_m = SENSOR_X_M + near_m * cosf(zone_left_rad[i]);
+            ray->floor_from_y_m = SENSOR_Y_M + near_m * sinf(zone_left_rad[i]);
+        }
     }
 }
 

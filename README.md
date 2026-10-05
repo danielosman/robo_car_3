@@ -198,7 +198,8 @@ serial log of each step:
 4. Check the map against the room: walls and furniture legs where they are, `.`
    on the open floor, no `##` in the middle of open floor. Within ~1 m obstacles
    show as `##`; farther walls as `''` (only their part above 12 cm is seen).
-   `.` = floor seen, nothing on it (only within ~50 cm: the floor rows); `:` =
+   `.` = floor seen, nothing on it (only within ~50 cm: the floor rows, and under
+   the robot, which stands there); `:` =
    nothing in the way, floor not seen (farther, or over a drop); `?` = no floor
    where rows 7-8 expected it, 3 times (a drop, or a floor the sensor can't see);
    blank = never seen (behind objects, far away). Cells stay on the map once seen.
@@ -259,7 +260,12 @@ readings that fit each zone's patch, and rows 7-8 fall back to the sensor's 7 cm
 height, so a start-up scan next to a desk's edge still learns it. `.` marks only
 where the floor was seen (within ~50 cm), `:` free space with the floor unseen.
 On the robot: living room solid free area, no false `?` (2 in front of a white
-glossy cupboard); on a desk, `?` along the edges and `:` beyond them.
+glossy cupboard); on a desk, `?` along the edges and `:` beyond them. Under the
+robot (within 15 cm, its turning circle) counts as floor, and a floor reading
+marks its zone's whole patch, so `.` forms a solid disc ~50 cm around the robot;
+nose-up tilt doesn't stretch the 6th row's patch (it made `.` appear 1.6 m away).
+A flat face often shows as two cells (`####`): the map marks where the face was
+seen, not how thick the object is.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

@@ -38,6 +38,9 @@ typedef enum {
 typedef struct {
     float x_m, y_m, z_m; // end point, robot frame (x forward, y left); z above the floor
     ray_kind_t kind;
+    // RAY_FLOOR: where the zone's patch of floor begins (its lower edge meets the
+    // floor), robot frame. The zone saw the floor from there to the end point.
+    float floor_from_x_m, floor_from_y_m;
 } ray_t;
 
 typedef struct {

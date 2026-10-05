@@ -13,11 +13,12 @@
 static scan_t scan;
 static const pose_t at_origin = {0, 0, 0, 0};
 
-// A scan with one ray from the sensor at (0, 0, 7 cm) to (x, y, z); the others unused.
+// A scan with one ray from the sensor at (0, 0, 7 cm) to (x, y, z); the others
+// unused. A floor ray saw the floor only at its end.
 static void one_ray(float x, float y, float z, ray_kind_t kind) {
     memset(&scan, 0, sizeof scan);
     scan.origin_z_m = 0.07f;
-    scan.ray[0] = (ray_t){x, y, z, kind};
+    scan.ray[0] = (ray_t){x, y, z, kind, x, y};
 }
 
 static void seconds(float s) { fake_now_us += (uint64_t)(s * 1e6f); }
@@ -56,8 +57,8 @@ int main(void) {
     // through: 10 rays ending in it are one sighting, so clearing it is no change.
     memset(&scan, 0, sizeof scan);
     scan.origin_z_m = 0.07f;
-    for (int i = 0; i < 10; i++) scan.ray[i] = (ray_t){0.75f, -0.45f, 0.07f, RAY_HIT};
-    scan.ray[10] = (ray_t){1.5f, -0.9f, 0.07f, RAY_CLEAR}; // through (0.75, -0.45)
+    for (int i = 0; i < 10; i++) scan.ray[i] = (ray_t){0.75f, -0.45f, 0.07f, RAY_HIT, 0.75f, -0.45f};
+    scan.ray[10] = (ray_t){1.5f, -0.9f, 0.07f, RAY_CLEAR, 1.5f, -0.9f}; // through (0.75, -0.45)
     map_add_scan(&scan, &at_origin);
     assert(map_cell(0.75f, -0.45f, 0) == CELL_OCCUPIED);
     assert(cell_at(0, cell_index(0.75f), cell_index(-0.45f))->sightings == 1);
@@ -115,8 +116,14 @@ int main(void) {
     assert(map_cell(0.25f, 0.05f, 0) == CELL_FREE && map_cell(0.30f, 0.05f, 0) == CELL_FREE);
     assert(map_cell(0.45f, 0.05f, 0) == CELL_UNKNOWN);
     // The floor is seen where the ray ends, not along it; a clear ray (nothing within
-    // 1 m, or over a drop) sees no floor.
-    assert(map_floor_seen(0.30f, 0.05f) && !map_floor_seen(0.15f, 0.05f));
+    // 1 m, or over a drop) sees no floor. Under the robot is floor (it stands there).
+    assert(map_floor_seen(0.30f, 0.05f) && !map_floor_seen(0.15f, 0.05f) && !map_floor_seen(0.25f, 0.05f));
+    assert(map_floor_seen(0.05f, 0.05f) && map_floor_seen(-0.05f, -0.05f) && map_cell(-0.05f, -0.05f, 0) == CELL_FREE);
+    // A floor ray whose zone saw the floor from 0.12 m on: floor seen from there.
+    one_ray(0.30f, 0.05f, 0, RAY_FLOOR);
+    scan.ray[0].floor_from_x_m = 0.12f;
+    map_add_scan(&scan, &at_origin);
+    assert(map_floor_seen(0.15f, 0.05f) && map_floor_seen(0.25f, 0.05f));
     one_ray(0.95f, 0.55f, 0.07f, RAY_CLEAR);
     map_add_scan(&scan, &at_origin);
     assert(map_cell(0.85f, 0.45f, 0) == CELL_FREE && !map_floor_seen(0.85f, 0.45f));

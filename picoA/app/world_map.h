@@ -26,7 +26,8 @@ void map_add_scan(const scan_t *scan, const pose_t *pose); // the robot's pose w
 cell_state_t map_cell(float x_m, float y_m, int layer);   // UNKNOWN outside the window
 // Whether the floor was seen in the cell at (x, y), and not missed there since. Free
 // space (nothing in the way) far away or over a drop isn't floor seen: only the floor
-// rows see the floor, up to ~50 cm from the sensor.
+// rows see the floor, up to ~50 cm from the sensor. Under the robot (within 15 cm of
+// where a scan was measured) counts as floor seen: it stands there.
 bool map_floor_seen(float x_m, float y_m);
 // How far from (x, y) along the unit direction (dx, dy) layer 0 stays free:
 // up to the first cell that isn't free (occupied, no floor, unknown), the window's edge, or max_m.

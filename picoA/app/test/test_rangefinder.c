@@ -123,6 +123,14 @@ int main(void) {
         rangefinder_scan(&f, RAD(p), &s);
         assert(count(&s, RAY_HIT, 0) == 0 && count(&s, RAY_FLOOR, 5) == 24);
     }
+    // A floor ray saw the floor from where its zone's lower edge meets it: the 8th
+    // row's from 7 cm / tan(22.5°) = 16.9 cm ahead of the sensor.
+    fake_frame(0, 0.07f, 0, 0);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    const ray_t *r8 = &s.ray[7 * 8 + 3];
+    assert(fabsf(hypotf(r8->floor_from_x_m - SENSOR_X_M, r8->floor_from_y_m - SENSOR_Y_M) - 0.169f) < 0.005f);
+    assert(r8->floor_from_x_m < r8->x_m);
 
     // A drop: the floor 20 cm lower (a stair). Rows 7-8 read far beyond their floor:
     // no floor where it should be, marked where they expected it. No return: the same.
@@ -146,6 +154,13 @@ int main(void) {
     rangefinder_poll(&f);
     rangefinder_scan(&f, 0, &s);
     assert(s.ray[5 * 8 + 3].kind == RAY_UNUSED && count(&s, RAY_NO_FLOOR, 0) == 0);
+    // Also with the robot nodding nose up 3°, when the 6th row's patch would reach
+    // 1.6 m: a reading of 1.6 m isn't the floor.
+    fake_frame(RAD(3), 0.07f, 0, 0);
+    set_zone(5, 3, 1600);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, RAD(3), &s);
+    assert(s.ray[5 * 8 + 3].kind == RAY_UNUSED);
     // A reading 10 % beyond the floor is still the floor (noise, a slightly lower patch).
     fake_frame(0, 0.077f, 0, 0);
     rangefinder_poll(&f);

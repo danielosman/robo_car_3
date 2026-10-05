@@ -13,6 +13,7 @@
 #define STEP_M         (CELL_M / 2) // ray walking
 #define MISSES_TO_CLEAR 6          // empty readings in a row that clear an occupied cell
 #define SOLID_SIGHTINGS 2          // occupied in this many scans: clearing it is a change
+#define ROBOT_FLOOR_M  0.15f       // the robot stands on floor: its turning circle
 #define NO_FLOOR_SCANS  3          // "no floor" this many times, the floor not seen in between: "?"
                                    // (a shiny floor sometimes reflects a zone's light far away)
 #define SWEEP_US       60000000    // keeps the 16-bit times from wrapping (18 h)
@@ -127,6 +128,36 @@ static void clear_at(point_t p, uint16_t now) {
     if (first_this_scan(c)) miss(c, now);
 }
 
+static void see_floor(cell_t *c) {
+    if (c) c->no_floor = 0, c->floor_seen = true;
+}
+
+// The floor seen along the floor from a to b (both ends included).
+static void see_floor_along(point_t a, point_t b) {
+    float dx = b.x - a.x, dy = b.y - a.y, length = sqrtf(dx * dx + dy * dy);
+    int steps = (int)(length / STEP_M);
+    for (int k = 0; k < steps; k++) {
+        float f = (float)k * STEP_M / length;
+        see_floor(ground_at((point_t){a.x + f * dx, a.y + f * dy, 0}));
+    }
+    see_floor(ground_at(b));
+}
+
+// Under the robot (where its sensors can't see) is floor with nothing on it: it
+// stands and turns there.
+static void stand_on(const pose_t *pose, uint16_t now) {
+    for (int ix = cell_index(pose->x_m - ROBOT_FLOOR_M); ix <= cell_index(pose->x_m + ROBOT_FLOOR_M); ix++)
+        for (int iy = cell_index(pose->y_m - ROBOT_FLOOR_M); iy <= cell_index(pose->y_m + ROBOT_FLOOR_M); iy++) {
+            float cx = ((float)ix + 0.5f) * CELL_M - pose->x_m, cy = ((float)iy + 0.5f) * CELL_M - pose->y_m;
+            if (cx * cx + cy * cy > ROBOT_FLOOR_M * ROBOT_FLOOR_M || !in_window(ix, iy)) continue;
+            cell_t *c = cell_at(0, ix, iy);
+            see_floor(c);
+            c->misses_left = 0;
+            c->sightings = 0;
+            c->seen_at = now;
+        }
+}
+
 // Every cell the line from a to b passes through, before b (and b's if
 // with_end), gets a miss, unless this scan already updated it (a hit always wins).
 static void clear_along(point_t a, point_t b, bool with_end, uint16_t now) {
@@ -177,8 +208,8 @@ void map_add_scan(const scan_t *scan, const pose_t *pose) {
     // counts (both in one scan: it counts).
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         const ray_t *r = &scan->ray[i];
-        cell_t *c = r->kind == RAY_FLOOR ? ground_at(to_world(pose, r->x_m, r->y_m, r->z_m)) : NULL;
-        if (c) c->no_floor = 0, c->floor_seen = true;
+        if (r->kind == RAY_FLOOR)
+            see_floor_along(to_world(pose, r->floor_from_x_m, r->floor_from_y_m, 0), to_world(pose, r->x_m, r->y_m, r->z_m));
     }
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         const ray_t *r = &scan->ray[i];
@@ -188,6 +219,7 @@ void map_add_scan(const scan_t *scan, const pose_t *pose) {
             c->seen_at = now;
         }
     }
+    stand_on(pose, now);
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         const ray_t *r = &scan->ray[i];
         if (r->kind == RAY_CLEAR || r->kind == RAY_FLOOR || r->kind == RAY_HIT)

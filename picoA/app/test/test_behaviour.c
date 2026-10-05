@@ -174,7 +174,7 @@ int main(void) {
         wall_checked += 2;
         wall_cells += wall_at(x, WALL_SIDE, 1) + wall_at(x, -WALL_SIDE, 1);
     }
-    int false_obstacles = 0, free_floor = 0, floor_cells = 0;
+    int false_obstacles = 0, free_floor = 0, floor_cells = 0, near_cells = 0, near_floor_seen = 0;
     // Layer 0 (2-12 cm) is only seen within ~1 m: farther, the rays above the
     // horizon are higher than 12 cm and the one below has reached the floor. The box
     // hides the floor behind it.
@@ -185,6 +185,8 @@ int main(void) {
             floor_cells++;
             false_obstacles += map_cell(x, y, 0) == CELL_OCCUPIED;
             free_floor += map_cell(x, y, 0) == CELL_FREE;
+            // Within ~50 cm the floor rows see the floor; closer, the robot stands on it.
+            if (hypotf(x, y) < 0.45f) near_cells++, near_floor_seen += map_floor_seen(x, y);
         }
     bool box_seen = map_cell(BOX_X - 0.05f, BOX_Y, 0) == CELL_OCCUPIED || map_cell(BOX_X - 0.05f, BOX_Y - 0.05f, 0) == CELL_OCCUPIED ||
                     map_cell(BOX_X - 0.05f, BOX_Y + 0.05f, 0) == CELL_OCCUPIED || map_cell(BOX_X + 0.05f, BOX_Y, 0) == CELL_OCCUPIED;
@@ -193,6 +195,8 @@ int main(void) {
     assert(wall_cells >= wall_checked * 9 / 10);
     assert(false_obstacles == 0);
     assert(free_floor >= floor_cells * 9 / 10);
+    printf("floor seen in %d of %d cells within 45 cm\n", near_floor_seen, near_cells);
+    assert(near_floor_seen >= near_cells * 9 / 10);
     assert(box_seen);
 
     printf("OK: the start-up scan learns the floor, maps the room and faces the most open direction\n");
