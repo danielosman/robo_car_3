@@ -14,6 +14,7 @@
 #define FIRST_FLOOR_ROW  4         // rows 4-7 see the floor
 #define HORIZON_ROW      4         // its floor is far and grazing: 1° of pitch moves it a lot
 #define HORIZON_MAX_HIT_M 0.95f    // so only closer hits on it count as obstacles
+#define FIRST_DROP_ROW   6         // rows 6-7 (7th, 8th) tell a drop: their floor is near and steady
 #define OBSTACLE_MIN_M   0.02f     // lower things are driven over (§4.2)
 #define NO_TARGET_CLEAR_M 1.0f     // "saw nothing" is only trusted this far (§4.5)
 #define EDGE_FLOOR_SHARE 0.8f      // above the floor rows: a reading this close to where the zone's
@@ -25,6 +26,9 @@
 #define FLOOR_WINDOW     0.1f      // readings within 10 % of that are the floor's scatter
 #define SCATTER_MARGIN_M 0.01f     // above the floor's own scatter, before a reading is an obstacle
 #define FLOOR_MAX_SHARE  1.25f     // of where the zone's centre meets a flat floor: slack for tilt
+#define FLOOR_SLACK_RAD  (2 * RAD_PER_DEG) // a zone sees the floor between its edges, give or take this
+#define DROP_SHARE       1.15f     // rows 5-7: a reading this much farther than the far end of the
+                                   // zone's floor patch (where its upper edge meets the floor) may be a drop
 
 // Each zone's ray with the robot level: how far below horizontal (rad) and how far left.
 static float zone_down_rad[RANGEFINDER_RAYS], zone_left_rad[RANGEFINDER_RAYS];
@@ -118,10 +122,34 @@ void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan)
         // The 5th row's floor is often not learned (in a room it mostly sees walls):
         // then it's used like the rows above it.
         bool floor_row = row >= FIRST_FLOOR_ROW && !(row == HORIZON_ROW && !floor_learned(i));
+        // Below the 5th row the floor is near and always seen, unless it isn't there.
+        bool must_see_floor = row > HORIZON_ROW && floor_learned(i);
+        // The 6th row's floor patch is long (35-71 cm) and grazing: on a shiny floor
+        // it sometimes reflects far away. Only the two lowest rows tell a drop.
+        bool tells_drop = must_see_floor && row >= FIRST_DROP_ROW;
         ray_t *ray = &scan->ray[i];
         uint16_t mm = frame->range_mm[i];
         ray->kind = RAY_UNUSED;
         if (mm == RANGE_INVALID) continue;
+        // A zone sees a patch of floor, 5.6° tall: any reading up to its far end is the
+        // floor. (Nose up so far that the ray doesn't reach the floor: it tells nothing.)
+        if (must_see_floor) {
+            float down_rad = floor_down_rad[floor_index(i)];
+            if (down_rad - pitch_rad <= 0) continue;
+            float floor_m = floor_range_m(down_rad - pitch_rad);
+            float far_down_rad = zone_down_rad[i] - ZONE_RAD / 2 - pitch_rad;
+            bool beyond_floor = far_down_rad > 0 && (float)mm * 0.001f > DROP_SHARE * floor_range_m(far_down_rad);
+            if (mm == RANGE_NO_TARGET || beyond_floor) {
+                if (!tells_drop) continue; // the 6th row: tells nothing
+                float d[3];
+                direction(down_rad, zone_left_rad[i], pitch_rad, d);
+                ray->x_m = SENSOR_X_M + floor_m * d[0];
+                ray->y_m = SENSOR_Y_M + floor_m * d[1];
+                ray->z_m = SENSOR_Z_M + floor_m * d[2];
+                ray->kind = RAY_NO_FLOOR;
+                continue;
+            }
+        }
         if (floor_row && (mm == RANGE_NO_TARGET || !floor_learned(i))) continue;
         if (row == HORIZON_ROW && !floor_row && mm == RANGE_NO_TARGET) continue; // its floor may be near: no "1 m clear"
         float range_m = mm == RANGE_NO_TARGET ? NO_TARGET_CLEAR_M : (float)mm * 0.001f;
@@ -134,7 +162,7 @@ void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan)
         bool obstacle = mm != RANGE_NO_TARGET && ray->z_m >= min_height_m &&
                         (row != HORIZON_ROW || range_m < HORIZON_MAX_HIT_M) &&
                         (floor_row || !maybe_floor(i, pitch_rad, range_m));
-        ray->kind = obstacle ? RAY_HIT : RAY_CLEAR;
+        ray->kind = obstacle ? RAY_HIT : must_see_floor ? RAY_FLOOR : RAY_CLEAR;
     }
 }
 
@@ -154,6 +182,9 @@ void rangefinder_learn_floor(const range_frame_t *frame, float pitch_rad) {
         if (range_m <= SENSOR_Z_M) continue; // can't be the floor
         float level_down = floor_angle_rad(range_m) + pitch_rad;
         if (level_down <= 0) continue;
+        // Only readings inside the zone's patch of floor can be the floor: shorter is
+        // an obstacle, longer a drop (the robot may learn next to a table's edge).
+        if (fabsf(level_down - zone_down_rad[i]) > ZONE_RAD / 2 + FLOOR_SLACK_RAD) continue;
         samples[z][n_samples[z]++] = floor_range_m(level_down);
     }
 }
@@ -163,8 +194,9 @@ static int compare_floats(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
-int rangefinder_finish_floor(void) {
+int rangefinder_finish_floor(int *assumed) {
     int learned = 0;
+    *assumed = 0;
     for (int z = 0; z < FLOOR_ZONES; z++) {
         floor_down_rad[z] = 0;
         int n = n_samples[z];
@@ -187,6 +219,14 @@ int rangefinder_finish_floor(void) {
         floor_down_rad[z] = down;
         obstacle_min_m[z] = fmaxf(OBSTACLE_MIN_M, (floor_m - short_m) * sinf(down) + SCATTER_MARGIN_M);
         learned++;
+    }
+    // The two lowest rows tell drops, so they always need a floor: where none was
+    // learned, the floor a zone's centre would see from the sensor's height.
+    for (int z = (FIRST_DROP_ROW - FIRST_FLOOR_ROW) * RANGEFINDER_COLS; z < FLOOR_ZONES; z++) {
+        if (floor_down_rad[z] != 0) continue;
+        floor_down_rad[z] = zone_down_rad[z + FIRST_FLOOR_ROW * RANGEFINDER_COLS];
+        obstacle_min_m[z] = OBSTACLE_MIN_M + SCATTER_MARGIN_M;
+        (*assumed)++;
     }
     return learned;
 }

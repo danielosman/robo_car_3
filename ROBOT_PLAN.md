@@ -162,7 +162,7 @@ is the design. §13 lists what's settled.
 | # | Requirement |
 |---|---|
 | R1 | **Map.** PicoA keeps a map of the surroundings from the VL53L8CX: 10 × 10 × 10 cm cells, 4 × 4 m (the sensor's range is 4 m), 4 height layers. |
-| R2 | **Cell memory.** Each cell holds a timer of at most 240 s that counts down in real time. Each reading that sees the cell occupied adds 60 s; each reading that sees it empty removes 60 s. At 0 the cell is empty. One noisy empty reading only takes a solid cell from 240 to 180, so it stays occupied; four empty readings in a row clear it quickly. |
+| R2 | **Cell memory** (revised 5 Oct). A cell changes only when it is measured, never with time, and remembers when it was last measured. A reading that sees it occupied makes it occupied; it becomes empty only after **6 empty readings in a row** (a sighting in between starts the count again). Curiosity about old cells is the behaviour's job, using the age, not the map forgetting. (Was: a 240 s timer counting down, +60 s per sighting, −60 s per empty reading.) |
 | R3 | **Pose.** Estimate the robot's pose from the wheel encoders (all four since 4 Oct) (wheels Ø 9 cm, 1 cm wide), the IMU and, later, the camera. Start without the camera and without a Kalman filter; keep both as future steps. |
 | R4 | **Protocol.** Design the PicoA ↔ PicoB protocol. |
 | R5 | **Attracted by movement.** Detect movement with the camera and the VL53 while the robot stands still. Any movement means something in the surroundings moved. |
@@ -230,7 +230,8 @@ left) in the robot frame; normalise it and use dot products. This assumes the
   whole-cell steps** when the robot moves more than ~0.5 m from its centre. Cells
   that fall off the edge are forgotten. Circular indexing, so nothing is copied.
   Hits beyond the window edge (> 2 m in some directions) are simply not stored.
-- Per cell: `occupied_until` and `observed_at`, both u16 seconds of robot time.
+- Per cell: `observed_at` (u16 seconds of robot time), misses still needed to clear
+  it, sightings since it was last free, the no-floor mark (layer 0).
   6 400 cells × 4 B = **~26 KB** of PicoA's 520 KB. A sweep every few minutes clamps
   old timestamps so the u16 wrap (18 h) never matters.
 
@@ -299,43 +300,48 @@ boundary.
 
 | State | Condition |
 |---|---|
-| UNKNOWN | never observed, or `now − observed_at > 240 s` |
-| OCCUPIED | `occupied_until > now` |
-| FREE | observed within 240 s and not occupied |
+| UNKNOWN | never observed (blank on the map) |
+| OCCUPIED | seen occupied, and not yet seen through 6 times in a row since |
+| NO_FLOOR | layer 0: a floor ray (rows 7-8) expected the floor here and got no return, or one more than 15 % beyond the far end of the zone's floor patch (a drop? a dark floor?), 3 times with the floor not seen here in between; stays until the floor is seen here (`?` on the map) |
+| FREE | observed, not occupied |
+
+**Changed 5 Oct (Daniel):** nothing changes with time. A cell once seen stays as
+last measured; `observed_at` keeps how old that is (for the refresh, R8). Exploring
+means: fill the blanks, avoid `?`, look again at old cells.
 
 ### 4.4 Update rule (your R2)
 
 Applied for **every ToF frame** (10–15 Hz):
 
 ```
-hit  (a range ended in this cell):   occupied_until = min(now + 240, max(occupied_until, now) + 60)
-miss (a range passed through it):    occupied_until = occupied_until - 60   (FREE once ≤ now)
+hit  (a range ended in this cell):   misses_left = 6; sightings += 1
+miss (a range passed through it):    if misses_left > 0: misses_left -= 1   (FREE at 0)
 both:                                observed_at = now
 ```
 
-- One noisy miss takes a solid cell from 240 to 180, so it stays OCCUPIED. Four
-  misses in a row (~0.3 s) clear it. One sighting gives 60 s, and the next miss
-  clears it.
+- A removed obstacle clears after 6 frames that see through it (~0.4 s at 15 Hz);
+  a noisy miss or five can't clear it.
 - **Within one frame, a cell gets at most one update; if any ray ends in it, it's
   a hit.** Near the sensor many of the 64 rays pass through the same few cells, and
   one frame shouldn't count as 20 misses. This is the only limit; there is no
   waiting or averaging across frames.
-- A cell that isn't seen again keeps counting down: one sighting fades to FREE
-  after 60 s, the cell stays *known* until 240 s, then becomes UNKNOWN.
+- A cell that isn't seen again stays as it was; only its age grows.
 
 ### 4.5 Adding a ToF frame
 
 For each of the 64 zones, rotate its precomputed direction vector by the robot's
 pose. Walk along the ray in half-cell steps: cells before the measured distance get
-a miss, and the cell at the distance gets a hit (or nothing, if §4.2 says it's
-floor). **Zones with no target mark the first 1 m of the ray as misses and leave farther cells untouched**: "saw nothing" is only trusted close up. Cost: 64 rays ×
+a miss, and the cell at the distance gets a hit (or a miss, if §4.2 says it's
+floor). **A ray that reaches the floor clears layer 0 all the way to it**, also
+where it is under 2 cm: anything standing on the floor 2 cm or taller would have
+blocked it (5 Oct; before, the last stretch of every floor ray stayed unknown). **Zones with no target mark the first 1 m of the ray as misses and leave farther cells untouched**: "saw nothing" is only trusted close up. Cost: 64 rays ×
 ≤ 40 steps ≈ 2 500 cell updates per frame, which is trivial.
 
 ### 4.6 Changes (R9)
 
 While adding a frame, the map reports a **change** when:
-- a **hit** lands in a FREE cell (seen empty within the last 240 s), or
-- a **miss** clears a cell that had built up ≥ 120 s of occupancy.
+- a **hit** lands in a FREE cell, or
+- a **miss** clears a cell that was seen occupied in 2 or more frames.
 
 Changes come with their world position. This works while driving and while
 scanning.
@@ -862,8 +868,53 @@ change; reflashing PicoA is optional).
   last stretch never clears layer 0?), then fill or tolerate the gaps.
 - **Noisy map changes:** 1584 after one scan and a square. M5 must filter them.
 
+**Gaps and drops (5 Oct, after M2, only PicoA):** floor rays clear layer 0 up to
+where they meet the floor; rows 6-8 report `RAY_NO_FLOOR` where the floor should
+be when they get no return or one > 15 % beyond the far end of their floor patch
+(the 6th row sees floor anywhere from 35 to 71 cm: a first version used 20 % past
+its usual 45-48 cm and drew a ring of `?` at ~50 cm), and the map shows `?` after 3
+such readings with no floor seen in between (the shiny floor sometimes reflects a
+6th-row zone to the wall: `z` showed 184 cm, the wall's distance, about once in 24
+readings), until the floor is seen there. Then (Daniel): the 6th row doesn't tell
+drops at all, its far or missing readings tell nothing; only rows 7-8 (steady at
+28-31 and 20-22 cm) do. Row 8 sees the floor ~14 cm ahead of the front edge: at
+10 cm/s, 3 readings (0.2 s) plus braking (~1.3 cm) still stop ~10 cm short.
+
+**Desk test (5 Oct):** a start-up scan 10-15 cm from a desk's edge learned the
+floor in only 9 of 32 zones (rows 6-7 none): half the turn looked over the edge,
+and the long readings spoiled the floor. Without a floor rows 7-8 can't tell a
+drop, and the map showed `.` beyond the edge (nothing in the way, but no floor
+either). Fixed: floor learning only takes readings that fit the zone's patch of
+floor (±2° of its edges), so obstacles and drops are left out; rows 7-8 assume the
+floor the sensor's 7 cm height gives where nothing was learned; each layer-0 cell
+marks where the floor was seen (the end of a floor ray, cleared by `?`), and the map
+prints `.` only there, `:` for free without floor seen (far away, or over a drop).
+Host tests: learning next to a desk's edge, learning with the floor never seen.
+**For M4:** drive forward only while rows 7-8 see the floor right ahead
+(`map_floor_seen`); `:` or `?` ahead means stop. Choosing where to look may use `:`.
+Floor learning stays (Daniel asked): the 6th row reads 35-53 cm where geometry says
+48, which drew false obstacles in the first run; rows 7-8 are close to geometry.
+
+**Desk test again, with the fixes:** rows 7-8 learned (29 / 21 cm), a line of `?`
+along the desk's edges ahead and to the right, `:` beyond them, `.` only on the
+desk next to the robot. On the living-room floor: no `?` ring, free area solid,
+2.0 m free on average; 2 `?` in front of a white glossy cupboard (reflections off
+the shiny floor; accepted: right in front of an obstacle, and on the safe side).
+**For M4 (Daniel):** the robot should point along the farthest path it can
+actually drive: a corridor the robot's width (23.5 cm plus margin) straight ahead,
+through `.` and `:` (rows 7-8 confirm the floor while driving), stopped by `##`,
+`?` and blank; today's "most open" (average over the camera's ±25°) is for where
+to look. **Nothing changes with
+time** (R2 revised): an obstacle stays until 6 readings in a row see through it;
+each cell keeps the time of its last measurement. Host tests: drops, no false `?`
+while nodding with noise, floor rays, `?` cleared only by seeing the floor, 6
+misses, an hour without change. Not yet run on the robot.
+
 **Next session, in this order:**
-1. Plan, then fix, the gaps in the free area (above).
+1. Not yet tried on the robot: move an object away while the robot looks at it
+   (it clears within a second); one behind it stays.
 2. Still open from M1: `b` and the carpet tests.
 3. M3 (movement detection), starting with moving the camera driver out of
    bring-up.
+4. M4 then adds: drive only while rows 7-8 see the floor ahead; face the farthest
+   drivable corridor.

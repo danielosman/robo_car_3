@@ -68,7 +68,8 @@ connected and checked** (see "Motor change" below); square test passed again. **
 - **PicoA map (M2):** `rangefinder.c` turns the VL53L8CX's 64 zones (8 × 8, 15 Hz)
   into rays in the robot frame and tells floor from obstacles (≥ 2 cm above the
   floor); `world_map.c` keeps 10 cm cells, 4 layers, 4 × 4 m around the robot, with
-  the 240 s timers; `pose.c` gives the pose at the moment a frame was measured;
+  cells changing only when measured (an obstacle clears after 6 empty readings in
+  a row) and remembering when; `pose.c` gives the pose at the moment a frame was measured;
   `surroundings.c` feeds the frames to the map; `behaviour.c` runs the start-up
   scan. PicoB's clock is translated from the ODOM reports in `body.c` (no extra
   message, PicoB unchanged).
@@ -197,6 +198,10 @@ serial log of each step:
 4. Check the map against the room: walls and furniture legs where they are, `.`
    on the open floor, no `##` in the middle of open floor. Within ~1 m obstacles
    show as `##`; farther walls as `''` (only their part above 12 cm is seen).
+   `.` = floor seen, nothing on it (only within ~50 cm: the floor rows); `:` =
+   nothing in the way, floor not seen (farther, or over a drop); `?` = no floor
+   where rows 7-8 expected it, 3 times (a drop, or a floor the sensor can't see);
+   blank = never seen (behind objects, far away). Cells stay on the map once seen.
 5. `z` prints one ToF frame (cm, as the robot sees it; `?N` = unsure, VL53
    status N). Checked 4 Oct: a hand on the robot's left shortens the left column.
 6. Drive the square (`q`) and press `m`: the walls must stay where they were, and
@@ -237,13 +242,24 @@ ahead-left is gone. Since: an unlearned 5th row is used like the rows above.
   the robot faced away from them; after the square, `m` showed the walls and
   objects where they were and no obstacles from braking. Square: odometry 1.1 /
   −1.5 cm, 363.0° (as on 4 Oct).
-- **Open:** isolated unknown cells inside the free area (often in radial lines)
-  cut the free distance short, so the robot can pick a less open direction than
-  the map shows (here it turned away from a more open front-right). Map changes
-  counted 1584 after one scan and a square: too noisy as they stand for M5.
+- Found: isolated unknown cells inside the free area cut the free distance short
+  (fixed after M2, below). Map changes counted 1584 after one scan and a square:
+  too noisy as they stand for M5.
 - `**` on the map is 30 cm ahead of the robot: with 10 cm cells it shows the
   heading to about ±20°. `n` clears the map and makes the robot's heading at its
   start the map's up.
+
+**After M2 (5 Oct): gaps, drops, nothing fading.** Floor rays clear the low layer
+all the way to where they meet the floor (no more gaps). The map no longer changes
+with time: an obstacle clears only after 6 empty readings in a row. Rows 7-8 mark
+`?` where the floor is missing (no return, or one beyond their floor patch, 3 times
+with no floor seen in between); the 6th row's far readings (reflections off the
+waxed floor, e.g. 184 cm = the wall) tell nothing. The floor is learned only from
+readings that fit each zone's patch, and rows 7-8 fall back to the sensor's 7 cm
+height, so a start-up scan next to a desk's edge still learns it. `.` marks only
+where the floor was seen (within ~50 cm), `:` free space with the floor unseen.
+On the robot: living room solid free area, no false `?` (2 in front of a white
+glossy cupboard); on a desk, `?` along the edges and `:` beyond them.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

@@ -1,6 +1,7 @@
 // Host test for picoA/app/rangefinder.c: the zone order, learning the floor
 // during a turn with obstacles around, floor vs obstacle with the robot pitching,
-// small bumps ignored, the horizon row, against a fake VL53L8CX. Run from the repo root:
+// small bumps ignored, the horizon row, drops (no floor where it should be),
+// against a fake VL53L8CX. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_rangefinder picoA/app/test/test_rangefinder.c -lm && build/test_rangefinder
 #include <assert.h>
 #include <stdio.h>
@@ -18,7 +19,8 @@ static void set_zone(int row, int col, int mm) {
 }
 
 static float noise_m;       // +- this much, random, on every reading
-static bool near_edge;      // a zone reports the nearest point of its patch (as the real sensor does)
+static bool near_edge;      // a zone reports the nearest point of its patch (as the real sensor mostly does)
+static bool anywhere;       // a zone reports a random point of its patch (as the real sensor sometimes does)
 
 // Distance along direction d to a flat floor `height_m` below the sensor, and to
 // a box in front of the robot (x from box_x_m, any y, box_h_m tall). 4 m = nothing.
@@ -35,7 +37,8 @@ static float cast_one(const float d[3], float height_m, float box_x_m, float box
 // What zone i reads with the robot pitched by pitch_rad, in mm; 0 = nothing within 4 m.
 static int range_to(int i, float pitch_rad, float height_m, float box_x_m, float box_h_m) {
     float d[3];
-    direction(zone_down_rad[i], zone_left_rad[i], pitch_rad, d);
+    float offset_rad = anywhere ? ((float)rand() / (float)RAND_MAX - 0.5f) * ZONE_RAD : 0;
+    direction(zone_down_rad[i] + offset_rad, zone_left_rad[i], pitch_rad, d);
     float best_m = cast_one(d, height_m, box_x_m, box_h_m);
     if (near_edge) // the zone's upper and lower edges, 2.8° either way
         for (float k = -1; k <= 1; k += 2) {
@@ -62,6 +65,7 @@ static int count(const scan_t *s, ray_kind_t kind, int from_row) {
 int main(void) {
     range_frame_t f;
     scan_t s;
+    int assumed;
     fake_now_us = 1000000;
     assert(rangefinder_init());
     assert(!rangefinder_poll(&f));
@@ -103,7 +107,7 @@ int main(void) {
         rangefinder_poll(&f);
         rangefinder_learn_floor(&f, RAD(-0.8f));
     }
-    assert(rangefinder_finish_floor() == 32);
+    assert(rangefinder_finish_floor(&assumed) == 32 && assumed == 0);
     // Flat floor, zone centres: 1.43 m, 48, 29, 21 cm (§4.2).
     const float expected_m[4] = {1.434f, 0.479f, 0.287f, 0.208f};
     for (int row = 4; row < 8; row++) assert(fabsf(rangefinder_floor_distance(row) - expected_m[row - 4]) < 0.01f);
@@ -117,8 +121,36 @@ int main(void) {
         fake_frame(RAD(p), 0.07f, 0, 0);
         rangefinder_poll(&f);
         rangefinder_scan(&f, RAD(p), &s);
-        assert(count(&s, RAY_HIT, 0) == 0 && count(&s, RAY_CLEAR, 5) == 24);
+        assert(count(&s, RAY_HIT, 0) == 0 && count(&s, RAY_FLOOR, 5) == 24);
     }
+
+    // A drop: the floor 20 cm lower (a stair). Rows 7-8 read far beyond their floor:
+    // no floor where it should be, marked where they expected it. No return: the same.
+    // The 6th row's far readings tell nothing (on a shiny floor they're often reflections).
+    fake_frame(0, 0.27f, 0, 0);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    assert(count(&s, RAY_NO_FLOOR, 6) == 16 && count(&s, RAY_NO_FLOOR, 0) == 16 && count(&s, RAY_HIT, 0) == 0);
+    for (int col = 0; col < 8; col++) assert(s.ray[5 * 8 + col].kind == RAY_UNUSED);
+    for (int i = 6 * 8; i < RANGEFINDER_RAYS; i++) assert(fabsf(s.ray[i].z_m) < 0.005f);
+    assert(fabsf(s.ray[7 * 8].x_m - SENSOR_X_M - 0.208f * cosf(RAD(19.7f)) * cosf(RAD(19.7f))) < 0.01f);
+    fake_frame(0, 0.07f, 0, 0);
+    for (int col = 0; col < 8; col++) set_zone(6, col, 0), set_zone(5, col, 0);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    for (int col = 0; col < 8; col++) assert(s.ray[6 * 8 + col].kind == RAY_NO_FLOOR);
+    for (int col = 0; col < 8; col++) assert(s.ray[5 * 8 + col].kind == RAY_UNUSED);
+    // As on the robot: one 6th-row zone reads the wall 1.84 m away (a reflection).
+    fake_frame(0, 0.07f, 0, 0);
+    set_zone(5, 3, 1840);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    assert(s.ray[5 * 8 + 3].kind == RAY_UNUSED && count(&s, RAY_NO_FLOOR, 0) == 0);
+    // A reading 10 % beyond the floor is still the floor (noise, a slightly lower patch).
+    fake_frame(0, 0.077f, 0, 0);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    assert(count(&s, RAY_FLOOR, 5) == 24);
 
     // A 4 cm box 25 cm ahead is an obstacle (the 6th row hits its face 3.3 cm up);
     // a 1 cm bump isn't. (A 3 cm box at exactly 25 cm falls between rows: the 6th
@@ -163,14 +195,15 @@ int main(void) {
         rangefinder_poll(&f);
         rangefinder_learn_floor(&f, RAD(-0.8f));
     }
-    assert(rangefinder_finish_floor() == 32);
-    int false_hits = 0;
+    assert(rangefinder_finish_floor(&assumed) == 32 && assumed == 0);
+    int false_hits = 0, false_drops = 0;
     for (int k = 0; k < 200; k++) {
         float p = RAD(-0.8f + (float)(k % 5 - 2) * 0.5f); // nodding +-1°
         fake_frame(p, 0.07f, 0, 0);
         rangefinder_poll(&f);
         rangefinder_scan(&f, p, &s);
         false_hits += count(&s, RAY_HIT, 0);
+        false_drops += count(&s, RAY_NO_FLOOR, 0);
     }
     fake_frame(RAD(-0.8f), 0.07f, 0.40f, 0.10f);
     rangefinder_poll(&f);
@@ -182,6 +215,21 @@ int main(void) {
            (double)(rangefinder_floor_distance(6) * 100), (double)(rangefinder_floor_distance(7) * 100),
            false_hits, real_hits);
     assert(false_hits <= 2);
+    assert(false_drops == 0);
+    // On the robot the 6th row read anywhere in its floor patch (35-71 cm), not
+    // only its near edge: still the floor, not a drop.
+    near_edge = false;
+    anywhere = true;
+    for (int k = 0; k < 200; k++) {
+        float p = RAD(-0.8f + (float)(k % 5 - 2) * 0.5f);
+        fake_frame(p, 0.07f, 0, 0);
+        rangefinder_poll(&f);
+        rangefinder_scan(&f, p, &s);
+        false_drops += count(&s, RAY_NO_FLOOR, 0);
+    }
+    anywhere = false;
+    printf("readings anywhere in the floor patch: %d false drops in 200 frames\n", false_drops);
+    assert(false_drops == 0);
     assert(real_hits >= 8);
 
     // In a room the 5th row mostly sees walls 2-3 m away: that isn't its floor
@@ -196,7 +244,7 @@ int main(void) {
         rangefinder_poll(&f);
         rangefinder_learn_floor(&f, 0);
     }
-    assert(rangefinder_finish_floor() == 24 && rangefinder_floor_distance(4) == 0);
+    assert(rangefinder_finish_floor(&assumed) == 24 && assumed == 0 && rangefinder_floor_distance(4) == 0);
     for (int col = 0; col < 8; col++) set_zone(4, col, 700);
     fake_tof_fresh = true;
     rangefinder_poll(&f);
@@ -209,6 +257,40 @@ int main(void) {
     rangefinder_poll(&f);
     rangefinder_scan(&f, 0, &s);
     for (int col = 0; col < 8; col++) assert(s.ray[4 * 8 + col].kind == RAY_HIT); // something 30 cm away
+
+    // Learning next to a desk's edge: in half the turn the floor rows look over the
+    // edge (the room's floor 75 cm lower). The floor still comes out right, and the
+    // edge is a drop for the two lowest rows.
+    rangefinder_forget_floor();
+    for (int k = 0; k < 220; k++) {
+        fake_frame(RAD(-0.8f), k % 2 ? 0.82f : 0.07f, 0, 0);
+        rangefinder_poll(&f);
+        rangefinder_learn_floor(&f, RAD(-0.8f));
+    }
+    assert(rangefinder_finish_floor(&assumed) == 32 && assumed == 0);
+    for (int row = 4; row < 8; row++) assert(fabsf(rangefinder_floor_distance(row) - expected_m[row - 4]) < 0.01f);
+    fake_frame(RAD(-0.8f), 0.82f, 0, 0);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, RAD(-0.8f), &s);
+    assert(count(&s, RAY_NO_FLOOR, 6) == 16);
+    // Learning where the floor rows never see the floor (all over the edge): the two
+    // lowest rows still tell the drop, from the floor the sensor's height gives.
+    rangefinder_forget_floor();
+    for (int k = 0; k < 220; k++) {
+        fake_frame(0, 0.82f, 0, 0);
+        rangefinder_poll(&f);
+        rangefinder_learn_floor(&f, 0);
+    }
+    assert(rangefinder_finish_floor(&assumed) == 0 && assumed == 16);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    assert(count(&s, RAY_NO_FLOOR, 6) == 16);
+    fake_frame(0, 0.07f, 0, 0);
+    rangefinder_poll(&f);
+    rangefinder_scan(&f, 0, &s);
+    assert(count(&s, RAY_FLOOR, 6) == 16 && count(&s, RAY_HIT, 0) == 0);
+    printf("next to a desk's edge: the floor learned, the edge a drop; never seeing the floor: rows 7-8 assume it at %.0f %.0f cm, the edge still a drop\n",
+           (double)(rangefinder_floor_distance(6) * 100), (double)(rangefinder_floor_distance(7) * 100));
 
     printf("OK: rangefinder orders zones, picks sure targets, learns the floor, tells floor from obstacles\n");
     return 0;

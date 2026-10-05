@@ -3,7 +3,10 @@
 // is mounted (turned 90° on the PCB, 2.5 cm ahead of the centre, 3 cm right, 7 cm
 // up), its settings and status codes, and the floor: the lower four rows of zones
 // see the floor, and a reading is an obstacle only if it ends at least 2 cm above
-// it (more in zones whose floor readings are noisy). The floor is learned while
+// it (more in zones whose floor readings are noisy). The two lowest rows must
+// see their floor: no return, or one from beyond the floor, may be a drop (stairs)
+// or a floor the sensor can't see, and is reported as such. (The 6th row's floor is
+// too long and grazing for that: such readings from it tell nothing.) The floor is learned while
 // the robot turns, because floors differ and each zone sees its patch of floor
 // differently (a zone reports the near edge of a patch 5.6° tall).
 #include <stdbool.h>
@@ -25,9 +28,11 @@ typedef struct {
 } range_frame_t;
 
 typedef enum {
-    RAY_UNUSED, // tells nothing: an unsure reading, or a floor zone whose floor isn't known
-    RAY_CLEAR,  // free from the sensor to the end point (the floor, or nothing within 1 m)
-    RAY_HIT,    // free up to the end point, which is an obstacle 2 cm or more above the floor
+    RAY_UNUSED,   // tells nothing: an unsure reading, or a floor zone whose floor isn't known
+    RAY_CLEAR,    // free from the sensor to the end point (nothing within 1 m, or something far that may be the floor)
+    RAY_FLOOR,    // free from the sensor to the end point, where it sees the floor
+    RAY_HIT,      // free up to the end point, which is an obstacle 2 cm or more above the floor
+    RAY_NO_FLOOR, // the end point is where the floor should be, but it wasn't seen there (a drop? a dark floor?)
 } ray_kind_t;
 
 typedef struct {
@@ -47,13 +52,15 @@ bool rangefinder_poll(range_frame_t *frame); // true when a new frame was read
 void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan);
 
 // Learning the floor: forget it, feed frames from all around the robot (a full
-// turn), then finish. Each floor zone takes a distance that is both long and
-// common, because obstacles only make readings shorter, and how much its floor
-// readings scatter. Zones not learned stay unused. Returns how many zones were
-// learned, of rangefinder_floor_zones().
+// turn), then finish. Each floor zone takes, of the readings that fit its patch of
+// floor, a distance that is both long and common (obstacles only make readings
+// shorter), and how much its floor readings scatter. Zones not learned stay unused,
+// except in the two lowest rows, which tell drops: they assume the floor the
+// sensor's height gives. Returns how many zones were learned, of
+// rangefinder_floor_zones(), and how many were assumed.
 void rangefinder_forget_floor(void);
 void rangefinder_learn_floor(const range_frame_t *frame, float pitch_rad);
-int rangefinder_finish_floor(void);
+int rangefinder_finish_floor(int *assumed);
 int rangefinder_floor_zones(void);
 int rangefinder_first_floor_row(void);
 float rangefinder_floor_distance(int row); // where a floor row sees the floor (robot level), averaged; 0 = not learned

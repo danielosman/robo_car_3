@@ -1,6 +1,8 @@
-// Host test for picoA/app/world_map.c: the occupancy timers (R2), one update per
+// Host test for picoA/app/world_map.c: occupied until 6 empty readings in a row
+// (nothing changes with time), one update per
 // cell per scan with hits winning, rays clearing what they pass, the window
-// moving with the robot, change detection, free distance and forgetting. Run from
+// moving with the robot, change detection, free distance, floor rays clearing
+// layer 0 to the floor, no-floor marks, and cells staying known. Run from
 // the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_world_map picoA/app/test/test_world_map.c -lm && build/test_world_map
 #include <assert.h>
@@ -25,39 +27,44 @@ int main(void) {
     map_clear();
     assert(map_cell(1.05f, 0.05f, 0) == CELL_UNKNOWN);
 
-    // One sighting: occupied for 60 s, the cells before it free.
+    // One sighting: occupied, the cells before it free. Time alone changes nothing.
     one_ray(1.05f, 0.05f, 0.07f, RAY_HIT);
     map_add_scan(&scan, &at_origin);
     assert(map_cell(1.05f, 0.05f, 0) == CELL_OCCUPIED);
     assert(map_cell(0.55f, 0.05f, 0) == CELL_FREE);
-    seconds(59);
+    seconds(3600);
     assert(map_cell(1.05f, 0.05f, 0) == CELL_OCCUPIED);
-    seconds(2);
-    assert(map_cell(1.05f, 0.05f, 0) == CELL_FREE);
 
-    // Four sightings make 240 s (capped); one miss leaves 180 (still occupied),
-    // four in a row clear it.
-    for (int i = 0; i < 6; i++) { one_ray(1.05f, 0.05f, 0.07f, RAY_HIT); map_add_scan(&scan, &at_origin); }
-    one_ray(1.55f, 0.05f, 0.07f, RAY_CLEAR); // passes through the cell
+    // Seen through: free after 6 readings in a row, not 5; a sighting in between
+    // starts the count again. Clearing what was seen in 2 or more scans is a change.
+    one_ray(1.05f, 0.05f, 0.07f, RAY_HIT);
     map_add_scan(&scan, &at_origin);
+    one_ray(1.55f, 0.05f, 0.07f, RAY_CLEAR); // passes through the cell
+    for (int i = 0; i < 5; i++) map_add_scan(&scan, &at_origin);
     assert(map_cell(1.05f, 0.05f, 0) == CELL_OCCUPIED);
-    seconds(179);
+    one_ray(1.05f, 0.05f, 0.07f, RAY_HIT);
+    map_add_scan(&scan, &at_origin);
+    one_ray(1.55f, 0.05f, 0.07f, RAY_CLEAR);
+    for (int i = 0; i < 5; i++) map_add_scan(&scan, &at_origin);
     assert(map_cell(1.05f, 0.05f, 0) == CELL_OCCUPIED);
-    seconds(-179);
     unsigned changes_before = map_changes();
-    for (int i = 0; i < 3; i++) map_add_scan(&scan, &at_origin);
+    map_add_scan(&scan, &at_origin);
     assert(map_cell(1.05f, 0.05f, 0) == CELL_FREE);
     assert(map_changes() == changes_before + 1); // a solid obstacle cleared: a change
 
-    // Within one scan a cell is updated once, and a hit wins over a ray passing through.
+    // Within one scan a cell is updated once, and a hit wins over a ray passing
+    // through: 10 rays ending in it are one sighting, so clearing it is no change.
     memset(&scan, 0, sizeof scan);
     scan.origin_z_m = 0.07f;
     for (int i = 0; i < 10; i++) scan.ray[i] = (ray_t){0.75f, -0.45f, 0.07f, RAY_HIT};
     scan.ray[10] = (ray_t){1.5f, -0.9f, 0.07f, RAY_CLEAR}; // through (0.75, -0.45)
     map_add_scan(&scan, &at_origin);
-    seconds(61);
-    assert(map_cell(0.75f, -0.45f, 0) == CELL_FREE); // 60 s, not 10 x 60 s
-    seconds(-61);
+    assert(map_cell(0.75f, -0.45f, 0) == CELL_OCCUPIED);
+    assert(cell_at(0, cell_index(0.75f), cell_index(-0.45f))->sightings == 1);
+    one_ray(1.5f, -0.9f, 0.07f, RAY_CLEAR);
+    changes_before = map_changes();
+    for (int i = 0; i < 6; i++) map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.75f, -0.45f, 0) == CELL_FREE && map_changes() == changes_before);
 
     // A hit where the map had seen free space is a change.
     changes_before = map_changes();
@@ -92,10 +99,52 @@ int main(void) {
     assert(map_cell(1.0f, 1.5f, 0) == CELL_OCCUPIED);    // kept
     assert(map_cell(2.55f, 0.05f, 0) == CELL_UNKNOWN);   // new at the front
 
-    // Not seen for 240 s: unknown again (also across the sweeps that keep times from wrapping).
-    for (int i = 0; i < 5; i++) { seconds(60); map_add_scan(&scan, &moved); }
-    assert(map_cell(1.0f, 1.5f, 0) == CELL_UNKNOWN);
+    // A cell stays as last measured, also after hours (across the sweeps that keep
+    // the 16-bit times from wrapping), and remembers how old the measurement is.
+    for (int i = 0; i < 20 * 60; i++) { seconds(60); map_add_scan(&scan, &moved); }
+    assert(map_cell(1.0f, 1.5f, 0) == CELL_OCCUPIED);
+    const cell_t *old = cell_at(0, cell_index(1.0f), cell_index(1.5f));
+    assert(old->seen_at != 0 && age_s(old->seen_at, now_s()) >= OLDEST_S - 60);
 
-    printf("OK: world map timers, one update per scan, layers, free distance, moving window, changes\n");
+    // A floor ray: free all the way to where it meets the floor, also where it's
+    // under 2 cm (a ray from 7 cm to the floor 0.3 m ahead is under 2 cm from 0.21 m).
+    map_clear();
+    one_ray(0.30f, 0.05f, 0, RAY_FLOOR);
+    map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.15f, 0.05f, 0) == CELL_FREE);
+    assert(map_cell(0.25f, 0.05f, 0) == CELL_FREE && map_cell(0.30f, 0.05f, 0) == CELL_FREE);
+    assert(map_cell(0.45f, 0.05f, 0) == CELL_UNKNOWN);
+    // The floor is seen where the ray ends, not along it; a clear ray (nothing within
+    // 1 m, or over a drop) sees no floor.
+    assert(map_floor_seen(0.30f, 0.05f) && !map_floor_seen(0.15f, 0.05f));
+    one_ray(0.95f, 0.55f, 0.07f, RAY_CLEAR);
+    map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.85f, 0.45f, 0) == CELL_FREE && !map_floor_seen(0.85f, 0.45f));
+
+    // No floor where it should be, 3 times with no floor seen in between: "?" until
+    // the floor is seen there (a single reflection doesn't make one). A ray passing
+    // over it doesn't clear it; free distance stops at it.
+    one_ray(0.45f, 0.05f, 0, RAY_NO_FLOOR);
+    for (int i = 0; i < 2; i++) map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.45f, 0.05f, 0) == CELL_FREE);
+    one_ray(0.45f, 0.05f, 0, RAY_FLOOR);
+    map_add_scan(&scan, &at_origin);
+    one_ray(0.45f, 0.05f, 0, RAY_NO_FLOOR);
+    for (int i = 0; i < 2; i++) map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.45f, 0.05f, 0) == CELL_FREE); // the floor seen in between
+    assert(map_floor_seen(0.45f, 0.05f));
+    map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.45f, 0.05f, 0) == CELL_NO_FLOOR && !map_floor_seen(0.45f, 0.05f));
+    assert(map_cell(0.35f, 0.05f, 0) == CELL_FREE); // the no-floor ray clears nothing new
+    one_ray(0.95f, 0.05f, 0.07f, RAY_CLEAR);
+    map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.45f, 0.05f, 0) == CELL_NO_FLOOR);
+    d = map_free_distance(0.05f, 0.05f, 1, 0, 2);
+    assert(d > 0.3f && d <= 0.4f);
+    one_ray(0.45f, 0.05f, 0, RAY_FLOOR);
+    map_add_scan(&scan, &at_origin);
+    assert(map_cell(0.45f, 0.05f, 0) == CELL_FREE);
+
+    printf("OK: world map 6 misses clear, no change with time, one update per scan, layers, free distance, moving window, changes, floor rays, no-floor marks, cells stay known\n");
     return 0;
 }

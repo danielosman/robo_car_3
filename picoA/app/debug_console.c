@@ -64,13 +64,14 @@ static void print_frame(void) {
     pose_now(&p);
     scan_t scan;
     rangefinder_scan(f, p.pitch_rad, &scan);
-    printf("What each zone makes of it: #N obstacle N cm above the floor, . free, blank unused%s:\n",
+    printf("What each zone makes of it: #N obstacle N cm above the floor, . free, ? floor not seen, blank unused%s:\n",
            surroundings_mapping() ? "" : " (floor not learned yet)");
     for (int row = 0; row < RANGEFINDER_ROWS; row++) {
         for (int col = 0; col < RANGEFINDER_COLS; col++) {
             const ray_t *r = &scan.ray[row * RANGEFINDER_COLS + col];
             if (r->kind == RAY_HIT) printf("  #%-2d", (int)(r->z_m * 100 + 0.5f));
-            else if (r->kind == RAY_CLEAR) printf("    .");
+            else if (r->kind == RAY_CLEAR || r->kind == RAY_FLOOR) printf("    .");
+            else if (r->kind == RAY_NO_FLOOR) printf("    ?");
             else printf("     ");
         }
         printf("\n");

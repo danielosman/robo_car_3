@@ -11,17 +11,20 @@
 #define LAYER_M        0.1f
 #define RECENTRE_CELLS 5           // re-centre when the robot is 0.5 m from the window's centre
 #define STEP_M         (CELL_M / 2) // ray walking
-#define SEEN_FOR_S     60          // a sighting
-#define MAX_OCCUPIED_S 240
-#define REMEMBER_S     240         // unseen this long: unknown again
-#define SOLID_S        120         // occupancy that counts as solid for change detection
+#define MISSES_TO_CLEAR 6          // empty readings in a row that clear an occupied cell
+#define SOLID_SIGHTINGS 2          // occupied in this many scans: clearing it is a change
+#define NO_FLOOR_SCANS  3          // "no floor" this many times, the floor not seen in between: "?"
+                                   // (a shiny floor sometimes reflects a zone's light far away)
 #define SWEEP_US       60000000    // keeps the 16-bit times from wrapping (18 h)
+#define OLDEST_S       30000       // ages are kept up to ~8 h; older cells count as this old
 
 typedef struct {
-    uint16_t occupied_until; // robot seconds; occupied while in the future
-    uint16_t seen_at;        // robot seconds; 0 = never (or forgotten)
+    uint16_t seen_at;        // robot seconds of the last measurement; 0 = never
     uint16_t frame;          // the last scan that updated it: one update per scan
-    bool solid;              // has been occupied for SOLID_S or more since it was last free
+    uint8_t misses_left;     // empty readings still needed to clear it; 0 = not occupied
+    uint8_t sightings;       // scans that saw it occupied since it was last free
+    uint8_t no_floor;        // layer 0: scans in a row that expected the floor here and didn't see it
+    bool floor_seen;         // layer 0: the floor was seen here (and not missed since)
 } cell_t;
 
 static cell_t cells[MAP_LAYERS][SIZE][SIZE]; // [layer][x mod SIZE][y mod SIZE]
@@ -34,10 +37,6 @@ static uint64_t next_sweep_us;
 // Robot time in whole seconds, never 0 (0 means "never seen").
 static uint16_t now_s(void) { return (uint16_t)(time_us_64() / 1000000u % 65535u + 1u); }
 static int age_s(uint16_t t, uint16_t now) { return (int16_t)(uint16_t)(now - t); }
-static int remaining_s(const cell_t *c, uint16_t now) {
-    int r = (int16_t)(uint16_t)(c->occupied_until - now);
-    return r > 0 ? r : 0;
-}
 
 static int cell_index(float m) { return (int)floorf(m / CELL_M); }
 static int wrap(int i) { return ((i % SIZE) + SIZE) % SIZE; }
@@ -46,9 +45,10 @@ static bool in_window(int ix, int iy) {
 }
 static cell_t *cell_at(int layer, int ix, int iy) { return &cells[layer][wrap(ix)][wrap(iy)]; }
 
-static cell_state_t state_of(const cell_t *c, uint16_t now) {
-    if (c->seen_at == 0 || age_s(c->seen_at, now) > REMEMBER_S) return CELL_UNKNOWN;
-    return remaining_s(c, now) > 0 ? CELL_OCCUPIED : CELL_FREE;
+static cell_state_t state_of(const cell_t *c) {
+    if (c->seen_at == 0) return CELL_UNKNOWN;
+    if (c->misses_left > 0) return CELL_OCCUPIED;
+    return c->no_floor >= NO_FLOOR_SCANS ? CELL_NO_FLOOR : CELL_FREE;
 }
 
 static void forget(cell_t *c) { memset(c, 0, sizeof *c); }
@@ -83,22 +83,17 @@ static int layer_of(float z_m) {
 }
 
 static void hit(cell_t *c, uint16_t now) {
-    if (state_of(c, now) == CELL_FREE) changes++;
-    int r = remaining_s(c, now) + SEEN_FOR_S;
-    if (r > MAX_OCCUPIED_S) r = MAX_OCCUPIED_S;
-    c->occupied_until = (uint16_t)(now + r);
-    if (r >= SOLID_S) c->solid = true;
+    if (state_of(c) == CELL_FREE) changes++;
+    c->misses_left = MISSES_TO_CLEAR;
+    if (c->sightings < UINT8_MAX) c->sightings++;
     c->seen_at = now;
 }
 
 static void miss(cell_t *c, uint16_t now) {
-    int r = remaining_s(c, now) - SEEN_FOR_S;
-    if (r <= 0) {
-        if (c->solid) changes++;
-        c->solid = false;
-        r = 0;
+    if (c->misses_left > 0 && --c->misses_left == 0) {
+        if (c->sightings >= SOLID_SIGHTINGS) changes++;
+        c->sightings = 0;
     }
-    c->occupied_until = (uint16_t)(now + r);
     c->seen_at = now;
 }
 
@@ -116,32 +111,48 @@ static bool first_this_scan(cell_t *c) {
     return true;
 }
 
-// Every cell the line from a to b passes through, before b, gets a miss, unless
-// this scan already updated it (a hit always wins).
-static void clear_along(point_t a, point_t b, uint16_t now) {
+// The cell of layer 0 at a point, or NULL outside the window.
+static cell_t *ground_at(point_t p) {
+    int ix = cell_index(p.x), iy = cell_index(p.y);
+    return in_window(ix, iy) ? cell_at(0, ix, iy) : NULL;
+}
+
+static void clear_at(point_t p, uint16_t now) {
+    int ix = cell_index(p.x), iy = cell_index(p.y);
+    // Under 2 cm the ray passed below anything standing on the floor tall enough to
+    // block the robot, so layer 0 is free there too.
+    int l = p.z < FIRST_LAYER_M ? 0 : layer_of(p.z);
+    if (l < 0 || !in_window(ix, iy)) return;
+    cell_t *c = cell_at(l, ix, iy);
+    if (first_this_scan(c)) miss(c, now);
+}
+
+// Every cell the line from a to b passes through, before b (and b's if
+// with_end), gets a miss, unless this scan already updated it (a hit always wins).
+static void clear_along(point_t a, point_t b, bool with_end, uint16_t now) {
     float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     float length = sqrtf(dx * dx + dy * dy + dz * dz);
     int steps = (int)(length / STEP_M);
     for (int k = 0; k < steps; k++) {
         float f = (float)k * STEP_M / length;
-        int ix = cell_index(a.x + f * dx), iy = cell_index(a.y + f * dy), l = layer_of(a.z + f * dz);
-        if (l < 0 || !in_window(ix, iy)) continue;
-        cell_t *c = cell_at(l, ix, iy);
-        if (first_this_scan(c)) miss(c, now);
+        clear_at((point_t){a.x + f * dx, a.y + f * dy, a.z + f * dz}, now);
     }
+    if (with_end) clear_at(b, now);
 }
 
 void map_add_scan(const scan_t *scan, const pose_t *pose) {
     uint16_t now = now_s();
     if (time_us_64() >= next_sweep_us) {
-        // Forget what's too old, so 16-bit times never wrap into looking fresh.
+        // Very old times move up to OLDEST_S, so 16-bit times never wrap into looking fresh.
         next_sweep_us = time_us_64() + SWEEP_US;
         for (int l = 0; l < MAP_LAYERS; l++)
             for (int i = 0; i < SIZE; i++)
                 for (int j = 0; j < SIZE; j++) {
                     cell_t *c = &cells[l][i][j];
-                    if (c->seen_at && age_s(c->seen_at, now) > REMEMBER_S) forget(c);
-                    else if (!remaining_s(c, now)) c->occupied_until = now;
+                    if (c->seen_at && age_s(c->seen_at, now) > OLDEST_S) {
+                        c->seen_at = (uint16_t)(now - OLDEST_S);
+                        if (c->seen_at == 0) c->seen_at = UINT16_MAX; // 0 means never seen
+                    }
                 }
     }
     recentre(pose->x_m, pose->y_m);
@@ -162,17 +173,37 @@ void map_add_scan(const scan_t *scan, const pose_t *pose) {
         cell_t *c = cell_at(l, ix, iy);
         if (first_this_scan(c)) hit(c, now);
     }
+    // Where the floor should be: seen there starts the count again, not seen there
+    // counts (both in one scan: it counts).
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         const ray_t *r = &scan->ray[i];
-        if (r->kind == RAY_UNUSED) continue;
-        clear_along(origin, to_world(pose, r->x_m, r->y_m, r->z_m), now);
+        cell_t *c = r->kind == RAY_FLOOR ? ground_at(to_world(pose, r->x_m, r->y_m, r->z_m)) : NULL;
+        if (c) c->no_floor = 0, c->floor_seen = true;
+    }
+    for (int i = 0; i < RANGEFINDER_RAYS; i++) {
+        const ray_t *r = &scan->ray[i];
+        cell_t *c = r->kind == RAY_NO_FLOOR ? ground_at(to_world(pose, r->x_m, r->y_m, r->z_m)) : NULL;
+        if (c) {
+            if (c->no_floor < NO_FLOOR_SCANS && ++c->no_floor == NO_FLOOR_SCANS) c->floor_seen = false;
+            c->seen_at = now;
+        }
+    }
+    for (int i = 0; i < RANGEFINDER_RAYS; i++) {
+        const ray_t *r = &scan->ray[i];
+        if (r->kind == RAY_CLEAR || r->kind == RAY_FLOOR || r->kind == RAY_HIT)
+            clear_along(origin, to_world(pose, r->x_m, r->y_m, r->z_m), r->kind != RAY_HIT, now);
     }
 }
 
 cell_state_t map_cell(float x_m, float y_m, int layer) {
     int ix = cell_index(x_m), iy = cell_index(y_m);
     if (!placed || layer < 0 || layer >= MAP_LAYERS || !in_window(ix, iy)) return CELL_UNKNOWN;
-    return state_of(cell_at(layer, ix, iy), now_s());
+    return state_of(cell_at(layer, ix, iy));
+}
+
+bool map_floor_seen(float x_m, float y_m) {
+    int ix = cell_index(x_m), iy = cell_index(y_m);
+    return placed && in_window(ix, iy) && cell_at(0, ix, iy)->floor_seen;
 }
 
 float map_free_distance(float x_m, float y_m, float dx, float dy, float max_m) {
@@ -185,13 +216,13 @@ unsigned map_changes(void) { return changes; }
 
 void map_print(const pose_t *robot) {
     if (!placed) { printf("The map is empty\n"); return; }
-    uint16_t now = now_s();
     int rx = cell_index(robot->x_m), ry = cell_index(robot->y_m);
     int ax = cell_index(robot->x_m + 0.3f * cosf(robot->yaw_rad));
     int ay = cell_index(robot->y_m + 0.3f * sinf(robot->yaw_rad));
     printf("Map %d x %d m, 10 cm cells; up = where the robot faced when the scan started.\n"
-           "## obstacle (2-12 cm), '' obstacle only seen above 12 cm, . free, blank unknown,\n"
-           "() robot, ** 30 cm ahead of it.\n",
+           "## obstacle (2-12 cm), ? no floor where expected (a drop?), '' obstacle only seen above 12 cm,\n"
+           ". floor seen, nothing on it, : nothing in the way, floor not seen (too far, or a drop),\n"
+           "blank never seen, () robot, ** 30 cm ahead of it.\n",
            SIZE / 10, SIZE / 10);
     printf("+");
     for (int i = 0; i < SIZE; i++) printf("--");
@@ -205,13 +236,14 @@ void map_print(const pose_t *robot) {
             if (ix == rx && iy == ry) s = "()";
             else if (ix == ax && iy == ay) s = "**";
             else {
-                cell_state_t ground = state_of(cell_at(0, ix, iy), now);
+                cell_state_t ground = state_of(cell_at(0, ix, iy));
                 bool overhang = false;
                 for (int l = 1; l < MAP_LAYERS; l++)
-                    overhang |= state_of(cell_at(l, ix, iy), now) == CELL_OCCUPIED;
+                    overhang |= state_of(cell_at(l, ix, iy)) == CELL_OCCUPIED;
                 if (ground == CELL_OCCUPIED) s = "##";
+                else if (ground == CELL_NO_FLOOR) s = "? ";
                 else if (overhang) s = "''";
-                else if (ground == CELL_FREE) s = ". ";
+                else if (ground == CELL_FREE) s = cell_at(0, ix, iy)->floor_seen ? ". " : ": ";
             }
             line[n++] = s[0];
             line[n++] = s[1];

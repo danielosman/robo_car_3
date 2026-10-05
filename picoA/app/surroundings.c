@@ -46,10 +46,12 @@ void surroundings_learn_start(void) {
 
 int surroundings_learn_finish(void) {
     for (int i = 0; i < n_kept; i++) rangefinder_learn_floor(&kept[i].frame, kept[i].pose.pitch_rad);
-    int learned = rangefinder_finish_floor();
+    int assumed;
+    int learned = rangefinder_finish_floor(&assumed);
     for (int i = 0; i < n_kept; i++) map_frame(&kept[i].frame, &kept[i].pose);
-    printf("Floor learned in %d of %d zones from %d frames; rows %d-%d see it at", learned,
-           rangefinder_floor_zones(), n_kept, rangefinder_first_floor_row() + 1, RANGEFINDER_ROWS);
+    printf("Floor learned in %d of %d zones from %d frames", learned, rangefinder_floor_zones(), n_kept);
+    if (assumed) printf(" (%d more assumed from the sensor's height)", assumed);
+    printf("; rows %d-%d see it at", rangefinder_first_floor_row() + 1, RANGEFINDER_ROWS);
     for (int row = rangefinder_first_floor_row(); row < RANGEFINDER_ROWS; row++)
         printf(" %.0f", (double)(rangefinder_floor_distance(row) * 100));
     printf(" cm\n");
