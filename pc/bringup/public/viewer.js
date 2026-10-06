@@ -10,8 +10,6 @@ function log(text) {
   lines.push(text); if (lines.length > 80) lines.shift();
   el('log').textContent = lines.join('\n'); el('log').scrollTop = el('log').scrollHeight;
   if (text.startsWith('TOF')) el('tofMessage').textContent = text;
-  const match = text.match(/^MODE ([0-4]):.* OK$/);
-  if (match) el('bin').value = match[1];
 }
 function send(data) {
   if (ws?.readyState === WebSocket.OPEN && serialConnected) ws.send(data);
@@ -139,38 +137,14 @@ function updateStatus() {
       `last sample ${age.toFixed(1)}s ago${age > 2 ? ' — stopped / stale' : ''}`;
   }
 }
-// Mode change restarts streaming (there is no separate Stream button).
-el('bin').onchange = () => { send(new Uint8Array([0x4d, Number(el('bin').value)])); send('S'); };
 el('gamma').oninput = () => { el('gammaV').textContent = Number(el('gamma').value).toFixed(2); drawCamera(); };
 el('stretch').oninput = drawCamera;
-// Sensor readback (CAMERA_STATE) is authoritative; controls follow it unless
-// the user is mid-edit on the exposure slider.
-let editingLines = false;
 function showCameraSettings(s) {
-  el('tone').value = String(s.tone);
-  el('ae').value = s.ae ? '1' : '0';
-  el('manual').hidden = s.ae;
-  el('analog').value = String(s.analog);
-  const digital = el('digital');
-  if (![...(digital.options ?? [])].some(o => o.value === String(s.digital))) {
-    const o = document.createElement('option'); o.value = String(s.digital);
-    o.textContent = `${(s.digital / 64).toFixed(2)}×`; digital.append(o);
-  }
-  digital.value = String(s.digital);
-  el('lines').max = String(s.maxLines);
-  if (!editingLines) { el('lines').value = String(s.lines); el('linesV').textContent = String(s.lines); }
+  el('exposure').textContent = `${s.exposureMs.toFixed(1)} ms · gain ×${s.gain.toFixed(2)} · ${s.fps.toFixed(1)} frames/s · ` +
+    `brightness ${s.brightness} · ${s.held ? 'held' : 'adjusting'}${s.settling ? ' (changing)' : ''}`;
+  el('hold').checked = s.held;
 }
-function sendManual() {
-  send(`H manual ${el('lines').value} ${el('analog').value} ${el('digital').value}\n`);
-}
-el('tone').onchange = () => send(`H tone ${el('tone').value}\n`);
-el('ae').onchange = () => {
-  el('manual').hidden = el('ae').value === '1';
-  if (el('ae').value === '1') send('H auto\n'); else sendManual();
-};
-el('analog').onchange = sendManual; el('digital').onchange = sendManual;
-el('lines').oninput = () => { editingLines = true; el('linesV').textContent = el('lines').value; };
-el('lines').onchange = () => { editingLines = false; sendManual(); };
+el('hold').onchange = () => send(el('hold').checked ? 'H hold\n' : 'H release\n');
 for (const id of ['metric', 'target', 'validity', 'rotation']) el(id).onchange = drawTof;
 el('resolution').onchange = () => {
   el('hz').max = el('resolution').value === '64' ? '15' : '60';

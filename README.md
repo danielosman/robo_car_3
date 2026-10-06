@@ -17,8 +17,8 @@ robo_car_3/
 ├── common/              # shared by both Picos: the inter-Pico link (+ host test)
 ├── picoA/               # A1 — sensors: camera, ToF, color (MLX90640 planned)
 │   ├── CMakeLists.txt   # picoA_drivers library + one executable per firmware
-│   ├── drivers/         # ToF, OPT4048, HM0360 registers/PIO; lib/vl53l8cx/ = ST ULD driver
-│   ├── bringup/         # camera.c: PCB test firmware (camera driver + USB streaming)
+│   ├── drivers/         # ToF, camera (HM0360), OPT4048; lib/vl53l8cx/ = ST ULD driver
+│   ├── bringup/         # camera.c: PCB test firmware (USB streaming to pc/bringup)
 │   └── app/             # robot firmware, the brain
 ├── picoB/               # A2 — motors, encoders, IMU
 │   ├── CMakeLists.txt   # picoB_drivers library + one executable per firmware
@@ -36,15 +36,15 @@ robo_car_3/
 One configure and build produces every firmware. Drivers are shared: each Pico's
 `CMakeLists.txt` builds the robot firmware and the bring-up firmware from the same
 `picoX_drivers` library, so the bring-up firmware keeps building and can be used
-to re-test hardware (e.g. a new PCB revision). The camera driver is still
-inside `picoA/bringup/camera.c`; it moves to `drivers/` when the app needs it.
+to re-test hardware (e.g. a new PCB revision).
 Code shared between the Picos (the inter-Pico link) is in `common/`.
 
 ## Robot firmware (`picoA_app`, `picoB_app`) — in progress
 
 Built to [ROBOT_PLAN.md](ROBOT_PLAN.md), milestone by milestone. **Done: M0 (link,
 wheel control, odometry), M1 (calibration, on waxed wood; `b` and the carpet still
-to test), M2 (map).** Next: M3 (movement detection). What happened in each session
+to test), M2 (map).** Now: M3a (movement detection while still); the camera driver
+is in `picoA/drivers/camera.c`, sets its own exposure, and the app captures frames. What happened in each session
 is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
@@ -80,7 +80,8 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   15 s (none while a test runs); keys `g` motors on, `s` stop, `p` status now (with
   a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; map: `n` start-up scan again, `m` print the
   map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
-  forward / back (`robot_test.c`). Unplugging the USB doesn't stop the robot. A
+  forward / back (`robot_test.c`); camera `c` one frame as 20 × 15 blocks, with its
+  exposure. Unplugging the USB doesn't stop the robot. A
   test that stops early says why and what it measured so far. The keys and the
   last result are printed ~1 s after a serial monitor opens or the robot server
   connects (sooner gets lost on the Mac).
@@ -119,6 +120,7 @@ marks where the face was seen, not how thick the object is.
 | Effective track width | 28.6 cm (geometric 22.5 cm: the wheels skid) |
 | Turning in place | the body slides ~1.5 cm per turn, which odometry can't see; roll −3…−5° |
 | Floor rows 6 / 7 / 8 | see the floor at ~47 / 31 / 21 cm along the ray; rows 7-8 steady to ±1-2 cm |
+| Camera (living room, evening light) | line period 42.7 µs (~12 MHz pixel clock, 512 per line); exposure 40 ms × gain 5.9 for mean brightness ~98, so 24.9 frames/s; a still scene's blocks repeat within ±1 between frames (no flicker bands) |
 | VL53 on the waxed floor | the 6th row sometimes reads a reflection (e.g. the wall); rows 7-8 can read "beyond the floor" in front of glossy furniture (`?`); status 12 zones (two surfaces in one zone) come and go with the scene |
 
 **Known geometry limits:** each zone is 5.6° tall and reports the nearest surface
@@ -181,6 +183,24 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
    (`r`, `s` after one turn, `m`).
 7. At a table edge (held, motors off), `m`: `?` along the edge, `:` beyond it.
 
+**Camera** (M3a; only PicoA, motors not needed):
+1. Flash `picoA_app` onto PicoA, open the serial monitor. No "Camera not working"
+   after the keys.
+2. `c`: frames/s and the line time (both measured), the exposure and gain the driver
+   chose, and the frame as 20 × 15 blocks of brightness 0-99. Expected: exposure 10,
+   20, 30 or 40 ms indoors with lights (under 10 ms only in bright daylight), mean
+   brightness ~80-125, "adjusting", and "middle row taken N ms ago" well under 100 ms.
+   "N since the last c" grows with the time between presses (frames/s × seconds).
+3. Hold a hand in front of the **left** half of the camera and press `c`: the left
+   columns change (the print is as the robot sees it, not mirrored).
+4. Switch the room light off or on, wait ~1 s, `c`: the exposure or gain changed and
+   the mean brightness is back to ~80-125.
+5. With the room's lights on, press `c` a few times on a still scene: each block
+   within ~2 between presses (no flicker bands).
+6. Bring-up: `picoA_bringup` with the viewer (below) shows the same image and the
+   exposure; "Hold the exposure" freezes it (switch a light: the image gets darker
+   or brighter and stays so), unticking lets it adjust again.
+
 **WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,
    build, flash `picoA_app`.
@@ -196,10 +216,9 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 
-- **HM0360 / Arducam B0319 camera:** 4-bit capture over PIO/DMA, streamed over USB.
-  Default: **160×120, Sub4, no binning**. Horizontal-binning stripes remain
-  unresolved; experiments and the even-column workaround are available in the
-  viewer. See [follow-up notes](picoA/CAMERA_STRIPES_TODO.md).
+- **HM0360 / Arducam B0319 camera:** the robot's camera driver (`drivers/camera.c`),
+  streamed over USB: **160×120, Sub4, no binning**, exposure set by the driver.
+  Binning gives stripes and isn't used ([notes](picoA/CAMERA_STRIPES_TODO.md)).
 - **VL53L8CX ToF:** working **8×8** ranging over SPI0; default **10 Hz**, up to four
   targets per zone. LPn is not wired to the Pico—the Pololu carrier holds it high.
 - **OPT4048 color sensor:** I2C0 0x44 (GP4/5, 400 kHz), auto-range, 100 ms per
@@ -207,10 +226,9 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
   lux, CIE xy/XYZ (datasheet example matrix, not board-calibrated), approximate
   color swatch and raw channel counts.
 - **Shared browser viewer:** camera, ToF matrix and OPT4048 panels side by side,
-  separate controls, diagnostic metrics and sensor logs. Camera controls: capture
-  mode (also restarts streaming), display gamma / auto-stretch, and sensor-side
-  tone curve, auto-exposure and manual exposure / analog / digital gain, read back
-  from the HM0360. ToF display starts **rotated 90°** to match PCB mounting
+  separate controls, diagnostic metrics and sensor logs. Camera: display gamma /
+  auto-stretch, the driver's exposure, gain and frame rate, and "Hold the exposure"
+  (`camera_hold_exposure()`). ToF display starts **rotated 90°** to match PCB mounting
   (display only, not camera/ToF calibration). Farthest selection means the
   farthest valid *returned* target, not necessarily every object in the zone.
 
@@ -299,9 +317,10 @@ while the wheel turns: encoder wiring or power. Paste a few lines of each side.
 3. Open **http://127.0.0.1:8080/**. Restart the Node app after reflashing/reconnecting.
    Sensor initialization and errors appear in the page log.
 
-In `picoA/`: `bringup/camera.c` (camera driver, main loop and serial commands) with
-`drivers/hm0360_init.h` / `hm0360_regs.h` / `hm0360_curves.h` (tone curves) /
-`hm0360.pio`: camera; `drivers/tof.c` / `drivers/lib/vl53l8cx/`: ST ULD integration
+In `picoA/`: `drivers/camera.c` (camera driver: continuous capture into three
+buffers, one interrupt per frame, its own exposure control, row times) with
+`drivers/hm0360_init.h` / `hm0360_regs.h` / `hm0360.pio`, and `bringup/camera.c`
+(the bring-up main loop and serial commands); `drivers/tof.c` / `drivers/lib/vl53l8cx/`: ST ULD integration
 (`bringup/tof_stream.c`: the viewer's ToF packets and commands);
 `drivers/opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in
 `pc/bringup/src/opt4048.ts`).
@@ -319,6 +338,11 @@ hardware behavior still needs PCB testing after changes.
 - [HM0360 V04 datasheet](../hm0360/doc/HM0360-datasheet_v4.pdf), especially §§3.3,
   6.6 and 10.6–10.11; [local summary](../hm0360/doc/HM0360-datasheet.md) omits some
   diagram details—prefer the PDF.
+- [HM0360 V01 datasheet (preliminary, April 2019)](https://www.welectron.com/mediafiles/productimg/arducam/Datasheet/HM0360-image-sensor-datasheet.pdf)
+  ([local copy](../hm0360/doc/HM0360-datasheet_v01.pdf), [extracted text](../hm0360/doc/HM0360-datasheet_v01.txt),
+  searchable, figures missing): the copy on this Mac. Rolling shutter (p. 2), motion
+  detection §4.1, CMU timing §9.1, gains §9.2, exposure and flicker §9.3, frame rate
+  §9.4, registers §10. Himax marks it confidential: not in the repo.
 - [VL53L8CX datasheet (ST)](https://www.st.com/resource/en/datasheet/vl53l8cx.pdf)
   ([local copy](../vl53l8cx/spec/vl53l8cx.pdf)).
 - [ST UM3109 ULD guide](https://www.st.com/resource/en/user_manual/um3109-a-guide-for-using-the-vl53l8cx-lowpower-highperformance-timeofflight-multizone-ranging-sensor-stmicroelectronics.pdf)

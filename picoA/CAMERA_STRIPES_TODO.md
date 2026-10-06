@@ -2,7 +2,9 @@
 
 ## Current status
 
-Camera firmware is in `bringup/camera.c`; initialization is in `drivers/hm0360_init.h`;
+The camera driver is `drivers/camera.c`; it has one readout, 160×120 Sub4 without
+binning. The binning experiments (modes 0-4 of the old bring-up firmware) were removed
+in M3a; git history before then has them. Initialization is in `drivers/hm0360_init.h`;
 PIO capture is in `drivers/hm0360.pio`; the shared camera/ToF browser viewer is under `pc/bringup/`.
 The current camera boot default is **160×120 Sub4, no binning**.
 VL53L8CX integration is separate in `drivers/tof.c`.

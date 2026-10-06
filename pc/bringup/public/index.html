@@ -38,30 +38,17 @@ pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:180px; overflow:a
 <canvas id="cv" width="160" height="120"></canvas>
 <div class="status" id="cameraStatus">Waiting for camera</div>
 <div class="controls">
-<label class="wide">Capture <select id="bin">
-<option value="" selected disabled>Select mode — boot default: Sub4, no binning</option>
-<option value="3">160×120 — Sub4, no binning (boot default)</option>
-<option value="2">160×120 — Sub4 + V-bin</option>
-<option value="1">160×120 — direct Sub4 + H/V bin (experimental)</option>
-<option value="0">160×120 — legacy even-column workaround</option>
-<option value="4">320×120 — raw legacy capture</option>
-</select></label>
 <label>Gamma <input id="gamma" type="range" min="0.3" max="2.5" step="0.05" value="1"> <span id="gammaV">1.00</span></label>
 <label><input id="stretch" type="checkbox">Auto-stretch</label>
 </div>
-<fieldset><legend>Sensor exposure / tone (read back from the HM0360)</legend>
+<fieldset><legend>Exposure (set by the robot's camera driver)</legend>
+<div class="status" id="exposure">Waiting for camera</div>
 <div class="controls">
-<label>Tone curve <select id="tone"><option value="0">Datasheet default</option><option value="1">Low</option><option value="2">Medium</option><option value="3">High</option><option value="-1" disabled>Custom / unknown</option></select></label>
-<label>Auto-exposure <select id="ae"><option value="1">On</option><option value="0">Off (manual)</option></select></label>
-</div>
-<div class="controls" id="manual">
-<label>Analog gain <select id="analog"><option value="0">1× (0 dB)</option><option value="1">2× (6 dB)</option><option value="2">4× (12 dB)</option><option value="3">8× (18 dB)</option><option value="4">16× (24 dB)</option></select></label>
-<label>Digital gain <select id="digital"><option value="64">1.0×</option><option value="80">1.25×</option><option value="96">1.5×</option><option value="128">2.0×</option><option value="160">2.5×</option><option value="192">3.0×</option><option value="255">3.98× (max)</option></select></label>
-<label class="wide">Exposure <input id="lines" type="range" min="1" max="1000" step="1" value="264" style="flex:1"> <span id="linesV">264</span> lines</label>
+<label><input id="hold" type="checkbox">Hold the exposure</label>
 </div>
 </fieldset>
-<div class="note">Selecting a capture mode also restarts streaming. Manual gain/exposure applies only with auto-exposure off;
-exposure is capped by the current frame length. H/V stripes remain experimental.</div>
+<div class="note">The robot's image: 160×120, exposure in 10 ms steps (no light flicker), then gain.
+Gamma and auto-stretch change only the display.</div>
 </section>
 <section class="panel">
 <h2>VL53L8CX — multizone ranging</h2>

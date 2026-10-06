@@ -10,6 +10,7 @@
 #include "world_map.h"
 #include "pose.h"
 #include "wifi_console.h"
+#include "camera.h"
 #include "debug_console.h"
 
 #define STATUS_PERIOD_US  15000000 // not while a test or the scan runs: they print their own progress
@@ -23,6 +24,7 @@ static void help(void) {
     printf("Keys: g = motors on, s = stop (motors off), p = print status now, l = link counters, h = help\n"
            "WiFi: w = connect (or show how it is connected)\n"
            "Map: n = start-up scan again (390 deg turn), m = print the map, z = one ToF frame\n"
+           "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
            "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
            "       t = print the last test result again\n");
 }
@@ -90,6 +92,44 @@ static void print_frame(void) {
     }
 }
 
+#define BLOCK 8 // pixels per block side: 160 x 120 -> 20 x 15
+
+// One camera frame as block brightness 0-99, as the robot sees it, so the numbers
+// can be compared between presses (a hand in front of it, the light changing).
+static void print_camera(void) {
+    static uint32_t last_number;
+    camera_frame_t f;
+    absolute_time_t deadline = make_timeout_time_ms(500);
+    while (!camera_frame(&f)) {
+        if (time_reached(deadline)) {
+            printf("No camera frame (%lu captured so far)\n", (unsigned long)camera_frames_captured());
+            return;
+        }
+    }
+    camera_exposure_t e;
+    camera_exposure(&e);
+    printf("Camera: %.1f frames/s, line %.1f us; exposure %.1f ms, gain x%.2f, %s%s\n",
+           e.frame_us > 0.0f ? (double)(1e6f / e.frame_us) : 0.0, (double)e.line_us,
+           (double)(e.exposure_us / 1000.0f), (double)e.gain, e.held ? "held" : "adjusting",
+           e.settling ? " (changing now)" : "");
+    printf("Frame %lu (%lu since the last c), its middle row taken %.0f ms ago; block brightness 0-99:\n",
+           (unsigned long)f.number, (unsigned long)(f.number - last_number),
+           (double)((time_us_32() - camera_row_time(&f, CAMERA_HEIGHT / 2)) / 1000.0f));
+    last_number = f.number;
+    uint32_t sum = 0;
+    for (int by = 0; by < CAMERA_HEIGHT / BLOCK; by++) {
+        for (int bx = 0; bx < CAMERA_WIDTH / BLOCK; bx++) {
+            uint32_t block = 0;
+            for (int y = 0; y < BLOCK; y++)
+                for (int x = 0; x < BLOCK; x++) block += f.pixels[(by * BLOCK + y) * CAMERA_WIDTH + bx * BLOCK + x];
+            sum += block;
+            printf(" %2lu", (unsigned long)(block * 100 / (BLOCK * BLOCK * 256)));
+        }
+        printf("\n");
+    }
+    printf("Mean brightness %.1f of 255\n", (double)((float)sum / (float)(CAMERA_WIDTH * CAMERA_HEIGHT)));
+}
+
 static void print_map(void) {
     pose_t p;
     if (!pose_now(&p)) { printf("No odometry yet\n"); return; }
@@ -151,6 +191,7 @@ void debug_console_update(void) {
     case 'n': robot_test_stop(); behaviour_scan(); break;
     case 'm': print_map(); break;
     case 'z': print_frame(); break;
+    case 'c': print_camera(); break;
     case 'q': start_test(ROBOT_TEST_SQUARE); break;
     case 'd': start_test(ROBOT_TEST_DRIFT); break;
     case 'r': start_test(ROBOT_TEST_TURNS); break;

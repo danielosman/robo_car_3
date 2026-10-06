@@ -22,11 +22,16 @@
 ; Pin usage (absolute GPIO, set in C):
 ;   IN base = GP7 (camD3), 4 data pins GP7-GP10   PCLK = GP11  HREF = GP12  VSYNC = GP13
 ;
-; C pushes (pixels_per_line - 1) = (160 - 1) once; we hold it in Y and reload X
-; every line. Each loop iteration consumes 2 PCLK (one pixel = two nibbles).
+; C pushes (pixels_per_line - 1) = (160 - 1) once per frame; we hold it in Y and
+; reload X every line. Each loop iteration consumes 2 PCLK (one pixel = two nibbles).
+; The program first waits for the start of a frame (VSYNC rising) itself, so C can
+; restart it at any moment without catching a frame halfway; C stops it (and its
+; DMA) after the frame's last pixel.
 
     pull block          ; OSR = pixels_per_line - 1 (from TX FIFO)
     mov y, osr          ; Y = pixels_per_line - 1 (persistent)
+    wait 0 gpio 13      ; VSYNC low
+    wait 1 gpio 13      ; VSYNC rising edge = start of a frame
 .wrap_target
     wait 0 gpio 12      ; HREF low (between lines)
     wait 1 gpio 12      ; HREF rising edge = start of active line

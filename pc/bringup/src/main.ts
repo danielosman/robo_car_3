@@ -68,10 +68,9 @@ async function main(): Promise<void> {
       const bytes = Buffer.from(data as Buffer);
       const text = bytes.toString("ascii");
       const valid = (bytes.length === 1 && "SXC".includes(text)) ||
-        (bytes.length === 2 && ((bytes[0] === 0x4d && bytes[1] <= 4) ||
-          (bytes[0] === 0x50 && bytes[1] <= 5))) ||
+        (bytes.length === 2 && bytes[0] === 0x50 && bytes[1] <= 5) ||
         /^T (init|start|stop|\d+ \d+ \d+ \d+ \d+ \d+)\n$/.test(text) ||
-        /^H (status|auto|tone [0-3]|manual \d{1,5} [0-4] \d{1,3})\n$/.test(text) ||
+        /^H (status|hold|release)\n$/.test(text) ||
         text === 'O init\n' ||
         /^[wr] [0-9a-fA-F]{1,4}( [0-9a-fA-F]{1,2})?\n$/.test(text);
       if (!valid || !port.isOpen) {

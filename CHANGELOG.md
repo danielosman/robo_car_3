@@ -5,6 +5,57 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
+## 6 Oct 2026: M3a started: the camera driver out of bring-up
+
+`picoA/drivers/camera.c`: capture runs continuously into three buffers (one being
+filled, the newest complete frame, the one the caller holds), one DMA interrupt
+per frame; the PIO program now waits for VSYNC itself, so restarting it late can
+only skip a frame, never start halfway. Each frame carries the time of its middle
+row's exposure (frame period measured from the frames). `camera_lock_exposure()`
+turns auto-exposure off at a whole number of 10 ms with the digital gain making up
+the difference. The bring-up firmware uses the driver (same viewer protocol and
+modes; 320-wide buffers only there). The app starts the camera at power-up; keys
+`c` (frame as blocks, frame rate, exposure) and `e` (lock).
+
+Then reworked from what the robot needs, not from what bring-up had (Daniel): one
+readout (160 × 120, Sub4, no binning; the binning experiments, modes 0-4 and the
+tone-curve choices removed, and the 320-wide buffers with them); the sensor's
+auto-exposure off for good and the driver's own exposure control instead (10 ms
+steps, then gain, `camera_hold_exposure()`), so there is no switching between auto
+and manual; the frame length follows the exposure and the line period is measured
+continuously, nothing assumes a frame rate. The datasheet (V01, found online, kept
+next to the repo, README "References") confirms a rolling shutter: frames now give
+each row's time. `e` is gone. The bring-up viewer shows the driver's exposure with
+a hold checkbox. Builds, host and viewer tests pass; not yet run on the robot
+(README, "Camera").
+
+**On the robot (camera steps 1, 2, 5, evening light):** worked first time. Line
+period 42.7 µs (measured), exposure 40 ms (the longest step) with gain ×5.9, 24.9
+frames/s, mean brightness 98 against the target 100; three presses over ~15 s gave
+the same blocks within ±1 (no flicker bands, exposure steady). The middle row's
+moment was 24-48 ms before printing (20 ms is half the exposure). Not mirrored: a hand held
+at the left edge of the robot's view (from behind the robot) darkened columns 1-8;
+the driver then doubled the gain (×5.9 → ×11.6) to bring the mean back to 98, so
+the rest of the image got ~1.5 × brighter (why motion detection must hold the
+exposure while it has a reference).
+
+## 6 Oct 2026: M3 planned (movement detection and following)
+
+Planning only, no code (ROBOT_PLAN.md §6, §7.1-7.2, §12). Daniel's points: robot
+states IDLE / SCAN / WATCH; a common interface for the camera and VL53 detectors;
+no assumption that movement goes left or right (react only if the horizontal part
+of its direction is > 0.5, else log); follow without stopping between turns, or
+someone walking past is gone; use uncertain and flaky VL53 zones, since their
+changes are information. Proposed and agreed: a reference per cell (not the
+previous frame) in a change grid both detectors share; zone states scored by how
+rare they were in the reference; pursuit with the camera reference shifted by the
+gyro heading and the map as the ToF reference; M3 split into M3a (still) and M3b
+(following by turning). Signal per SPAD, ambient and 2 targets per zone are logged
+first and kept only if they help. ST's on-chip motion indicator plugin was
+downloaded and checked (identical in ULD 1.2.1, 1.3.0 and 2.0.0) and then not
+used: 16 values in 8 × 8 mode, a depth window of ≤ 1.5 m from 40 cm, its own
+16-frame reference, useless while turning.
+
 ## 5 Oct 2026 (evening): WiFi console (ROBOT_WIFI.md), working on the robot
 
 Daniel wants no USB cable while the robot drives around. PicoA is a Pico 2 W, so

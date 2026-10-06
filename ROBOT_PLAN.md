@@ -1,7 +1,8 @@
 # RoboCar — robot app plan
 
 Status: **M0 ✅ (link, wheel control, odometry), M1 ✅ (calibration on waxed wood;
-`b` and the carpet still to test), M2 ✅ (map, §14). Next: M3.** This plan covers
+`b` and the carpet still to test), M2 ✅ (map, §14). Next: M3a (movement detection
+while still), then M3b (following by turning, §6, §7.1-7.2).** This plan covers
 the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully autonomous**
 robot, built on the drivers verified in the bring-up (tag `pcb-bringup-v1`). It
 describes the current design; what happened in each session is in
@@ -12,8 +13,10 @@ describes the current design; what happened in each session is in
 **Next session, in this order:**
 1. Open from M1: the `b` test and the carpet tests (README, "M1"); on the carpet
    also `n` (floor learned, no false `?`).
-2. M3 (movement detection), starting with moving the camera driver out of
-   bring-up.
+2. M3a (movement detection while still, §6). Done: the camera driver
+   (`picoA/drivers/camera.c`, its own exposure control, row times for the rolling
+   shutter), key `c`; to test on the robot (README, "Camera"). Next: the change grid and the VL53 detector. Then M3b (states IDLE / SCAN / WATCH, following by
+   turning, §7.1-7.2). Order and done-when in §12.
 3. M4 then adds: drive forward only while rows 7-8 see the floor right ahead
    (`map_floor_seen`; `:` or `?` ahead means stop), and face the farthest drivable
    corridor (§14).
@@ -95,9 +98,10 @@ To do that it needs three things:
   gyro (heading) and the wheel encoders (distance). PicoA corrects heading drift
   using the VL53: after each full turn it compares the start of the turn with the
   end, and it matches readings against the map.
-- **Noticing movement.** While standing still, PicoA compares each camera frame and
-  ToF frame with what it saw before. While moving, anything that contradicts the
-  map counts as a change.
+- **Noticing movement.** PicoA compares each camera frame and ToF frame with a
+  reference of what it saw: learned while standing still, and carried along while
+  it turns to follow something. While driving, anything that contradicts the map
+  counts as a change.
 
 The work is split between the boards. **PicoA is the brain:** sensors, map, pose
 correction, decisions. **PicoB is the body:** wheel speed
@@ -124,8 +128,9 @@ is the design. §13 lists what's settled.
 | R2 | **Cell memory.** A cell changes only when it is measured, never with time, and remembers when it was last measured. A reading that sees it occupied makes it occupied; it becomes empty only after **6 empty readings in a row** (a sighting in between starts the count again). Curiosity about old cells is the behaviour's job, using the age, not the map forgetting. |
 | R3 | **Pose.** Estimate the robot's pose from the wheel encoders (all four) (wheels Ø 9 cm, 1 cm wide), the IMU and, later, the camera. Start without the camera and without a Kalman filter; keep both as future steps. |
 | R4 | **Protocol.** Design the PicoA ↔ PicoB protocol. |
-| R5 | **Attracted by movement.** Detect movement with the camera and the VL53 while the robot stands still. Any movement means something in the surroundings moved. |
-| R6 | **Direction of movement.** Know where the movement went, including whether it left the field of view to the left or the right. |
+| R5 | **Attracted by movement.** Detect movement with the camera and the VL53 while the robot stands still, and keep detecting it while turning to follow it. Any movement means something in the surroundings moved. |
+| R6 | **Direction of movement.** Know where the movement is and which way it goes (no assumption that it goes left or right), including whether it left the field of view to the left or the right. React only if it moves mainly horizontally; log the rest. |
+| R14 | **States.** IDLE (console, tests), SCAN (390° at start-up), WATCH (follow movement, return to open space); start-up without USB goes SCAN → WATCH, console keys switch. |
 | R7 | **Go to it.** Turn toward the movement and drive toward it until 50 cm away. |
 | R8 | **Keep the map fresh.** When cells around the robot haven't been seen for a while (or never), rotate 360° to see them again. |
 | R9 | **Changes are movement.** If a refresh shows that something changed, investigate it like movement. |
@@ -140,7 +145,7 @@ is the design. §13 lists what's settled.
 |---|---|---|
 | The Pico is weak at floating point (R11) | Use **float32** freely, never `double`; still use unit vectors and dot/cross products instead of angles and trig | The Pico 2 (RP2350, Cortex-M33) has a **hardware single-precision FPU**; that limitation applied to the old RP2040. `double` is still slow, so compile with `-Wdouble-promotion` and write `1.0f`. Dot/cross products still pay off: "is it ahead?" is one dot product, "left or right?" is the sign of one cross product, with no `atan2` in loops. |
 | One timer per cell (R2) | Keep your timer **and** add a "last observed" time per cell | With only the timer, "seen empty" and "never seen" look the same. R8 needs that difference: cells nobody has looked at recently are *unknown*, not empty. |
-| Movement detection with the camera (R5) | Camera and ToF movement detection **only while stationary**; while driving, use **map contradictions** | While the robot moves, everything in the image moves. A map contradiction ("a hit where we recently saw free space") works while driving and during the 360° scan, and is exactly R9. |
+| Movement detection with the camera (R5) | Camera and ToF movement detection while **still**, and while **turning to follow** with the references carried along (§6.4); while driving, use **map contradictions** | While the robot drives, everything in the image moves. A turn in place only slides the image, which can be undone with the gyro heading. A map contradiction ("a hit where we recently saw free space") works while driving and during the 360° scan, and is exactly R9. |
 
 ---
 
@@ -432,51 +437,182 @@ pitch for floor detection (§4.2).
 
 ## 6. Movement detection (PicoA)
 
-Active only while PicoB reports **stationary for ≥ 0.5 s** (lets vibration settle).
-Camera auto-exposure is **locked** while detecting; otherwise exposure changes look
-like movement.
+Two detectors, the camera and the VL53, feed one module, `motion_sense`. It works
+in two modes:
 
-### 6.1 ToF
+- **Still:** the robot stands still (PicoB stationary, then 0.5 s for vibration to
+  settle). The most sensitive mode; waiting for movement happens here.
+- **Pursuit:** the robot turns in place to follow a target (§7.2). The references
+  are carried along with the turn (§6.4), and detection looks only near where the
+  target is expected.
 
-Each zone keeps a slow background average of its distance and a noise estimate. A
-zone has **moved** if `|distance − background| > max(60 mm, 4 × noise)` in two
-frames in a row. Neighbouring moved zones form a **blob**: its bearing is the
-centre column's direction vector, its range the nearest moved distance.
+While driving (M4 on), neither detector runs; map changes (§4.6) take over.
 
-### 6.2 Camera
+### 6.1 The change grid (shared by both detectors)
 
-Shrink 160 × 120 to 40 × 30 blocks (integer sums of 4 × 4 pixels) and compare them
-with a slow background. A block has moved if the difference is above a threshold.
-If more than ~40 % of blocks change at once, it's a lighting change, so ignore the
-frame. The blob's bearing is the column vector from §3. The camera gives
-**bearing only, no range**.
+Comparing each frame with the previous one only sees the edges of a moving thing and
+misses slow movement (someone walking slowly 3 m away barely changes in 66 ms). So
+each frame is compared with a **reference**, and each cell is judged against its
+own noise:
 
-### 6.3 Combining them
+1. **Learn the reference:** after the robot stops and settles, ~8 frames give each
+   cell its mean and noise (~0.5 s).
+2. **Score each cell** by how unlike its reference it is (the detectors below say
+   how). A cell has **moved** when its score summed over the last ~4 frames is
+   above a threshold; a neighbouring cell that also scores lowers it (people span
+   several cells, noise mostly doesn't).
+3. **Keep it current:** cells that didn't move update the reference slowly (drift).
+   A cell that stays moved for more than ~5 s is absorbed into the reference: a bag
+   put down is reported once, not followed forever. Things that always move (a TV,
+   a curtain, a fan) are absorbed the same way; an ignore mask can come later.
+4. **Blobs:** neighbouring moved cells form a blob with a **where** vector (unit, robot
+   frame, including elevation) and a **which way** vector (unit, how the blob moved
+   since the last frame: 3D from the ToF, since its range changes too; 2D across
+   and up/down in the image from the camera).
 
-The ToF's 45° field of view lies inside the camera's 53°, so the camera sees ~4° more
-on each side. If the camera and ToF bearings agree (dot product > cos 10°), it's
-one event with bearing and range. The 3 cm sideways offset shifts the ToF bearing
-by up to ~3° at 50 cm and less further away, which is within that tolerance.
-Camera only (e.g. in the outer 4°): bearing only, with the range from the map if
-it has something there.
+The two detectors share this module; each adds only what a cell is, how it is
+scored, how a cell maps to a direction, and its own way of rejecting false movement.
+Their output is the same type:
 
-### 6.4 Tracking and exit side (R6)
+```c
+typedef struct {
+    vec3     where;      // unit vector to the blob, robot frame
+    vec3     which_way;  // unit vector of its movement since the last frame (0 if new)
+    float    range_m;    // < 0: unknown (camera)
+    float    strength;   // share of cells moved
+    uint32_t t_us;
+} motion_obs;
+```
 
-The tracker remembers the active blob's last bearings. When the blob disappears:
-- last seen in the outer ~15 % of the camera's field of view → **EXITED_LEFT /
-  EXITED_RIGHT**; the side is the sign of cross(forward, bearing).
-- otherwise → **LOST** (it stopped moving or went out of range).
+### 6.2 VL53
 
-### 6.5 While moving
+Each zone is a cell. Per frame its reading is in one of three **states**: **sure**
+with a distance (status 5, 6, 9), **unsure** with a distance and a status (e.g. 12,
+two surfaces in the zone), or **none**. No reading is thrown away: the reference
+learns per zone how often it is sure / unsure / none (e.g. 95/5/0 %, or a flaky
+50/40/10 %), the mean and noise of its sure distances, and separately of its unsure
+ones. **A zone moves when it behaves unlike its reference.** Each reading scores by
+how rare it was in the reference (a small integer table per zone, from counts):
 
-No camera or ToF movement detection. Map changes (§4.6) take over.
+| Reference → now | Score |
+|---|---|
+| sure → sure, distance off by more than `max(60 mm, 4σ)` | high |
+| always none → sure (something appeared in empty space) | high |
+| flaky → steadily sure at a new distance (something solid fills the zone) | medium-high |
+| always sure → unsure or none (a target left; an edge crossing the zone: status 12) | medium |
+| unsure → unsure, distance shifted (wider threshold than sure) | medium |
+| flaky → steadily sure at its usual distance (the zone calmed down) | low |
 
-**Events produced:** `MOTION(bearing, range or none)`, `EXITED(side, last
-bearing)`, `MAP_CHANGE(world point)`.
+So a zone changing between flaky and steady is information too; it just counts less
+than a clear change of distance. The where vector is the mean of the moved zones'
+ray directions from `rangefinder` (robot frame, so the zone layout stays hidden),
+the range the nearest moved distance.
+
+**Log first, then decide:**
+- `signal_per_spad` (what the reflectance is calculated from) as one more scored
+  channel: it changes when a different surface sits at the same distance, or
+  something only partly covers a zone. It may only confirm (with a distance or state
+  change, or a neighbour), never trigger alone; it's noisy at range and in sunlight.
+- `ambient_per_spad` (infrared background, a very coarse camera): logged only.
+- **2 targets per zone:** a new near target in front of the zone's known wall. The
+  driver already reads up to 4; check that 8 × 8 still runs at 15 Hz.
+
+`z` prints these per zone; recordings of someone walking in front of the robot show
+which channels catch something the others miss, and only those stay. ST's on-chip
+motion indicator is not used: 16 values in 8 × 8 mode, a depth window of at most
+1.5 m starting at 40 cm, its own 16-frame reference (useless while turning), and it
+would duplicate our reference rather than replace it.
+
+### 6.3 Camera
+
+Each 8 × 8-pixel block of the 160 × 120 image is a cell (20 × 15 cells; 4 × 4 blocks
+if that turns out too coarse); its value is the mean brightness, scored by
+`|value − mean| / noise`.
+
+- **The driver sets the exposure itself, always** (the sensor's auto-exposure is
+  off): whole 10 ms steps, since lights flicker at 100 Hz on 50 Hz mains and the
+  rolling shutter would turn flicker into moving bands; the shortest step needing at
+  most ×4 gain, then more gain; under 10 ms only in daylight. The frame length
+  follows the exposure, so frames come as fast as it allows (25 frames/s or more);
+  nothing depends on a frame rate. Motion detection holds the exposure while it has
+  a reference (`camera_hold_exposure`); frames say when a change is still settling.
+- **Rolling shutter:** each row is exposed one line period after the row above
+  (datasheet V01, p. 2); frames give each row's time (`camera_row_time`), and turn
+  compensation (§6.4) takes the heading per block row.
+- **Lighting changes:** the frame's average change is subtracted first; if more than
+  ~40 % of blocks still changed, the frame is dropped and the reference learned again.
+- **Direction only, no range:** where comes from the column vector (§3) and row.
+  The range comes from the ToF if the two agree, else from the map along that bearing.
+
+### 6.4 During pursuit
+
+- **Camera: shift the reference by the turn.** The camera is 2.5 cm from the turning
+  centre, so a turn in place is almost a pure rotation, which slides the whole image
+  sideways by ~3 px per degree at every depth. Each frame takes the heading turned
+  since the reference from `pose_at(frame time)`, shifts the reference by that many
+  pixels and compares only the columns both see. Motion blur at 60°/s with 10 ms
+  exposure is ~2 px, below a block. New columns at the leading edge get a reference
+  after a few frames.
+- **ToF: the map is the reference.** In the robot frame a turn changes every zone; in
+  the world frame the room stays put. A hit in a cell the map recently saw free,
+  near the predicted target position, is the target (§4.6's map changes, which are
+  too noisy alone but usable when filtered by the prediction).
+- Detection searches only within ~15° of the predicted bearing.
+
+### 6.5 Combining, tracking, events
+
+- The camera sees ±26.5°, the ToF ±22.5°. If their where vectors agree (dot >
+  cos 10°; the ToF's 3 cm sideways offset shifts it ≤ 3° at 50 cm), it's one
+  observation with range. Seen by only one sensor, a cell needs a higher score (one
+  more frame).
+- The tracker follows one target (the strongest blob; once tracked, it keeps it over a
+  stronger newcomer unless it is lost), with its angular speed.
+- **React or log:** project which way onto the horizontal (drop its vertical part); a
+  length **> 0.5** (it moves mainly sideways, or toward or away from the robot) is a
+  `MOTION` event; ≤ 0.5 (mainly up and down: a hand waving, someone sitting down)
+  is only logged.
+- When the target disappears: last seen in the outer ~15 % of the camera's field of
+  view → `EXITED(side, last bearing)` (side: the sign of cross(forward, where));
+  otherwise `STOPPED`.
+
+**Events produced:** `MOTION(where, which way, range or none, angular speed)`,
+`EXITED(side, last bearing)`, `STOPPED`, `MAP_CHANGE(world point)`.
 
 ---
 
 ## 7. Behaviour (PicoA)
+
+### 7.1 Robot states
+
+| State | What the robot does | Entered by |
+|---|---|---|
+| **IDLE** | stands still, motors off, takes console keys; the tests (`q`, `r`, `f`, `b`, `d`) run only from here | power-up on USB, `i`, `s`, a safety stop |
+| **SCAN** | turns 390°, builds the map, turns to the most open direction (§14) | power-up without USB after trying the WiFi, `n` |
+| **WATCH** | watches for movement, follows it by turning (§7.2), returns to open space when nothing moves | the end of SCAN, `a` |
+
+Power-up without USB: WiFi, SCAN, WATCH. On USB: IDLE; `n` (scan, then watch) or
+`a` starts it. A safety stop drops to IDLE, so nothing restarts the motors by
+itself. Every change of state is printed.
+
+### 7.2 Following movement by turning (M3b)
+
+In WATCH, with no driving yet:
+
+1. **Still:** detect (§6). A `MOTION` event → Pursuit. (Within ±10° of straight ahead
+   and not moving sideways: no turn, keep watching.)
+2. **Pursuit:** turn at the target's angular speed to keep it centred, aiming ahead
+   by angular speed × ~0.3 s, at up to 1.5 rad/s (a person at 1 m/s crosses at
+   ~1 rad/s 1 m away). No limit on how far: it follows for as long as the movement
+   goes on. Detection continues during the turn (§6.4).
+   - `EXITED` (lost at an edge): keep turning that way along the prediction for ~1 s,
+     or ~40° past the edge of the field of view.
+   - `STOPPED` or lost: stop, settle 0.5 s, learn the references, back to Still.
+3. **Back to open space:** ~20 s in Still with no movement → turn to the most open
+   direction (§14's chooser), only if it is ≥ 1.5 × better than the current heading.
+4. **Turning safety:** no turn while the map has an obstacle within the 15 cm turning
+   radius (the turning part of the Safety guard below).
+
+### 7.3 The order of needs (M4, M5)
 
 The robot's needs, in order:
 
@@ -614,11 +750,11 @@ the names are open to change.
 |---|---|---|
 | `body` | `body_update()`, `body_connected()`, `body_odom()`, `body_status()`, `body_motors(on)`, `body_drive(v, ω)` | PicoB as PicoA sees it: the link protocol, greeting and version check, repeating DRIVE for PicoB's safety stop, re-sending MOTORS until PicoB has acted on it, printing PicoB's log lines |
 | `robot_test` (M0, M1) | `robot_test_start(test)`, `robot_test_stop()`, `robot_test_update()`, `robot_test_result()` | the calibration tests as a table (steps, progress, result), driving to distances and angles, early stops and their results |
-| `camera` (taken out of bring-up `camera.c` in M3) | `camera_start()`, `camera_frame(&frame)` (non-blocking), `camera_lock_exposure(bool)` | PIO/DMA, HM0360 registers and modes |
+| `camera` (driver, `picoA/drivers/camera.c`) ✅ | `camera_init()`, `camera_update()`, `camera_frame(&frame)` (non-blocking: the newest complete frame, with its exposure, gain, a settling flag and its row times, `camera_row_time()`), `camera_hold_exposure(bool)`, `camera_exposure(&e)` | PIO/DMA capture into three buffers, HM0360 registers, its own exposure control (10 ms steps against flicker, then gain; the sensor's auto-exposure off), the frame length following the exposure, the measured line period, the rolling shutter |
 | `rangefinder` (on top of the `tof` driver) | `rangefinder_poll(&scan)` → 64 rays **in the robot frame** (origin, unit direction, distance, and floor / obstacle / no target) plus a timestamp | zone order, the 90° rotation, the 3 cm offset and 7 cm height, per-zone floor calibration and pitch adjustment, VL53 status codes and settings |
 | `world_map` | `map_add_scan(scan, pose, changes)`, `map_cell_state(point)`, `map_staleness(pose, sectors)`, `map_free_distance(point, direction)` | cell size, layers, rolling window, timers, ray walking, change detection |
 | `pose` | `pose_on_odom(odom)`, `pose_on_scan(scan)`, `pose_at(t)` | odometry history and interpolation, clock offset, full-turn check, map ← odometry correction, map matching |
-| `motion_sense` | `motion_on_scan(scan)`, `motion_on_frame(frame)`, `motion_next_event(&ev)` | backgrounds, thresholds, blobs, tracking, exit side, camera/ToF agreement, stationary gating |
+| `motion_sense` | `motion_on_scan(scan)`, `motion_on_frame(frame)`, `motion_reset()`, `motion_next_event(&ev)` | the change grid (references, noise, scores, absorbing), VL53 zone states, camera blocks and lighting rejection, turn compensation, blobs, tracking, react-or-log, exit side, camera/ToF agreement, still/pursuit gating |
 | `behaviour` | `behaviour_step(now)` → drive command | the order of needs, the Safety guard, targets, scan progress, the 50 cm rule, choosing open space |
 | `debug_console` | `debug_console_update()` | what gets printed and how often, single-key commands |
 
@@ -681,8 +817,9 @@ Each milestone ends with a test on the robot and a red-flag review.
 | M0 ✅ | **Foundations:** `common/link` (its byte and frame counters double as the UART test); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | End pose within ~1 cm and ~1° of odometry after a 50 cm square |
 | M1 ✅ | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % (none needed on waxed wood; carpet still to measure) |
 | M2 ✅ | **Map:** per-zone floor learning, map from ToF and odometry, drops, map printed as text in the debug log (§14) | Open floor shows no obstacles, also while braking; walls stay put while turning; drops marked |
-| M3 | **Movement detection** while stationary (ToF, then camera); exit side. Take the camera driver out of bring-up first (moved from M0: nothing earlier uses the camera) | Events in the debug log match what you do in front of the robot |
-| M4 | **Behaviour:** Investigate, Face open space, the Safety guard | Robot turns to movement, stops 50 cm away, then turns to face open space |
+| M3a | **Movement detection while still** (§6.1–6.3, 6.5): camera driver out of bring-up (non-blocking frames, exposure lock, flicker-safe exposure, a key printing the block grid); the change grid; VL53 zone states (log signal, ambient and 2 targets, keep what helps); camera blocks; combining, tracking, react-or-log, exit side | Events in the debug log match what you do in front of the robot |
+| M3b | **Following by turning** (§6.4, §7.1–7.2): states IDLE / SCAN / WATCH; turn-compensated camera (tested by turning the robot by hand on the bench); map as the ToF reference; pursuit; back to open space; no turn into a near obstacle | The robot keeps facing someone walking past it, then returns to open space |
+| M4 | **Behaviour:** Investigate (driving to the target), the Safety guard for driving | Robot drives to movement, stops 50 cm away, then turns to face open space |
 | M5 | **Staleness, 390° scan with the full-turn check, map changes** | Heading error after a scan ~1–2°; move an object while the robot isn't looking and the robot finds it |
 | M6 | **Correction against the map** | Heading and position drift corrected over a few minutes of operation |
 
@@ -709,7 +846,8 @@ Each milestone ends with a test on the robot and a red-flag review.
 
 ## 13. Open questions and decisions
 
-None at the moment.
+- Detail values to confirm on the robot: 20 s before returning to open space,
+  thresholds and frame counts in §6 (from M3a logs).
 
 Settled: robot dimensions and height, sensor positions, camera field of view,
 indoors on waxed wood with one carpet, no thermal camera for now, order of needs,
@@ -717,7 +855,13 @@ fully autonomous with no PC app in v1, ToF zones with no target mark the first 1
 empty and leave farther cells alone, a blocked path counts as arrived, no battery sensor for now.
 
 Decided along the way:
-- The camera driver comes out of bring-up in M3 (nothing earlier uses the camera).
+- The camera driver comes out of bring-up in M3a (nothing earlier uses the camera).
+- Movement (§6, §7.1-7.2): states IDLE / SCAN / WATCH; detection against a learned
+  reference, not the previous frame; uncertain and flaky VL53 zones are used
+  (changes of state score); detection continues while turning to follow (no stop
+  between steps, no limit on the turn); react only if the horizontal part of the
+  movement's direction is > 0.5, else log; turning to follow comes in M3b, driving
+  to the target stays M4; ST's motion indicator not used.
 - No separate UART echo test: the link's counters (`l` in the console) do that job.
 - **Safety stops** (PicoB): no DRIVE for 250 ms, a wheel not following its target
   for 1 s (stopped, far too slow or turning the wrong way; each of the four wheels),

@@ -13,6 +13,7 @@
 #include "robot_test.h"
 #include "debug_console.h"
 #include "wifi_console.h"
+#include "camera.h"
 
 #define USB_CHECK_US 3000000 // after power-up: time for a computer to enumerate the USB
 
@@ -34,19 +35,22 @@ int main(void) {
     absolute_time_t usb_check = make_timeout_time_us(USB_CHECK_US);
     body_init();
     bool tof_ok = surroundings_init(); // ~2 s: uploads the ToF sensor's firmware
+    bool camera_ok = camera_init();
     for (;;) {
         start_up(usb_check);
         body_update();
         pose_update();
         surroundings_update();
+        camera_update();
         behaviour_update();
         robot_test_update();
         wifi_console_update();
         debug_console_update();
         static bool warned;
-        if (!tof_ok && !warned && (stdio_usb_connected() || wifi_console_connected())) {
+        if (!warned && (stdio_usb_connected() || wifi_console_connected())) {
             warned = true;
-            printf("ToF sensor not working: no map\n");
+            if (!tof_ok) printf("ToF sensor not working: no map\n");
+            if (!camera_ok) printf("Camera not working\n");
         }
     }
 }

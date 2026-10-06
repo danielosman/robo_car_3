@@ -42,8 +42,6 @@ test('viewer renders both streams and sends independent sensor controls', async 
     assert.equal(node('rotation').value, '90', 'PCB mounting rotation is the startup default');
     const receive = (msg: object) => socket.onmessage!({data: JSON.stringify(msg)});
     receive({type: 'connection', connected: true, port: 'COM_TEST'});
-    receive({type: 'log', text: 'MODE 3: H_SUB=2 V_SUB=2 BIN=0 capture=160x120 OK'});
-    assert.equal(node('bin').value, '3');
     const camera = new Uint8Array(4 + 160*120); camera.set([160, 0, 120, 0]);
     socket!.onmessage!({data: camera.buffer}); assert.equal(draws, 1);
     const zones = Array.from({length: 64}, () => ({count: 2, ambient: 10, spads: 50,
@@ -54,21 +52,18 @@ test('viewer renders both streams and sends independent sensor controls', async 
     assert.equal(node('grid').children[0].children[0].textContent, '100');
     node('target').value = 'farthest'; node('target').onchange!();
     assert.equal(node('grid').children[0].children[0].textContent, '1000');
-    node('bin').value = '2'; node('bin').onchange!();
     node('stopTof').onclick!(); node('applyTof').onclick!();
-    assert.deepEqual(sent, [new Uint8Array([0x4d, 2]), 'S', 'T stop\n', 'T 64 10 1 1 5 5\n']);
+    assert.deepEqual(sent, ['T stop\n', 'T 64 10 1 1 5 5\n']);
     node('ranging').value = '3'; node('integration').value = '100'; node('applyTof').onclick!();
-    assert.equal(sent.length, 4, 'invalid autonomous timing must not be sent');
+    assert.equal(sent.length, 2, 'invalid autonomous timing must not be sent');
     sent.length = 0;
-    receive({type: 'cameraSettings', ae: false, lines: 300, maxLines: 560, analog: 2, digital: 100, tone: 3});
-    assert.equal(node('tone').value, '3'); assert.equal(node('ae').value, '0');
-    assert.equal(node('manual').hidden, false); assert.equal(node('lines').max, '560');
-    assert.equal(node('digital').value, '100', 'non-preset digital gain from readback is shown');
-    node('tone').value = '1'; node('tone').onchange!();
-    node('lines').value = '400'; node('lines').onchange!();
-    node('ae').value = '1'; node('ae').onchange!();
-    assert.deepEqual(sent, ['H tone 1\n', 'H manual 400 2 100\n', 'H auto\n']);
-    assert.equal(node('manual').hidden, true);
+    receive({type: 'cameraSettings', held: false, settling: false, exposureMs: 20, gain: 2.5, fps: 31.2, brightness: 98});
+    assert.match(node('exposure').textContent, /20\.0 ms · gain ×2\.50 · 31\.2 frames\/s · brightness 98 · adjusting/);
+    assert.equal(node('hold').checked, false);
+    node('hold').checked = true; node('hold').onchange!();
+    receive({type: 'cameraSettings', held: true, settling: false, exposureMs: 20, gain: 2.5, fps: 31.2, brightness: 98});
+    assert.match(node('exposure').textContent, /held/);
+    assert.deepEqual(sent, ['H hold\n']);
     const channel = (adc: number) => ({adc, exponent: 1, counter: 2, crcOk: true, rangeOk: true});
     receive({type: 'opt', sequence: 5, conversionMs: 100, overload: false, valid: true, lux: 123.4,
       channels: [channel(10), channel(20), channel(30), channel(40)],

@@ -61,10 +61,9 @@ struct senosr_reg hm0360_320x240_trim_2[] = {
     {0x103F,0xE6},   // gamma LUT point 15
 
     // --- Auto-exposure (AE) ------------------------------------------------
-    {0x2000,0x3F},   // AE_CTRL: bit[0] AE en, bit[4] AE_update, bit[7] ALC kept;
-                     //   bit[6] FR_ctrl_en CLEARED (was 0x7F) -> auto-framerate OFF
-                     //   so the frame_length below HOLDS instead of AE stretching it
-                     //   to lengthen exposure in low light (that was a big fps sink).
+    {0x2000,0x3E},   // AE_CTRL: bit[0] AE OFF (camera.c sets exposure, gains and frame
+                     //   length itself), bit[6] FR_ctrl_en off (no auto frame rate).
+                     //   The other AE registers below are unused while AE is off.
     {0x202C,0x1F},   // AE max gain / convergence
     {0x2031,0x18},   // [rm?] AE integration-time seed (AE overwrites at runtime)
     {0x2032,0x01},   // [rm?] AE integration-time seed (AE overwrites at runtime)
@@ -260,9 +259,8 @@ struct senosr_reg hm0360_320x240_trim_2[] = {
     {0x0341,0x90},   // FRAME_LENGTH_LINES_L }  (120 active rows now; raise if frame tears)
 
     // --- Output format + sub-sample + stream-on (keep this block LAST) ------
-    // Boot default: direct 160x120 Sub4, no binning. Other modes are selected
-    // in camera.c. H-binning stripes remain under investigation; even-column
-    // removal is a workaround, not a verified native binning layout.
+    // The only readout: 160x120, Sub4, no binning (binning gives stripes:
+    // CAMERA_STRIPES_TODO.md). camera.c then sets the exposure and frame length.
     {0x310F,0x40},   // OUTPUT_FMT: [6]=1 4-bit serial enable (D0-D3), [7]=0 1-bit off.
                      //   slew [5:3]/[2:0]=0 (kept from 1-bit). 1-bit used 0x80.
     {0x0380,0x02},   // H_SUB: Sub4 horizontal -> 640->160 columns
