@@ -2,8 +2,8 @@
 
 Status: **M0 ✅ (link, wheel control, odometry), M1 ✅ (calibration on waxed wood;
 `b` and the carpet still to test), M2 ✅ (map, §14). Now: M3a (movement detection
-while still: camera driver ✅, VL53 ✅, camera detector next), then M3b (following by
-turning, §6, §7.1-7.2).** This plan covers
+while still: camera driver ✅, VL53 ✅, camera detector ✅ first robot tests, VL53
+tracker ✅); next: turning to look (M3b, §6.6).** This plan covers
 the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully autonomous**
 robot, built on the drivers verified in the bring-up (tag `pcb-bringup-v1`). It
 describes the current design; what happened in each session is in
@@ -21,13 +21,19 @@ describes the current design; what happened in each session is in
      background, §6.2 in six sentences; logged by `motion_sense`, keys `v` / `o`;
      README, "Movement, VL53").
 
-   **Next: the camera detector (§6.3).** Start by proposing it to Daniel in a few
-   plain sentences, as §6.2 is written, before any code. It is not the VL53's
-   approach: a block can only look different from its background, never "closer";
-   lighting changes, the held exposure and noise per block are its problems. It can
-   reuse `change_grid` (last 4 frames, blobs) or not. Then combining the two and
-   tracking (§6.5), then M3b (states IDLE / SCAN / WATCH, following by turning,
-   §7.1-7.2). Order and done-when in §12.
+   - the camera's movement detection (`camera_motion`, §6.3), with the exposure
+     kept apart from it (adjusted only when calm); key `k`. On the robot: people
+     and a light switch found as expected; it also sees shadows on the floor (the
+     evening lamp). Movement log lines start with the robot's time in seconds.
+     Known limit: a small thing moving faster than ~50°/s isn't found.
+
+   **Tracking with the VL53 only (§6.6), decided with Daniel:** the tracker
+   (`tracker.c`) works on the robot (walks at 0.5 and 1.5 m, both ways: one target
+   edge to edge, the correct exit side). **Next: turning to look (M3b, simple,
+   §6.6)**; start by agreeing its sentences with Daniel. Combining the camera with
+   the VL53 (§6.5) and the camera during turns (§6.4) are put off: the camera keeps
+   running and logging, but nothing uses it yet.
+
    Open, to try later: the VL53 at 10 Hz instead of 15 (`RANGEFINDER_HZ`; 100 ms per
    reading, ~20 % less noise; the map was tuned at 15). For pursuit the camera
    driver should prefer 10 ms exposures with more gain (40 ms blurs ~7 px at 60°/s;
@@ -48,7 +54,7 @@ describes the current design; what happened in each session is in
 | `ROBOT_WIFI.md` | PicoA's console over WiFi to `pc/robot/` (a browser page), and what PicoA does at power-up |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `change_grid.*` (last 4 frames per cell, blobs), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
 | `picoA/drivers/camera.*` | HM0360 camera: continuous capture, own exposure control, row times; shared with the bring-up firmware |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
@@ -56,7 +62,7 @@ describes the current design; what happened in each session is in
 **Build, test, flash:**
 - `cmake -S . -B build -G Ninja` (first time), `cmake --build build`.
 - `./run_tests.sh`: host tests (link; PicoB drive, odometry, brain; PicoA body,
-  robot_test, rangefinder, world map, pose, start-up scan); run after every change.
+  robot_test, rangefinder, world map, pose, start-up scan, movement detection); run after every change.
   It stops at the first failure.
 - Flash `build/picoA/picoA_app.uf2` → PicoA, `build/picoB/picoB_app.uf2` → PicoB.
   Only the Pico whose code changed needs reflashing; a change to `common/link_msgs.h`
@@ -516,32 +522,60 @@ Host test (`test_tof_motion.c`, 20 random seeds): 5 minutes of a room with range
 noise, unsure frames, a floor zone's reflection and far zones' farther surfaces or
 nothing for 1-2 frames every ~10 s, a far zone sure half the time, a floor zone
 reading the wall behind half the time, a door frame's edge 1 frame in 20: no
-movement; a person found in 2 frames, a thin pole in one zone in 3, a hand waving
+movement; someone walking up until they fill the view: movement, not light; a
+person found in 2 frames, a thin pole in one zone in 3, a hand waving
 for 3 s counted the whole time, a box still after ~1 s, taking it away not
 movement.
 
-### 6.3 Camera
+### 6.3 Camera: different from the background
 
-Not designed yet (next session: propose it in plain sentences first). Starting
-points: each 8 × 8-pixel block of the 160 × 120 image is a cell (20 × 15); its value
-the mean brightness, compared with a background learned while still, against the
-block's own noise; a block that changes and then stays steady for 1 s has stopped,
-as on the VL53. What the driver already gives:
+In simple sentences (`camera_motion.c`):
+1. Each 8 × 8-pixel block of the 160 × 120 image is a cell (20 × 15); its value is
+   its mean brightness. Frames still settling after an exposure change are skipped,
+   and frames are used at most ~15 a second (times are in seconds, not frames).
+2. When the robot stops, the exposure is let reach its target, then held, and each
+   block learns over 1 s what it normally reads (the middle value) and how much it
+   wobbles (its noise: the mean distance from the middle, at least 2 of 255). A
+   block at its background follows it slowly (dusk).
+3. A block **differs** when it is off its background by more than 4 × its noise.
+4. A block has **moved** when it differs in 2 of the last 4 frames next to another
+   such block, or in 3 alone (`change_grid`, as on the VL53).
+5. A block that changed and keeps its new value (within the same 4 × noise) for 1 s
+   has stopped (a box put down, the place it was taken from, a light switched),
+   also if it dips under "differs" now and then: that is its background from then on.
+6. **Exposure and movement are kept apart.** The driver sets the exposure slowly
+   (camera driver below). While the robot stands still the exposure is held; when
+   the driver wants a change, it gets it only when calm: nothing moved for 5 s (or
+   after 30 s of wanting, for something that never stops moving). Then the camera
+   stops watching, the exposure is adjusted, the view learned again (~1-3 s blind;
+   the VL53 keeps watching). A light switched is movement, then the exposure follows.
+7. Where: a blob's blocks give the direction, from column and row along
+   `(160, 79.5 − x, 59.5 − y)` (§3), normalised; its time is its middle row's
+   (`camera_row_time`). No range: that comes from the VL53 or the map (§6.5).
+
+Unlike the VL53 the camera can't tell nearer from farther: taking something away is
+movement too, until it is steady; a moving shadow or a reflection on the waxed
+floor is movement as well.
 
 - **The driver sets the exposure itself, always** (the sensor's auto-exposure is
   off): whole 10 ms steps, since lights flicker at 100 Hz on 50 Hz mains and the
   rolling shutter would turn flicker into moving bands; the shortest step needing at
-  most ×4 gain, then more gain; under 10 ms only in daylight. The frame length
-  follows the exposure, so frames come as fast as it allows (25 frames/s or more);
-  nothing depends on a frame rate. Motion detection holds the exposure while it has
-  a reference (`camera_hold_exposure`); frames say when a change is still settling.
+  most ×4 gain, then more gain; under 10 ms only in daylight. It adapts slowly, like
+  an auto-exposure: off target by > 25 %, it waits (5 s when a little off, down to
+  0.5 s when far off: a passing shadow is gone by then), then steps exposure × gain
+  by at most ×1.25 until on target. Held, frames say it wants a change.
 - **Rolling shutter:** each row is exposed one line period after the row above
-  (datasheet V01, p. 2); frames give each row's time (`camera_row_time`), and turn
-  compensation (§6.4) takes the heading per block row.
-- **Lighting changes:** the frame's average change is subtracted first; if more than
-  ~40 % of blocks still changed, the frame is dropped and the reference learned again.
-- **Direction only, no range:** where comes from the column vector (§3) and row.
-  The range comes from the ToF if the two agree, else from the map along that bearing.
+  (datasheet V01, p. 2); turn compensation (§6.4) takes the heading per block row.
+
+Host test (`test_camera_motion.c`, 11 seeds, at 25 and 100 frames/s): a textured
+room with pixel noise and a wobble of the whole image, a driver that waits and
+steps: no movement in 5 min, nor at dusk; darker still: the exposure adjusted when
+calm, no movement; the light switched off or on: movement, still after ~1.4 s, a
+new exposure ~8 s after the switch; someone walking up until they fill the view:
+movement all the way, the exposure adjusted only once they stand still; a hand that
+never stops: adjusted after 30 s anyway; a person found in 2 frames, a small object
+in one block in 3, a hand waving at ~33°/s the whole time, a box still after ~1.2 s,
+and its place after it is taken away.
 
 ### 6.4 During pursuit
 
@@ -558,7 +592,7 @@ as on the VL53. What the driver already gives:
   too noisy alone but usable when filtered by the prediction).
 - Detection searches only within ~15° of the predicted bearing.
 
-### 6.5 Combining, tracking, events
+### 6.5 Combining, tracking, events (later: the full design)
 
 - The camera sees ±26.5°, the ToF ±22.5°. If their where vectors agree (dot >
   cos 10°; the ToF's 3 cm sideways offset shifts it ≤ 3° at 50 cm), it's one
@@ -576,6 +610,40 @@ as on the VL53. What the driver already gives:
 
 **Events produced:** `MOTION(where, which way, range or none, angular speed)`,
 `EXITED(side, last bearing)`, `STOPPED`, `MAP_CHANGE(world point)`.
+
+
+### 6.6 Tracking with the VL53 only, then turning to look
+
+Why the VL53 alone: it only sees real things (no shadows, lamps, light switches),
+gives a range, and its blobs are few (8 × 8 zones). The camera's finer direction
+and wider view (±26.5° against ±22.5°) can be added later (§6.5).
+
+**Tracker** (`tracker.c`, log only, the robot stays still):
+1. Each VL53 frame's blobs (`tof_motion`) are the candidates.
+2. The tracker follows one target: the biggest blob at first; afterwards the
+   biggest blob that reaches within 10° of where the target is expected (blobs
+   report their leftmost and rightmost cells: someone close is a big blob plus
+   pieces, and its centre says little), and is not more than 0.5 m nearer or
+   farther (a far zone in the same direction is something else).
+3. It keeps the target's direction, range and angular speed (a straight line
+   through its directions of the last ~0.8 s: two directions alone were too noisy).
+4. No blob near it for 0.5 s: lost. Last seen in an outer zone column (the outer
+   ~15 % of the view) → "exited left / right"; else "stopped".
+5. Log: `Target: +12 deg, 0.6 m, going right at 20 deg/s` twice a second, then
+   "left the view on the right at −17 deg" or "stopped at …".
+
+Host test (`test_tracker.c`, 20 seeds, ±2° jitter, 1 frame in 8 missing): walking
+at 20 and 40°/s, the speed within 5 / 8°/s and the exit side right; stopping
+inside: stopped; the target kept over a bigger newcomer and through a 0.47 s gap;
+from the robot's logs: someone close (a big blob from −15° to +20° and a 2-zone
+piece at −17°) followed by the big blob, a far zone at the edge not taken.
+
+**Turning to look** (M3b, the simple way, after the tracker works): the WATCH
+state. When the target stops or leaves the view, the robot turns to its last
+direction (for an exit, ~40° past that edge), stops, settles 0.5 s, learns the view
+again (~1 s) and watches. It follows in hops; smooth following while turning
+(§6.4, §7.2) only if the hops show it is needed. Still to do with it: no turn when
+the map has an obstacle within the turning radius (§7.2).
 
 ---
 
@@ -755,7 +823,9 @@ the names are open to change.
 | `pose` | `pose_on_odom(odom)`, `pose_on_scan(scan)`, `pose_at(t)` | odometry history and interpolation, clock offset, full-turn check, map ← odometry correction, map matching |
 | `change_grid` ✅ | `change_grid_init()`, `change_grid_add(scores)`, `change_grid_moved()`, `change_grid_blobs()` | the last 4 frames per cell, the thresholds, blob labelling |
 | `tof_motion` ✅ | `tof_motion_restart()`, `tof_motion_add(frame, obs)` | the zone backgrounds, "closer than the background" (§6.2), blobs to observations |
-| `motion_sense` (started) | `motion_sense_update()`, `motion_sense_watching()`; later `motion_next_event(&ev)` | the change grid (references, noise, scores, absorbing), VL53 zone states, camera blocks and lighting rejection, turn compensation, blobs, tracking, react-or-log, exit side, camera/ToF agreement, still/pursuit gating |
+| `tracker` | `tracker_reset()`, `tracker_add(obs, n, t)` → new / exited left / right / stopped, `tracker_target()` | which blob is the target, its angular speed, when it is lost and where (§6.6) |
+| `camera_motion` | `camera_motion_restart()`, `camera_motion_add(frame, obs)`, `camera_motion_exposure_adjustments()` | blocks, their backgrounds and noise, holding the exposure and letting it change only when calm, "different from the background" (§6.3), column/row → direction |
+| `motion_sense` (started) | `motion_sense_update()`, `motion_sense_watching()`; later `motion_next_event(&ev)` | when the detectors watch (still) and when they learn again, the camera's exposure follows the view while moving, the movement log; later turn compensation, tracking, react-or-log, exit side, camera/ToF agreement, still/pursuit gating |
 | `behaviour` | `behaviour_step(now)` → drive command | the order of needs, the Safety guard, targets, scan progress, the 50 cm rule, choosing open space |
 | `debug_console` | `debug_console_update()` | what gets printed and how often, single-key commands |
 
@@ -768,7 +838,7 @@ already labelled floor / obstacle / no target.
 - Zone layout, sensor mounting and floor calibration are known only to
   `rangefinder`; everyone else sees robot-frame rays.
 - Camera geometry (focal length, column → bearing) is known only to
-  `motion_sense`'s camera part.
+  `camera_motion`.
 - Message layouts are known only to `link_msgs.h`.
 - Wheel diameter and track width are known only to PicoB's `odometry` and `drive`.
 
@@ -818,8 +888,8 @@ Each milestone ends with a test on the robot and a red-flag review.
 | M0 ✅ | **Foundations:** `common/link` (its byte and frame counters double as the UART test); PicoB `drive` (closed-loop wheel speed) and `odometry`; HELLO / MOTORS / DRIVE / ODOM / LOG; PicoA `body`, `debug_console` and a square test | End pose within ~1 cm and ~1° of odometry after a 50 cm square |
 | M1 ✅ | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % (none needed on waxed wood; carpet still to measure) |
 | M2 ✅ | **Map:** per-zone floor learning, map from ToF and odometry, drops, map printed as text in the debug log (§14) | Open floor shows no obstacles, also while braking; walls stay put while turning; drops marked |
-| M3a | **Movement detection while still** (§6.1–6.3, 6.5): camera driver out of bring-up (non-blocking frames, exposure lock, flicker-safe exposure, a key printing the block grid); the change grid; VL53 zone states (log signal, ambient and 2 targets, keep what helps); camera blocks; combining, tracking, react-or-log, exit side | Events in the debug log match what you do in front of the robot |
-| M3b | **Following by turning** (§6.4, §7.1–7.2): states IDLE / SCAN / WATCH; turn-compensated camera (tested by turning the robot by hand on the bench); map as the ToF reference; pursuit; back to open space; no turn into a near obstacle | The robot keeps facing someone walking past it, then returns to open space |
+| M3a | **Movement detection while still** (§6.1–6.3, 6.6): camera driver out of bring-up; the change grid; VL53 and camera detectors; tracking with the VL53 only, exit side (combining the camera, react-or-log: later, §6.5) | The target in the debug log matches what you do in front of the robot |
+| M3b | **Turning to look** (§6.6, §7.1): states IDLE / SCAN / WATCH; turn to where the target stopped or left, settle, watch again; back to open space; no turn into a near obstacle. Smooth pursuit (§6.4, §7.2) only if the hops need it | The robot turns to face someone who walked past it, then returns to open space |
 | M4 | **Behaviour:** Investigate (driving to the target), the Safety guard for driving | Robot drives to movement, stops 50 cm away, then turns to face open space |
 | M5 | **Staleness, 390° scan with the full-turn check, map changes** | Heading error after a scan ~1–2°; move an object while the robot isn't looking and the robot finds it |
 | M6 | **Correction against the map** | Heading and position drift corrected over a few minutes of operation |

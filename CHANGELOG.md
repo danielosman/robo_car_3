@@ -5,6 +5,115 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
+## 6 Oct 2026 (evening): M3a: the camera's movement detection
+
+Proposed to Daniel in seven sentences (ROBOT_PLAN.md §6.3) and agreed; key `k`
+for the camera's blocks (`v` and `o` were taken: `v` now logs both sensors).
+New: `camera_motion` (blocks, background and noise learned over 1 s with the
+exposure held, the light taken off as the median change, > 40 % differing = the
+light changed: learned again; moved by `change_grid` as on the VL53; steady 1 s =
+stopped), wired into `motion_sense` (the exposure is held while still, follows the
+light while moving; "Movement (camera)" lines and "the light changed"), host test
+`test_camera_motion.c` (25 and 100 frames/s, 11 seeds).
+
+Found in the host test: a small hand sweeping ~66°/s is in each block for only one
+used frame and is never found by "2 of 4 frames"; kept the agreed rule (a hand
+waving at ~33°/s is found the whole time) and noted the limit in the plan.
+
+**On the robot (walking right to left and back, a hand, a second light on and
+off):** both walks and the hand were found on the correct side and moved the right
+way (e.g. +22° → −14° for the hand left to right). Three things: every movement
+line was followed by "ended": frames skipped to keep ~15 a second returned 0
+("nothing moved"); they now return −1 and are ignored (the host test checks it).
+Walking past at ~0.5 m, the person filled > 40 % of the view and was taken for a
+change of light (twice). A lamp lighting ~25 % of the view was movement for as
+long as it was on (~2.5 s: switched off without waiting), though steady blocks
+should be taken in after ~1.3 s.
+
+Fixes: the light changed only when more than 40 % of the blocks *start* to differ
+in the same frame (a person comes in over several). The host test of someone
+walking up until they fill the view then found a second trap: once they cover half
+the view, the median change is theirs, so every other block "starts" at once; the
+light is now taken only from the blocks that looked like their background in the
+last frame. Tried and reverted: "steady" measured from frame to frame, for a bulb
+warming up: in the host test a lamp brightening over 5 s still kept moving
+(taken-in blocks drift off again); waiting for the `k` prints instead of guessing.
+A test-only trap on the way: a `static float light` in the module and in the test
+were one variable (tentative definitions in C); renamed `light_shift`.
+
+## 6 Oct 2026 (night): M3a: exposure and movement kept apart
+
+Daniel: the exposure was changed too eagerly; adapt slowly, like an auto-exposure;
+a light switched should be movement; and don't mix exposure control with movement
+detection: adjust the exposure only when calm, and don't watch with the camera
+meanwhile. Now: the driver waits before adjusting (5 s when 25 % off, down to 0.5 s
+when far off) and steps exposure × gain by at most ×1.25; frames say when it wants
+a change. `camera_motion` holds the exposure while still and lets it change only
+after 5 s with nothing moving (or after 30 s of wanting), then learns the view
+again. The "40 % start at once = light changed" rule and the median light
+correction are gone: a light switched is movement until steady.
+
+Found in the host test: blocks left right at the edge of "differs" after a light
+switch flickered in and out of it, and each dip restarted their 1 s steady timer
+(movement trickling for seconds, maybe the lamp on the robot); a block that keeps
+its new value is now taken in after 1 s even if it dips now and then. The median
+light correction kept moving by a few levels while blocks were being taken in,
+which also delayed it; slow light is left to each block's drift. Test fixes on the
+way: objects drawn with a fixed texture (redrawn noise made them flicker), the
+test's clock (0.1 s steps were 80 ms at 25 frames/s), the simulated driver's wait.
+
+## 6 Oct 2026 (last): the tracker fixed, on the robot
+
+Four walks with the fixes: at ~0.5 m right to left and left to right, at ~1.5 m
+both ways. Each kept one target from edge to edge (speeds 5-31°/s), no jumps to far
+zones, and ended with the correct side ("left the view on the left at +16 deg" … "on
+the right at −20 deg"), ~0.5 s after the ToF's movement ended. The tracker does what
+§6.6 asks; next is turning to look (M3b).
+
+## 6 Oct 2026 (later still): the tracker on the robot, over WiFi
+
+At ~0.5 m: left to right followed and "left on the right" as it should; right to
+left, Daniel was a 24-zone blob centred at +3° plus a 2-zone piece at −17° (his
+feet), the tracker matched by centre and stayed on the piece, reported "left on the
+right", then jumped to a single zone at 2.76 m. At ~1.3-1.5 m both walks were right
+(speeds 13-29°/s, exit sides correct), but at the end of each the target jumped to a
+far zone in the same direction (2.80 m, 2.21 m). Fixes: blobs report their leftmost
+and rightmost cells; the target is the biggest blob reaching within 10° of where it
+is expected, and not more than 0.5 m nearer or farther; target lines are printed
+only for frames in which it was seen (one showed an old position). Host test cases
+from both logs.
+
+## 6 Oct 2026 (after that): the VL53 tracker
+
+Daniel: implement the tracker now. `tracker.c` (ROBOT_PLAN.md §6.6): one target
+among the VL53's blobs, its direction, range and angular speed, lost after 0.5 s
+without a blob within 15° of where it is expected: "left the view on the left /
+right" from the outer zone columns (beyond ±16°), else "stopped". `motion_sense`
+logs it ("Target …" lines with `v`) and forgets it when the robot moves. Found in
+the host test: the angular speed from two directions 0.5 s apart was off by up to
+~8°/s with ±2° of jitter; now a least-squares line through ~0.8 s. Not yet on the
+robot.
+
+## 6 Oct 2026 (end of session): the plan simplified
+
+Proposed next: combining the camera with the VL53 into one target, then turning in
+hops, then smooth following. Daniel: too complicated; start with the VL53 alone for
+tracking. Written down as ROBOT_PLAN.md §6.6 (tracker in five sentences, then
+turning to look in hops); combining (§6.5) and the camera during turns (§6.4) put
+off; M3a/M3b in §12 changed to match. Not committed yet.
+
+## 6 Oct 2026 (late night): M3a: the camera on the robot, evening light
+
+Daniel walked right to left and back, walked to the light switch, switched the
+light on. The light switch: all 300 blocks moved for ~1.5 s, "ended", then the
+exposure was adjusted when calm (40 ms × 10.1, mean 113); two `c` ~10 s apart
+within ±1 per block; every block's noise at the 2.0 floor. Most extra camera blobs
+were 14-19° below level: Daniel's shadow on the floor (the evening lamp). What
+looked like the ToF ending 2-3 s late was a single 5th-row zone at 2.8 m, twice
+~15 s apart: most likely his feet on the way to the switch and back. Movement log
+lines now start with the robot's time in seconds, to answer such questions from the
+log.
+
 ## 6 Oct 2026 (later): M3a: the VL53's movement detection
 
 New: `change_grid` (shared by both detectors: scores over 4 frames, thresholds with a

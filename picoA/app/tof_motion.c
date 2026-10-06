@@ -110,6 +110,9 @@ static int observations(const range_frame_t *f, motion_obs_t *obs, int max) {
         float dir[3];
         rangefinder_ray_direction(i, dir);
         for (int k = 0; k < 3; k++) o->where[k] += dir[k];
+        float bearing = atan2f(dir[1], dir[0]);
+        if (o->cells == 0 || bearing > o->left_rad) o->left_rad = bearing;
+        if (o->cells == 0 || bearing < o->right_rad) o->right_rad = bearing;
         o->cells++;
         float mm = reading(i, f->range_mm[i]);
         if (mm >= 0 && mm < NOTHING && (o->range_m < 0 || mm / 1000.0f < o->range_m)) o->range_m = mm / 1000.0f;

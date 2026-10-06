@@ -44,15 +44,15 @@ Code shared between the Picos (the inter-Pico link) is in `common/`.
 Built to [ROBOT_PLAN.md](ROBOT_PLAN.md), milestone by milestone. **Done: M0 (link,
 wheel control, odometry), M1 (calibration, on waxed wood; `b` and the carpet still
 to test), M2 (map).** Now: M3a (movement detection while still): the camera driver
-(`picoA/drivers/camera.c`, its own exposure) and the VL53's movement detection
-(`change_grid.c`, `tof_motion.c`, `motion_sense.c`). What happened in each session
+(`picoA/drivers/camera.c`, its own exposure), the VL53's and the camera's movement
+detection (`change_grid.c`, `tof_motion.c`, `camera_motion.c`, `motion_sense.c`). What happened in each session
 is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, PicoB's wheel control, odometry and `brain`,
-  PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53), the start-up scan
+  PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53, camera), the start-up scan
   in a simulated room and the WiFi console (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
@@ -82,7 +82,9 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; map: `n` start-up scan again, `m` print the
   map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
   forward / back (`robot_test.c`); camera `c` one frame as 20 × 15 blocks, with its
-  exposure; movement `v` log on / off, `o` each ToF zone's background. Unplugging the USB doesn't stop the robot. A
+  exposure; movement `v` log on / off (both sensors; each line starts with the robot's
+  time in s), `o` each ToF zone's background,
+  `k` each camera block's. Unplugging the USB doesn't stop the robot. A
   test that stops early says why and what it measured so far. The keys and the
   last result are printed ~1 s after a serial monitor opens or the robot server
   connects (sooner gets lost on the Mac).
@@ -191,12 +193,17 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
 2. `c`: frames/s and the line time (both measured), the exposure and gain the driver
    chose, and the frame as 20 × 15 blocks of brightness 0-99. Expected: exposure 10,
    20, 30 or 40 ms indoors with lights (under 10 ms only in bright daylight), mean
-   brightness ~80-125, "adjusting", and "middle row taken N ms ago" well under 100 ms.
+   brightness ~80-125, "held" (movement detection holds it while the robot stands
+   still; "free" while it moves; "wants a change" / "adjusting" when off target),
+   and "middle row taken N ms ago" well under 100 ms.
    "N since the last c" grows with the time between presses (frames/s × seconds).
 3. Hold a hand in front of the **left** half of the camera and press `c`: the left
    columns change (the print is as the robot sees it, not mirrored).
-4. Switch the room light off or on, wait ~1 s, `c`: the exposure or gain changed and
-   the mean brightness is back to ~80-125.
+4. Switch the room light off or on, keep still ~10 s, `c`: the exposure or gain
+   changed and the mean brightness is back to ~80-125. The driver waits (5 s when a
+   little off, down to 0.5 s when far off), then steps by at most ×1.25; while the
+   robot stands still, movement detection lets it adjust only after 5 s of calm
+   (`k` counts these adjustments).
 5. With the room's lights on, press `c` a few times on a still scene: each block
    within ~2 between presses (no flicker bands).
 6. Bring-up: `picoA_bringup` with the viewer (below) shows the same image and the
@@ -218,6 +225,40 @@ motors off). Robot on the floor facing ~2 m of open room:
    you standing in view: `*` on the zones that see you.
 6. `n` (scan): no movement lines while it turns; afterwards `o` says "learning the
    view", then "watching".
+
+**Movement, camera** (M3a; PicoA, with PicoB running; motors off). Robot on the
+floor facing ~2 m of the room, room lights on:
+1. Press `v`: "Movement log on". Stand behind the robot, keep still for a minute.
+   Expected: no "Movement (camera)" lines (paste any that come, with a `k`).
+2. `k`: "watching", each block's background (as in `c`) and its noise (tenths of a
+   brightness level; expected ~10-40). Paste it.
+3. Walk across in front of the robot at ~1 m, left to right. Expected: "Movement
+   (camera): N blocks, +X deg (+ = left), …" about twice a second, X going from
+   positive to negative, then "Movement (camera) ended"; the ToF lines too.
+4. Wave a hand ~30 cm in front of the left half: positive degrees.
+5. Put a box ~60 cm in front and step away: "ended" ~1 s after you let go. Take it
+   away: movement again (the camera can't tell taking away from putting down), "ended"
+   ~1 s later.
+6. Walk past close (~0.5 m), filling the view: movement the whole time.
+7. Switch the room light off (or on) and keep still: "Movement (camera)" for ~1.5 s,
+   "ended"; ~5 s later "Camera: adjusting the exposure, then learning the view
+   again", no movement lines; a few seconds later `k` says "watching" and `c` shows
+   a new exposure.
+8. A lamp lighting part of the view: switch it on, keep it on ~10 s, press `k` twice
+   in that time, then switch it off. Expected: movement ~1.5 s after each switch, then
+   quiet. Paste the log. Also watch your shadow.
+
+**Target, VL53** (M3a; PicoA, with PicoB running; motors off). Robot on the floor
+facing ~2 m of room; `v` on. The tracker follows one target in the VL53's movement:
+1. Walk across at ~1 m, left to right. Expected: "Target (new): +15 deg …, 1.0 m",
+   then "Target: … going right at N deg/s" twice a second (N roughly your walking
+   speed / distance: ~1 m/s at 1 m ≈ 57 deg/s), then "Target left the view on the
+   right at −17 deg" (or so) ~0.5 s after you are out of view.
+2. The same right to left: "left the view on the left".
+3. Walk in and stop in the middle: "about still", then "Target stopped … at N deg"
+   ~1.5 s after you stopped (the VL53 takes you in after 1 s, the tracker waits 0.5 s).
+4. While you walk, someone else (or a waved hand) on the other side: the target stays
+   on you.
 
 **WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,

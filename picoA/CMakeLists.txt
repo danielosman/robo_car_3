@@ -28,7 +28,7 @@ pico_add_extra_outputs(picoA_bringup)
 # start-up scan, debug console (USB and WiFi, ROBOT_WIFI.md), calibration tests.
 add_executable(picoA_app app/main.c app/body.c app/pose.c app/rangefinder.c app/world_map.c
     app/surroundings.c app/behaviour.c app/robot_test.c app/debug_console.c app/wifi_console.c
-    app/change_grid.c app/tof_motion.c app/motion_sense.c)
+    app/change_grid.c app/tof_motion.c app/camera_motion.c app/tracker.c app/motion_sense.c)
 pico_set_program_name(picoA_app "picoA_app")
 pico_set_program_version(picoA_app "0.1")
 pico_generate_pio_header(picoA_app ${CMAKE_CURRENT_LIST_DIR}/drivers/hm0360.pio)

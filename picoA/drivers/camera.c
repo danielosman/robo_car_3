@@ -33,6 +33,9 @@
 #define MAX_GAIN (16.0f * 255.0f / 64.0f)
 #define TARGET_BRIGHTNESS 100.0f // of 255: room above for highlights
 #define SETTLE_FRAMES 3     // after a change: the frame being read, the one it applies to, one spare
+#define MAX_STEP 1.25f      // one adjustment changes exposure x gain by at most this
+#define WAIT_MAX_US 5000000 // off target by 25 %: wait this long before adjusting (a shadow passes)...
+#define WAIT_MIN_US 500000  // ...far off: at least this long
 #define SAMPLE_STEP 4       // brightness from every 4th pixel of every 4th row
 
 struct senosr_reg { uint16_t addr; uint8_t value; };
@@ -47,6 +50,9 @@ static int dma = -1;
 static uint16_t exposure_lines, frame_lines;
 static uint8_t analog_code, digital_gain; // digital: 64 = x1
 static bool held;
+static bool off_target;      // brightness outside the band since off_since_us
+static uint32_t off_since_us;
+static volatile bool wants_change; // off target for its wait: adjusting, or would be if not held
 
 // Shared with the interrupt. One buffer is being filled, one may hold the newest
 // complete frame, one may be held by the caller of camera_frame().
@@ -122,6 +128,7 @@ static void frame_done(void) {
     ready_frame.exposure_us = (float)exposure_lines * line_us;
     ready_frame.gain = gain();
     ready_frame.settling = number <= settle_until;
+    ready_frame.wants_exposure_change = wants_change;
 }
 
 static bool write16(uint16_t reg, uint16_t value) {
@@ -163,14 +170,28 @@ static void choose_settings(float light_us) {
     digital_gain = digital < 64.0f ? 64 : digital > 255.0f ? 255 : (uint8_t)digital;
 }
 
+// Slow, like an auto-exposure: off target, it waits first (5 s when 25 % off, less
+// the further off, 0.5 s at least), then steps by at most x1.25 per adjustment, one
+// after the other, until on target. Held, it only says it wants to.
 void camera_update(void) {
-    if (dma < 0 || held || line_us == 0.0f || frames <= settle_until) return;
+    if (dma < 0 || line_us == 0.0f || frames <= settle_until) return;
     float b = brightness < 1.0f ? 1.0f : brightness;
     float change = TARGET_BRIGHTNESS / b;
     if (saturated > 0.05f && change > 0.7f) change = 0.7f; // large areas burnt out
-    if (change > 0.8f && change < 1.25f) return;
-    if (change < 0.25f) change = 0.25f;
-    if (change > 4.0f) change = 4.0f;
+    if (change > 0.8f && change < 1.25f) {
+        off_target = wants_change = false;
+        return;
+    }
+    uint32_t now = time_us_32();
+    if (!off_target) { off_target = true; off_since_us = now; }
+    float factor = change > 1.0f ? change : 1.0f / change;
+    float wait_us = (float)WAIT_MAX_US * (MAX_STEP - 1.0f) / (factor - 1.0f);
+    if (wait_us < (float)WAIT_MIN_US) wait_us = (float)WAIT_MIN_US;
+    if (!wants_change && (float)(now - off_since_us) < wait_us) return;
+    wants_change = true; // from now on it steps until on target
+    if (held) return;
+    if (change < 1.0f / MAX_STEP) change = 1.0f / MAX_STEP;
+    if (change > MAX_STEP) change = MAX_STEP;
     float light = (float)exposure_lines * line_us * gain() * change;
     uint16_t old_lines = exposure_lines;
     uint8_t old_analog = analog_code, old_digital = digital_gain;
@@ -259,6 +280,7 @@ void camera_exposure(camera_exposure_t *e) {
     e->brightness = brightness;
     e->held = held;
     e->settling = frames <= settle_until;
+    e->wants_change = wants_change;
 }
 
 uint32_t camera_frames_captured(void) { return frames; }

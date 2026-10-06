@@ -5,6 +5,7 @@
 
 typedef struct {
     float where[3];  // unit vector from the sensor to it, robot frame (x forward, y left, z up)
+    float left_rad, right_rad; // the directions of its leftmost and rightmost cells (+ = left)
     float range_m;   // < 0: unknown (camera; a VL53 blob of zones that lost their target)
     float point[3];  // robot frame, metres; only with a range
     float strength;  // share of the sensor's cells that moved

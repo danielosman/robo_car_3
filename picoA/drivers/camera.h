@@ -8,7 +8,10 @@
 // The driver sets the exposure itself (the sensor's auto-exposure is off): whole
 // 10 ms steps against the flicker of lights on 50 Hz mains, the shortest one that
 // needs at most x4 gain, then more gain; shorter than 10 ms only when even that is
-// too bright. camera_hold_exposure() freezes it, so frames stay comparable.
+// too bright. It adapts slowly: off target, it waits (5 s when a little off, down
+// to 0.5 s when far off), then changes exposure x gain by at most x1.25 per step.
+// camera_hold_exposure() freezes it, so frames stay comparable; frames then say
+// when it would like to adjust.
 //
 // The sensor has a rolling shutter: each row is exposed one line period after the
 // row above it; camera_row_time() gives each row's moment.
@@ -29,13 +32,14 @@ typedef struct {
     float gain;            // analog x digital
     bool settling;         // the exposure or gain changed in the last few frames: brightness
                            // not comparable with earlier frames, exposure_us and gain unsure
+    bool wants_exposure_change; // off target for a while: adjusting, or would be if not held
 } camera_frame_t;
 
 typedef struct {
     float exposure_us, gain;
     float frame_us, line_us; // measured; 0 until measured
     float brightness;        // mean of the newest frame, 0-255
-    bool held, settling;
+    bool held, settling, wants_change;
 } camera_exposure_t;
 
 bool camera_init(void);   // finds the sensor, loads its settings and starts capturing

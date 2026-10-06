@@ -12,6 +12,7 @@
 #include "wifi_console.h"
 #include "camera.h"
 #include "tof_motion.h"
+#include "camera_motion.h"
 #include "motion_sense.h"
 #include "debug_console.h"
 
@@ -27,7 +28,7 @@ static void help(void) {
            "WiFi: w = connect (or show how it is connected)\n"
            "Map: n = start-up scan again (390 deg turn), m = print the map, z = one ToF frame\n"
            "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
-           "Movement: v = log on / off, o = each ToF zone's background now\n"
+           "Movement: v = log on / off; backgrounds now: o = each ToF zone, k = each camera block\n"
            "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
            "       t = print the last test result again\n");
 }
@@ -113,8 +114,8 @@ static void print_camera(void) {
     camera_exposure(&e);
     printf("Camera: %.1f frames/s, line %.1f us; exposure %.1f ms, gain x%.2f, %s%s\n",
            e.frame_us > 0.0f ? (double)(1e6f / e.frame_us) : 0.0, (double)e.line_us,
-           (double)(e.exposure_us / 1000.0f), (double)e.gain, e.held ? "held" : "adjusting",
-           e.settling ? " (changing now)" : "");
+           (double)(e.exposure_us / 1000.0f), (double)e.gain, e.held ? "held" : "free",
+           e.settling ? " (changing now)" : e.wants_change ? (e.held ? " (wants a change)" : " (adjusting)") : "");
     printf("Frame %lu (%lu since the last c), its middle row taken %.0f ms ago; block brightness 0-99:\n",
            (unsigned long)f.number, (unsigned long)(f.number - last_number),
            (double)((time_us_32() - camera_row_time(&f, CAMERA_HEIGHT / 2)) / 1000.0f));
@@ -137,7 +138,7 @@ static void print_camera(void) {
 // (cm; -- nothing), * = moved (reads clearly closer).
 static void print_tof_motion(void) {
     printf("ToF movement, %s: each zone's background, cm (-- nothing), * = moved:\n",
-           motion_sense_watching() ? "watching" : tof_motion_ready() ? "robot moving" : "learning the view");
+           !motion_sense_still() ? "robot moving" : tof_motion_ready() ? "watching" : "learning the view");
     for (int row = 0; row < RANGEFINDER_ROWS; row++) {
         for (int col = 0; col < RANGEFINDER_COLS; col++) {
             int i = row * RANGEFINDER_COLS + col;
@@ -145,6 +146,31 @@ static void print_tof_motion(void) {
             if (mm) printf(" %c%4u", tof_motion_moved(i) ? '*' : ' ', (unsigned)((mm + 5) / 10));
             else printf(" %c  --", tof_motion_moved(i) ? '*' : ' ');
         }
+        printf("\n");
+    }
+}
+
+// What the camera's movement detection makes of each block now (as the robot sees
+// it): its background brightness 0-99, + = differs from it now, * = moved; then
+// each block's noise (brightness 0-255, tenths).
+static void print_camera_motion(void) {
+    printf("Camera movement, %s; exposure adjusted %lu times while still so far.\n",
+           !motion_sense_still() ? "robot moving" : camera_motion_ready() ? "watching" : "adjusting the exposure or learning the view",
+           (unsigned long)camera_motion_exposure_adjustments());
+    if (!camera_motion_ready()) return;
+    printf("Each block's background, brightness 0-99 (+ = differs now, * = moved):\n");
+    for (int row = 0; row < CAMERA_MOTION_ROWS; row++) {
+        for (int col = 0; col < CAMERA_MOTION_COLS; col++) {
+            int i = row * CAMERA_MOTION_COLS + col;
+            char mark = camera_motion_moved(i) ? '*' : camera_motion_differs(i) ? '+' : ' ';
+            printf(" %c%2d", mark, (int)(camera_motion_background(i) * 100.0f / 256.0f));
+        }
+        printf("\n");
+    }
+    printf("Each block's noise, brightness 0-255 x 10 (differs beyond 4 x this):\n");
+    for (int row = 0; row < CAMERA_MOTION_ROWS; row++) {
+        for (int col = 0; col < CAMERA_MOTION_COLS; col++)
+            printf(" %3d", (int)(camera_motion_noise(row * CAMERA_MOTION_COLS + col) * 10.0f + 0.5f));
         printf("\n");
     }
 }
@@ -212,6 +238,7 @@ void debug_console_update(void) {
     case 'z': print_frame(); break;
     case 'c': print_camera(); break;
     case 'o': print_tof_motion(); break;
+    case 'k': print_camera_motion(); break;
     case 'v':
         motion_sense_log(!motion_sense_logging());
         printf("Movement log %s\n", motion_sense_logging() ? "on" : "off");
