@@ -5,7 +5,6 @@
 #include "units.h"
 #include "rangefinder.h"
 
-#define HZ               15
 #define POLL_US          5000      // tof_poll() checks for data this often
 #define ZONE_RAD         (5.625f * RAD_PER_DEG) // 45° field of view over 8 zones
 #define SENSOR_X_M       0.025f    // ahead of the centre
@@ -62,7 +61,7 @@ static void direction(float down_rad, float left_rad, float pitch_rad, float out
 
 bool rangefinder_init(void) {
     if (!have_zones) make_zones();
-    tof_settings_t s = {.zones = 64, .hz = HZ, .order = 1, .mode = 1, .integration_ms = 5, .sharpener = 5};
+    tof_settings_t s = {.zones = 64, .hz = RANGEFINDER_HZ, .order = 1, .mode = 1, .integration_ms = 5, .sharpener = 5};
     return tof_init() && tof_start(&s);
 }
 
@@ -86,15 +85,26 @@ bool rangefinder_poll(range_frame_t *frame) {
     const VL53L8CX_ResultsData *r = tof_poll();
     if (!r) return false;
     // Data is read up to POLL_US after it's ready; the measurement took the whole period.
-    frame->t_us = time_us_32() - 1000000u / HZ / 2 - POLL_US / 2;
+    frame->t_us = time_us_32() - 1000000u / RANGEFINDER_HZ / 2 - POLL_US / 2;
     for (int row = 0; row < RANGEFINDER_ROWS; row++)
         for (int col = 0; col < RANGEFINDER_COLS; col++) {
             // The sensor is turned 90° on the PCB (same as the bring-up viewer's rotation).
-            int zone = (RANGEFINDER_COLS - 1 - col) * RANGEFINDER_ROWS + row;
-            frame->range_mm[row * RANGEFINDER_COLS + col] = closest_sure_mm(r, zone);
-            frame->status[row * RANGEFINDER_COLS + col] = r->target_status[zone * VL53L8CX_NB_TARGET_PER_ZONE];
+            int zone = (RANGEFINDER_COLS - 1 - col) * RANGEFINDER_ROWS + row, i = row * RANGEFINDER_COLS + col;
+            frame->range_mm[i] = closest_sure_mm(r, zone);
+            frame->status[i] = r->target_status[zone * VL53L8CX_NB_TARGET_PER_ZONE];
         }
     return true;
+}
+
+void rangefinder_origin(float origin[3]) {
+    origin[0] = SENSOR_X_M;
+    origin[1] = SENSOR_Y_M;
+    origin[2] = SENSOR_Z_M;
+}
+
+void rangefinder_ray_direction(int ray, float dir[3]) {
+    if (!have_zones) make_zones();
+    direction(zone_down_rad[ray], zone_left_rad[ray], 0, dir);
 }
 
 static int floor_index(int ray) { return ray - FIRST_FLOOR_ROW * RANGEFINDER_COLS; }
@@ -263,3 +273,10 @@ bool rangefinder_zone_floor(int ray, float *floor_m, float *obstacle_min_height_
 int rangefinder_floor_zones(void) { return FLOOR_ZONES; }
 
 int rangefinder_first_floor_row(void) { return FIRST_FLOOR_ROW; }
+
+float rangefinder_floor_limit_m(int ray) {
+    if (!have_zones) make_zones();
+    float far_down_rad = zone_down_rad[ray] - ZONE_RAD / 2; // where its upper edge meets the floor
+    if (ray / RANGEFINDER_COLS < FIRST_FLOOR_ROW || far_down_rad <= 0) return 0;
+    return DROP_SHARE * floor_range_m(far_down_rad);
+}

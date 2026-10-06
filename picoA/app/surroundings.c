@@ -4,7 +4,7 @@
 #include "world_map.h"
 #include "surroundings.h"
 
-#define KEPT_FRAMES 300 // 20 s at 15 Hz: a 390° turn at ~30°/s takes ~14 s
+#define KEPT_FRAMES (20 * RANGEFINDER_HZ) // 20 s: a 390° turn at ~30°/s takes ~14 s
 
 typedef struct { range_frame_t frame; pose_t pose; } placed_frame_t;
 

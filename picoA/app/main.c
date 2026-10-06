@@ -14,6 +14,7 @@
 #include "debug_console.h"
 #include "wifi_console.h"
 #include "camera.h"
+#include "motion_sense.h"
 
 #define USB_CHECK_US 3000000 // after power-up: time for a computer to enumerate the USB
 
@@ -42,6 +43,7 @@ int main(void) {
         pose_update();
         surroundings_update();
         camera_update();
+        motion_sense_update();
         behaviour_update();
         robot_test_update();
         wifi_console_update();

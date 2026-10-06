@@ -5,6 +5,81 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
+## 6 Oct 2026 (later): M3a: the VL53's movement detection
+
+New: `change_grid` (shared by both detectors: scores over 4 frames, thresholds with a
+neighbour, absorbing a cell moved for 5 s, blobs), `tof_motion` (each zone's
+reference: how often sure / unsure / none, its distances; scores per §6.2),
+`motion_sense` (feeds it while PicoB says the robot is still, logs movement), keys
+`v` and `o`, and `z` now also prints each zone's signal, ambient light and second
+target. `rangefinder` gives the zones' raw readings (`rangefinder_zones()`).
+
+Found in the host test: scoring states with a hand-set weight let rare unsure
+frames add up (a 2 % rate of them gave false movement within a minute). Scores are
+now bits of surprise (−log₂ of how likely the reading was under the reference),
+with a threshold of 20 bits over 4 frames (14 with a neighbour): no false movement
+in a minute of a noisy room over 10 random seeds, a person found in 2 frames, an
+object put down absorbed after 5.0 s. Which way a target moves moved to the tracker
+(it needs the same target in two frames).
+
+**On the robot (step 1, still for ~2.5 min, living room):** ~16 false movements, all
+single zones: the same floor-row zone (6th row, left edge) reading 58 cm, its
+reflection on the waxed floor, again and again, and far zones (1.7-3.3 m, upper
+rows) now and then reading another surface. A reference with one distance per
+zone, forgetting in ~3 s, saw each switch as new. Now each zone knows up to 3
+readings with how often they come, over ~1 min, learns every reading (one seen
+once stays known, and rare), and a zone alone needs 30 bits (3 frames of a new
+distance). The host test's room now has those glitches (1-2 frames every ~10 s):
+quiet for 5 min over 10 seeds. Each movement line now lists its zones: what they
+read against what they are known to read.
+
+**On the robot again (step 1, ~2 min still, then a hand twice):** no false movement;
+both hand passes found, on the correct side (+17°, then −18°), at 14-24 cm. The log
+showed a new distance scoring 6 bits instead of 10 from its 2nd frame: it had been
+learned at once, so a lone zone could reach only 28 of its 30 bits. Readings are now
+learned once they leave the 4-frame window (the view takes ~0.8 s to learn); host
+test: a thin pole in one zone is found in 3 frames. Zone lines show the bits over
+the window.
+
+**Steps 2-4 on the robot, and a rewrite:** walking and a hand were found, but after
+a box was put down and taken away, movement went on for a long time. `z` showed why:
+almost every zone above the floor rows reports a faint unsure target at ~30 cm
+(signal 3-10 against the floor's 150-730), the floor's echo inside the sensor, also
+facing just a wall and a door frame; the real target is the next one, sure. Using
+the nearest target whatever its status had made the detector watch the echo, and
+the bits / known-readings machinery made it hard to see. Daniel: overcomplicated.
+Rewritten simply: the nearest sure target per zone, as the map uses; a background
+per zone (the middle of its sure readings while learning); movement = clearly
+closer than the background (8 cm or 8 %) in 2 of 4 frames; farther is never
+movement and becomes the background after 1 s; closer for 5 s becomes the
+background. The raw per-zone readings (signal, ambient, second target) are gone from
+`rangefinder` and `z`. Two traps the host test found on the way: the farthest
+reading as background (one reflection frame while learning became the background)
+and "nothing" winning the median for a far target that comes and goes.
+
+**Still, nothing moving (robot facing a wall and a door frame):** steady false
+movement, nearly all in the 6th row (−8°): its zones grazing the waxed floor read
+the floor (~40 cm) or the wall behind (1.3-2.5 m), and a median background of the
+wall made the floor "closer"; also a door frame's edge now and then. Now floor zones
+ignore readings beyond their floor patch (the map's limit), the background is the
+nearest distance a zone gives regularly (2nd-nearest of 1 s), a zone alone needs 3
+of 4 frames, a brief nearer reading that goes back becomes the background, and
+farther readings need 10 s in a row. The host room has all of these: quiet over 20
+seeds. Detector times are in seconds of `RANGEFINDER_HZ` (Daniel asked about 10 Hz:
+to try once 15 Hz works).
+
+**Again (a minute still, a hand, Daniel's wife walking through, a box):** the still
+minute was quiet; the hand and the person (small groups of zones at 1.4-2.2 m on
+the left) were found; taking the box away gave nothing. But a box put down kept
+"moving" for 5 s after it was let go: the 5 s rule called anything new movement.
+Movement is change now: a zone closer but steady for 1 s has stopped, and that
+distance is its background; `change_grid` lost its absorbing. Host test: a box is
+still after 1.1 s, a hand waving for 3 s counts the whole time, 20 seeds.
+
+**On the robot:** box put down: movement while it was handled, "ended" ~1 s after
+it was let go; taken away: one line (the hand); the box moved from left to right:
++20°, −3°, −18°, ended. The VL53's movement detection works as intended.
+
 ## 6 Oct 2026: M3a started: the camera driver out of bring-up
 
 `picoA/drivers/camera.c`: capture runs continuously into three buffers (one being

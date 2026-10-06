@@ -11,6 +11,8 @@
 #include "pose.h"
 #include "wifi_console.h"
 #include "camera.h"
+#include "tof_motion.h"
+#include "motion_sense.h"
 #include "debug_console.h"
 
 #define STATUS_PERIOD_US  15000000 // not while a test or the scan runs: they print their own progress
@@ -25,6 +27,7 @@ static void help(void) {
            "WiFi: w = connect (or show how it is connected)\n"
            "Map: n = start-up scan again (390 deg turn), m = print the map, z = one ToF frame\n"
            "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
+           "Movement: v = log on / off, o = each ToF zone's background now\n"
            "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
            "       t = print the last test result again\n");
 }
@@ -130,6 +133,22 @@ static void print_camera(void) {
     printf("Mean brightness %.1f of 255\n", (double)((float)sum / (float)(CAMERA_WIDTH * CAMERA_HEIGHT)));
 }
 
+// What the VL53's movement detection makes of each zone now: its background
+// (cm; -- nothing), * = moved (reads clearly closer).
+static void print_tof_motion(void) {
+    printf("ToF movement, %s: each zone's background, cm (-- nothing), * = moved:\n",
+           motion_sense_watching() ? "watching" : tof_motion_ready() ? "robot moving" : "learning the view");
+    for (int row = 0; row < RANGEFINDER_ROWS; row++) {
+        for (int col = 0; col < RANGEFINDER_COLS; col++) {
+            int i = row * RANGEFINDER_COLS + col;
+            uint16_t mm = tof_motion_background_mm(i);
+            if (mm) printf(" %c%4u", tof_motion_moved(i) ? '*' : ' ', (unsigned)((mm + 5) / 10));
+            else printf(" %c  --", tof_motion_moved(i) ? '*' : ' ');
+        }
+        printf("\n");
+    }
+}
+
 static void print_map(void) {
     pose_t p;
     if (!pose_now(&p)) { printf("No odometry yet\n"); return; }
@@ -192,6 +211,11 @@ void debug_console_update(void) {
     case 'm': print_map(); break;
     case 'z': print_frame(); break;
     case 'c': print_camera(); break;
+    case 'o': print_tof_motion(); break;
+    case 'v':
+        motion_sense_log(!motion_sense_logging());
+        printf("Movement log %s\n", motion_sense_logging() ? "on" : "off");
+        break;
     case 'q': start_test(ROBOT_TEST_SQUARE); break;
     case 'd': start_test(ROBOT_TEST_DRIFT); break;
     case 'r': start_test(ROBOT_TEST_TURNS); break;

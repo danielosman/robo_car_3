@@ -1,8 +1,9 @@
 # RoboCar — robot app plan
 
 Status: **M0 ✅ (link, wheel control, odometry), M1 ✅ (calibration on waxed wood;
-`b` and the carpet still to test), M2 ✅ (map, §14). Next: M3a (movement detection
-while still), then M3b (following by turning, §6, §7.1-7.2).** This plan covers
+`b` and the carpet still to test), M2 ✅ (map, §14). Now: M3a (movement detection
+while still: camera driver ✅, VL53 ✅, camera detector next), then M3b (following by
+turning, §6, §7.1-7.2).** This plan covers
 the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully autonomous**
 robot, built on the drivers verified in the bring-up (tag `pcb-bringup-v1`). It
 describes the current design; what happened in each session is in
@@ -13,10 +14,24 @@ describes the current design; what happened in each session is in
 **Next session, in this order:**
 1. Open from M1: the `b` test and the carpet tests (README, "M1"); on the carpet
    also `n` (floor learned, no false `?`).
-2. M3a (movement detection while still, §6). Done: the camera driver
-   (`picoA/drivers/camera.c`, its own exposure control, row times for the rolling
-   shutter), key `c`; to test on the robot (README, "Camera"). Next: the change grid and the VL53 detector. Then M3b (states IDLE / SCAN / WATCH, following by
-   turning, §7.1-7.2). Order and done-when in §12.
+2. M3a (movement detection while still, §6). Done and tested on the robot:
+   - the camera driver (`picoA/drivers/camera.c`: its own exposure, 10 ms steps
+     then gain, hold; row times for the rolling shutter), key `c`;
+   - the VL53's movement detection (`change_grid`, `tof_motion`: closer than the
+     background, §6.2 in six sentences; logged by `motion_sense`, keys `v` / `o`;
+     README, "Movement, VL53").
+
+   **Next: the camera detector (§6.3).** Start by proposing it to Daniel in a few
+   plain sentences, as §6.2 is written, before any code. It is not the VL53's
+   approach: a block can only look different from its background, never "closer";
+   lighting changes, the held exposure and noise per block are its problems. It can
+   reuse `change_grid` (last 4 frames, blobs) or not. Then combining the two and
+   tracking (§6.5), then M3b (states IDLE / SCAN / WATCH, following by turning,
+   §7.1-7.2). Order and done-when in §12.
+   Open, to try later: the VL53 at 10 Hz instead of 15 (`RANGEFINDER_HZ`; 100 ms per
+   reading, ~20 % less noise; the map was tuned at 15). For pursuit the camera
+   driver should prefer 10 ms exposures with more gain (40 ms blurs ~7 px at 60°/s;
+   the living room in the evening needs 40 ms × 5.9).
 3. M4 then adds: drive forward only while rows 7-8 see the floor right ahead
    (`map_floor_seen`; `:` or `?` ahead means stop), and face the farthest drivable
    corridor (§14).
@@ -33,7 +48,8 @@ describes the current design; what happened in each session is in
 | `ROBOT_WIFI.md` | PicoA's console over WiFi to `pc/robot/` (a browser page), and what PicoA does at power-up |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `change_grid.*` (last 4 frames per cell, blobs), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/drivers/camera.*` | HM0360 camera: continuous capture, own exposure control, row times; shared with the bring-up firmware |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
 
@@ -74,6 +90,11 @@ describes the current design; what happened in each session is in
   (session results, robot runs, fixes) goes only in CHANGELOG.md.
 - Commit and push only when Daniel asks. **No `Co-Authored-By` lines** in commits
   (README convention).
+- **Keep it simple** (learned in M3a): an algorithm should fit in a few plain
+  sentences, written down before the code; Daniel judges it by the robot's log.
+  Look at what the sensor really reports (its flags, `z`, `c`) before adding
+  machinery. Design from what the robot needs now: earlier code (bring-up, old
+  experiments) is not a reason to keep anything.
 
 **Not yet implemented from §9:** CALIBRATE, GYRO_SCALE (M5), STATUS beyond the gyro
 bias, the slip flag.
@@ -448,86 +469,64 @@ in two modes:
 
 While driving (M4 on), neither detector runs; map changes (§4.6) take over.
 
-### 6.1 The change grid (shared by both detectors)
+### 6.1 Movement against a background
 
 Comparing each frame with the previous one only sees the edges of a moving thing and
-misses slow movement (someone walking slowly 3 m away barely changes in 66 ms). So
-each frame is compared with a **reference**, and each cell is judged against its
-own noise:
+misses slow movement, so each frame is compared with a **background** learned when
+the robot stops. A cell (a VL53 zone, a camera block) has **moved** when it differs
+from its background in 2 of the last 4 frames; moved cells that touch form a blob,
+with a **where** vector (unit, from the sensor, robot frame), a range if the sensor
+has one, and a point. `change_grid` keeps the last 4 frames and the blobs; what
+"differs" means, and when something has stopped (§6.2: steady for 1 s), is each
+sensor's own: the two work in entirely different ways (§6.2, §6.3).
+Which way a target moves needs the same target in two frames, so the tracker (§6.5)
+computes it.
 
-1. **Learn the reference:** after the robot stops and settles, ~8 frames give each
-   cell its mean and noise (~0.5 s).
-2. **Score each cell** by how unlike its reference it is (the detectors below say
-   how). A cell has **moved** when its score summed over the last ~4 frames is
-   above a threshold; a neighbouring cell that also scores lowers it (people span
-   several cells, noise mostly doesn't).
-3. **Keep it current:** cells that didn't move update the reference slowly (drift).
-   A cell that stays moved for more than ~5 s is absorbed into the reference: a bag
-   put down is reported once, not followed forever. Things that always move (a TV,
-   a curtain, a fan) are absorbed the same way; an ignore mask can come later.
-4. **Blobs:** neighbouring moved cells form a blob with a **where** vector (unit, robot
-   frame, including elevation) and a **which way** vector (unit, how the blob moved
-   since the last frame: 3D from the ToF, since its range changes too; 2D across
-   and up/down in the image from the camera).
+### 6.2 VL53: closer than the background
 
-The two detectors share this module; each adds only what a cell is, how it is
-scored, how a cell maps to a direction, and its own way of rejecting false movement.
-Their output is the same type:
+In simple sentences (`tof_motion.c`):
+1. Each zone uses the frame's nearest **sure** target, as the map does, or nothing.
+   Unsure readings tell nothing: on the robot most of them are a faint echo of the
+   floor (the strongest return by far) that every zone picks up, ~1 % of its signal
+   at the floor's distance; the sensor flags them so they can be dropped. In the
+   floor rows, a reading beyond the zone's patch of floor (or nothing) tells nothing
+   either: on the waxed floor the grazing 6th row reads the wall behind half the
+   time (`rangefinder_floor_limit_m`, the map's own limit).
+2. When the robot stops, each zone learns its **background** over 1 s: the nearest
+   distance it gives regularly (its 2nd-nearest sure reading, so one odd near frame
+   doesn't count); nothing only if it had no sure reading. A zone switching between
+   a near and a far surface has the near one: the far one is just farther.
+3. A zone has **moved** when it reads clearly **closer** than its background (8 cm,
+   or 8 % if more) in 2 of the last 4 frames next to another such zone, or 3 alone
+   (a person or a hand always spans several zones). Something that enters the view
+   is always in front of what was there.
+4. A zone that reads nearer briefly without moving, then goes back, shows a nearer
+   surface now and then (a door frame's edge): that is its background from then on.
+5. Farther readings (something taken away, a reflection) are never movement; 10 s
+   farther in a row is the new background (not sooner, or a surface shown only now
+   and then would be forgotten). At the background, it follows slowly.
+6. A zone that reads closer but steady (within the same 8 cm / 8 %) for 1 s has
+   stopped moving (a box put down): that distance is its background. Movement is
+   change; a waving hand or a walking person keeps changing and keeps counting.
 
-```c
-typedef struct {
-    vec3     where;      // unit vector to the blob, robot frame
-    vec3     which_way;  // unit vector of its movement since the last frame (0 if new)
-    float    range_m;    // < 0: unknown (camera)
-    float    strength;   // share of cells moved
-    uint32_t t_us;
-} motion_obs;
-```
+Times are in seconds (`RANGEFINDER_HZ`, 15 Hz; 10 Hz would measure 100 ms instead of
+66 ms per frame, ~20 % less range noise: to try once 15 Hz works).
 
-### 6.2 VL53
-
-Each zone is a cell. Per frame its reading is in one of three **states**: **sure**
-with a distance (status 5, 6, 9), **unsure** with a distance and a status (e.g. 12,
-two surfaces in the zone), or **none**. No reading is thrown away: the reference
-learns per zone how often it is sure / unsure / none (e.g. 95/5/0 %, or a flaky
-50/40/10 %), the mean and noise of its sure distances, and separately of its unsure
-ones. **A zone moves when it behaves unlike its reference.** Each reading scores by
-how rare it was in the reference (a small integer table per zone, from counts):
-
-| Reference → now | Score |
-|---|---|
-| sure → sure, distance off by more than `max(60 mm, 4σ)` | high |
-| always none → sure (something appeared in empty space) | high |
-| flaky → steadily sure at a new distance (something solid fills the zone) | medium-high |
-| always sure → unsure or none (a target left; an edge crossing the zone: status 12) | medium |
-| unsure → unsure, distance shifted (wider threshold than sure) | medium |
-| flaky → steadily sure at its usual distance (the zone calmed down) | low |
-
-So a zone changing between flaky and steady is information too; it just counts less
-than a clear change of distance. The where vector is the mean of the moved zones'
-ray directions from `rangefinder` (robot frame, so the zone layout stays hidden),
-the range the nearest moved distance.
-
-**Log first, then decide:**
-- `signal_per_spad` (what the reflectance is calculated from) as one more scored
-  channel: it changes when a different surface sits at the same distance, or
-  something only partly covers a zone. It may only confirm (with a distance or state
-  change, or a neighbour), never trigger alone; it's noisy at range and in sunlight.
-- `ambient_per_spad` (infrared background, a very coarse camera): logged only.
-- **2 targets per zone:** a new near target in front of the zone's known wall. The
-  driver already reads up to 4; check that 8 × 8 still runs at 15 Hz.
-
-`z` prints these per zone; recordings of someone walking in front of the robot show
-which channels catch something the others miss, and only those stay. ST's on-chip
-motion indicator is not used: 16 values in 8 × 8 mode, a depth window of at most
-1.5 m starting at 40 cm, its own 16-frame reference (useless while turning), and it
-would duplicate our reference rather than replace it.
+Host test (`test_tof_motion.c`, 20 random seeds): 5 minutes of a room with range
+noise, unsure frames, a floor zone's reflection and far zones' farther surfaces or
+nothing for 1-2 frames every ~10 s, a far zone sure half the time, a floor zone
+reading the wall behind half the time, a door frame's edge 1 frame in 20: no
+movement; a person found in 2 frames, a thin pole in one zone in 3, a hand waving
+for 3 s counted the whole time, a box still after ~1 s, taking it away not
+movement.
 
 ### 6.3 Camera
 
-Each 8 × 8-pixel block of the 160 × 120 image is a cell (20 × 15 cells; 4 × 4 blocks
-if that turns out too coarse); its value is the mean brightness, scored by
-`|value − mean| / noise`.
+Not designed yet (next session: propose it in plain sentences first). Starting
+points: each 8 × 8-pixel block of the 160 × 120 image is a cell (20 × 15); its value
+the mean brightness, compared with a background learned while still, against the
+block's own noise; a block that changes and then stays steady for 1 s has stopped,
+as on the VL53. What the driver already gives:
 
 - **The driver sets the exposure itself, always** (the sensor's auto-exposure is
   off): whole 10 ms steps, since lights flicker at 100 Hz on 50 Hz mains and the
@@ -754,7 +753,9 @@ the names are open to change.
 | `rangefinder` (on top of the `tof` driver) | `rangefinder_poll(&scan)` → 64 rays **in the robot frame** (origin, unit direction, distance, and floor / obstacle / no target) plus a timestamp | zone order, the 90° rotation, the 3 cm offset and 7 cm height, per-zone floor calibration and pitch adjustment, VL53 status codes and settings |
 | `world_map` | `map_add_scan(scan, pose, changes)`, `map_cell_state(point)`, `map_staleness(pose, sectors)`, `map_free_distance(point, direction)` | cell size, layers, rolling window, timers, ray walking, change detection |
 | `pose` | `pose_on_odom(odom)`, `pose_on_scan(scan)`, `pose_at(t)` | odometry history and interpolation, clock offset, full-turn check, map ← odometry correction, map matching |
-| `motion_sense` | `motion_on_scan(scan)`, `motion_on_frame(frame)`, `motion_reset()`, `motion_next_event(&ev)` | the change grid (references, noise, scores, absorbing), VL53 zone states, camera blocks and lighting rejection, turn compensation, blobs, tracking, react-or-log, exit side, camera/ToF agreement, still/pursuit gating |
+| `change_grid` ✅ | `change_grid_init()`, `change_grid_add(scores)`, `change_grid_moved()`, `change_grid_blobs()` | the last 4 frames per cell, the thresholds, blob labelling |
+| `tof_motion` ✅ | `tof_motion_restart()`, `tof_motion_add(frame, obs)` | the zone backgrounds, "closer than the background" (§6.2), blobs to observations |
+| `motion_sense` (started) | `motion_sense_update()`, `motion_sense_watching()`; later `motion_next_event(&ev)` | the change grid (references, noise, scores, absorbing), VL53 zone states, camera blocks and lighting rejection, turn compensation, blobs, tracking, react-or-log, exit side, camera/ToF agreement, still/pursuit gating |
 | `behaviour` | `behaviour_step(now)` → drive command | the order of needs, the Safety guard, targets, scan progress, the 50 cm rule, choosing open space |
 | `debug_console` | `debug_console_update()` | what gets printed and how often, single-key commands |
 

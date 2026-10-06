@@ -43,15 +43,16 @@ Code shared between the Picos (the inter-Pico link) is in `common/`.
 
 Built to [ROBOT_PLAN.md](ROBOT_PLAN.md), milestone by milestone. **Done: M0 (link,
 wheel control, odometry), M1 (calibration, on waxed wood; `b` and the carpet still
-to test), M2 (map).** Now: M3a (movement detection while still); the camera driver
-is in `picoA/drivers/camera.c`, sets its own exposure, and the app captures frames. What happened in each session
+to test), M2 (map).** Now: M3a (movement detection while still): the camera driver
+(`picoA/drivers/camera.c`, its own exposure) and the VL53's movement detection
+(`change_grid.c`, `tof_motion.c`, `motion_sense.c`). What happened in each session
 is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, PicoB's wheel control, odometry and `brain`,
-  PicoA's `body`, robot tests, rangefinder, world map, pose, the start-up scan
+  PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53), the start-up scan
   in a simulated room and the WiFi console (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
@@ -81,7 +82,7 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; map: `n` start-up scan again, `m` print the
   map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
   forward / back (`robot_test.c`); camera `c` one frame as 20 × 15 blocks, with its
-  exposure. Unplugging the USB doesn't stop the robot. A
+  exposure; movement `v` log on / off, `o` each ToF zone's background. Unplugging the USB doesn't stop the robot. A
   test that stops early says why and what it measured so far. The keys and the
   last result are printed ~1 s after a serial monitor opens or the robot server
   connects (sooner gets lost on the Mac).
@@ -121,6 +122,7 @@ marks where the face was seen, not how thick the object is.
 | Turning in place | the body slides ~1.5 cm per turn, which odometry can't see; roll −3…−5° |
 | Floor rows 6 / 7 / 8 | see the floor at ~47 / 31 / 21 cm along the ray; rows 7-8 steady to ±1-2 cm |
 | Camera (living room, evening light) | line period 42.7 µs (~12 MHz pixel clock, 512 per line); exposure 40 ms × gain 5.9 for mean brightness ~98, so 24.9 frames/s; a still scene's blocks repeat within ±1 between frames (no flicker bands) |
+| VL53 unsure readings | most zones above the floor rows report a faint unsure target at ~30 cm (signal 3-10 kcps/SPAD), the distance where rows 7-8 see the floor (150-730): the floor's echo inside the sensor; the real target is the next one, sure. Use only sure targets (status 5, 6, 9) |
 | VL53 on the waxed floor | the 6th row sometimes reads a reflection (e.g. the wall); rows 7-8 can read "beyond the floor" in front of glossy furniture (`?`); status 12 zones (two surfaces in one zone) come and go with the scene |
 
 **Known geometry limits:** each zone is 5.6° tall and reports the nearest surface
@@ -200,6 +202,22 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
 6. Bring-up: `picoA_bringup` with the viewer (below) shows the same image and the
    exposure; "Hold the exposure" freezes it (switch a light: the image gets darker
    or brighter and stays so), unticking lets it adjust again.
+
+**Movement, VL53** (M3a; PicoA, with PicoB running so PicoA knows the robot is still;
+motors off). Robot on the floor facing ~2 m of open room:
+1. Flash `picoA_app` onto PicoA. Press `v`: "Movement log on". Stand behind the robot,
+   keep still for a minute. Expected: no "Movement" lines (paste any that come).
+2. Walk across in front of the robot at ~1 m, left to right as the robot sees it.
+   Expected: "Movement (ToF): N zones, +X deg (+ = left), …, 1.0 m" about twice a
+   second, X going from positive to negative, then "Movement (ToF) ended".
+3. Wave a hand ~30 cm in front of the left half: positive degrees, ~0.3 m.
+4. Put a box ~60 cm in front and step away: "ended" ~1 s after you let go (still for
+   1 s: it stopped moving). Take it away: no movement from the box itself (it reads
+   farther), only from your hand.
+5. `o` with nothing moving: each zone's background in cm (`--` nothing); then with
+   you standing in view: `*` on the zones that see you.
+6. `n` (scan): no movement lines while it turns; afterwards `o` says "learning the
+   view", then "watching".
 
 **WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,

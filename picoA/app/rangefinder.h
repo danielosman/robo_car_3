@@ -15,6 +15,7 @@
 #define RANGEFINDER_ROWS 8
 #define RANGEFINDER_COLS 8
 #define RANGEFINDER_RAYS (RANGEFINDER_ROWS * RANGEFINDER_COLS)
+#define RANGEFINDER_HZ   15 // frames per second; each measures for the whole period
 
 #define RANGE_NO_TARGET 0      // range_mm: nothing within range
 #define RANGE_INVALID   0xFFFF // range_mm: the sensor isn't sure
@@ -50,6 +51,14 @@ typedef struct {
 
 bool rangefinder_init(void);                 // starts the sensor (~2 s); false if it doesn't answer
 bool rangefinder_poll(range_frame_t *frame); // true when a new frame was read
+// The unit direction of a ray from the sensor (x forward, y left, z up), robot level,
+// and where the sensor is (robot frame, z above the floor).
+void rangefinder_ray_direction(int ray, float dir[3]);
+void rangefinder_origin(float origin[3]);
+// For a zone that sees the floor: the farthest reading that can still be its floor
+// (robot level; farther ones are reflections or a drop, and tell nothing about what
+// stands there). 0 for zones with no such limit.
+float rangefinder_floor_limit_m(int ray);
 // Where each reading of `frame` ends and what it means, with the robot pitched by
 // pitch_rad (+ = nose up) when it was measured.
 void rangefinder_scan(const range_frame_t *frame, float pitch_rad, scan_t *scan);
