@@ -4,6 +4,9 @@
 // and a box; like the real sensor, each zone reports the nearest point of its
 // 5.6° tall patch, with noise; the robot sits 0.9° nose-down). The robot must turn 390°, learn the floor, map the walls and the box
 // with an empty floor between them, and turn to face the most open direction.
+// Then it watches: told that a target is leaving the view (a fake motion_sense), it
+// turns to where the target will be when the turn ends, and on after it when the
+// target is seen leaving again while the view is learned.
 // The test provides body.h's functions as the robot. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_behaviour picoA/app/test/test_behaviour.c -lm && build/test_behaviour
 #include <assert.h>
@@ -46,6 +49,25 @@ const odom_report_t *body_odom(void) { return &report; }
 uint32_t body_odom_time_us(void) { return report_time_us; }
 void body_motors(bool on) { motors_wanted = on; motors_changed_us = fake_now_us; if (!on) cmd_v = cmd_w = 0; }
 void body_drive(float v_mps, float w_radps) { cmd_v = v_mps; cmd_w = w_radps; }
+
+// --- A fake motion_sense: the leaving reports the test hands out ---
+static leaving_t fake_leaving;
+static bool fake_have_leaving, leave_while_learning;
+static float learning_leave_bearing_deg;
+
+bool motion_sense_leaving(leaving_t *l) {
+    if (!fake_have_leaving) return false;
+    *l = fake_leaving;
+    fake_have_leaving = false;
+    return true;
+}
+bool motion_sense_watching(void) { return still_s >= 1.5f; } // stationary after 0.5 s, then 1 s learning
+void motion_sense_stamp(void) {}
+
+static void report_leaving(float bearing_deg, float rate_degps, uint32_t t_us) {
+    fake_leaving = (leaving_t){.bearing_rad = bearing_deg * RAD_PER_DEG, .rate_radps = rate_degps * RAD_PER_DEG, .t_us = t_us};
+    fake_have_leaving = true;
+}
 
 static float approach_to(float x, float target, float step) {
     return x < target ? fminf(x + step, target) : fmaxf(x - step, target);
@@ -116,7 +138,12 @@ static void tick(void) {
     max_yaw_rad = fmaxf(max_yaw_rad, sim.yaw_rad);
     sim.v_mps = v;
     sim.w_radps = w;
+    float was_still_s = still_s;
     still_s = v == 0 && w == 0 ? still_s + dt : 0;
+    if (leave_while_learning && was_still_s < 1.5f && still_s >= 1.5f) { // the view just learned
+        leave_while_learning = false;
+        report_leaving(learning_leave_bearing_deg, 0, (uint32_t)fake_now_us - 200000);
+    }
     sim.stationary = still_s >= 0.5f;
     if (fake_now_us % LINK_ODOM_PERIOD_US == 0) { // PicoB's report arrives
         report = sim;
@@ -140,6 +167,18 @@ static bool wall_at(float x, float y, int axis) {
     return false;
 }
 
+// Runs until the robot has turned and stands still, the view not learned yet; checks the turn.
+static void turn_and_learn(float *yaw, float expected_deg, const char *what) {
+    for (int i = 0; i < 1000 && state == WATCHING; i++) tick();
+    assert(state == LOOKING);
+    for (int i = 0; i < 20000 && !(state == WATCHING && still_s >= 1.4f); i++) tick();
+    assert(state == WATCHING && still_s >= 1.4f);
+    float turned_deg = DEG(sim.yaw_rad - *yaw);
+    printf("ok: %s: turned %+.1f deg (expected %+.1f)\n", what, (double)turned_deg, (double)expected_deg);
+    assert(fabsf(turned_deg - expected_deg) < 3.0f);
+    *yaw = sim.yaw_rad;
+}
+
 int main(void) {
     fake_now_us = 1000000;
     next_frame_us = fake_now_us;
@@ -150,8 +189,8 @@ int main(void) {
 
     behaviour_scan();
     float seconds = 0;
-    while (behaviour_busy() && seconds < 60) { tick(); seconds += DT_US * 1e-6f; }
-    assert(!behaviour_busy());
+    while (!behaviour_watching() && seconds < 60) { tick(); seconds += DT_US * 1e-6f; }
+    assert(behaviour_watching());
     printf("start-up scan done in %.0f s; yaw %.1f deg\n", (double)seconds, (double)DEG(sim.yaw_rad));
     assert(seconds > 14 && seconds < 25);
 
@@ -200,5 +239,41 @@ int main(void) {
     assert(box_seen);
 
     printf("OK: the start-up scan learns the floor, maps the room and faces the most open direction\n");
+
+    // Watching: nothing leaving, the robot stays put.
+    float yaw = sim.yaw_rad;
+    for (int i = 0; i < 3000; i++) tick();
+    assert(behaviour_watching() && sim.yaw_rad == yaw && sim.motors_on);
+    // A target leaving on the right at -19 deg, going right at 30 deg/s: the turn
+    // ends where it will be then: a = -19 - 30 (|a| / 57.3 + 0.5) = -71 deg.
+    report_leaving(-19, -30, (uint32_t)fake_now_us);
+    turn_and_learn(&yaw, -71.4f, "a target leaving on the right at 30 deg/s");
+    // It is seen leaving again on the right while the view is learned (0.2 s before
+    // the view is learned): on after it at the same speed: a = -19.7 - 30 (0.2 + |a| / 57.3 + 0.5) = -85 deg.
+    leave_while_learning = true;
+    learning_leave_bearing_deg = -19.7f;
+    report_leaving(-19, -30, (uint32_t)fake_now_us);
+    turn_and_learn(&yaw, -71.4f, "again");
+    turn_and_learn(&yaw, -85.4f, "it left the view again on the right while learning");
+    // Seen leaving while learning, but the other way, or not after a turn: nothing to follow.
+    leave_while_learning = true;
+    learning_leave_bearing_deg = 19.7f;
+    report_leaving(-19, -30, (uint32_t)fake_now_us);
+    turn_and_learn(&yaw, -71.4f, "a target leaving on the right");
+    for (int i = 0; i < 3000; i++) tick();
+    assert(state == WATCHING && sim.yaw_rad == yaw);
+    report_leaving(19.7f, 0, (uint32_t)fake_now_us);
+    for (int i = 0; i < 3000; i++) tick();
+    assert(state == WATCHING && sim.yaw_rad == yaw);
+    printf("ok: left the view while learning the other way, or not after a turn: no turn\n");
+    // Leaving on the left at 20 deg/s: a = 18 + 20 (|a| / 57.3 + 0.5) = 43 deg; fast: at most 90 deg.
+    report_leaving(18, 20, (uint32_t)fake_now_us);
+    turn_and_learn(&yaw, 43.0f, "a target leaving on the left at 20 deg/s");
+    report_leaving(-19, -120, (uint32_t)fake_now_us);
+    turn_and_learn(&yaw, -90.0f, "a target leaving on the right at 120 deg/s (at most 90 deg)");
+
+    behaviour_stop();
+    assert(!behaviour_busy());
+    printf("OK: watching, the robot turns after a target leaving the view, and on when it leaves again while learning\n");
     return 0;
 }

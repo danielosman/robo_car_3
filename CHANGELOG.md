@@ -5,6 +5,36 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
+## 7 Oct 2026: M3b first iteration: turning after a target leaving the view
+
+Agreed with Daniel: as simple as possible for the first iteration. When the target
+is about to leave the view (two or more readings, at the edge), turn to where it
+will be (estimated from its angular speed and the known turn rate), stop and learn;
+if it is seen leaving while learning, continue at the same angular speed. No
+smooth following, no turning to a target that stopped, no back to open space or
+obstacle check yet. ROBOT_PLAN.md §6.6 has the sentences.
+
+New: the tracker's "leaving" report (`TRACK_LEAVING_*`); `tof_motion` notices
+something passing out through an outer column while it learns; `motion_sense`
+hands both to the behaviour; `behaviour.c` watches after the scan (or `a`), motors
+on, and turns at 1 rad/s (at most 90°). Host tests for all three. Found in the
+behaviour test: a fast target's predicted angle beyond 180° was wrapped and the
+robot turned the wrong way; now only clamped. The web page (`pc/robot/`) got
+buttons for `a`, `v`, `o`, `k` and `c` (M3a's keys were missing).
+
+**On the robot (living room, without USB, the console over WiFi; Daniel walking
+around it for ~4 min):** it kind of worked. 11 turns after a target leaving, both
+ways, at 10-20 deg/s (+44, −31, −31, −36, −27, −39, +32, −32, +38 deg), turns
+ending within ~1° of the command (e.g. +44 asked, +43.8 by the gyro); twice it
+turned on after the target left while it learned (−61, −52 deg). Missed: sometimes
+it didn't notice the movement at all, and often it didn't notice the target leaving
+while it learned. Agreed: good enough for the first iteration. Likely causes, to
+look at next: the view is learned only once PicoB reports the robot still (~0.5 s
+after stopping), so a target that left before that is never seen; a zone needs 3
+sure readings to have a "farthest", so farther than the VL53 reaches (upper rows)
+it tells nothing; 2 zones in one frame of the outer column. The WiFi connection
+dropped at the end ("robot silent for 6 s"); cause not looked at.
+
 ## 6 Oct 2026 (evening): M3a: the camera's movement detection
 
 Proposed to Daniel in seven sentences (ROBOT_PLAN.md §6.3) and agreed; key `k`

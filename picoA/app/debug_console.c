@@ -26,7 +26,8 @@ static absolute_time_t next_status, greeting_time;
 static void help(void) {
     printf("Keys: g = motors on, s = stop (motors off), p = print status now, l = link counters, h = help\n"
            "WiFi: w = connect (or show how it is connected)\n"
-           "Map: n = start-up scan again (390 deg turn), m = print the map, z = one ToF frame\n"
+           "Map: n = start-up scan again (390 deg turn, then watch), m = print the map, z = one ToF frame\n"
+           "Watch: a = watch from here, turning after a target leaving the view (s stops)\n"
            "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
            "Movement: v = log on / off; backgrounds now: o = each ToF zone, k = each camera block\n"
            "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
@@ -40,7 +41,7 @@ static void print_last_result(void) {
 }
 
 static void greet(void) {
-    printf("\nPicoA robot firmware (M2)\n");
+    printf("\nPicoA robot firmware (M3)\n");
     help();
     print_last_result();
 }
@@ -234,6 +235,7 @@ void debug_console_update(void) {
     case 'g': body_motors(true); printf("Motors on\n"); break;
     case 's': behaviour_stop(); robot_test_stop(); body_motors(false); printf("Stopped, motors off\n"); break;
     case 'n': robot_test_stop(); behaviour_scan(); break;
+    case 'a': robot_test_stop(); behaviour_watch(); break;
     case 'm': print_map(); break;
     case 'z': print_frame(); break;
     case 'c': print_camera(); break;
@@ -257,6 +259,6 @@ void debug_console_update(void) {
     }
     if (time_reached(next_status)) {
         next_status = make_timeout_time_us(STATUS_PERIOD_US);
-        if (!robot_test_running() && !behaviour_busy()) print_status();
+        if (!robot_test_running() && (!behaviour_busy() || behaviour_watching())) print_status();
     }
 }

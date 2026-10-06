@@ -1,7 +1,7 @@
-// PicoA robot firmware, the brain. M2: talks to PicoB over the link, maps the
-// surroundings with the ToF sensor; a serial monitor on USB or the robot server
-// over WiFi (ROBOT_WIFI.md) shows the map and odometry, starts the start-up scan
-// and runs the calibration tests.
+// PicoA robot firmware, the brain. Talks to PicoB over the link, maps the
+// surroundings with the ToF sensor, watches for movement and turns after it; a
+// serial monitor on USB or the robot server over WiFi (ROBOT_WIFI.md) shows the map
+// and odometry, starts the start-up scan and watching, and runs the calibration tests.
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"

@@ -6,7 +6,9 @@
 // close by is a big blob and pieces). It keeps the target's direction, range and
 // angular speed (over the last ~0.8 s). With no such blob for 0.5 s it is lost:
 // last seen in the outer zone columns, it left the view on that side; else it
-// stopped (it stands still now, or is too small to see).
+// stopped (it stands still now, or is too small to see). Before it leaves: seen in
+// an outer zone column moving outward (at least 10°/s, its speed measured over at
+// least 3 frames), it is leaving that way, reported once per target.
 #include <stdbool.h>
 #include <stdint.h>
 #include "motion_obs.h"
@@ -25,6 +27,8 @@ typedef enum {
     TRACK_EXITED_LEFT,  // the target left the view on the left
     TRACK_EXITED_RIGHT,
     TRACK_STOPPED,      // the target was lost inside the view
+    TRACK_LEAVING_LEFT, // the target is about to leave the view on the left
+    TRACK_LEAVING_RIGHT,
 } track_event_t;
 
 void tracker_reset(void); // forgets the target (the robot moved: the view changed)

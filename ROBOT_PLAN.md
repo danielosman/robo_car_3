@@ -3,7 +3,7 @@
 Status: **M0 ✅ (link, wheel control, odometry), M1 ✅ (calibration on waxed wood;
 `b` and the carpet still to test), M2 ✅ (map, §14). Now: M3a (movement detection
 while still: camera driver ✅, VL53 ✅, camera detector ✅ first robot tests, VL53
-tracker ✅); next: turning to look (M3b, §6.6).** This plan covers
+tracker ✅); M3b turning to look: first iteration ✅ on the robot, misses some (§6.6).** This plan covers
 the real firmware (`picoA/app/`, `picoB/app/`, `common/`) of a **fully autonomous**
 robot, built on the drivers verified in the bring-up (tag `pcb-bringup-v1`). It
 describes the current design; what happened in each session is in
@@ -29,8 +29,13 @@ describes the current design; what happened in each session is in
 
    **Tracking with the VL53 only (§6.6), decided with Daniel:** the tracker
    (`tracker.c`) works on the robot (walks at 0.5 and 1.5 m, both ways: one target
-   edge to edge, the correct exit side). **Next: turning to look (M3b, simple,
-   §6.6)**; start by agreeing its sentences with Daniel. Combining the camera with
+   edge to edge, the correct exit side). **Turning to look (M3b, first iteration,
+   §6.6) works on the robot**: turns after people leaving both ways, within ~1° of
+   the command, and on again when they left while it learned. **Next: the misses**
+   (CHANGELOG, 7 Oct): sometimes no movement noticed at all, and often the target
+   leaving while it learns is not noticed (learning starts only ~0.5 s after the
+   stop; zones beyond the VL53's reach have no "farthest"). Look at a `v` log of
+   misses first. Then back to open space and no turn into a near obstacle. Combining the camera with
    the VL53 (§6.5) and the camera during turns (§6.4) are put off: the camera keeps
    running and logging, but nothing uses it yet.
 
@@ -54,7 +59,7 @@ describes the current design; what happened in each session is in
 | `ROBOT_WIFI.md` | PicoA's console over WiFi to `pc/robot/` (a browser page), and what PicoA does at power-up |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan, watching and turning to look), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
 | `picoA/drivers/camera.*` | HM0360 camera: continuous capture, own exposure control, row times; shared with the bring-up firmware |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
@@ -638,12 +643,35 @@ inside: stopped; the target kept over a bigger newcomer and through a 0.47 s gap
 from the robot's logs: someone close (a big blob from −15° to +20° and a 2-zone
 piece at −17°) followed by the big blob, a far zone at the edge not taken.
 
-**Turning to look** (M3b, the simple way, after the tracker works): the WATCH
-state. When the target stops or leaves the view, the robot turns to its last
-direction (for an exit, ~40° past that edge), stops, settles 0.5 s, learns the view
-again (~1 s) and watches. It follows in hops; smooth following while turning
-(§6.4, §7.2) only if the hops show it is needed. Still to do with it: no turn when
-the map has an obstacle within the turning radius (§7.2).
+**Turning to look** (M3b, first iteration; `behaviour.c`, the WATCH state):
+1. The robot watches standing still, motors on (after the start-up scan, or `a`).
+2. The tracker reports the target **leaving** (once per target): seen in an outer
+   zone column (beyond ±16°), moving outward at ≥ 10°/s, its angular speed measured
+   over at least 3 frames (≥ 0.15 s).
+3. The robot turns to where the target will be when the turn ends, if it keeps its
+   angular speed (the turn takes its angle at 1 rad/s plus 0.5 s), at most 90°.
+4. It stops; once it stands still the VL53 learns the view (1 s), as after every stop.
+5. While learning, the VL53 notices something **passing out** of the view: in an
+   outer column, 2 zones in one frame clearly nearer (8 cm / 8 %) than the farthest
+   the zone gives regularly (its 3rd-farthest sure distance: gone for more than 2
+   frames). If that is on the side the target was going, it left again: from where
+   and when it was last seen there, at the same angular speed, back to 3. Otherwise
+   it watches (1).
+
+On the robot: turns within ~1° of the command; it misses some movement, and often
+the target leaving while it learns (CHANGELOG, 7 Oct). A target that stops inside
+the view, or leaves too slowly or too fast to be seen at the edge, gets no turn. Moving straight away is not movement for the VL53 (only
+the camera logs it). Not yet: back to open space after ~20 s, no turn into a near
+obstacle (§7.2), smooth following while turning (§6.4) only if the hops show it is
+needed.
+
+Host tests: `test_tracker.c` (leaving once, at the edge, before the exit; not
+when coming in at the edge), `test_tof_motion.c` (the quiet room learned 300 times:
+nothing passes; passing out left / right noticed with its time; staying at the
+edge, gone one frame, passing in the middle: not), `test_behaviour.c` (after the
+scan: watching; turns of −71°, −85° when it leaves again while learning, +43°, and
+at most 90° for 120°/s; leaving seen while learning the other way, or not after a
+turn: no turn).
 
 ---
 
@@ -655,15 +683,15 @@ the map has an obstacle within the turning radius (§7.2).
 |---|---|---|
 | **IDLE** | stands still, motors off, takes console keys; the tests (`q`, `r`, `f`, `b`, `d`) run only from here | power-up on USB, `i`, `s`, a safety stop |
 | **SCAN** | turns 390°, builds the map, turns to the most open direction (§14) | power-up without USB after trying the WiFi, `n` |
-| **WATCH** | watches for movement, follows it by turning (§7.2), returns to open space when nothing moves | the end of SCAN, `a` |
+| **WATCH** | watches for movement, turns after a target leaving the view (§6.6); later: returns to open space when nothing moves | the end of SCAN, `a` |
 
 Power-up without USB: WiFi, SCAN, WATCH. On USB: IDLE; `n` (scan, then watch) or
-`a` starts it. A safety stop drops to IDLE, so nothing restarts the motors by
+`a` starts it. The motors stay on while watching. A safety stop drops to IDLE, so nothing restarts the motors by
 itself. Every change of state is printed.
 
-### 7.2 Following movement by turning (M3b)
+### 7.2 Following movement by turning (later; M3b's first iteration is §6.6)
 
-In WATCH, with no driving yet:
+The full design, for when the hops of §6.6 are not enough. In WATCH, with no driving yet:
 
 1. **Still:** detect (§6). A `MOTION` event → Pursuit. (Within ±10° of straight ahead
    and not moving sideways: no turn, keep watching.)
@@ -889,7 +917,7 @@ Each milestone ends with a test on the robot and a red-flag review.
 | M1 ✅ | **Calibration:** gyro drift standing still, gyro scale (10 × 360° against a mark), encoder distance (2 m), the same on the carpet; host test for PicoA `body`. Effective track width only matters for feedforward (the gyro trim corrects turning), so it's measured but not critical | Measured numbers in the README; constants adjusted only if off by > 1 % (none needed on waxed wood; carpet still to measure) |
 | M2 ✅ | **Map:** per-zone floor learning, map from ToF and odometry, drops, map printed as text in the debug log (§14) | Open floor shows no obstacles, also while braking; walls stay put while turning; drops marked |
 | M3a | **Movement detection while still** (§6.1–6.3, 6.6): camera driver out of bring-up; the change grid; VL53 and camera detectors; tracking with the VL53 only, exit side (combining the camera, react-or-log: later, §6.5) | The target in the debug log matches what you do in front of the robot |
-| M3b | **Turning to look** (§6.6, §7.1): states IDLE / SCAN / WATCH; turn to where the target stopped or left, settle, watch again; back to open space; no turn into a near obstacle. Smooth pursuit (§6.4, §7.2) only if the hops need it | The robot turns to face someone who walked past it, then returns to open space |
+| M3b | **Turning to look** (§6.6, §7.1): states IDLE / SCAN / WATCH; turn after a target leaving the view, stop, learn, on again if it left meanwhile (first iteration, written); then back to open space and no turn into a near obstacle. Smooth pursuit (§6.4, §7.2) only if the hops need it | The robot turns to face someone who walked past it, then returns to open space |
 | M4 | **Behaviour:** Investigate (driving to the target), the Safety guard for driving | Robot drives to movement, stops 50 cm away, then turns to face open space |
 | M5 | **Staleness, 390° scan with the full-turn check, map changes** | Heading error after a scan ~1–2°; move an object while the robot isn't looking and the robot finds it |
 | M6 | **Correction against the map** | Heading and position drift corrected over a few minutes of operation |

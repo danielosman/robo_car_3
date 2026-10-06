@@ -4,7 +4,9 @@
 // empty, floor zones reading the wall behind, a door frame's edge now and then) must show no movement however long it is watched; a person stepping in on
 // the left, a thin pole in one zone, a hand waving for 3 s and a target where
 // nothing was must show; a box
-// put down is still after ~1 s, and taking it away is not movement.
+// put down is still after ~1 s, and taking it away is not movement. While the view
+// is learned, someone passing out through an outer column is noticed, on that side;
+// the quiet room, someone staying at the edge or passing in the middle are not.
 // Run from the repo root (run_tests.sh does):
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_tof_motion picoA/app/test/test_tof_motion.c -lm && build/test_tof_motion
 #include <assert.h>
@@ -83,6 +85,31 @@ static void unsure_patch(void) {
         for (int col = 4; col <= 6; col++) f.range_mm[row * RANGEFINDER_COLS + col] = RANGE_INVALID;
 }
 
+// Someone at 1 m in the outer column on the left (col 0) or right (col 7), rows 1-5.
+static void at_left_edge(void) { for (int row = 1; row <= 5; row++) set(row, 0, 1000.0f); }
+static void at_right_edge(void) { for (int row = 1; row <= 5; row++) set(row, 7, 1000.0f); }
+static void in_middle(void) { for (int row = 1; row <= 5; row++) set(row, 3, 1000.0f); }
+
+// Learns the view with `scene` in it for the first `frames` frames; returns the
+// last frame's time they were in view.
+static uint32_t learn_with(void (*scene)(void), int frames) {
+    tof_motion_restart();
+    uint32_t last_us = 0;
+    for (int k = 0; k < LEARN_FRAMES; k++) {
+        room();
+        if (k < frames) { scene(); last_us = f.t_us; }
+        frame();
+    }
+    assert(tof_motion_ready());
+    return last_us;
+}
+
+static bool passed(bool left) {
+    float b;
+    uint32_t t;
+    return tof_motion_passed(left, &b, &t);
+}
+
 static void quiet_again(void) {
     watch(CHANGE_GRID_WINDOW, 0);
     assert(watch(30, 0) == 0);
@@ -151,6 +178,29 @@ int main(void) {
     room(); person(); frame();
     room(); person(); assert(frame() > 0);
     printf("ok: taking the box away is not movement; the wall is the background again after 10 s\n");
+
+    for (int k = 0; k < 300; k++) {
+        learn_with(in_middle, 0);
+        assert(!passed(true) && !passed(false));
+    }
+    printf("ok: the quiet room learned 300 times: nothing passed out of the view\n");
+    for (int k = 0; k < 20; k++) {
+        float b;
+        uint32_t t, last_us = learn_with(at_left_edge, 8);
+        assert(tof_motion_passed(true, &b, &t) && !passed(false));
+        assert(t == last_us && b > 16 * RAD_PER_DEG);
+        last_us = learn_with(at_right_edge, 4);
+        assert(tof_motion_passed(false, &b, &t) && !passed(true));
+        assert(t == last_us && b < -16 * RAD_PER_DEG);
+        learn_with(at_left_edge, LEARN_FRAMES); // stayed
+        assert(!passed(true));
+        learn_with(at_left_edge, LEARN_FRAMES - 1); // gone for one frame only
+        assert(!passed(true));
+        learn_with(in_middle, 8);
+        assert(!passed(true) && !passed(false));
+    }
+    printf("ok: while learning, someone passing out on the left or right is noticed there, with when;\n"
+           "    not someone staying at the edge, gone for one frame, or passing in the middle\n");
     printf("tof_motion: all tests passed\n");
     return 0;
 }

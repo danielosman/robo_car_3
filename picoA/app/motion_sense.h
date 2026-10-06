@@ -8,10 +8,22 @@
 // detector's movement is printed (at most twice a second while it goes on) and its
 // end, and each exposure adjustment while still; each line starts with the robot's
 // time in seconds since power-up.
+// The target leaving the view, for turning after it (ROBOT_PLAN.md §6.6): the
+// tracker's "leaving", or something the VL53 saw pass out of the view while it
+// learned the view after a stop.
 #include <stdbool.h>
+#include <stdint.h>
+
+typedef struct {
+    float bearing_rad; // where it was last seen, from the sensor (+ = left)
+    float rate_radps;  // its angular speed (+ = to the left); 0: not known (seen only while learning)
+    uint32_t t_us;     // when
+} leaving_t;
 
 void motion_sense_update(void); // call every loop iteration
+bool motion_sense_leaving(leaving_t *l); // the latest leaving since the last call, if any
 bool motion_sense_watching(void); // still, and the references are learned
 bool motion_sense_still(void);    // the robot stands still: the detectors watch or learn
 void motion_sense_log(bool on);
 bool motion_sense_logging(void);
+void motion_sense_stamp(void);  // prints the robot's time in seconds, as the movement log does

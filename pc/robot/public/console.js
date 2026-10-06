@@ -3,6 +3,7 @@
 const KEYS = [
   ["Robot", [["g", "motors on"], ["s", "stop"], ["p", "status"], ["l", "link"], ["w", "WiFi"], ["h", "help"]]],
   ["Map", [["n", "scan"], ["m", "map"], ["z", "ToF frame"]]],
+  ["Watch", [["a", "watch"], ["v", "movement log"], ["o", "ToF backgrounds"], ["k", "camera backgrounds"], ["c", "camera frame"]]],
   ["Tests", [["q", "square"], ["d", "drift"], ["r", "turns"], ["f", "forward"], ["b", "back"], ["t", "last result"]]],
 ];
 const MAX_CHARS = 1024 * 1024;

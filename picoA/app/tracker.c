@@ -8,9 +8,10 @@
 #define EDGE_RAD     (16 * RAD_PER_DEG) // beyond this: the VL53's outer zone columns (its view is ±22.5°)
 #define HISTORY      12                 // directions kept for the angular speed: ~0.8 s at 15 Hz
 #define RATE_MIN_US  150000             // the angular speed needs at least this much history
+#define LEAVING_RADPS (10 * RAD_PER_DEG) // at the edge, moving outward at least this fast: leaving
 
 static target_t target;
-static bool active, lost;
+static bool active, lost, leaving_told;
 static float history_rad[HISTORY];
 static uint32_t history_us[HISTORY];
 static int history_n, history_next;
@@ -53,6 +54,7 @@ track_event_t tracker_add(const motion_obs_t *obs, int n, uint32_t t_us) {
     if (!active) {
         if (n == 0) return TRACK_NOTHING;
         active = true;
+        leaving_told = false;
         target.range_m = -1.0f;
         history_n = history_next = 0;
         remember(&obs[0], t_us); // the biggest
@@ -70,7 +72,11 @@ track_event_t tracker_add(const motion_obs_t *obs, int n, uint32_t t_us) {
     }
     if (best) {
         remember(best, t_us);
-        return TRACK_NOTHING;
+        // At the edge, moving outward (the angular speed is 0 until it is measured).
+        float b = target.bearing_rad, r = target.rate_radps;
+        if (leaving_told || fabsf(b) < EDGE_RAD || fabsf(r) < LEAVING_RADPS || (b > 0) != (r > 0)) return TRACK_NOTHING;
+        leaving_told = true;
+        return b > 0 ? TRACK_LEAVING_LEFT : TRACK_LEAVING_RIGHT;
     }
     if (t_us - target.last_seen_us < LOST_US) return TRACK_NOTHING;
     active = false;

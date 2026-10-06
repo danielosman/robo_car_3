@@ -1,6 +1,7 @@
 // Host test for picoA/app/tracker.c: people walking through the VL53's view (15
 // frames a second, ±2° of jitter, a frame now and then without them) are followed
-// with the right angular speed and reported leaving on the correct side; someone
+// with the right angular speed, reported about to leave at the edge (once) and
+// leaving on the correct side; someone
 // who stops inside the view is reported stopped; the target is kept over a bigger
 // newcomer elsewhere and through short gaps; the first target is the biggest blob.
 // Run from the repo root (run_tests.sh does):
@@ -39,8 +40,13 @@ static float deg(float rad) { return rad * DEG_PER_RAD; }
 // Someone walking from `from` to `to` degrees at `speed` deg/s, 1 m away, missing
 // from 1 frame in 8; returns the first event other than "nothing" after they are
 // out of view or have stopped (stops: they stand at `to`, then the VL53 takes them
-// in after ~1 s and reports nothing).
+// in after ~1 s and reports nothing). "Leaving" reports are counted in `leaving`,
+// the last one's event in `leaving_e`, its direction and speed in `leaving_deg`, `leaving_rate_deg`.
+static int leaving;
+static track_event_t leaving_e;
+static float leaving_deg, leaving_rate_deg;
 static track_event_t walk(float from, float to, float speed, bool stops, float *rate_mid_deg) {
+    leaving = 0;
     float b = from, step = (to > from ? speed : -speed) * FRAME_US * 1e-6f;
     bool started = false;
     for (int k = 0; k < 400; k++) {
@@ -49,7 +55,12 @@ static track_event_t walk(float from, float to, float speed, bool stops, float *
         if (seen) obs[0] = blob(b + jitter_deg(), 1.0f, 6);
         track_event_t e = frame(seen ? 1 : 0);
         if (e == TRACK_NEW) { assert(!started); started = true; continue; }
-        if (e != TRACK_NOTHING) return e;
+        if (e == TRACK_LEAVING_LEFT || e == TRACK_LEAVING_RIGHT) {
+            leaving++;
+            leaving_e = e;
+            leaving_deg = deg(tracker_target()->bearing_rad);
+            leaving_rate_deg = deg(tracker_target()->rate_radps);
+        } else if (e != TRACK_NOTHING) return e;
         if (rate_mid_deg && fabsf(b - (from + to) / 2) < fabsf(step)) *rate_mid_deg = deg(tracker_target()->rate_radps);
         if (!arrived) b += step;
     }
@@ -66,14 +77,18 @@ int main(void) {
         float rate;
         assert(walk(30.0f, -30.0f, 20.0f, false, &rate) == TRACK_EXITED_RIGHT);
         assert(fabsf(rate + 20.0f) < 5.0f);
+        assert(leaving == 1 && leaving_e == TRACK_LEAVING_RIGHT && leaving_deg < -14.0f && leaving_rate_deg < -12.0f);
         assert(walk(-30.0f, 30.0f, 40.0f, false, &rate) == TRACK_EXITED_LEFT);
         assert(fabsf(rate - 40.0f) < 8.0f);
+        assert(leaving == 1 && leaving_e == TRACK_LEAVING_LEFT && leaving_deg > 14.0f && leaving_rate_deg > 25.0f);
         assert(walk(30.0f, 5.0f, 20.0f, true, 0) == TRACK_STOPPED);
+        assert(leaving == 0); // came in at the edge, going inward
         assert(fabsf(deg(tracker_target()->bearing_rad) - 5.0f) < 4.0f);
         assert(fabsf(tracker_target()->range_m - 1.0f) < 0.01f);
         assert(frame(0) == TRACK_NOTHING && !tracker_target());
     }
-    printf("ok: walking right and left (20, 40 deg/s): angular speed, exit side; stopping inside: stopped (20 seeds)\n");
+    printf("ok: walking right and left (20, 40 deg/s): angular speed, leaving once at the edge, exit side;\n"
+           "    stopping inside: stopped, not leaving (20 seeds)\n");
 
     // The first target is the biggest blob; it is kept over a bigger newcomer elsewhere.
     obs[0] = blob(-10.0f, 0.8f, 9);
@@ -108,9 +123,10 @@ int main(void) {
     assert(frame(1) == TRACK_NOTHING && deg(tracker_target()->bearing_rad) > 10.0f);
     printf("ok: someone close: the big blob reaching where they are, not a small piece nearer its centre\n");
 
-    // ...leaving at the left edge, a far zone in the same direction is not them.
+    // ...leaving at the left edge (moving outward there: about to leave), a far zone
+    // in the same direction is not them.
     obs[0] = wide_blob(17.0f, 20.0f, 0.5f, 4);
-    assert(frame(1) == TRACK_NOTHING);
+    assert(frame(1) == TRACK_LEAVING_LEFT);
     obs[0] = blob(20.0f, 2.8f, 1);
     track_event_t e = TRACK_NOTHING;
     for (int k = 0; k < 10 && e == TRACK_NOTHING; k++) e = frame(1);

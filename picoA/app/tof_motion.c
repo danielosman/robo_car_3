@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "units.h"
 #include "change_grid.h"
 #include "tof_motion.h"
 
@@ -14,6 +15,8 @@
 #define DRIFT          0.05f  // a reading at the background pulls it this much
 #define STEADY_FRAMES  (1 * RANGEFINDER_HZ)  // closer but steady for 1 s: it has stopped, the new background
 #define NOTHING        1e9f   // the background of a zone with no sure target: far beyond anything
+#define EDGE_RAD       (16 * RAD_PER_DEG) // beyond this: the outer zone columns (the view is ±22.5°)
+#define PASSING_ZONES  2      // zones of an outer column nearer in one frame: something passing
 
 static float background[RANGEFINDER_RAYS]; // mm, or NOTHING (no sure reading while learning)
 static float floor_limit[RANGEFINDER_RAYS]; // mm; 0 = none (rangefinder_floor_limit_m)
@@ -27,7 +30,10 @@ static float steady_mm[RANGEFINDER_RAYS];
 static uint16_t steady_frames[RANGEFINDER_RAYS];
 static uint16_t farther[RANGEFINDER_RAYS];  // frames in a row farther than the background
 static float learning[LEARN_FRAMES][RANGEFINDER_RAYS]; // the readings while learning
+static uint32_t learning_us[LEARN_FRAMES];
 static int learned;                        // frames learned since the restart
+static uint32_t passed_us[2];              // right, left: the last frame something passed there; 0 = none
+static float passed_rad[2];
 static change_grid_t grid;
 static bool grid_ready;
 
@@ -36,6 +42,7 @@ void tof_motion_restart(void) {
     grid_ready = true;
     change_grid_clear(&grid);
     learned = 0;
+    memset(passed_us, 0, sizeof passed_us);
     memset(background, 0, sizeof background);
     memset(farther, 0, sizeof farther);
     memset(brief_mm, 0, sizeof brief_mm);
@@ -64,6 +71,52 @@ static void learn_backgrounds(void) {
     }
 }
 
+static float margin_of(float mm) { return fmaxf(CLOSER_MM, CLOSER_SHARE * mm); }
+
+// While learning, something passing out of the view: in an outer zone column, 2
+// zones in one frame clearly nearer than the farthest the zone gives regularly (its
+// 3rd-farthest sure distance).
+static void find_passing(void) {
+    float far[RANGEFINDER_RAYS], bearing[RANGEFINDER_RAYS];
+    for (int i = 0; i < RANGEFINDER_RAYS; i++) {
+        float dir[3];
+        rangefinder_ray_direction(i, dir);
+        bearing[i] = atan2f(dir[1], dir[0]);
+        float v[LEARN_FRAMES];
+        int n = 0;
+        for (int k = 0; k < LEARN_FRAMES; k++)
+            if (learning[k][i] >= 0 && learning[k][i] < NOTHING) v[n++] = learning[k][i];
+        far[i] = 0; // none: the zone tells nothing
+        if (n < 3) continue;
+        qsort(v, (size_t)n, sizeof v[0], compare_mm);
+        far[i] = v[n - 3];
+    }
+    for (int k = 0; k < LEARN_FRAMES; k++) {
+        int count[2] = {0, 0};
+        float sum_rad[2] = {0, 0};
+        for (int i = 0; i < RANGEFINDER_RAYS; i++) {
+            if (fabsf(bearing[i]) < EDGE_RAD || far[i] == 0) continue;
+            float mm = learning[k][i];
+            if (mm < 0 || mm >= far[i] - margin_of(far[i])) continue;
+            int side = bearing[i] > 0;
+            count[side]++;
+            sum_rad[side] += bearing[i];
+        }
+        for (int side = 0; side < 2; side++)
+            if (count[side] >= PASSING_ZONES) {
+                passed_us[side] = learning_us[k];
+                passed_rad[side] = sum_rad[side] / (float)count[side];
+            }
+    }
+}
+
+bool tof_motion_passed(bool left, float *bearing_rad, uint32_t *t_us) {
+    if (!tof_motion_ready() || !passed_us[left]) return false;
+    *bearing_rad = passed_rad[left];
+    *t_us = passed_us[left];
+    return true;
+}
+
 bool tof_motion_ready(void) { return grid_ready && learned >= LEARN_FRAMES; }
 
 // A zone's reading as a distance in mm: NOTHING for no target, < 0 when it tells
@@ -75,7 +128,7 @@ static float reading(int i, uint16_t mm) {
     return (float)mm;
 }
 
-static float margin(int i) { return fmaxf(CLOSER_MM, CLOSER_SHARE * background[i]); }
+static float margin(int i) { return margin_of(background[i]); }
 
 static bool closer(int i, float mm) {
     return mm >= 0 && mm < NOTHING && mm < background[i] - margin(i);
@@ -139,7 +192,8 @@ int tof_motion_add(const range_frame_t *f, motion_obs_t *obs, int max) {
     if (!grid_ready) tof_motion_restart();
     if (learned < LEARN_FRAMES) {
         for (int i = 0; i < RANGEFINDER_RAYS; i++) learning[learned][i] = reading(i, f->range_mm[i]);
-        if (++learned == LEARN_FRAMES) learn_backgrounds();
+        learning_us[learned] = f->t_us;
+        if (++learned == LEARN_FRAMES) { learn_backgrounds(); find_passing(); }
         return 0;
     }
     float score[RANGEFINDER_RAYS];

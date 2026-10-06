@@ -45,15 +45,17 @@ Built to [ROBOT_PLAN.md](ROBOT_PLAN.md), milestone by milestone. **Done: M0 (lin
 wheel control, odometry), M1 (calibration, on waxed wood; `b` and the carpet still
 to test), M2 (map).** Now: M3a (movement detection while still): the camera driver
 (`picoA/drivers/camera.c`, its own exposure), the VL53's and the camera's movement
-detection (`change_grid.c`, `tof_motion.c`, `camera_motion.c`, `motion_sense.c`). What happened in each session
+detection (`change_grid.c`, `tof_motion.c`, `camera_motion.c`, `motion_sense.c`), the
+VL53 tracker (`tracker.c`); M3b's first iteration, turning after a target leaving the
+view (`behaviour.c`), works on the robot but misses some movement. What happened in each session
 is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, PicoB's wheel control, odometry and `brain`,
-  PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53, camera), the start-up scan
-  in a simulated room and the WiFi console (`npm test` in `pc/robot/` for the server). Run it after every change.
+  PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the start-up scan
+  and watching in a simulated room and the WiFi console (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
   from the encoders, heading from the gyro with the bias re-measured whenever the
@@ -75,11 +77,18 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   to WiFi, then does the start-up scan whether that worked or not (ROBOT_WIFI.md).
 - **Start-up scan:** at power-up without USB, or with `n`, the robot turns 390° in place, learns the floor from what
   the lower zones see all around (fresh every start, nothing stored), prints the
-  map, turns to face the most open direction and prints its heading. `n` clears
-  the map and makes the robot's heading the map's up.
+  map, turns to face the most open direction and prints its heading, then watches.
+  `n` clears the map and makes the robot's heading the map's up.
+- **Watching** (`behaviour.c`, ROBOT_PLAN.md §6.6): after the scan, or with `a`, the
+  robot stands still with the motors on. When the VL53's target is about to leave
+  the view (at the edge, moving outward), it turns to where the target will be when
+  the turn ends (at 1 rad/s, at most 90°), stops and learns the view; if the target
+  is seen leaving again meanwhile, it turns on after it. `s` stops. On the robot the
+  turns end within ~1° of the command; it misses some movement, and often the target
+  leaving while it learns.
 - **PicoA console** (`debug_console.c`), on USB and over WiFi: a status line every
   15 s (none while a test runs); keys `g` motors on, `s` stop, `p` status now (with
-  a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; map: `n` start-up scan again, `m` print the
+  a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; `a` watch from here; map: `n` start-up scan again (then watch), `m` print the
   map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
   forward / back (`robot_test.c`); camera `c` one frame as 20 × 15 blocks, with its
   exposure; movement `v` log on / off (both sensors; each line starts with the robot's
@@ -259,6 +268,21 @@ facing ~2 m of room; `v` on. The tracker follows one target in the VL53's moveme
    ~1.5 s after you stopped (the VL53 takes you in after 1 s, the tracker waits 0.5 s).
 4. While you walk, someone else (or a waved hand) on the other side: the target stays
    on you.
+
+**Watching** (M3b; both Picos, battery on). Robot on the floor with room to turn,
+facing ~2 m of room; `v` on so the target lines show too:
+1. Flash `picoA_app` onto PicoA. Press `a`: "Watching for movement…". Stand behind
+   the robot: it stays put.
+2. Walk across at ~2 m, left to right. Expected: "Target leaving the view on the
+   right at −17 deg, N deg/s", then "Watching: target leaving the view … turning
+   −N deg": the robot turns right and stops facing about where you are. If you
+   walked on out of its view while it learned (~1.5 s after it stopped): "it left
+   the view again while learning it … turning …" and it turns on.
+3. The same at ~1 m (faster across the view: it may trail behind you), and right to
+   left.
+4. Walk in and stop in the middle: no turn. A hand waved at the edge: maybe a turn
+   (paste the log).
+5. Paste the log with what you did; `s` stops.
 
 **WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,

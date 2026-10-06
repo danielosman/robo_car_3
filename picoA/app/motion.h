@@ -13,7 +13,10 @@ static inline float motion_speed(float remaining_m) {
     return copysignf(fminf(MOTION_SPEED_MPS, fmaxf(MOTION_MIN_SPEED_MPS, fabsf(remaining_m))), remaining_m);
 }
 
-// Turn rate (+ = left) with remaining_rad still to turn (+ = left).
+// Turn rate (+ = left) with remaining_rad still to turn (+ = left), at most max_radps.
+static inline float motion_turn_rate_up_to(float remaining_rad, float max_radps) {
+    return copysignf(fminf(max_radps, fmaxf(MOTION_MIN_TURN_RADPS, 2 * fabsf(remaining_rad))), remaining_rad);
+}
 static inline float motion_turn_rate(float remaining_rad) {
-    return copysignf(fminf(MOTION_TURN_RADPS, fmaxf(MOTION_MIN_TURN_RADPS, 2 * fabsf(remaining_rad))), remaining_rad);
+    return motion_turn_rate_up_to(remaining_rad, MOTION_TURN_RADPS);
 }

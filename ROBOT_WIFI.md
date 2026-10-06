@@ -17,8 +17,8 @@ map come later.
 
 | At power-up | What PicoA does |
 |---|---|
-| **USB connected** (a computer enumerated the Pico; a charger doesn't count), checked ~3 s after boot | Nothing: no scan, no WiFi. Waits for the serial monitor and keys. `n` starts the scan, `w` connects to WiFi |
-| **No USB** | Connects to WiFi, then does the 390° start-up scan whether that worked or not |
+| **USB connected** (a computer enumerated the Pico; a charger doesn't count), checked ~3 s after boot | Nothing: no scan, no WiFi. Waits for the serial monitor and keys. `n` starts the scan (then watching), `a` watching, `w` connects to WiFi |
+| **No USB** | Connects to WiFi, then does the 390° start-up scan whether that worked or not, then watches (turns after movement; `s` stops) |
 
 "WiFi worked or not" means the first of: connected to the server; WiFi failed
 (wrong password, network not found, no answer after 15 s); or WiFi joined but no
