@@ -5,6 +5,23 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
+## 8 Oct 2026: rework plans (architecture, movement, map)
+
+No code changed. From Daniel's brain dump and an inspiration doc
+(`doc/RobotMotionTrackingAlgorithms.md`), four plans were written, reviewed
+together by a reviewer and revised: the architecture (today's functions as a
+spec, deep modules, red flags), VL53 movement (per-reading confidence, edge times
+across neighbouring zones, watching while turning with a heading background),
+the map (ground as an ordinary cell layer, the cone-slice rule, confidence-weighted
+log-odds, no floor learning) and the camera (features tracked frame to frame into
+a record of measurements only; movement detection is one reader and removes the
+robot's own turn itself). Decided with Daniel: ground band −7…+3 cm; drivable =
+ground + both layers above free; camera dark rather than noisy (≤ 10 ms, gain
+≤ 8); no camera images to the PC; recordings not in git; scan after a watchdog
+reset. Start: [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md) (order of 21 steps), terms
+in [doc/GLOSSARY.md](doc/GLOSSARY.md). It replaces the "fix the misses" next step
+of 7 Oct (`find_passing()` goes in T-R).
+
 ## 7 Oct 2026: M3b first iteration: turning after a target leaving the view
 
 Agreed with Daniel: as simple as possible for the first iteration. When the target
@@ -32,8 +49,7 @@ while it learned. Agreed: good enough for the first iteration. Likely causes, to
 look at next: the view is learned only once PicoB reports the robot still (~0.5 s
 after stopping), so a target that left before that is never seen; a zone needs 3
 sure readings to have a "farthest", so farther than the VL53 reaches (upper rows)
-it tells nothing; 2 zones in one frame of the outer column. The WiFi connection
-dropped at the end ("robot silent for 6 s"); cause not looked at.
+it tells nothing; 2 zones in one frame of the outer column.
 
 ## 6 Oct 2026 (evening): M3a: the camera's movement detection
 

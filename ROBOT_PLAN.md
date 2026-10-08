@@ -11,6 +11,10 @@ describes the current design; what happened in each session is in
 
 ## Where we are (handover for the next session)
 
+**A rework comes first: [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md)** (architecture,
+movement detection, map; its order of steps). It replaces "Next: the misses" below
+(don't fix `find_passing()`: the rework removes it); M1's open tests stay.
+
 **Next session, in this order:**
 1. Open from M1: the `b` test and the carpet tests (README, "M1"); on the carpet
    also `n` (floor learned, no false `?`).
@@ -33,9 +37,30 @@ describes the current design; what happened in each session is in
    §6.6) works on the robot**: turns after people leaving both ways, within ~1° of
    the command, and on again when they left while it learned. **Next: the misses**
    (CHANGELOG, 7 Oct): sometimes no movement noticed at all, and often the target
-   leaving while it learns is not noticed (learning starts only ~0.5 s after the
-   stop; zones beyond the VL53's reach have no "farthest"). Look at a `v` log of
-   misses first. Then back to open space and no turn into a near obstacle. Combining the camera with
+   leaving while it learns is not noticed. First, two flaws in "passing out while
+   learning" (`find_passing()` in `tof_motion.c`, §6.6 rule 5), found with Daniel:
+   - *Why the farthest:* a zone at the edge sees its background (wall, sofa) or the
+     person in front of it, always nearer: the background is the zone's farthest
+     regular reading, the frames clearly nearer than it are when the person was
+     there, the last of them when they left. (The closest would just be the
+     person's own distance.)
+   - *Flaw 1, entering counts as leaving:* the rule only asks for near frames and
+     far frames, in any order, so walking *into* the edge column while it learns
+     (far, then near) is also "left the view". Fix: the near frames must come before
+     the far ones (gone by the end of learning). Host test: entering at the edge
+     while learning is not passing.
+   - *Flaw 2, zones that see nothing are ignored:* only sure distances count, so a
+     zone with "no target" behind the person (open room beyond the VL53's reach,
+     often the upper rows) has no farthest and the person is never noticed there:
+     a likely cause of the misses. Fix: "nothing" counts as the farthest reading
+     (as the background learning's NOTHING). Left out at first because far zones
+     flip between a wall and nothing; the 2-zones-in-one-frame rule should stop
+     that: check with the quiet-room host test (300 learns, nothing passing), and
+     add a test of someone passing in front of open space.
+   - *Also:* learning starts only once PicoB reports the robot still (~0.5 s after
+     the stop), so someone gone before that is never seen.
+   Then a `v` log of the misses on the robot. Then back to open space and no turn
+   into a near obstacle. Combining the camera with
    the VL53 (§6.5) and the camera during turns (§6.4) are put off: the camera keeps
    running and logging, but nothing uses it yet.
 
