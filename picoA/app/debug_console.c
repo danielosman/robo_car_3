@@ -7,13 +7,14 @@
 #include "robot_test.h"
 #include "behaviour.h"
 #include "surroundings.h"
-#include "world_map.h"
+#include "cell_map.h"
 #include "pose.h"
 #include "wifi_console.h"
 #include "camera.h"
 #include "tof_motion.h"
 #include "camera_motion.h"
 #include "motion_sense.h"
+#include "loop_stats.h"
 #include "debug_console.h"
 
 #define STATUS_PERIOD_US  15000000 // not while a test or the scan runs: they print their own progress
@@ -24,10 +25,10 @@ static bool usb_was_connected, wifi_was_connected, greeted;
 static absolute_time_t next_status, greeting_time;
 
 static void help(void) {
-    printf("Keys: g = motors on, s = stop (motors off), p = print status now, l = link counters, h = help\n"
+    printf("Keys: g = motors on, s = stop (motors off), p = print status now (with loop time and RAM), l = link counters, h = help\n"
            "WiFi: w = connect (or show how it is connected)\n"
            "Map: n = start-up scan again (390 deg turn, then watch), m = print the map, z = one ToF frame\n"
-           "Watch: a = watch from here, turning after a target leaving the view (s stops)\n"
+           "Watch: a = watch from here, turning towards the biggest movement (s stops)\n"
            "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
            "Movement: v = log on / off; backgrounds now: o = each ToF zone, k = each camera block\n"
            "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
@@ -53,8 +54,7 @@ static void print_link(void) {
            (unsigned long)s.rx_lost, (unsigned long)s.tx_msgs, (unsigned long)s.tx_dropped);
 }
 
-// One ToF frame as the robot sees it (top row up, left column left): the distances,
-// what each zone makes of them, and what the floor zones learned.
+// One ToF frame as the robot sees it (top row up, left column left): the distances.
 static void print_frame(void) {
     const range_frame_t *f = surroundings_last_frame();
     if (!f) { printf("No ToF frame yet\n"); return; }
@@ -66,32 +66,6 @@ static void print_frame(void) {
             if (mm == RANGE_NO_TARGET) printf("   --");
             else if (mm == RANGE_INVALID) printf(" ?%-3u", (unsigned)f->status[i]);
             else printf(" %4u", (unsigned)((mm + 5) / 10));
-        }
-        printf("\n");
-    }
-    pose_t p = {0};
-    pose_now(&p);
-    scan_t scan;
-    rangefinder_scan(f, p.pitch_rad, &scan);
-    printf("What each zone makes of it: #N obstacle N cm above the floor, . free, ? floor not seen, blank unused%s:\n",
-           surroundings_mapping() ? "" : " (floor not learned yet)");
-    for (int row = 0; row < RANGEFINDER_ROWS; row++) {
-        for (int col = 0; col < RANGEFINDER_COLS; col++) {
-            const ray_t *r = &scan.ray[row * RANGEFINDER_COLS + col];
-            if (r->kind == RAY_HIT) printf("  #%-2d", (int)(r->z_m * 100 + 0.5f));
-            else if (r->kind == RAY_CLEAR || r->kind == RAY_FLOOR) printf("    .");
-            else if (r->kind == RAY_NO_FLOOR) printf("    ?");
-            else printf("     ");
-        }
-        printf("\n");
-    }
-    printf("Learned floor, cm along each ray / obstacle from cm above it:\n");
-    for (int row = rangefinder_first_floor_row(); row < RANGEFINDER_ROWS; row++) {
-        for (int col = 0; col < RANGEFINDER_COLS; col++) {
-            float floor_m, min_m;
-            if (rangefinder_zone_floor(row * RANGEFINDER_COLS + col, &floor_m, &min_m))
-                printf(" %4.0f/%-2.0f", (double)(floor_m * 100), (double)(min_m * 100));
-            else printf("    -   ");
         }
         printf("\n");
     }
@@ -139,7 +113,7 @@ static void print_camera(void) {
 // (cm; -- nothing), * = moved (reads clearly closer).
 static void print_tof_motion(void) {
     printf("ToF movement, %s: each zone's background, cm (-- nothing), * = moved:\n",
-           !motion_sense_still() ? "robot moving" : tof_motion_ready() ? "watching" : "learning the view");
+           tof_motion_ready() ? (motion_sense_still() ? "watching" : "watching while turning") : "filling the background");
     for (int row = 0; row < RANGEFINDER_ROWS; row++) {
         for (int col = 0; col < RANGEFINDER_COLS; col++) {
             int i = row * RANGEFINDER_COLS + col;
@@ -186,8 +160,7 @@ static void print_map(void) {
         body_motors(false);
         printf("Motors off for printing the map (g switches them on)\n");
     }
-    map_print(&p);
-    printf("Map changes so far: %u%s\n", map_changes(), surroundings_mapping() ? "" : " (not mapping: the floor isn't learned yet, press n)");
+    cell_map_print(&p, 0);
 }
 
 static void start_test(robot_test_t t) {
@@ -211,6 +184,13 @@ static void print_status(void) {
            (double)(body_status()->gyro_bias_radps * DEG_PER_RAD),
            o->stationary ? "still " : "moving", o->motors_on ? "on" : "off",
            o->stop_reason != STOP_NONE ? " (safety stop)" : "", o->imu_error ? "  IMU ERROR" : "");
+}
+
+// The RAM no static variable uses (the linker's heap: nothing calls malloc but lwIP's
+// own pools, which are static too). Fixed at build time.
+static void print_ram(void) {
+    extern char __end__, __HeapLimit;
+    printf("RAM free %lu KB\n", (unsigned long)((uintptr_t)&__HeapLimit - (uintptr_t)&__end__) / 1024);
 }
 
 void debug_console_update(void) {
@@ -250,7 +230,7 @@ void debug_console_update(void) {
     case 'r': start_test(ROBOT_TEST_TURNS); break;
     case 'f': start_test(ROBOT_TEST_FORWARD); break;
     case 'b': start_test(ROBOT_TEST_BACK); break;
-    case 'p': print_status(); wifi_console_print_status(); break;
+    case 'p': print_status(); wifi_console_print_status(); loop_stats_print(); print_ram(); break;
     case 'w': wifi_console_start(); break;
     case 't': print_last_result(); break;
     case 'l': print_link(); break;

@@ -48,7 +48,7 @@ static void check_ramp(float seconds) {
 
 int main(void) {
     drive_init();
-    fake_now_us = 1000000;
+    fake_now_us = FAKE_CLOCK_WRAP_US - 7000000; // the clock wraps during the test
     drive_update(&odom);
     assert(fake_left_power == 0 && !fake_standby_off);     // starts off
 

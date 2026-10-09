@@ -87,3 +87,23 @@ and the M2 parts of `debug_console`. No behaviour changed; host tests pass.
 | PicoA `rangefinder` | Nonobvious code (considered) | `HORIZON_ROW` and `FIRST_FLOOR_ROW` are both row 4 | **Accepted:** two facts about the same row (it learns the floor; its floor is too far for obstacles beyond 0.95 m); one name for both would hide one of them |
 | PicoA `world_map` | (to watch, M5) | "Map changes so far: 1584" after one scan and a square: ~2 per frame, so change detection as it stands is noisy (cells at edges and far walls flipping between free and occupied) | **Open:** nothing uses changes until M5, which has to filter them (e.g. a change only counts if it persists, or clusters) |
 | PicoA `world_map`, `behaviour` | (found on the robot) | Isolated unknown cells inside the free area (often in radial lines) stop `map_free_distance()`, so the robot undercounts open directions | **Open:** cause to find and fix before M4 (ROBOT_PLAN §14, next session) |
+
+## Rework
+
+### A0 — Measure, by analysis (9 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| PicoA `tof_motion`, the core-0 stack | Nonobvious code | The `static` locals assumed a 2 KB stack, but the SDK never enforces it, and `observations()` keeps a 3.2 KB `all[]` on the stack anyway: the main loop needs 4.2 KB, ~6 KB with interrupts. It works only because the stack can grow through both empty scratch banks (8 KB) | **Open until V3:** explicit 8 KB stacks before core 1 starts (core 1's stack is in that area); `tools/stack_depth.py` re-run then |
+
+### A1 — helpers, clock wrap (9 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| `tracker`, `tof_motion`, `camera_motion`, `motion_sense` | Repetition | `atan2f(v[1], v[0])` for a bearing, five times | **Fixed:** `geom.h` `bearing_rad()` |
+| `pose`, `tracker`, `behaviour` | Repetition | Time differences as `(float)(a - b) * 1e-6f` and `pose`'s `after()` | **Fixed:** `stamp.h` `stamp_us()`, `stamp_s()`. `robot_test`'s `seconds_between()` stays: 64-bit `absolute_time_t`, no wrap |
+| `behaviour` | Repetition (ahead of need) | `wrap_angle()` private, while the map and ToF work need it too | **Fixed:** `geom.h` `wrap_pi()` |
+| `tof_motion`, `camera_motion`, `rangefinder` | Repetition | Three `compare_*` functions with `qsort` for a median or an n-th value | **Fixed:** `stats.h`; `nth_value()` where one value is needed, `sort_values()` where `rangefinder` scans the sorted samples |
+| `tof_motion`, `camera_motion` | Repetition | Blob → observation (sum directions, left / right, normalise, strength, sort by cells) written twice | **Fixed:** `change_grid_observations()` and `change_grid_biggest()`; each detector adds only its own (range; rolling-shutter time) |
+| test fake clock | (test gap) | Started at 1: no test crossed the 32-bit wrap | **Fixed:** starts 30 s before; each test checked to cross it. No wrap bug found |
+| `tof_motion` | Nonobvious code (considered) | `passed_us` uses 0 for "none", a real time once per 71.6 min | **Accepted:** misfires only for a frame stamped at exactly 0 µs; T-R removes `find_passing()` |

@@ -9,7 +9,7 @@
 // must show; a box put down is still after ~1 s, and so is the place it is taken
 // from. The same at 100 frames/s.
 // Run from the repo root (run_tests.sh does):
-//   cc -std=c11 -Wall -Wextra -IpicoA/drivers -o build/test_camera_motion picoA/app/test/test_camera_motion.c -lm && build/test_camera_motion
+//   cc -std=c11 -Wall -Wextra -IpicoA/drivers -Icommon -o build/test_camera_motion picoA/app/test/test_camera_motion.c -lm && build/test_camera_motion
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,7 +30,8 @@ void camera_hold_exposure(bool hold) { held = hold; }
 
 static uint8_t room_px[CAMERA_WIDTH * CAMERA_HEIGHT], scene_px[CAMERA_WIDTH * CAMERA_HEIGHT];
 static uint8_t px[CAMERA_WIDTH * CAMERA_HEIGHT];
-static camera_frame_t f = {.pixels = px, .line_us = 42.7f, .exposure_us = 40000.0f, .gain = 1.0f};
+static camera_frame_t f = {.pixels = px, .line_us = 42.7f, .exposure_us = 40000.0f, .gain = 1.0f,
+                           .last_row_us = 0u - 30000000u}; // 30 s before the clock wraps
 static uint32_t frame_us = 40000; // 25 frames/s
 static motion_obs_t obs[8];
 

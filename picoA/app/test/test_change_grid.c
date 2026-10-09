@@ -1,6 +1,6 @@
 // Host test for picoA/app/change_grid.c: scores adding up over the window, the
 // lower threshold with a scoring neighbour, old scores forgotten, blobs. Run from the repo root:
-//   cc -std=c11 -Wall -Wextra -o build/test_change_grid picoA/app/test/test_change_grid.c && build/test_change_grid
+//   cc -std=c11 -Wall -Wextra -Icommon -o build/test_change_grid picoA/app/test/test_change_grid.c -lm && build/test_change_grid
 #include <assert.h>
 #include <stdio.h>
 #include "../change_grid.c"

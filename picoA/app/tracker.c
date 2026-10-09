@@ -1,5 +1,7 @@
 #include <math.h>
 #include "units.h"
+#include "geom.h"
+#include "stamp.h"
 #include "tracker.h"
 
 #define REACH_RAD    (10 * RAD_PER_DEG) // a blob reaching this close to where the target is expected can be it...
@@ -19,18 +21,16 @@ static int history_n, history_next;
 void tracker_reset(void) { active = lost = false; }
 const target_t *tracker_target(void) { return active || lost ? &target : 0; }
 
-static float bearing(const motion_obs_t *o) { return atan2f(o->where[1], o->where[0]); }
-
 // The angular speed: the slope of a straight line through the directions of the
 // last ~0.8 s (least squares: the jitter of single frames averages out).
 static float rate(void) {
     int oldest = (history_next - history_n + HISTORY) % HISTORY;
     int newest = (history_next - 1 + HISTORY) % HISTORY;
-    if (history_us[newest] - history_us[oldest] < RATE_MIN_US) return 0.0f;
+    if (stamp_us(history_us[newest], history_us[oldest]) < RATE_MIN_US) return 0.0f;
     float st = 0.0f, sb = 0.0f, stt = 0.0f, stb = 0.0f;
     for (int k = 0; k < history_n; k++) {
         int i = (oldest + k) % HISTORY;
-        float t = (float)(history_us[i] - history_us[oldest]) * 1e-6f, b = history_rad[i];
+        float t = stamp_s(history_us[i], history_us[oldest]), b = history_rad[i];
         st += t; sb += b; stt += t * t; stb += t * b;
     }
     float n = (float)history_n;
@@ -38,7 +38,7 @@ static float rate(void) {
 }
 
 static void remember(const motion_obs_t *o, uint32_t t_us) {
-    target.bearing_rad = bearing(o);
+    target.bearing_rad = bearing_rad(o->where);
     target.up_rad = asinf(o->where[2]);
     if (o->range_m >= 0) target.range_m = o->range_m;
     target.last_seen_us = t_us;
@@ -62,7 +62,7 @@ track_event_t tracker_add(const motion_obs_t *obs, int n, uint32_t t_us) {
     }
     // The biggest blob that reaches where the target is expected (a person close by
     // is a big blob and pieces: its centre says little about where it reaches).
-    float expected = target.bearing_rad + target.rate_radps * (float)(t_us - target.last_seen_us) * 1e-6f;
+    float expected = target.bearing_rad + target.rate_radps * stamp_s(t_us, target.last_seen_us);
     const motion_obs_t *best = 0;
     for (int k = 0; k < n; k++) {
         const motion_obs_t *o = &obs[k];
@@ -78,7 +78,7 @@ track_event_t tracker_add(const motion_obs_t *obs, int n, uint32_t t_us) {
         leaving_told = true;
         return b > 0 ? TRACK_LEAVING_LEFT : TRACK_LEAVING_RIGHT;
     }
-    if (t_us - target.last_seen_us < LOST_US) return TRACK_NOTHING;
+    if (stamp_us(t_us, target.last_seen_us) < LOST_US) return TRACK_NOTHING;
     active = false;
     lost = true;
     if (target.bearing_rad > EDGE_RAD) return TRACK_EXITED_LEFT;

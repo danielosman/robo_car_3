@@ -1,106 +1,155 @@
 # RoboCar — the rework (start here)
 
-The main plan for the rework of the architecture, movement detection and map
-(written 8 Oct 2026, from Daniel's brain dump; four plans written, cross-reviewed
-and revised). **A fresh session starts here**, not in one of the sub-plans: this
-file says what each plan is, what was decided and in which order to build.
-
-It supersedes, once each step lands: ROBOT_PLAN.md §4 (the map, floor learning),
-§6.2-§6.6 (movement detection, learning after a stop, `find_passing()`) and the
-"Next: the misses" item of ROBOT_PLAN's handover. Don't fix `find_passing()`: T-R
-removes it. ROBOT_PLAN.md stays the plan for everything else (M1's open tests,
-M4-M6 after this rework) and keeps describing the robot **as it is**; update it,
-the README and CHANGELOG as each step lands (README "Docs").
+The rework of the movement detection, the map and the architecture. **A fresh
+session starts here.** This file holds only the current state, the decisions, and
+the open suggestions and discussion points. What happened, and what was tried and
+dropped, is in [REWORK_CHANGELOG.md](REWORK_CHANGELOG.md). README.md and
+ROBOT_PLAN.md describe the robot as it is; ROBOT_PLAN.md stays the plan for
+everything outside the rework (M1's open tests, M4-M6).
 
 ## The files
 
 | File | What it is | Read it for |
 |---|---|---|
-| **REWORK_PLAN.md** (this) | Entry point: the files, the decisions, the order, how to work | always first |
-| [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) | Today's functions as a spec, a first-principles design, shared data types (§2.3), deep modules (§5), red flags (§6), every improvement idea with an opinion (§7); milestones A0-A6, R0, M-S, V3 | the A, R0 and M-S steps; the shared types; how modules fit |
-| [cross_plan.md](cross_plan.md) | The reviewer's binding decisions: numbers, shared types, the one ToF confidence model, ownership, RAM budget, merged order | when two plans seem to disagree: this file wins on names and numbers, the sub-plan on detail |
-| [TOF_MOTION_PLAN.md](TOF_MOTION_PLAN.md) | VL53 movement: per-reading confidence (§3), a zone over time and edge timing across neighbouring zones (§4-§6), the heading background for watching while turning (§7) | T1-T4 |
-| [SURROUNDINGS_PLAN.md](SURROUNDINGS_PLAN.md) | The map: ground as an ordinary cell layer, the cone-slice rule (§3, with a figure), log-odds evidence weighted by confidence (§4), drivable = ground + both layers above free | S1-S4 |
-| [CAMERA_MOTION_PLAN.md](CAMERA_MOTION_PLAN.md) | Camera: corners tracked frame to frame (`vision`), the universal per-frame record `vision_frame_t` (§5), ego-motion from the gyro (§6), movement detection as one reader (`camera_movers`, §8) | V1-V5 |
-| [GLOSSARY.md](GLOSSARY.md) | The terms all plans use, one word per thing | when a word is unclear; add new terms there |
+| **REWORK_PLAN.md** (this) | Current state, decisions, open points, how to work | always first |
+| [REWORK_CHANGELOG.md](REWORK_CHANGELOG.md) | What happened, robot runs, what was tried and dropped | history, before retrying an idea |
+| [MAP_DESIGN.md](MAP_DESIGN.md) | **The map as built** (9 rays per zone, best measurement wins), its known limits and open points | anything about the map |
+| [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) | Budgets (§1.3: RAM, stack, the stack tool), shared types, deep modules, red flags, the groundwork milestones (A2-A6, R0, M-S, V3) | groundwork when a feature needs it |
+| [TOF_MOTION_PLAN.md](TOF_MOTION_PLAN.md) | VL53 movement. §7 (heading background) is built in a simpler form (below); the confidence model (§3), the z-test (T2) and edge timing (T3) are open ideas | movement detection |
+| [SURROUNDINGS_PLAN.md](SURROUNDINGS_PLAN.md) | The first map design. **§3-§4.3 (cone rule, log-odds) are replaced by MAP_DESIGN.md**; its layers, columns and the L2 rule near the robot (§4.4) are what was built | background |
+| [CAMERA_MOTION_PLAN.md](CAMERA_MOTION_PLAN.md) | Camera: features tracked frame to frame, ego-motion from the gyro, movement while turning. Not started | the camera work |
+| [cross_plan.md](cross_plan.md) | The reviewer's numbers and shared types across the plans; its step order is outdated | when plans disagree on names or numbers |
+| [GLOSSARY.md](GLOSSARY.md) | The terms; MAP_DESIGN.md adds zone, cell, column, ray | when a word is unclear |
 | [RobotMotionTrackingAlgorithms.md](RobotMotionTrackingAlgorithms.md) | The inspiration (a Gemini conversation); not a spec | background only |
 
-## Decisions (Daniel, 8 Oct 2026)
+## Decisions (Daniel)
 
-- Robot height: **12 cm** (really a bit less); **no extra clearance margin**.
-- Ground band **−7…+3 cm**: anything under 3 cm counts as ground and is driven
-  over; everything above is an obstacle. No floor learning.
-- **Drivable** = ground seen and L1 (3-13 cm) and L2 (13-23 cm) both free. The
-  never-seen L2 cells within 25 cm of the robot are set free once after the scan.
-- **ToF and camera both detect while the robot turns**, using the known rotation;
-  no learning after a stop.
-- The camera's movement detector is **one reader** of a universal feature record.
-- **No camera images to the PC** for now: no image recording, no drawing of
-  features (CAMERA_MOTION_PLAN §11). Vision is tested with synthetic frames on
-  the host and printed numbers on the robot.
-- **Recordings** (VL53 frames, odometry, keys; for replay on the Mac) are
-  **not in git**: a git-ignored folder (`recordings/`). Host tests in git use
-  synthetic data; replay checks run when the folder is there.
-- **After a watchdog reset without USB: the start-up scan**, as at power-up
-  (Daniel prefers a scan after any start without USB). Guard: after 3 resets
-  within a minute, stay idle and say why (a crash loop must not keep driving).
-- **Camera while watching: sharp and dark rather than noisy.** Exposure ≤ 10 ms
-  (1.6 px blur at 1 rad/s), gain ≤ 8; evening images ~3× darker than the target,
-  accepted (CAMERA_MOTION_PLAN §6.3).
-- **No climbing worries:** under 3 cm is usually the floor; the robot drives
-  slowly in controlled rooms for now; tilt/shock detection comes later.
+How to work:
+- **Visible progress first.** Each step should change something the robot does;
+  groundwork (timing, telemetry, recording) only when a feature needs it.
+- **Robot tests only when a step changes what the robot does or needs the robot's
+  numbers.** A pure refactor is checked by the host tests (same output before and
+  after) and rides along with the next robot test. No regression runs of code a
+  later step replaces.
+- **Plan files hold the current truth and the open suggestions, not history.**
+  History goes to REWORK_CHANGELOG.md.
+- Ask before changing behaviour that wasn't agreed.
 
-Still open, not blocking: grid size 6 × 6 m (decide before M4,
-SURROUNDINGS_PLAN §11); the measured values the M-S session decides (status
-weights, 2 or 3 targets, 15 or 10 Hz).
+The robot:
+- Robot height **12 cm**, no extra clearance margin.
+- Ground band **−7…+3 cm**: anything under 3 cm is ground and driven over (a 2.5 cm
+  object not on the map is fine). Everything above is an obstacle. **No floor
+  learning.**
+- **Drivable** = floor seen in the ground cell, 3-13 cm and 13-23 cm free. L2 cells
+  within 25 cm of the robot, never seen by any zone, count as free.
+- **The map: 9 rays per zone, the best measurement wins** (MAP_DESIGN.md).
+- **Movement is detected while still and while turning**, against a background
+  kept per world direction; no learning after a stop.
+- **Watching follows the biggest movement**: no predicting where it will go, no
+  jumping ahead; its measured angular speed may be used, but never overshoot.
+  **Movement at the edge of the view is inspected** (a one-zone blob turns the
+  robot), like an animal would.
+- The camera's movement detector will be one reader of a universal feature record;
+  no camera images to the PC for now (CAMERA_MOTION_PLAN §11).
+- Recordings (for replay on the Mac) are not in git: a git-ignored `recordings/`.
+- After a watchdog reset without USB: the start-up scan; after 3 resets within a
+  minute, stay idle and say why.
+- Camera while watching: sharp and dark rather than noisy (exposure ≤ 10 ms, gain
+  ≤ 8).
+- No climbing worries for now: the robot drives slowly in controlled rooms.
 
-## The order
+## Current state
 
-One step at a time; each ends with a working robot, host tests green and its robot
-tests done by Daniel. "Plan" says where the step is written out.
+- **Budgets** (ARCHITECTURE_PLAN §1.3): everything is static, no `malloc`; RAM free
+  **219 KB**. The core-0 stack's worst case was ~6 KB of the 8 KB it can use (the
+  SDK's 2 KB is nominal); `tools/stack_depth.py` recomputes it (not re-run since
+  the new map). `p` prints the loop time (mean, max, slowest stage over 10 s) and
+  the free RAM.
+- **Helpers** in `common/`: `stamp.h` (time differences across the wrap), `geom.h`
+  (bearings, `wrap_pi`), `stats.h` (n-th value, median, sort). **Both Picos start
+  their clock 30 s before `time_us_32()` wraps**, and so does the host tests' fake
+  clock: every run and every test crosses the wrap.
+- **VL53 movement** (`tof_motion`): background per world direction (8 rows × 256
+  bins of 1.4°), fed every frame with the turn during the frame (from the pose); a
+  zone is compared with the nearest bin it swept (1° slack for heading error);
+  floor rows tell nothing while turning; bins forgotten after 10 cm of driving. A
+  nearer thing that stays put for 1 s (robot still) becomes background. Works on
+  the robot while still and turning.
+- **The map** (`cell_map`, MAP_DESIGN.md): fed every frame, the scan's too; `m`
+  prints it (the scan doesn't); the most open direction after the scan comes from
+  it. The old map and the floor learning are gone.
+- **Watching** (`behaviour`): turns toward the biggest VL53 movement and follows it
+  (world directions, its angular speed from a line through the last 0.5 s, plus 2 ×
+  the angle still to go, at most ~29°/s; starts at 8°, stops below 3° when it is
+  about still; its speed is dropped once past where it was last seen). Smooth on
+  the robot (9 Oct). When the biggest movement is one zone, the log prints that
+  zone's reading and background.
 
-| # | Step | Plan | What it gives |
-|---|---|---|---|
-| 1 | A0 — Measure | ARCHITECTURE §8 | loop time, stack, RAM numbers to decide on |
-| 2 | A1 — Helpers, clock wrap | ARCHITECTURE §8 | shared bearing/time/median code; tests across the 71.6 min wrap |
-| 3 | A2 — Time at the source, published frames, DRIVE on change | ARCHITECTURE §8 | every measurement stamped when measured; readers don't steal frames (protocol v5) |
-| 4 | A3 — Non-blocking telemetry, watchdog | ARCHITECTURE §8 | printing never blocks the loop; hang → reset → scan |
-| 5 | R0 — Recording and replay | ARCHITECTURE §8 | key `R`, WiFi recording, `replay` on the Mac |
-| 6 | M-S — Measurement session | ARCHITECTURE §8 (+ the M-S parts of TOF §12, SURROUNDINGS §9, CAMERA §13) | recordings and numbers that settle the unverified claims |
-| 7 | A4 + T1 — `tof_quality`, `tof_frame_t`, `view` | ARCHITECTURE §8, TOF §12 | one confidence model; no behaviour change |
-| 8 | S1 — Classify readings | SURROUNDINGS §9 | the cone-slice rule as a pure function |
-| 9 | T2 — z-test, weighted evidence | TOF §12 | "nearer" judged by sigma, not fixed cm |
-| 10 | T-R — Heading background | TOF §12 (§7) | ToF watches while turning; no learning after a stop |
-| 11 | S2 — New map alongside the old | SURROUNDINGS §9 | both maps compared on the robot |
-| 12 | S3 — Switch the map, floor learning gone | SURROUNDINGS §9 | ~135 KB RAM freed (needed for the camera) |
-| 13 | V1 — `vision` on core 0, measured | CAMERA §13 | features found and tracked, timed |
-| 14 | V2 — Ego-motion, calibration | CAMERA §13 | gyro prediction, rolling shutter, focal length from the scan |
-| 15 | V3 — Core 1 | CAMERA §13, ARCHITECTURE §8 | vision runs beside the main loop |
-| 16 | A5 — One activity at a time, safety pass | ARCHITECTURE §8 | one owner of the wheels (before M4) |
-| 17 | V4 — Camera movers while still | CAMERA §13 | old `camera_motion` removed |
-| 18 | T3 — ToF edge times and rates | TOF §12 | direction and speed from neighbouring zones |
-| 19 | A6 + T4 + V6 — `movement` | ARCHITECTURE §8, TOF §12, CAMERA §13 | both sensors into one tracker and behaviour |
-| 20 | V5 — Camera movers while turning | CAMERA §13 | |
-| 21 | S4 — Map queries for M4 | SURROUNDINGS §9 | drivable corridor, changes, staleness |
+## Open suggestions and discussion points
 
-Then back to ROBOT_PLAN.md: M4 onwards. Steps 8-12 (map) and 9-10 (ToF) touch
-different modules and may swap, but S3 must come before V1 (RAM, cross_plan §5).
+Not decided; each needs Daniel's yes before it is built.
+
+**Map** (details in MAP_DESIGN.md §8):
+1. **Low obstacles (under ~8 cm) at 0.4-1 m can be missed**: a 6 cm box 40 cm in
+   front was not on the map after the scan (robot, 9 Oct); in the host test a 7 cm
+   box at 50 cm has 1 of 4 front columns blocked. Suggestion: use the robot's own
+   height and pitch to recognise a zone whose reading is where its lowest ray meets
+   the floor (floor), so other readings are real surfaces that rays passing over
+   them don't erase. Two other fixes were tried and failed (REWORK_CHANGELOG, 9 Oct).
+2. Under a table top ~0.8 m away: false "blocked" columns (host test: 6).
+3. A small hole next to floor gets a few floor hits (a long drop is handled).
+4. Standing still, the floor is seen only in rings (~20, 30, 45, 70 cm).
+5. Far walls (beyond ~2 m) are weak and patchy (closeness weight).
+6. Roll is not used (pitch only); turning, the robot rolls 3-5°.
+7. A fixed 6 × 6 m window around the origin: a moving window before driving (M4).
+8. Measure the map's cost per frame with `p` (with both maps the worst frame was
+   22 ms in `surroundings`; 66 ms between frames).
+9. VL53 confidence `v` from the shared confidence model (sigma, signal) instead of
+   the status alone (TOF_MOTION_PLAN §3).
+
+**Movement and watching:**
+10. **Discussion (Daniel): "movement is movement".** Today only "nearer than the
+    background" is movement; farther changes never are. Someone behind something
+    nearer (the 6 cm box) can't be seen by the VL53 either way.
+11. **Slow glance:** until a movement is confirmed (3 sightings over 0.2 s), turn at
+    ~10°/s, then at full speed: a real movement gets a slow look, then following; a
+    blip only a 2-3° twitch. (Not answered.)
+12. Not starting a turn for a one-zone blob: Daniel wants edge movement inspected
+    for now; the diagnostic showed the edge blobs at the start of walks were real.
+13. The camera still learns 1 s after each stop and doesn't watch while turning
+    (CAMERA_MOTION_PLAN V4-V5).
+14. The tracker only logs now: remove it, or use its target for the log only.
+15. A stopped thing becomes background after 1 s standing still: shorter fades a
+    stopped person sooner but may absorb someone walking slowly.
+16. The VL53 detector by sigma instead of a fixed 8 cm / 8 % (TOF_MOTION_PLAN T2),
+    and edge times and rates from neighbouring zones (T3).
+
+**Groundwork, when a feature needs it** (ARCHITECTURE_PLAN §8):
+17. A2: the ToF frame time from the INT pin (if door edges show false movement while
+    turning), DRIVE sent on change (turn latency), the IMU sample time in ODOM
+    (protocol v5), roll in the pose, `camera_next()` for several readers (V1).
+18. A3: printing that never blocks the loop (printing the map switches the motors
+    off today), the watchdog and the crash-loop guard.
+19. R0 and M-S: recording on the robot, replay on the Mac, one measurement session.
+20. V3 (core 1 for the camera): explicit stacks first; core 1's stack sits where
+    core 0's overflows today. `observations()` in `tof_motion.c` keeps 3.2 KB on the
+    stack.
+21. A5: one owner of the wheels before M4.
+
+## Decided against
+
+- Floor learning; a single ray per zone; adding up evidence over frames (standing
+  still would erase what was explored).
+- Predicting where a movement goes and turning ahead of it.
+- A 75-minute soak test (the clock starts near the wrap instead).
 
 ## How to work a step
 
-1. Read the step in its plan, the parts of cross_plan.md it names, and the code
-   it changes. If the plan is wrong against the code, say so and fix the plan
-   first.
-2. Host tests first where the plan lists them; `./run_tests.sh` stays green.
-3. Build, then hand Daniel the robot test steps (as written in the plan, in the
-   README's "Robot tests" style) and wait for the pasted log.
-4. Update README / ROBOT_PLAN (current state), CHANGELOG (what happened),
-   REDFLAGS (the review pass), and tick the step here.
-5. Commit only when Daniel asks; no AI co-author trailer (README "Git
-   conventions").
-
-## Progress
-
-- [ ] 1 A0 · [ ] 2 A1 · [ ] 3 A2 · [ ] 4 A3 · [ ] 5 R0 · [ ] 6 M-S · [ ] 7 A4+T1
-- [ ] 8 S1 · [ ] 9 T2 · [ ] 10 T-R · [ ] 11 S2 · [ ] 12 S3 · [ ] 13 V1 · [ ] 14 V2
-- [ ] 15 V3 · [ ] 16 A5 · [ ] 17 V4 · [ ] 18 T3 · [ ] 19 A6+T4+V6 · [ ] 20 V5 · [ ] 21 S4
+1. Read the code it changes, and the plan part if there is one. If the plan is wrong
+   against the code, say so and fix the plan.
+2. Host tests first where they make sense; `./run_tests.sh` stays green.
+3. Build. A robot test only if the step changes what the robot does (above); hand
+   Daniel the steps in the README's "Robot tests" style and wait for the log.
+4. Update README / ROBOT_PLAN / this file (current state), REWORK_CHANGELOG.md
+   (what happened), REDFLAGS.md (the review pass).
+5. Commit only when Daniel asks; no AI co-author trailer (README "Git conventions").

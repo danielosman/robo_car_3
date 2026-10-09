@@ -14,7 +14,8 @@ robo_car_3/
 ├── pico_sdk_import.cmake
 ├── .vscode/             # Run / Flash / Debug ask which firmware (picoA/… or picoB/…)
 ├── run_tests.sh         # host tests, no Pico needed
-├── common/              # shared by both Picos: the inter-Pico link (+ host test)
+├── common/              # shared by both Picos: the inter-Pico link, time/angle/statistics helpers (+ host tests)
+├── tools/               # stack_depth.py: worst-case stack from the call graph
 ├── picoA/               # A1 — sensors: camera, ToF, color (MLX90640 planned)
 │   ├── CMakeLists.txt   # picoA_drivers library + one executable per firmware
 │   ├── drivers/         # ToF, camera (HM0360), OPT4048; lib/vl53l8cx/ = ST ULD driver
@@ -37,25 +38,29 @@ One configure and build produces every firmware. Drivers are shared: each Pico's
 `CMakeLists.txt` builds the robot firmware and the bring-up firmware from the same
 `picoX_drivers` library, so the bring-up firmware keeps building and can be used
 to re-test hardware (e.g. a new PCB revision).
-Code shared between the Picos (the inter-Pico link) is in `common/`.
+Code shared between the Picos (the inter-Pico link; `stamp.h` time differences
+across the clock's wrap, `geom.h` bearings and angles, `stats.h` n-th value and
+median; `clock_start.h`: both Picos start their clock 30 s before
+`time_us_32()` wraps, so every run crosses the wrap 30 s after power-up) is in `common/`.
 
 ## Robot firmware (`picoA_app`, `picoB_app`) — in progress
 
 Built to [ROBOT_PLAN.md](ROBOT_PLAN.md), milestone by milestone. **Done: M0 (link,
 wheel control, odometry), M1 (calibration, on waxed wood; `b` and the carpet still
-to test), M2 (map).** Now: M3a (movement detection while still): the camera driver
-(`picoA/drivers/camera.c`, its own exposure), the VL53's and the camera's movement
-detection (`change_grid.c`, `tof_motion.c`, `camera_motion.c`, `motion_sense.c`), the
-VL53 tracker (`tracker.c`); M3b's first iteration, turning after a target leaving the
-view (`behaviour.c`), works on the robot but misses some movement. What happened in each session
-is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
+to test), M2 (map).** Now: the rework ([doc/REWORK_PLAN.md](doc/REWORK_PLAN.md)):
+the VL53 watches while still and while turning (`tof_motion.c`), the map is
+[doc/MAP_DESIGN.md](doc/MAP_DESIGN.md)'s (`cell_map.c`), and watching follows the
+biggest movement (`behaviour.c`); the camera's movement detection (`camera_motion.c`)
+watches while still. What happened is in [CHANGELOG.md](CHANGELOG.md) and, for the
+rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
-  at the first failure: the link, PicoB's wheel control, odometry and `brain`,
+  at the first failure: the link, the shared helpers, PicoB's wheel control, odometry and `brain`,
   PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the start-up scan
-  and watching in a simulated room and the WiFi console (`npm test` in `pc/robot/` for the server). Run it after every change.
+  and watching in a simulated room, the WiFi console and the loop timer. The fake
+  clock starts 30 s before `time_us_32()` wraps, so every test crosses the wrap (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
   from the encoders, heading from the gyro with the bias re-measured whenever the
@@ -64,31 +69,33 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
   switches them on; it switches them off by itself if PicoA's drive commands stop
   for 250 ms, any wheel doesn't follow its side's target for 1 s, or the robot
   tilts more than 15° (`picoB/app/drive.h`).
-- **PicoA map:** `rangefinder.c` turns the VL53L8CX's 64 zones (8 × 8, 15 Hz) into
-  rays in the robot frame: floor, obstacle (≥ 2 cm above the floor), or no floor
-  where rows 7-8 expected it; `world_map.c` keeps 10 cm cells, 4 layers, 4 × 4 m
-  around the robot; cells change only when measured (an obstacle clears after 6
-  empty readings in a row) and remember when; `pose.c` gives the pose at the moment
-  a frame was measured; `surroundings.c` feeds the frames to the map;
-  `behaviour.c` runs the start-up scan. PicoB's clock is translated from the ODOM
+- **PicoA map** ([doc/MAP_DESIGN.md](doc/MAP_DESIGN.md)): `rangefinder.c` reads the
+  VL53L8CX's 64 zones (8 × 8, 15 Hz) and knows their directions; `cell_map.c` shoots
+  9 rays per zone as long as its reading into 10 cm cells in three layers (ground
+  −7…+3 cm, 3-13 cm, 13-23 cm), 6 × 6 m: cells passed are evidence for free, the end
+  cell for occupied, weighted by closeness and the VL53's status; a cell keeps its
+  best measurement and changes for a better one or 3 good-enough ones in a row. No
+  floor learning. `pose.c` gives the pose at the moment a frame was measured;
+  `surroundings.c` feeds every frame to the map; `behaviour.c` runs the start-up scan
+  and the watching (turning towards the biggest movement). PicoB's clock is translated from the ODOM
   reports in `body.c`.
 - **Start-up (`main.c`):** powered up on USB (a computer, not a charger), PicoA
   waits for the serial monitor and keys: no scan, no WiFi. Without USB it connects
   to WiFi, then does the start-up scan whether that worked or not (ROBOT_WIFI.md).
-- **Start-up scan:** at power-up without USB, or with `n`, the robot turns 390° in place, learns the floor from what
-  the lower zones see all around (fresh every start, nothing stored), prints the
-  map, turns to face the most open direction and prints its heading, then watches.
-  `n` clears the map and makes the robot's heading the map's up.
-- **Watching** (`behaviour.c`, ROBOT_PLAN.md §6.6): after the scan, or with `a`, the
-  robot stands still with the motors on. When the VL53's target is about to leave
-  the view (at the edge, moving outward), it turns to where the target will be when
-  the turn ends (at 1 rad/s, at most 90°), stops and learns the view; if the target
-  is seen leaving again meanwhile, it turns on after it. `s` stops. On the robot the
-  turns end within ~1° of the command; it misses some movement, and often the target
-  leaving while it learns.
+- **Start-up scan:** at power-up without USB, or with `n`, the robot turns 390° in
+  place, mapping all around (nothing to learn first; the map isn't printed: `m`
+  does), turns to face the most open direction and prints its heading, then
+  watches. `n` clears the map and makes the robot's heading the map's up.
+- **Watching** (`behaviour.c`): after the scan, or with `a`, motors on. The VL53
+  watches still and while turning (a background per world direction, no learning
+  after a stop). The robot turns toward the biggest movement and follows it: its
+  angular speed plus 2 × the angle still to go, at most ~29°/s, starting when it is
+  8° off, stopping within 3° once it is about still, never past where it was last
+  seen; movement at the edge of the view is inspected too. A thing that stops is
+  background 1 s after the robot stands still. `s` stops.
 - **PicoA console** (`debug_console.c`), on USB and over WiFi: a status line every
   15 s (none while a test runs); keys `g` motors on, `s` stop, `p` status now (with
-  a WiFi line), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; `a` watch from here; map: `n` start-up scan again (then watch), `m` print the
+  a WiFi line, the loop time over the last 10 s, `loop_stats.c`, and the free RAM), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; `a` watch from here; map: `n` start-up scan again (then watch), `m` print the
   map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
   forward / back (`robot_test.c`); camera `c` one frame as 20 × 15 blocks, with its
   exposure; movement `v` log on / off (both sensors; each line starts with the robot's
@@ -105,18 +112,21 @@ is in [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
 
 ### The map as printed (`m`)
 
-40 × 40 cells of 10 cm, up = where the robot faced when the scan started; one
-symbol per cell (two characters), the low layer (2-12 cm, what blocks the robot):
+Only on `m` (the scan doesn't print it). 4 × 4 m around the robot, 10 cm columns, up
+= where the robot faced when the scan started; one symbol per column (two characters):
 
 | Symbol | Meaning |
 |---|---|
-| `.` | floor seen, nothing on it: within ~50 cm (the floor rows) and under the robot (within 15 cm: it stands and turns there) |
-| `:` | nothing in the way, floor not seen: farther away, or over a drop |
-| `##` | obstacle 2-12 cm high (only seen within ~1 m) |
-| `''` | obstacle seen only above 12 cm (an overhang, or a farther wall whose low part wasn't seen) |
-| `?` | no floor where rows 7-8 expected it, 3 times with no floor seen in between (a drop, or a floor the sensor can't see) |
-| blank | never seen (behind objects, far away) |
-| `()`, `**` | the robot, and the point 30 cm ahead of it (shows the heading to about ±20°) |
+| `.` | drivable: floor seen (a ray ended in the ground layer), 3-23 cm free |
+| `:` | free 3-23 cm, floor not seen (between the rings where rays end on the floor, or far) |
+| `##` | blocked: something 3-13 cm high |
+| `''` | overhang: something 13-23 cm high, nothing below it |
+| `?` | no floor: rays went through the ground layer (a drop, a dark floor) |
+| blank | unknown |
+| `()`, `**` | the robot, and the point 30 cm ahead of it |
+
+Standing still, the floor is seen in rings at each zone row's distance (~20, 30, 45,
+70 cm); driving fills the rest.
 
 Cells stay as last measured. A flat face often fills two cells (`####`): the map
 marks where the face was seen, not how thick the object is.
@@ -144,6 +154,16 @@ rows at some distances; layer 0 (2-12 cm) is only seen within ~1 m.
 **To watch:** a false `##` stays until the robot looks through it 6 times; stray
 `##` that never go away would show it. After a safety stop, `f` and `g` once
 printed nothing though the robot drove; not seen since. Scans on a desk: keep a hand ready.
+
+### Memory and stack (computed from the build, PicoA)
+
+| | Value |
+|---|---|
+| RAM | 385 of 512 KB static (.bss 377, .data 8), ~136 KB free; no `malloc` linked |
+| Core-0 stack | ~6 KB worst case: main loop 4.2 KB (`observations()` in `tof_motion.c` 3.2 KB), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
+
+`tools/stack_depth.py` recomputes the stack (how to build for it: the script's
+header). Re-run it after adding big locals and before core 1 is started.
 
 ### Robot tests (repeat after changes)
 
@@ -184,13 +204,11 @@ printed nothing though the robot drove; not seen since. Scans on a desk: keep a 
 2. Plug the USB into PicoA and open the serial monitor. After ~1 s: the keys. Press
    `n`: "Start-up scan: turning 390 deg…". The robot turns ~14 s. (Without USB it
    scans by itself after trying the WiFi.)
-3. Expected: "Floor learned in N of 32 zones … rows 5-8 see it at … cm" (rows 7-8
-   learned, or "assumed from the sensor's height"), the map, "Most open
-   direction…", a short turn, "Facing heading …".
-4. Check the map against the room: walls and furniture legs where they are, a solid
-   `.` disc around the robot, `:` beyond, no `##` or `?` on open floor.
-5. `z` prints one ToF frame (cm as the robot sees it; `?N` = unsure, VL53 status N),
-   what each zone makes of it, and what each floor zone learned.
+3. Expected: "Most open direction…", a short turn, "Facing heading …", then
+   watching. Press `m` for the map.
+4. Check the map against the room: walls and furniture legs where they are, `.`
+   rings and `:` around the robot, no `##` on open floor.
+5. `z` prints one ToF frame (cm as the robot sees it; `?N` = unsure, VL53 status N).
 6. Drive the square (`q`) and press `m`: walls and objects stay where they were,
    braking draws no obstacles. To see a removed object clear, turn without `n`
    (`r`, `s` after one turn, `m`).
@@ -269,20 +287,17 @@ facing ~2 m of room; `v` on. The tracker follows one target in the VL53's moveme
 4. While you walk, someone else (or a waved hand) on the other side: the target stays
    on you.
 
-**Watching** (M3b; both Picos, battery on). Robot on the floor with room to turn,
-facing ~2 m of room; `v` on so the target lines show too:
-1. Flash `picoA_app` onto PicoA. Press `a`: "Watching for movement…". Stand behind
-   the robot: it stays put.
-2. Walk across at ~2 m, left to right. Expected: "Target leaving the view on the
-   right at −17 deg, N deg/s", then "Watching: target leaving the view … turning
-   −N deg": the robot turns right and stops facing about where you are. If you
-   walked on out of its view while it learned (~1.5 s after it stopped): "it left
-   the view again while learning it … turning …" and it turns on.
-3. The same at ~1 m (faster across the view: it may trail behind you), and right to
-   left.
-4. Walk in and stop in the middle: no turn. A hand waved at the edge: maybe a turn
-   (paste the log).
-5. Paste the log with what you did; `s` stops.
+**Watching** (both Picos, battery on). Robot on the floor with room to turn, `v` on:
+1. `n` (scan), then `a`: "Watching for movement…". Stand behind the robot: it stays
+   put.
+2. Walk across at ~1-2 m at a steady pace, left to right. Expected: "Watching:
+   movement at N deg, turning towards it", movement lines "(turning at N deg/s)"
+   during the turn, following without stop-and-go; stop in front of it: "facing the
+   movement", then no more turning.
+3. The same right to left, and once fast (it follows at ~29°/s, then "nothing
+   moves").
+4. A one-zone movement prints the zone's reading and background (to tell a real
+   edge movement from noise). Paste the log; `s` stops.
 
 **WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,

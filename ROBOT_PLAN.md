@@ -11,66 +11,16 @@ describes the current design; what happened in each session is in
 
 ## Where we are (handover for the next session)
 
-**A rework comes first: [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md)** (architecture,
-movement detection, map; its order of steps). It replaces "Next: the misses" below
-(don't fix `find_passing()`: the rework removes it); M1's open tests stay.
+**The rework is under way: [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md)** (its current
+state, decisions and open points). It replaced this plan's map (§4, §14: now
+[doc/MAP_DESIGN.md](doc/MAP_DESIGN.md)), the VL53's learning after a stop (§6.2)
+and turning after a target leaving the view (§6.6); those sections say so.
 
-**Next session, in this order:**
-1. Open from M1: the `b` test and the carpet tests (README, "M1"); on the carpet
-   also `n` (floor learned, no false `?`).
-2. M3a (movement detection while still, §6). Done and tested on the robot:
-   - the camera driver (`picoA/drivers/camera.c`: its own exposure, 10 ms steps
-     then gain, hold; row times for the rolling shutter), key `c`;
-   - the VL53's movement detection (`change_grid`, `tof_motion`: closer than the
-     background, §6.2 in six sentences; logged by `motion_sense`, keys `v` / `o`;
-     README, "Movement, VL53").
-
-   - the camera's movement detection (`camera_motion`, §6.3), with the exposure
-     kept apart from it (adjusted only when calm); key `k`. On the robot: people
-     and a light switch found as expected; it also sees shadows on the floor (the
-     evening lamp). Movement log lines start with the robot's time in seconds.
-     Known limit: a small thing moving faster than ~50°/s isn't found.
-
-   **Tracking with the VL53 only (§6.6), decided with Daniel:** the tracker
-   (`tracker.c`) works on the robot (walks at 0.5 and 1.5 m, both ways: one target
-   edge to edge, the correct exit side). **Turning to look (M3b, first iteration,
-   §6.6) works on the robot**: turns after people leaving both ways, within ~1° of
-   the command, and on again when they left while it learned. **Next: the misses**
-   (CHANGELOG, 7 Oct): sometimes no movement noticed at all, and often the target
-   leaving while it learns is not noticed. First, two flaws in "passing out while
-   learning" (`find_passing()` in `tof_motion.c`, §6.6 rule 5), found with Daniel:
-   - *Why the farthest:* a zone at the edge sees its background (wall, sofa) or the
-     person in front of it, always nearer: the background is the zone's farthest
-     regular reading, the frames clearly nearer than it are when the person was
-     there, the last of them when they left. (The closest would just be the
-     person's own distance.)
-   - *Flaw 1, entering counts as leaving:* the rule only asks for near frames and
-     far frames, in any order, so walking *into* the edge column while it learns
-     (far, then near) is also "left the view". Fix: the near frames must come before
-     the far ones (gone by the end of learning). Host test: entering at the edge
-     while learning is not passing.
-   - *Flaw 2, zones that see nothing are ignored:* only sure distances count, so a
-     zone with "no target" behind the person (open room beyond the VL53's reach,
-     often the upper rows) has no farthest and the person is never noticed there:
-     a likely cause of the misses. Fix: "nothing" counts as the farthest reading
-     (as the background learning's NOTHING). Left out at first because far zones
-     flip between a wall and nothing; the 2-zones-in-one-frame rule should stop
-     that: check with the quiet-room host test (300 learns, nothing passing), and
-     add a test of someone passing in front of open space.
-   - *Also:* learning starts only once PicoB reports the robot still (~0.5 s after
-     the stop), so someone gone before that is never seen.
-   Then a `v` log of the misses on the robot. Then back to open space and no turn
-   into a near obstacle. Combining the camera with
-   the VL53 (§6.5) and the camera during turns (§6.4) are put off: the camera keeps
-   running and logging, but nothing uses it yet.
-
-   Open, to try later: the VL53 at 10 Hz instead of 15 (`RANGEFINDER_HZ`; 100 ms per
-   reading, ~20 % less noise; the map was tuned at 15). For pursuit the camera
-   driver should prefer 10 ms exposures with more gain (40 ms blurs ~7 px at 60°/s;
-   the living room in the evening needs 40 ms × 5.9).
-3. M4 then adds: drive forward only while rows 7-8 see the floor right ahead
-   (`map_floor_seen`; `:` or `?` ahead means stop), and face the farthest drivable
-   corridor (§14).
+**Next session:**
+1. Open from M1: the `b` test and the carpet tests (README, "M1").
+2. The rework's open points (REWORK_PLAN.md), as Daniel picks them.
+3. Then M4: driving forward only where the map's columns ahead are drivable, facing
+   the farthest drivable corridor.
 
 **Files:**
 
@@ -83,16 +33,18 @@ movement detection, map; its order of steps). It replaces "Next: the misses" bel
 | `REFACTORING.md` | code review of M0+M1 (standards + spec), all applied |
 | `ROBOT_WIFI.md` | PicoA's console over WiFi to `pc/robot/` (a browser page), and what PicoA does at power-up |
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
+| `common/stamp.h`, `geom.h`, `stats.h` | time differences across the wrap, bearings and `wrap_pi`, n-th value / median / sort |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF rays, floor, drops), `world_map.*`, `surroundings.*` (frames → map), `behaviour.*` (start-up scan, watching and turning to look), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF zones and their directions), `cell_map.*` (the map, doc/MAP_DESIGN.md), `surroundings.*` (frames → map), `behaviour.*` (start-up scan, watching and turning to look), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs, blobs as observations), `loop_stats.*` (loop time per 10 s, printed by `p`), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
 | `picoA/drivers/camera.*` | HM0360 camera: continuous capture, own exposure control, row times; shared with the bring-up firmware |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
 
 **Build, test, flash:**
 - `cmake -S . -B build -G Ninja` (first time), `cmake --build build`.
-- `./run_tests.sh`: host tests (link; PicoB drive, odometry, brain; PicoA body,
-  robot_test, rangefinder, world map, pose, start-up scan, movement detection); run after every change.
+- `./run_tests.sh`: host tests (link, helpers; PicoB drive, odometry, brain; PicoA body,
+  robot_test, rangefinder, world map, pose, start-up scan, movement detection, loop
+  timer), all crossing the 32-bit clock's wrap; run after every change.
   It stops at the first failure.
 - Flash `build/picoA/picoA_app.uf2` → PicoA, `build/picoB/picoB_app.uf2` → PicoB.
   Only the Pico whose code changed needs reflashing; a change to `common/link_msgs.h`
@@ -243,6 +195,10 @@ left) in the robot frame; normalise it and use dot products. This assumes the
 ---
 
 ## 4. Map (PicoA)
+
+> **Replaced** by [doc/MAP_DESIGN.md](doc/MAP_DESIGN.md) (9 rays per zone, three
+> layers, no floor learning). This section describes the first map's design, kept
+> for its reasoning about geometry and odometry.
 
 ### 4.1 Grid
 
@@ -520,6 +476,11 @@ computes it.
 
 ### 6.2 VL53: closer than the background
 
+> **Changed:** the background is now kept per world direction and fed while still
+> and while turning; there is no learning after a stop (REWORK_PLAN.md, "Current
+> state"; TOF_MOTION_PLAN.md §7). "Closer than the background" and the 2-of-4 /
+> 3-of-4 frame rule below still hold.
+
 In simple sentences (`tof_motion.c`):
 1. Each zone uses the frame's nearest **sure** target, as the map does, or nothing.
    Unsure readings tell nothing: on the robot most of them are a faint echo of the
@@ -668,35 +629,12 @@ inside: stopped; the target kept over a bigger newcomer and through a 0.47 s gap
 from the robot's logs: someone close (a big blob from −15° to +20° and a 2-zone
 piece at −17°) followed by the big blob, a far zone at the edge not taken.
 
-**Turning to look** (M3b, first iteration; `behaviour.c`, the WATCH state):
-1. The robot watches standing still, motors on (after the start-up scan, or `a`).
-2. The tracker reports the target **leaving** (once per target): seen in an outer
-   zone column (beyond ±16°), moving outward at ≥ 10°/s, its angular speed measured
-   over at least 3 frames (≥ 0.15 s).
-3. The robot turns to where the target will be when the turn ends, if it keeps its
-   angular speed (the turn takes its angle at 1 rad/s plus 0.5 s), at most 90°.
-4. It stops; once it stands still the VL53 learns the view (1 s), as after every stop.
-5. While learning, the VL53 notices something **passing out** of the view: in an
-   outer column, 2 zones in one frame clearly nearer (8 cm / 8 %) than the farthest
-   the zone gives regularly (its 3rd-farthest sure distance: gone for more than 2
-   frames). If that is on the side the target was going, it left again: from where
-   and when it was last seen there, at the same angular speed, back to 3. Otherwise
-   it watches (1).
-
-On the robot: turns within ~1° of the command; it misses some movement, and often
-the target leaving while it learns (CHANGELOG, 7 Oct). A target that stops inside
-the view, or leaves too slowly or too fast to be seen at the edge, gets no turn. Moving straight away is not movement for the VL53 (only
-the camera logs it). Not yet: back to open space after ~20 s, no turn into a near
-obstacle (§7.2), smooth following while turning (§6.4) only if the hops show it is
-needed.
-
-Host tests: `test_tracker.c` (leaving once, at the edge, before the exit; not
-when coming in at the edge), `test_tof_motion.c` (the quiet room learned 300 times:
-nothing passes; passing out left / right noticed with its time; staying at the
-edge, gone one frame, passing in the middle: not), `test_behaviour.c` (after the
-scan: watching; turns of −71°, −85° when it leaves again while learning, +43°, and
-at most 90° for 120°/s; leaving seen while learning the other way, or not after a
-turn: no turn).
+**Watching** (`behaviour.c`, the WATCH state; replaces the first iteration's
+turning after a target leaving the view): the robot turns toward the biggest
+movement the VL53 sees, still or turning, and follows it at its measured angular
+speed plus a correction, at most ~29°/s, never past where it was last seen
+(REWORK_PLAN.md, "Current state"). The tracker above still runs while the robot
+stands still, for the log only.
 
 ---
 
@@ -1005,6 +943,9 @@ Decided along the way:
 ---
 
 ## 14. The map as built (M2)
+
+> **Removed** with the old map (`world_map.c`, floor learning). The map now:
+> [doc/MAP_DESIGN.md](doc/MAP_DESIGN.md).
 
 Goal (§12): **an open floor shows no obstacles, also while braking; walls stay put
 while turning.** Everything runs on PicoA. How it works now:

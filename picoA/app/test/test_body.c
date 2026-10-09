@@ -55,7 +55,7 @@ static void run(int ms) {
 }
 
 int main(void) {
-    fake_now_us = 1000;
+    fake_now_us = FAKE_CLOCK_WRAP_US - 10000000; // the clock wraps during the test
     body_init();
 
     // Until PicoB answers: HELLO once a second, nothing else.

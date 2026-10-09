@@ -2,10 +2,12 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "units.h"
+#include "geom.h"
+#include "stamp.h"
 #include "body.h"
 #include "motion.h"
 #include "surroundings.h"
-#include "world_map.h"
+#include "cell_map.h"
 #include "pose.h"
 #include "motion_sense.h"
 #include "behaviour.h"
@@ -20,32 +22,31 @@
 #define VIEW_STEP_RAD    (5 * RAD_PER_DEG)
 #define FREE_FROM_M      0.15f     // the robot's own footprint isn't looked at
 #define FREE_MAX_M       2.0f      // the map reaches 2 m around the robot
-#define LOOK_TURN_RADPS  1.0f      // turning after a target
-#define LOOK_RAMP_S      0.5f      // a turn takes its angle at LOOK_TURN_RADPS plus about this (speeding up, slowing down)
-#define LOOK_MAX_RAD     (90 * RAD_PER_DEG)
-#define LOOK_DONE_RAD    (1 * RAD_PER_DEG)
+#define FOLLOW_START_RAD (8 * RAD_PER_DEG) // the movement this far off straight ahead: turn towards it...
+#define FOLLOW_STOP_RAD  (3 * RAD_PER_DEG) // ...until it is this close, and
+#define FOLLOW_STILL_RADPS (5 * RAD_PER_DEG) // no faster than this
+#define FOLLOW_GAIN      2.0f      // turn rate per angle still to go (1/s), on top of the movement's own angular speed
+#define FOLLOW_FIT_US    500000    // its angular speed: a line through its directions of the last 0.5 s
+#define FOLLOW_HISTORY   10
+#define FOLLOW_GAP_US    300000    // no sighting this long, or a jump this big: a new movement
+#define FOLLOW_JUMP_RAD  (15 * RAD_PER_DEG)
 // printf takes doubles; the (double) casts below are for printing only.
 
-// After each turn the robot settles (stands still) before the next step.
-// Building and printing the map keeps the loop busy longer than PicoB waits for
-// drive commands, so the motors are off meanwhile (MAPPING) and come back on before
-// the robot turns again (RESTARTING). Then it watches (WATCHING), turning after a
-// target leaving the view (LOOKING).
+// After each turn the robot settles (stands still) before the next step. Then it
+// watches (WATCHING), turning towards the biggest movement.
 typedef enum {
-    IDLE, STARTING, SCANNING, SETTLING_AFTER_SCAN, MAPPING, RESTARTING, FACING, SETTLING_AFTER_FACING,
-    WATCH_STARTING, WATCHING, LOOKING
+    IDLE, STARTING, SCANNING, SETTLING_AFTER_SCAN, FACING, SETTLING_AFTER_FACING,
+    WATCH_STARTING, WATCHING
 } state_t;
 static state_t state;
 static float start_yaw_rad, target_yaw_rad;
 static absolute_time_t deadline, settle_min_end;
-static float look_rate_radps; // the target's angular speed when the robot last turned after it
-static bool just_turned;      // stopped after a turn, learning the view: a target leaving meanwhile is followed on
-
-static float wrap_angle(float a) {
-    while (a > PI_F) a -= 2 * PI_F;
-    while (a <= -PI_F) a += 2 * PI_F;
-    return a;
-}
+static bool following;        // turning towards a movement
+// The movement's recent directions in the world (the map's yaw, unwrapped), when seen.
+static float seen_rad[FOLLOW_HISTORY];
+static uint32_t seen_us[FOLLOW_HISTORY];
+static int seen_n;
+static uint32_t last_seen_us;
 
 static const char *activity(void) { return state >= WATCH_STARTING ? "Watching" : "Start-up scan"; }
 
@@ -66,8 +67,8 @@ static float most_open_heading(const pose_t *p, float *free_m) {
         int n = 0;
         for (float a = heading - VIEW_HALF_RAD; a <= heading + VIEW_HALF_RAD + 1e-3f; a += VIEW_STEP_RAD, n++) {
             float dx = cosf(a), dy = sinf(a);
-            sum_m += FREE_FROM_M + map_free_distance(p->x_m + FREE_FROM_M * dx, p->y_m + FREE_FROM_M * dy,
-                                                     dx, dy, FREE_MAX_M - FREE_FROM_M);
+            sum_m += FREE_FROM_M + cell_map_free_distance(p->x_m + FREE_FROM_M * dx, p->y_m + FREE_FROM_M * dy,
+                                                          dx, dy, FREE_MAX_M - FREE_FROM_M);
         }
         score_m[h] = sum_m / (float)n;
         best_m = fmaxf(best_m, score_m[h]);
@@ -102,26 +103,22 @@ static bool settled(const odom_report_t *o) {
     return (time_reached(settle_min_end) && o->stationary) || time_reached(deadline);
 }
 
-// Headings are the map's: 0 = where the robot faced when the scan started.
-// Runs once PicoB reports the motors off: nothing else happens in the loop meanwhile.
-static void build_map(void) {
-    surroundings_learn_finish();
+// After the scan: turn to the most open direction. Headings are the map's: 0 = where
+// the robot faced when the scan started.
+static void face_most_open(void) {
     pose_t p;
     pose_now(&p);
-    map_print(&p);
     float free_m, heading = most_open_heading(&p, &free_m);
-    float turn_rad = wrap_angle(heading - p.yaw_rad);
+    float turn_rad = wrap_pi(heading - p.yaw_rad);
     target_yaw_rad = body_odom()->yaw_rad + turn_rad; // turning is measured on odometry's yaw
     printf("Most open direction: heading %+.0f deg, %.1f m free on average across the view; turning %+.0f deg\n",
-           (double)(wrap_angle(heading) * DEG_PER_RAD), (double)free_m, (double)(turn_rad * DEG_PER_RAD));
-    body_motors(true);
-    state = RESTARTING;
-    deadline = make_timeout_time_us(START_TIMEOUT_US);
+           (double)(wrap_pi(heading) * DEG_PER_RAD), (double)free_m, (double)(turn_rad * DEG_PER_RAD));
+    state = FACING;
 }
 
 void behaviour_scan(void) {
     end("started again");
-    printf("Start-up scan: turning %.0f deg in place (~%.0f s) to learn the floor and map the surroundings\n",
+    printf("Start-up scan: turning %.0f deg in place (~%.0f s) to map the surroundings\n",
            (double)(SCAN_RAD * DEG_PER_RAD), (double)(SCAN_RAD / MOTION_TURN_RADPS));
     body_drive(0, 0);
     body_motors(true);
@@ -140,56 +137,87 @@ void behaviour_watch(void) {
 void behaviour_stop(void) { end("by command"); }
 
 bool behaviour_busy(void) { return state != IDLE; }
-bool behaviour_watching(void) { return state == WATCHING || state == LOOKING; }
+bool behaviour_watching(void) { return state == WATCHING; }
 
 static void start_watching(void) {
-    printf("Watching for movement: the robot turns after a target leaving the view (s stops)\n");
-    just_turned = false;
+    printf("Watching for movement: the robot turns towards the biggest movement (s stops)\n");
+    following = false;
+    seen_n = 0;
     state = WATCHING;
 }
 
-// Where the target will be when the turn there ends, if it keeps its angular speed:
-// the turn from heading_rad, the target seen at seen_rad since_s ago (both pose
-// yaws, unwrapped); at most 90°, in the direction it goes (not wrapped: a fast target
-// predicted beyond 180° is still that way).
-static float look_turn(float heading_rad, float seen_rad, float rate_radps, float since_s) {
-    float turn_rad = 0;
-    for (int k = 0; k < 20; k++) { // the turn's length and its duration depend on each other
-        float ends_s = since_s + fabsf(turn_rad) / LOOK_TURN_RADPS + LOOK_RAMP_S;
-        turn_rad = fmaxf(-LOOK_MAX_RAD, fminf(LOOK_MAX_RAD, seen_rad + rate_radps * ends_s - heading_rad));
+// A new sighting of the biggest movement, at t_us, in the world's directions. A gap
+// or a jump starts the history again (another movement).
+static void add_sighting(uint32_t t_us, float world_rad) {
+    if (seen_n && (stamp_us(t_us, seen_us[seen_n - 1]) > FOLLOW_GAP_US ||
+                   fabsf(world_rad - seen_rad[seen_n - 1]) > FOLLOW_JUMP_RAD)) seen_n = 0;
+    if (seen_n == FOLLOW_HISTORY) {
+        for (int k = 1; k < seen_n; k++) { seen_rad[k - 1] = seen_rad[k]; seen_us[k - 1] = seen_us[k]; }
+        seen_n--;
     }
-    return turn_rad;
+    seen_rad[seen_n] = world_rad;
+    seen_us[seen_n++] = t_us;
+    int old = 0; // older than the fit's window
+    while (old < seen_n - 1 && stamp_us(t_us, seen_us[old]) > FOLLOW_FIT_US) old++;
+    for (int k = old; k < seen_n; k++) { seen_rad[k - old] = seen_rad[k]; seen_us[k - old] = seen_us[k]; }
+    seen_n -= old;
 }
 
-// The target leaving the view: turn after it. Seen only while learning the view
-// after a turn (no angular speed), it goes on the way it went, at the same speed;
-// otherwise that tells nothing about where it goes.
-static void follow(const leaving_t *l) {
-    bool seen_while_learning = l->rate_radps == 0;
-    float rate_radps = seen_while_learning ? look_rate_radps : l->rate_radps;
-    if (seen_while_learning && (!just_turned || (l->bearing_rad > 0) != (rate_radps > 0))) return;
+// A straight line through the recent directions: where the movement was at the
+// latest sighting, and its angular speed (0 until there are 3 sightings over 0.2 s).
+static void fit_sightings(float *where_rad, float *rate_radps) {
+    uint32_t t0 = seen_us[seen_n - 1];
+    float st = 0, sb = 0, stt = 0, stb = 0, n = (float)seen_n;
+    for (int k = 0; k < seen_n; k++) {
+        float t = stamp_s(seen_us[k], t0), b = seen_rad[k];
+        st += t; sb += b; stt += t * t; stb += t * b;
+    }
+    float d = n * stt - st * st;
+    bool enough = seen_n >= 3 && stamp_us(t0, seen_us[0]) >= 200000 && d > 0;
+    *rate_radps = enough ? (n * stb - st * sb) / d : 0;
+    *where_rad = enough ? (sb - *rate_radps * st) / n : seen_rad[seen_n - 1]; // the line at t0 (t = 0)
+}
+
+// Watching: turn towards the biggest movement and follow it at its own angular speed
+// plus a correction for the angle still to go (at most ~29°/s: what moves faster
+// gets away). The angle to go is from where the robot faces now, so its own turn
+// since the frame was measured counts. Once the robot has turned past where the
+// movement was last seen, its speed is dropped: no overshoot. Starts above 8°, stops
+// below 3° when the movement is about still, or when nothing moves.
+static void watch(void) {
+    float bearing_rad;
+    uint32_t t_us;
     pose_t now, then;
-    if (!pose_now(&now)) return;
-    if (!pose_at(l->t_us, &then)) then = now;
-    float since_s = (float)(time_us_32() - l->t_us) * 1e-6f;
-    float turn_rad = look_turn(now.yaw_rad, then.yaw_rad + l->bearing_rad, rate_radps, since_s);
-    motion_sense_stamp();
-    printf("Watching: %s on the %s at %+.0f deg, going %s at %.0f deg/s; turning %+.0f deg\n",
-           seen_while_learning ? "it left the view again while learning it" : "target leaving the view",
-           l->bearing_rad > 0 ? "left" : "right", (double)(l->bearing_rad * DEG_PER_RAD),
-           rate_radps > 0 ? "left" : "right", (double)(fabsf(rate_radps) * DEG_PER_RAD), (double)(turn_rad * DEG_PER_RAD));
-    look_rate_radps = rate_radps;
-    target_yaw_rad = body_odom()->yaw_rad + turn_rad; // turning is measured on odometry's yaw
-    state = LOOKING;
+    bool moving = motion_sense_strongest(&bearing_rad, &t_us) && pose_now(&now);
+    if (!moving) seen_n = 0;
+    else if (seen_n == 0 || t_us != last_seen_us) {
+        if (!pose_at(t_us, &then)) then = now;
+        add_sighting(t_us, then.yaw_rad + bearing_rad);
+        last_seen_us = t_us;
+    }
+    float where_rad = 0, rate_radps = 0, to_go_rad = 0;
+    if (moving) {
+        fit_sightings(&where_rad, &rate_radps);
+        to_go_rad = where_rad - now.yaw_rad;
+    }
+    bool turn = following ? moving && (fabsf(to_go_rad) > FOLLOW_STOP_RAD || fabsf(rate_radps) > FOLLOW_STILL_RADPS)
+                          : moving && fabsf(to_go_rad) > FOLLOW_START_RAD;
+    if (turn != following) {
+        motion_sense_stamp();
+        if (turn) printf("Watching: movement at %+.0f deg, turning towards it\n", (double)(to_go_rad * DEG_PER_RAD));
+        else printf("Watching: %s\n", moving ? "facing the movement" : "nothing moves");
+        following = turn;
+    }
+    float ahead_radps = to_go_rad * rate_radps < 0 ? 0 : rate_radps; // past it: no more of its speed
+    float w = ahead_radps + FOLLOW_GAIN * to_go_rad;
+    body_drive(0, turn ? fmaxf(-MOTION_TURN_RADPS, fminf(MOTION_TURN_RADPS, w)) : 0);
 }
 
 void behaviour_update(void) {
-    leaving_t leaving;
-    bool target_leaving = motion_sense_leaving(&leaving); // taken in every state: only fresh ones count
     if (state == IDLE) return;
     const odom_report_t *o = body_odom();
     if (!body_connected()) { end("PicoB not connected"); return; }
-    if (state != STARTING && state != MAPPING && state != RESTARTING && state != WATCH_STARTING && !o->motors_on) {
+    if (state != STARTING && state != WATCH_STARTING && !o->motors_on) {
         printf("%s stopped: PicoB switched the motors off (%s)\n", activity(), stop_reason_text(o->stop_reason));
         state = IDLE;
         return;
@@ -197,7 +225,7 @@ void behaviour_update(void) {
     switch (state) {
     case STARTING:
         if (o->motors_on && o->stationary) {
-            surroundings_learn_start();
+            surroundings_restart();
             start_yaw_rad = o->yaw_rad;
             state = SCANNING;
         } else if (time_reached(deadline)) {
@@ -211,26 +239,14 @@ void behaviour_update(void) {
         break;
     }
     case SETTLING_AFTER_SCAN:
-        if (settled(o)) {
-            body_motors(false);
-            state = MAPPING;
-            deadline = make_timeout_time_us(START_TIMEOUT_US);
-        }
-        break;
-    case MAPPING:
-        if (!o->motors_on) build_map();
-        else if (time_reached(deadline)) end("the motors didn't switch off");
-        break;
-    case RESTARTING:
-        if (o->motors_on) state = FACING;
-        else if (time_reached(deadline)) end(o->stop_reason != STOP_NONE ? stop_reason_text(o->stop_reason) : "the motors didn't switch on");
+        if (settled(o)) face_most_open();
         break;
     case SETTLING_AFTER_FACING:
         if (settled(o)) {
             pose_t p;
             pose_now(&p);
             printf("Facing heading %+.0f deg (0 = where the scan started, + = left)\n",
-                   (double)(wrap_angle(p.yaw_rad) * DEG_PER_RAD));
+                   (double)(wrap_pi(p.yaw_rad) * DEG_PER_RAD));
             start_watching();
         }
         break;
@@ -245,20 +261,8 @@ void behaviour_update(void) {
         else if (time_reached(deadline)) end("the motors didn't switch on");
         break;
     case WATCHING:
-        if (target_leaving) follow(&leaving);
-        else if (just_turned && motion_sense_watching()) just_turned = false; // learned, nothing left meanwhile
+        watch();
         break;
-    case LOOKING: {
-        float remaining_rad = target_yaw_rad - o->yaw_rad;
-        if (fabsf(remaining_rad) < LOOK_DONE_RAD) {
-            body_drive(0, 0);
-            just_turned = true;
-            state = WATCHING;
-        } else {
-            body_drive(0, motion_turn_rate_up_to(remaining_rad, LOOK_TURN_RADPS));
-        }
-        break;
-    }
     case IDLE:
         break;
     }

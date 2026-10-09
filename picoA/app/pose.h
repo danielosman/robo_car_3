@@ -16,6 +16,7 @@ typedef struct {
 
 void pose_update(void); // call every loop iteration: takes body's new reports
 void pose_set_origin(void); // from now on, poses are relative to where the robot is now
+uint32_t pose_origin_changes(void); // how often the origin was set: frames kept in the map's frame are void after a change
 bool pose_now(pose_t *pose); // the latest report; false before the first one
 // false if t_us is before the history or more than 50 ms after the latest report
 // (after that, the robot's motion is extrapolated from its last speeds).

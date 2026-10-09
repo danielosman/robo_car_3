@@ -1,6 +1,6 @@
 #include <math.h>
-#include <stdlib.h>
 #include <string.h>
+#include "stats.h"
 #include "change_grid.h"
 #include "camera_motion.h"
 
@@ -52,16 +52,6 @@ void camera_motion_restart(void) {
 bool camera_motion_ready(void) { return state == WATCHING; }
 uint32_t camera_motion_exposure_adjustments(void) { return adjustments; }
 
-static int compare_values(const void *a, const void *b) {
-    float x = *(const float *)a, y = *(const float *)b;
-    return (x > y) - (x < y);
-}
-
-static float median(float *v, int n) {
-    qsort(v, (size_t)n, sizeof v[0], compare_values);
-    return n % 2 ? v[n / 2] : 0.5f * (v[n / 2 - 1] + v[n / 2]);
-}
-
 static void block_values(const camera_frame_t *f, float *value) {
     for (int by = 0; by < CAMERA_MOTION_ROWS; by++)
         for (int bx = 0; bx < CAMERA_MOTION_COLS; bx++) {
@@ -80,7 +70,7 @@ static void learn_backgrounds(void) {
     for (int i = 0; i < CAMERA_MOTION_BLOCKS; i++) {
         float v[LEARN_MAX];
         for (int k = 0; k < learned; k++) v[k] = learning[k][i];
-        background[i] = median(v, learned);
+        background[i] = median_value(v, learned);
         float spread = 0.0f;
         for (int k = 0; k < learned; k++) spread += fabsf(v[k] - background[i]);
         noise[i] = fmaxf(MIN_NOISE, spread / (float)learned);
@@ -88,10 +78,6 @@ static void learn_backgrounds(void) {
 }
 
 static float threshold(int i) { return DIFFER_NOISE * noise[i]; }
-
-static int compare_cells(const void *a, const void *b) {
-    return ((const motion_obs_t *)b)->cells - ((const motion_obs_t *)a)->cells;
-}
 
 // The direction a block's centre looks along, robot frame (x forward, y left, z up).
 static void block_direction(int i, float *dir) {
@@ -102,37 +88,18 @@ static void block_direction(int i, float *dir) {
     for (int k = 0; k < 3; k++) dir[k] = v[k] / len;
 }
 
+// The blobs, each timed when the camera read its middle row (the rolling shutter).
+// No range: the camera gives none.
 static int observations(const camera_frame_t *f, motion_obs_t *obs, int max) {
     static uint8_t label[CAMERA_MOTION_BLOCKS];
     static motion_obs_t all[255];
     static float row_sum[255];
-    int blobs = change_grid_blobs(&grid, label);
-    memset(all, 0, (size_t)blobs * sizeof all[0]);
+    int blobs = change_grid_observations(&grid, block_direction, label, all);
     memset(row_sum, 0, sizeof row_sum);
-    for (int i = 0; i < CAMERA_MOTION_BLOCKS; i++) {
-        if (!label[i]) continue;
-        motion_obs_t *o = &all[label[i] - 1];
-        float dir[3];
-        block_direction(i, dir);
-        for (int k = 0; k < 3; k++) o->where[k] += dir[k];
-        float bearing = atan2f(dir[1], dir[0]);
-        if (o->cells == 0 || bearing > o->left_rad) o->left_rad = bearing;
-        if (o->cells == 0 || bearing < o->right_rad) o->right_rad = bearing;
-        o->cells++;
-        row_sum[label[i] - 1] += (float)(i / CAMERA_MOTION_COLS * BLOCK) + (BLOCK - 1) / 2.0f;
-    }
-    for (int b = 0; b < blobs; b++) {
-        motion_obs_t *o = &all[b];
-        float len = sqrtf(o->where[0] * o->where[0] + o->where[1] * o->where[1] + o->where[2] * o->where[2]);
-        for (int k = 0; k < 3; k++) o->where[k] /= len;
-        o->range_m = -1.0f; // the camera gives no range
-        o->strength = (float)o->cells / CAMERA_MOTION_BLOCKS;
-        o->t_us = camera_row_time(f, (int)(row_sum[b] / (float)o->cells)); // the rolling shutter
-    }
-    qsort(all, (size_t)blobs, sizeof all[0], compare_cells);
-    int n = blobs < max ? blobs : max;
-    memcpy(obs, all, (size_t)n * sizeof all[0]);
-    return n;
+    for (int i = 0; i < CAMERA_MOTION_BLOCKS; i++)
+        if (label[i]) row_sum[label[i] - 1] += (float)(i / CAMERA_MOTION_COLS * BLOCK) + (BLOCK - 1) / 2.0f;
+    for (int b = 0; b < blobs; b++) all[b].t_us = camera_row_time(f, (int)(row_sum[b] / (float)all[b].cells));
+    return change_grid_biggest(all, blobs, obs, max);
 }
 
 int camera_motion_add(const camera_frame_t *f, motion_obs_t *obs, int max) {

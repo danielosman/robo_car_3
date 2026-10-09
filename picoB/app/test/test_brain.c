@@ -62,7 +62,7 @@ static void run_driving(int ms, float v) {
 }
 
 int main(void) {
-    fake_now_us = 1000;
+    fake_now_us = FAKE_CLOCK_WRAP_US - 3000000; // the clock wraps during the test
     brain_init(true);
 
     // Before PicoA greets: HELLO once a second, ODOM at 50 Hz, STATUS at 2 Hz; MOTORS ignored.

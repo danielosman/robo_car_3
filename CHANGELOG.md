@@ -5,22 +5,10 @@ found and how it was fixed. [README.md](README.md) and
 [ROBOT_PLAN.md](ROBOT_PLAN.md) show only the current state; the red flags of each
 milestone are in [REDFLAGS.md](REDFLAGS.md).
 
-## 8 Oct 2026: rework plans (architecture, movement, map)
+## 8-9 Oct 2026: the rework
 
-No code changed. From Daniel's brain dump and an inspiration doc
-(`doc/RobotMotionTrackingAlgorithms.md`), four plans were written, reviewed
-together by a reviewer and revised: the architecture (today's functions as a
-spec, deep modules, red flags), VL53 movement (per-reading confidence, edge times
-across neighbouring zones, watching while turning with a heading background),
-the map (ground as an ordinary cell layer, the cone-slice rule, confidence-weighted
-log-odds, no floor learning) and the camera (features tracked frame to frame into
-a record of measurements only; movement detection is one reader and removes the
-robot's own turn itself). Decided with Daniel: ground band −7…+3 cm; drivable =
-ground + both layers above free; camera dark rather than noisy (≤ 10 ms, gain
-≤ 8); no camera images to the PC; recordings not in git; scan after a watchdog
-reset. Start: [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md) (order of 21 steps), terms
-in [doc/GLOSSARY.md](doc/GLOSSARY.md). It replaces the "fix the misses" next step
-of 7 Oct (`find_passing()` goes in T-R).
+Plans written on 8 Oct; from 9 Oct the rework's history is in
+[doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md).
 
 ## 7 Oct 2026: M3b first iteration: turning after a target leaving the view
 

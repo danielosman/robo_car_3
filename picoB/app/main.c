@@ -2,6 +2,7 @@
 // link and reports odometry back (see brain.h for the protocol side and the
 // safety stops). Keep the robot still for ~1 s after power-up (gyro bias).
 #include "pico/stdlib.h"
+#include "clock_start.h"
 #include "odometry.h"
 #include "drive.h"
 #include "brain.h"
@@ -9,6 +10,7 @@
 #define CONTROL_PERIOD_US 10000 // wheel control loop
 
 int main(void) {
+    clock_start();
     stdio_init_all();
     drive_init();
     bool imu_ok = odom_init();

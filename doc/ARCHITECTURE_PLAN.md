@@ -102,11 +102,27 @@ Safety guard; M5 staleness, full-turn check, map changes; M6 map correction.
 
 ### 1.3 Budgets (Pico 2: RP2350, 2 × Cortex-M33 at 150 MHz with a single-precision FPU, 520 KB SRAM)
 
-**Memory, PicoA.** The last build has .bss 377 KB + .data 8 KB = **385 KB of the
-512 KB main SRAM**, which leaves ~127 KB for heap and the stacks. Both core stacks
-now sit in the 4 KB scratch banks; the core-0 stack is the SDK default of **2 KB**,
-which is why several modules keep big locals `static`. Flash: 488 KB of 4 MB.
+**Memory, PicoA** (from the build: `arm-none-eabi-size`, `nm`). .bss **292 KB** of
+the 512 KB main SRAM, **219 KB free** since the old map and its floor learning were
+removed (the table below was written with them: subtract their 135 KB from its
+totals). No `malloc` is linked, so that is the whole RAM use; lwIP has its own
+static pools. Flash: 488 KB of 4 MB.
 PicoB uses 4.5 KB.
+
+**Stack, PicoA core 0** (A0, `tools/stack_depth.py` on GCC's call graphs). The SDK
+default of **2 KB** is only nominal: nothing enforces it, and the stack may grow
+down through both 4 KB scratch banks to `__StackLimit` (8 KB) while core 1 is
+unused. The worst case today is **~6 KB**:
+- main loop 4.2 KB, of which `observations()` (`tof_motion.c`) is 3.2 KB: its local
+  `all[RANGEFINDER_RAYS]`;
+- lwIP in the lowest-priority interrupt 0.75-1.3 KB, USB 0.25 KB (handlers of one
+  priority don't nest), two exception frames 0.2 KB.
+
+So the main loop overflows the nominal 2 KB today and works only because the
+scratch banks are empty. That holds until core 1 starts: its stack is in scratch
+X, exactly where core 0 overflows to. **V3 must set both stacks before launching
+core 1** (as planned: 8 KB each, ~2 KB margin over today's 6 KB); re-run the tool
+then, with the `static` locals back on the stack.
 
 | Change | KB | When |
 |---|---|---|
@@ -125,7 +141,7 @@ PicoB uses 4.5 KB.
 RAM free ≥ 40 KB"; less fails the milestone. Rule: everything is static, sizes are
 known at build time, no `malloc` outside lwIP's own pools.
 
-**Time** (targets; A0 measures today's numbers first):
+**Time** (targets; A1's loop timer shows today's numbers):
 
 | Path | Today | Target |
 |---|---|---|
@@ -479,8 +495,8 @@ time, not the send time (`brain.c:101`), and the hardware watchdog (§7, I24).
 | Blocking | Nothing blocks core 0 | Map build + print ≫ 250 ms (behaviour switches motors off for it); `c` waits up to 500 ms; `printf` up to 5 ms per call | Telemetry ring (A3); the batch map build goes in S3 |
 | Diagnosis | Records + replay | Text log only; host tests are synthetic | R0, M-S |
 | Cores | `vision` on core 1 | Core 1 unused | V3 |
-| Budgets | Measured and printed | Not measured; 2 KB stack worked around with `static` locals; 385 of 512 KB used | A0; the order constraint in §1.3 |
-| Long runs | Tested across the clock wrap | Fake clock starts at 1 | A1 |
+| Budgets | Known and printed | RAM and stack computed from the build (A0): 385 of 512 KB used; the core-0 stack ~6 KB worst case against a nominal 2 KB; loop time not printed | A1's loop timer; explicit stacks in V3; the order constraint in §1.3 |
+| Long runs | Tested across the clock wrap | Done in A1: the host tests' fake clock and both Picos start 30 s before the wrap | A1 |
 | Restart | Watchdog, safe start | No watchdog; a reset without USB starts the scan (the robot moves by itself) | A3 |
 
 ---
@@ -551,7 +567,7 @@ to the current code.
 | `brain.c:101` (PicoB) | Nonobvious code | ODOM's `t_us` is when it is sent, not when the IMU sample was taken | Sample time in `odom_t` (A2, protocol v5) |
 | `world_map.c:39, 175` | Nonobvious code | Cell age uses the clock at insertion; the start-up scan's 300 kept frames all get the time of the map build | The scan's own time (A2) |
 | `rangefinder.c` `closest_sure_mm` | Information hiding gone too far | The adapter throws away sigma, signal, ambient and the second target: the right decision for the map then, but now the ToF and surroundings plans need them | `tof_frame_t` keeps them (A4 + T1) |
-| `camera_motion.c:165`, `change_grid.c:45`, `tof_motion.c:155` | Nonobvious code | `static` locals because of the 2 KB stack: hidden non-reentrancy, a trap once core 1 runs code | Explicit stack sizes; locals back on the stack (V3, or A1 if A0's high-water mark is over 75 %) |
+| `camera_motion.c:165`, `change_grid.c:45`, `tof_motion.c:155` | Nonobvious code | `static` locals because of the 2 KB stack: hidden non-reentrancy, a trap once core 1 runs code | Explicit stack sizes; locals back on the stack (V3). A0 found the 2 KB was never enforced: `tof_motion.c`'s `observations()` alone uses 3.2 KB |
 | `tracker.c:22`, `tof_motion.c:84, 166`, `camera_motion.c:118`, `motion_sense.c:51` | Repetition | `atan2f(where[1], where[0])` for a bearing, five times | `geom.h`: `bearing_rad(v)` (A1) |
 | `pose.c`, `tracker.c:33, 65`, `behaviour.c:174`, `robot_test.c:54` | Repetition | `(float)(a - b) * 1e-6f` and `int32_t after()` for time differences | `stamp.h` (A1) |
 | `tof_motion.c:69, 91`, `camera_motion.c:61`, `rangefinder.c:223` | Repetition | Three `compare_*` functions + `qsort` for a median or n-th value | `stats.h`: `nth_value()` (A1) |
@@ -597,7 +613,7 @@ into the ring).
 | I23 | CMSIS-DSP | **Not now** | V1 measures the ZNCC cost first; the fallback is fewer features or a smaller search window | S | Low |
 | I24 | Hardware watchdog (PicoA 1 s, PicoB 0.5 s); after a watchdog reset PicoA starts as at power-up (scan without USB), IDLE after 3 resets in a minute | **Worth it** | A hung PicoA is already stopped by PicoB, but stays dead; Daniel prefers the scan after any start without USB, and the reset count stops a crash loop from driving | S | Low (policy question in §9) |
 | I25 | DRIVE sent on change | **Worth it** | Up to 50 ms less latency on every turn decision | S | Low |
-| I26 | Fake clock near the wrap; a 75-minute soak on the robot | **Worth it** | `time_us_32()` wraps after 71.6 min; no test covers it | S | None |
+| I26 | Fake clock near the wrap; the robot's clock started 30 s before it (no soak) | **Done (A1)** | `time_us_32()` wraps after 71.6 min; no test covers it | S | None |
 | I27 | Folders under `picoA/app/` per stage | **Later, optional** | Helps once the file count grows; churn in includes and tests now | S | Low |
 | I28 | 64-bit timestamps everywhere | **Not worth it** | u32 with wrap-safe helpers is enough for differences under 35 min; the wrap test covers it | — | — |
 | I29 | Move odometry to PicoA / one Pico for everything | **Not worth it** | PicoB as an independent safety layer is the best part of the design | — | — |
@@ -613,8 +629,8 @@ into the ring).
 
 | # | Milestone | From | Needs | Notes |
 |---|---|---|---|---|
-| 1 | Measure | A0 | | |
-| 2 | Helpers, clock wrap | A1 | | its soak test can run alongside later work |
+| 1 | Measure (by analysis, done) | A0 | | RAM and stack computed, no robot test; the loop timer moved to A1 |
+| 2 | Helpers, clock wrap, loop timer (done) | A1 | | robot check with A2; no soak: the clock starts 30 s before the wrap |
 | 3 | Time at the source, published frames, DRIVE on change, pose roll + `t_us` | A2 | | ToF INT time; `camera_next`; protocol v5 |
 | 4 | Non-blocking telemetry, watchdog | A3 | | the old scan map build is not chunked (S3 deletes it); MAPPING stays until S3 |
 | 5 | Recording + replay, WiFi throughput measured | **R0** (A7's core, V0, T0's record type, S0's dump) | A3 | |
@@ -655,38 +671,26 @@ into the ring).
 - `p` shows **RAM free ≥ 40 KB**, and the loop max within its target (from A3 on);
 - a red-flag review goes into REDFLAGS.md and an entry into the CHANGELOG.
 
-"Regression set" means: README **M0** step 4 (the square), **M2** steps 2-4 (scan
+Robot tests follow REWORK_PLAN's rule (only when a step changes what the robot does
+or needs the robot's numbers; refactors ride along with the next one), and a
+regression set only covers behaviour that no later step replaces. "Regression set" means: README **M0** step 4 (the square), **M2** steps 2-4 (scan
 and map), **Movement, VL53** steps 1-2, and **Watching** steps 1-2. The companion
 milestones (T*, S*, V*) have their test steps in their own plans; the A, R0 and
 merged milestones are below.
 
 ### A0 — Measure
 
-Loop statistics per stage (calls, mean, max over the last 10 s, which stage was
-slowest), stack high-water marks (the stack painted at boot), free RAM. Printed by
-`p` and over WiFi. No behaviour change.
+**Done, by analysis** (no robot session: RAM and stack follow from the build).
+- RAM from the build (`arm-none-eabi-size`, `nm`): everything is static, no
+  `malloc` linked (current numbers in §1.3).
+- Stack from GCC's call graphs (`-fcallgraph-info=su`) with `tools/stack_depth.py`,
+  which adds the calls through function pointers (printf's output, lwIP's
+  callbacks): core 0 ~6 KB worst case in 8 KB of room. The results and what they
+  mean for V3 are in §1.3.
+- Loop timing can't be computed (I2C, USB and WiFi waits); it moved to A1 as a
+  small timer printed by `p`, read during the robot tests that come anyway.
 
-Host tests: `test_loop_stats` checks:
-- the mean and the max over a window;
-- the window rolling over;
-- the slowest stage is named;
-- the stack check notices a painted pattern that has been overwritten.
-
-Robot (PicoA only; PicoB running):
-1. Flash `picoA_app`, open the serial monitor, wait 1 min, `p`. Expected: a line
-   "Loop: N per s, mean X us, max Y us (slowest: <stage>)", "Stack used N of 2048
-   B", "RAM free N KB". Paste it.
-2. `n` (scan). After "Facing heading…", `p`. Expected: the max loop time is the map
-   build or print, hundreds of ms (it confirms why behaviour switches the motors off).
-3. `a`, walk past twice with `v` on, `p`.
-4. Press `c`, `k`, `o`, `m`, `z` one after the other, `p` after each: which keys
-   stall the loop and for how long.
-5. Without USB, on the WiFi page: steps 1 and 3 again.
-6. **Pass / fail:**
-   - stack used over 75 % of 2 KB: the stacks are set explicitly in A1 (not V3);
-   - RAM free under 40 KB: a red flag, fixed before R0.
-
-   The numbers go into the README's measured table.
+Pass / fail held: RAM free ≥ 40 KB; the stack needs no change before V3.
 
 ### A1 — Shared helpers, the clock wrap
 
@@ -696,7 +700,11 @@ Robot (PicoA only; PicoB running):
   - `common/stats.h`: `nth_value`;
   - one helper that turns a blob into an observation.
 - The fake clock starts at 2³² − 30 s.
-- Stacks are set explicitly here if A0 said so. Otherwise it is a pure refactor.
+- The loop timer (from A0): loop iterations per s, mean and max over the last 10 s,
+  and which stage was slowest, printed by `p` and over WiFi. `p` also prints "RAM
+  free N KB": the linker's free space (`__HeapLimit` − `end`), a constant, so every
+  milestone's "RAM free ≥ 40 KB" check is one key.
+- Otherwise a pure refactor (A0: the stacks wait for V3).
 
 Host tests:
 - `test_helpers`:
@@ -704,19 +712,17 @@ Host tests:
   - `wrap_pi` at ±π and ±3π;
   - `nth_value` against a sorted copy, on random arrays;
   - `bearing_rad` on the four axes.
+- `test_loop_stats`: the mean and the max over a window; the window rolling over;
+  the slowest stage named.
 - Every existing test passes with the clock crossing the wrap during the test
   (check by printing the start time once). A test that fails here is a real wrap
   bug: fix it, then log it in REDFLAGS.
 
-Robot:
-1. Regression set; `p`: RAM free ≥ 40 KB.
-2. Soak: robot on the floor, battery and USB power, `a` (watching), `v` on, leave
-   it 75 min (`time_us_32()` wraps at 71.6 min). Then walk past. Expected:
-   - the movement lines and a turn, as at the start;
-   - the time in the log lines keeps counting (no jump);
-   - `p` shows no loop max beyond A0's.
-
-   Repeat once with recording on, after R0.
+**Done.** No robot test of its own (the host tests' output was the same before and
+after) and no soak: both Picos start their clock 30 s before `time_us_32()` wraps
+(`common/clock_start.h`, the timer's TIMELW/TIMEHW written first in `main()`), so
+every robot run crosses the wrap 30 s after power-up. `p` prints the loop time and
+the free RAM.
 
 ### A2 — Time at the source, published frames, DRIVE on change
 
@@ -1017,7 +1023,7 @@ Robot:
 2. The camera plan's V1-V2 robot tests: the same results as on core 0.
 3. Soak for 30 min, watching on WiFi with recording on, someone walking past every
    few minutes. Expected: no reset, `l` clean, stack high-water on both cores
-   < 75 %.
+   < 75 % (and `tools/stack_depth.py` under the new sizes before flashing).
 4. Regression set; `p`: RAM free ≥ 40 KB.
 
 ---

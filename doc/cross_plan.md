@@ -193,8 +193,8 @@ records only. Everything else stays on core 0.
 
 | # | Milestone | From | Needs | Notes |
 |---|---|---|---|---|
-| 1 | Measure | A0 | | |
-| 2 | Helpers, clock wrap | A1 | | soak test can run in parallel with later work |
+| 1 | Measure (done by analysis: ARCHITECTURE §1.3) | A0 | | |
+| 2 | Helpers, clock wrap (done) | A1 | | no soak: both Picos start their clock 30 s before the wrap |
 | 3 | Time at source, published frames, DRIVE on change, pose roll + `t_us` | A2 | | ToF INT time; `camera_next`; protocol v5 |
 | 4 | Non-blocking telemetry, watchdog | A3 | | **skip chunking the old scan map build** (S3 deletes it); keep MAPPING until S3 |
 | 5 | Recording + replay, throughput measured | **R0** = A7 core + V0 + T0 record + S0 dump | A3 | |

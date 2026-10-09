@@ -14,7 +14,7 @@
 #define FRAME_US 66667 // 15 Hz
 #define VIEW_DEG 22.5f
 
-static uint32_t now_us = 1000000;
+static uint32_t now_us = 0u - 30000000u; // 30 s before the clock wraps
 static motion_obs_t obs[4];
 
 static float jitter_deg(void) { return 2.0f * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }

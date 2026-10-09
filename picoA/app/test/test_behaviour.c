@@ -1,12 +1,12 @@
 // End-to-end host test of the start-up scan: picoA/app/behaviour.c with the real
-// surroundings, rangefinder, world_map and pose, on a simulated robot in a
+// surroundings, rangefinder, cell_map and pose, on a simulated robot in a
 // simulated room seen by a simulated ToF sensor (rays cast at the floor, the walls
 // and a box; like the real sensor, each zone reports the nearest point of its
-// 5.6° tall patch, with noise; the robot sits 0.9° nose-down). The robot must turn 390°, learn the floor, map the walls and the box
-// with an empty floor between them, and turn to face the most open direction.
-// Then it watches: told that a target is leaving the view (a fake motion_sense), it
-// turns to where the target will be when the turn ends, and on after it when the
-// target is seen leaving again while the view is learned.
+// 5.6° tall patch, with noise; the robot sits 0.9° nose-down). The robot must turn 390°, map the walls and the box with an
+// empty floor between them, and turn to face the most open direction.
+// Then it watches: a person (a fake motion_sense, which reports them while they are
+// in the VL53's view) walks in and stops; the robot turns towards them and stops
+// facing them; one walking faster than it turns gets away and it stops.
 // The test provides body.h's functions as the robot. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_behaviour picoA/app/test/test_behaviour.c -lm && build/test_behaviour
 #include <assert.h>
@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include "../pose.c"
 #include "../rangefinder.c"
-#include "../world_map.c"
+#include "../cell_map.c"
 #include "../surroundings.c"
 #include "../behaviour.c"
 
@@ -50,24 +50,50 @@ uint32_t body_odom_time_us(void) { return report_time_us; }
 void body_motors(bool on) { motors_wanted = on; motors_changed_us = fake_now_us; if (!on) cmd_v = cmd_w = 0; }
 void body_drive(float v_mps, float w_radps) { cmd_v = v_mps; cmd_w = w_radps; }
 
-// --- A fake motion_sense: the leaving reports the test hands out ---
-static leaving_t fake_leaving;
-static bool fake_have_leaving, leave_while_learning;
-static float learning_leave_bearing_deg;
+// --- A fake motion_sense: a person walking around the robot ---
+// Reported while in the VL53's view (±22.5°); one who has stopped is still movement
+// while the robot turns, and part of the view once it has stood still for 1 s.
+static float person_rad = 99.0f; // world bearing; 99: nobody
+static float person_radps;       // walking (+ = left); 0: stopped
+static float stopped_still_s;    // how long the robot has stood still since the person stopped
+static float walk_sign = 1;      // the way the person last walked (+ = left)
 
-bool motion_sense_leaving(leaving_t *l) {
-    if (!fake_have_leaving) return false;
-    *l = fake_leaving;
-    fake_have_leaving = false;
+// As the VL53 gives it: a frame every 66.7 ms, the direction measured then (±2°),
+// read 40 ms later.
+static bool seen_moving;
+static float seen_bearing_rad;
+static uint32_t seen_at_us;
+static uint64_t next_sight_us;
+static struct { bool moving; float bearing_rad; uint32_t t_us; uint64_t ready_us; } sight_pending;
+
+static void sight(void) { // every tick
+    if (fake_now_us >= next_sight_us) {
+        next_sight_us = fake_now_us + 66667;
+        float rel = wrap_pi(person_rad - sim.yaw_rad);
+        bool in_view = person_rad < 90.0f && fabsf(rel) <= 22.5f * RAD_PER_DEG;
+        bool moving = in_view && !(person_radps == 0 && stopped_still_s >= 1.0f);
+        float jitter = 2.0f * RAD_PER_DEG * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f);
+        sight_pending.moving = moving;
+        sight_pending.bearing_rad = rel + jitter;
+        sight_pending.t_us = (uint32_t)fake_now_us;
+        sight_pending.ready_us = fake_now_us + 40000;
+    }
+    if (sight_pending.ready_us && fake_now_us >= sight_pending.ready_us) {
+        seen_moving = sight_pending.moving;
+        seen_bearing_rad = sight_pending.bearing_rad;
+        seen_at_us = sight_pending.t_us;
+        sight_pending.ready_us = 0;
+    }
+}
+
+bool motion_sense_strongest(float *bearing_rad, uint32_t *t_us) {
+    if (!seen_moving) return false;
+    *bearing_rad = seen_bearing_rad;
+    *t_us = seen_at_us;
     return true;
 }
-bool motion_sense_watching(void) { return still_s >= 1.5f; } // stationary after 0.5 s, then 1 s learning
+bool motion_sense_watching(void) { return still_s >= 1.5f; }
 void motion_sense_stamp(void) {}
-
-static void report_leaving(float bearing_deg, float rate_degps, uint32_t t_us) {
-    fake_leaving = (leaving_t){.bearing_rad = bearing_deg * RAD_PER_DEG, .rate_radps = rate_degps * RAD_PER_DEG, .t_us = t_us};
-    fake_have_leaving = true;
-}
 
 static float approach_to(float x, float target, float step) {
     return x < target ? fminf(x + step, target) : fmaxf(x - step, target);
@@ -138,14 +164,12 @@ static void tick(void) {
     max_yaw_rad = fmaxf(max_yaw_rad, sim.yaw_rad);
     sim.v_mps = v;
     sim.w_radps = w;
-    float was_still_s = still_s;
     still_s = v == 0 && w == 0 ? still_s + dt : 0;
-    if (leave_while_learning && was_still_s < 1.5f && still_s >= 1.5f) { // the view just learned
-        leave_while_learning = false;
-        report_leaving(learning_leave_bearing_deg, 0, (uint32_t)fake_now_us - 200000);
-    }
+    person_rad += person_radps * dt;
+    stopped_still_s = person_radps == 0 && w == 0 ? stopped_still_s + dt : 0;
+    sight();
     sim.stationary = still_s >= 0.5f;
-    if (fake_now_us % LINK_ODOM_PERIOD_US == 0) { // PicoB's report arrives
+    if ((fake_now_us - FAKE_CLOCK_START_US) % LINK_ODOM_PERIOD_US == 0) { // PicoB's report arrives
         report = sim;
         report.t_us = (uint32_t)fake_now_us;
         report_time_us = (uint32_t)fake_now_us;
@@ -157,30 +181,35 @@ static void tick(void) {
     behaviour_update();
 }
 
-// A wall at x (axis 0) or y (axis 1): occupied in any layer, in the cell on either side of it.
+// A wall at x (axis 0) or y (axis 1): blocked or an overhang, in the column on either side of it.
 static bool wall_at(float x, float y, int axis) {
-    for (int side = -1; side <= 1; side += 2)
-        for (int l = 0; l < MAP_LAYERS; l++) {
-            float cx = axis == 0 ? x + 0.05f * (float)side : x, cy = axis == 1 ? y + 0.05f * (float)side : y;
-            if (map_cell(cx, cy, l) == CELL_OCCUPIED) return true;
-        }
+    for (int side = -1; side <= 1; side += 2) {
+        float cx = axis == 0 ? x + 0.05f * (float)side : x, cy = axis == 1 ? y + 0.05f * (float)side : y;
+        column_t c = cell_map_column(cx, cy);
+        if (c == COLUMN_BLOCKED || c == COLUMN_OVERHANG) return true;
+    }
     return false;
 }
 
-// Runs until the robot has turned and stands still, the view not learned yet; checks the turn.
-static void turn_and_learn(float *yaw, float expected_deg, const char *what) {
-    for (int i = 0; i < 1000 && state == WATCHING; i++) tick();
-    assert(state == LOOKING);
-    for (int i = 0; i < 20000 && !(state == WATCHING && still_s >= 1.4f); i++) tick();
-    assert(state == WATCHING && still_s >= 1.4f);
-    float turned_deg = DEG(sim.yaw_rad - *yaw);
-    printf("ok: %s: turned %+.1f deg (expected %+.1f)\n", what, (double)turned_deg, (double)expected_deg);
-    assert(fabsf(turned_deg - expected_deg) < 3.0f);
-    *yaw = sim.yaw_rad;
+// Runs for `seconds`; returns the fastest turn on the way (deg/s). Counts the
+// times the robot starts turning, and the farthest it got past the person in the
+// direction they walk (overshoot, deg).
+static int starts;
+static float overshoot_deg;
+static float run(float seconds) {
+    float fastest = 0;
+    for (float t = 0; t < seconds; t += DT_US * 1e-6f) {
+        bool was_turning = cmd_w != 0;
+        tick();
+        starts += !was_turning && cmd_w != 0;
+        fastest = fmaxf(fastest, fabsf(DEG(w)));
+        if (person_rad < 90.0f) overshoot_deg = fmaxf(overshoot_deg, DEG(walk_sign * (sim.yaw_rad - person_rad)));
+    }
+    return fastest;
 }
 
 int main(void) {
-    fake_now_us = 1000000;
+    fake_now_us = FAKE_CLOCK_START_US + 1000000;
     next_frame_us = fake_now_us;
     sim.pitch_rad = -0.9f * RAD_PER_DEG;
     srand(3);
@@ -197,13 +226,11 @@ int main(void) {
     // It turned the full 390° first, then to face the most open direction: ahead
     // (+x, 1.6 m to the wall), a little right of the box.
     assert(max_yaw_rad > 389 * RAD_PER_DEG);
-    float heading = wrap_angle(sim.yaw_rad);
+    float heading = wrap_pi(sim.yaw_rad);
     assert(DEG(heading) >= -20.5f && DEG(heading) <= 0.5f);
 
-    // The floor was learned in every zone; the walls are on the map where they are
-    // (in some layer: beyond ~1.4 m only their part above 12 cm is seen), and the
-    // floor between them is free except at the box.
-    assert(surroundings_mapping());
+    // The walls are on the map where they are, the open floor between them has no
+    // obstacle, the box is blocked, the floor around the robot is free.
     int wall_cells = 0, wall_checked = 0;
     for (float y = -0.65f; y <= 0.65f; y += 0.1f) {
         wall_checked++;
@@ -213,67 +240,94 @@ int main(void) {
         wall_checked += 2;
         wall_cells += wall_at(x, WALL_SIDE, 1) + wall_at(x, -WALL_SIDE, 1);
     }
-    int false_obstacles = 0, free_floor = 0, floor_cells = 0, near_cells = 0, near_floor_seen = 0;
-    // Layer 0 (2-12 cm) is only seen within ~1 m: farther, the rays above the
-    // horizon are higher than 12 cm and the one below has reached the floor. The box
-    // hides the floor behind it.
+    int false_obstacles = 0, near_cells = 0, near_free = 0;
     for (float x = -0.75f; x <= 1.35f; x += 0.1f)
         for (float y = -0.55f; y <= 0.55f; y += 0.1f) {
-            if (hypotf(x, y) > 0.95f) continue;
-            if (x > BOX_X - 0.2f && fabsf(y - BOX_Y) < 0.2f) continue;
-            floor_cells++;
-            false_obstacles += map_cell(x, y, 0) == CELL_OCCUPIED;
-            free_floor += map_cell(x, y, 0) == CELL_FREE;
-            // Within ~50 cm the floor rows see the floor; closer, the robot stands on it.
-            if (hypotf(x, y) < 0.45f) near_cells++, near_floor_seen += map_floor_seen(x, y);
+            if (x > BOX_X - 0.2f && fabsf(y - BOX_Y) < 0.2f) continue; // the box hides what's behind it
+            false_obstacles += cell_map_column(x, y) == COLUMN_BLOCKED;
+            if (hypotf(x, y) < 0.6f) {
+                near_cells++;
+                column_t c = cell_map_column(x, y);
+                near_free += c == COLUMN_DRIVABLE || c == COLUMN_OPEN;
+            }
         }
-    bool box_seen = map_cell(BOX_X - 0.05f, BOX_Y, 0) == CELL_OCCUPIED || map_cell(BOX_X - 0.05f, BOX_Y - 0.05f, 0) == CELL_OCCUPIED ||
-                    map_cell(BOX_X - 0.05f, BOX_Y + 0.05f, 0) == CELL_OCCUPIED || map_cell(BOX_X + 0.05f, BOX_Y, 0) == CELL_OCCUPIED;
-    printf("walls: %d of %d wall cells occupied; floor: %d of %d cells free, %d false obstacles; box %s\n",
-           wall_cells, wall_checked, free_floor, floor_cells, false_obstacles, box_seen ? "seen" : "missed");
-    assert(wall_cells >= wall_checked * 9 / 10);
+    bool box_seen = cell_map_column(BOX_X - 0.05f, BOX_Y) == COLUMN_BLOCKED ||
+                    cell_map_column(BOX_X - 0.05f, BOX_Y - 0.05f) == COLUMN_BLOCKED ||
+                    cell_map_column(BOX_X - 0.05f, BOX_Y + 0.05f) == COLUMN_BLOCKED;
+    printf("walls: %d of %d wall columns found; %d false obstacles on the floor; %d of %d columns within 60 cm free; box %s\n",
+           wall_cells, wall_checked, false_obstacles, near_free, near_cells, box_seen ? "seen" : "missed");
+    assert(wall_cells >= wall_checked * 8 / 10);
     assert(false_obstacles == 0);
-    assert(free_floor >= floor_cells * 9 / 10);
-    printf("floor seen in %d of %d cells within 45 cm\n", near_floor_seen, near_cells);
-    assert(near_floor_seen >= near_cells * 9 / 10);
+    assert(near_free >= near_cells * 9 / 10);
     assert(box_seen);
 
-    printf("OK: the start-up scan learns the floor, maps the room and faces the most open direction\n");
+    printf("OK: the start-up scan maps the room and faces the most open direction\n");
 
-    // Watching: nothing leaving, the robot stays put.
+    // Watching: nothing moving, the robot stays put.
     float yaw = sim.yaw_rad;
-    for (int i = 0; i < 3000; i++) tick();
+    run(5);
     assert(behaviour_watching() && sim.yaw_rad == yaw && sim.motors_on);
-    // A target leaving on the right at -19 deg, going right at 30 deg/s: the turn
-    // ends where it will be then: a = -19 - 30 (|a| / 57.3 + 0.5) = -71 deg.
-    report_leaving(-19, -30, (uint32_t)fake_now_us);
-    turn_and_learn(&yaw, -71.4f, "a target leaving on the right at 30 deg/s");
-    // It is seen leaving again on the right while the view is learned (0.2 s before
-    // the view is learned): on after it at the same speed: a = -19.7 - 30 (0.2 + |a| / 57.3 + 0.5) = -85 deg.
-    leave_while_learning = true;
-    learning_leave_bearing_deg = -19.7f;
-    report_leaving(-19, -30, (uint32_t)fake_now_us);
-    turn_and_learn(&yaw, -71.4f, "again");
-    turn_and_learn(&yaw, -85.4f, "it left the view again on the right while learning");
-    // Seen leaving while learning, but the other way, or not after a turn: nothing to follow.
-    leave_while_learning = true;
-    learning_leave_bearing_deg = 19.7f;
-    report_leaving(-19, -30, (uint32_t)fake_now_us);
-    turn_and_learn(&yaw, -71.4f, "a target leaving on the right");
-    for (int i = 0; i < 3000; i++) tick();
-    assert(state == WATCHING && sim.yaw_rad == yaw);
-    report_leaving(19.7f, 0, (uint32_t)fake_now_us);
-    for (int i = 0; i < 3000; i++) tick();
-    assert(state == WATCHING && sim.yaw_rad == yaw);
-    printf("ok: left the view while learning the other way, or not after a turn: no turn\n");
-    // Leaving on the left at 20 deg/s: a = 18 + 20 (|a| / 57.3 + 0.5) = 43 deg; fast: at most 90 deg.
-    report_leaving(18, 20, (uint32_t)fake_now_us);
-    turn_and_learn(&yaw, 43.0f, "a target leaving on the left at 20 deg/s");
-    report_leaving(-19, -120, (uint32_t)fake_now_us);
-    turn_and_learn(&yaw, -90.0f, "a target leaving on the right at 120 deg/s (at most 90 deg)");
+    // Someone comes in on the right (-15 deg) walking right at 15 deg/s for 4 s, then
+    // stops: the robot turns towards them and follows at their speed (one start, not
+    // stop-and-go), lagging a few degrees; when they stop it doesn't run past them,
+    // and stops facing them.
+    person_rad = yaw - 15 * RAD_PER_DEG;
+    person_radps = -15 * RAD_PER_DEG;
+    walk_sign = -1;
+    starts = 0;
+    float fastest = run(4);
+    float lag_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
+    int walking_starts = starts;
+    overshoot_deg = -99;
+    person_radps = 0;
+    fastest = fmaxf(fastest, run(3));
+    float off_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
+    printf("someone walking right at 15 deg/s for 4 s: %d start(s), %.1f deg behind at the end, at most %.0f deg/s;\n"
+           "    then stopping: %.1f deg past them at most, stopped %.1f deg from them\n",
+           walking_starts, (double)fabsf(lag_deg), (double)fastest, (double)fmaxf(overshoot_deg, 0), (double)off_deg);
+    assert(walking_starts == 1 && fabsf(lag_deg) < 5.0f);
+    assert(overshoot_deg < 3.0f && fabsf(off_deg) <= 3.5f && w == 0 && fastest <= 30.0f);
+    yaw = sim.yaw_rad;
+    run(5);
+    assert(sim.yaw_rad == yaw); // they stand there: part of the view, no more turning
+    printf("ok: follows a steady walker smoothly, doesn't overshoot when they stop, stops facing them\n");
+
+    // Walking the other way at 25 deg/s (close to the robot's 29 deg/s): still one start.
+    person_rad = yaw + 10 * RAD_PER_DEG;
+    person_radps = 25 * RAD_PER_DEG;
+    walk_sign = 1;
+    starts = 0;
+    run(4);
+    lag_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
+    person_radps = 0;
+    overshoot_deg = -99;
+    run(3);
+    printf("someone walking left at 25 deg/s: %d start(s), %.1f deg behind; after stopping %.1f deg past them at most\n",
+           starts, (double)fabsf(lag_deg), (double)fmaxf(overshoot_deg, 0));
+    assert(starts == 1 && fabsf(lag_deg) < 8.0f && overshoot_deg < 3.0f);
+    yaw = sim.yaw_rad;
+    run(3);
+    printf("ok: a faster walker too\n");
+
+    // Someone walking left at 40 deg/s, faster than the robot turns: it turns after
+    // them until they are out of view, then stops.
+    person_rad = yaw + 10 * RAD_PER_DEG;
+    person_radps = 40 * RAD_PER_DEG;
+    walk_sign = 1;
+    fastest = run(3);
+    person_rad = 99.0f; // gone
+    person_radps = 0;
+    run(2);
+    printf("someone walking left at 40 deg/s: the robot turned %+.0f deg (at most %.0f deg/s), then stopped\n",
+           (double)DEG(sim.yaw_rad - yaw), (double)fastest);
+    assert(sim.yaw_rad > yaw + 10 * RAD_PER_DEG && fastest <= 30.0f && w == 0);
+    yaw = sim.yaw_rad;
+    run(5);
+    assert(sim.yaw_rad == yaw);
+    printf("ok: someone faster than the robot gets away; it stops when nothing moves\n");
 
     behaviour_stop();
     assert(!behaviour_busy());
-    printf("OK: watching, the robot turns after a target leaving the view, and on when it leaves again while learning\n");
+    printf("OK: watching, the robot turns towards movement and stops facing it\n");
     return 0;
 }

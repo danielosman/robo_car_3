@@ -1,27 +1,24 @@
 #pragma once
-// Movement around the robot (ROBOT_PLAN.md §6). Watches only while the robot stands
-// still (PicoB says so; with no PicoB the robot can't move): after every stop the
-// detectors learn what the view looks like (~1 s), then report what moves in it.
-// M3a so far: the VL53 (tof_motion) and the camera (camera_motion), each on its
-// own; the tracker follows one target in the VL53's movement (tracker). The camera's exposure follows the light (slowly) while the robot moves; while
+// Movement around the robot (ROBOT_PLAN.md §6). The VL53 (tof_motion) watches all
+// the time, still and turning in place, against a background kept per world
+// direction (no learning after a stop). The camera (camera_motion) watches only while
+// the robot stands still (PicoB says so; with no PicoB the robot can't move): after
+// every stop it learns the view (~1 s). The tracker follows one target in the VL53's
+// movement while the robot stands still (tracker). The camera's exposure follows the light (slowly) while the robot moves; while
 // it stands still it is held and adjusted only when calm. With the log on, each
 // detector's movement is printed (at most twice a second while it goes on) and its
 // end, and each exposure adjustment while still; each line starts with the robot's
-// time in seconds since power-up.
-// The target leaving the view, for turning after it (ROBOT_PLAN.md §6.6): the
-// tracker's "leaving", or something the VL53 saw pass out of the view while it
-// learned the view after a stop.
+// time in seconds since power-up. The tracker's target is only logged: behaviour
+// turns towards the biggest movement (motion_sense_strongest).
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
-    float bearing_rad; // where it was last seen, from the sensor (+ = left)
-    float rate_radps;  // its angular speed (+ = to the left); 0: not known (seen only while learning)
-    uint32_t t_us;     // when
-} leaving_t;
-
 void motion_sense_update(void); // call every loop iteration
-bool motion_sense_leaving(leaving_t *l); // the latest leaving since the last call, if any
+// The biggest movement the VL53 sees now (in its latest frame, still or turning):
+// its direction from where the robot faced when the frame was measured (+ = left),
+// and when that was (PicoA's clock: a new value means a new frame). False if nothing
+// moves.
+bool motion_sense_strongest(float *bearing_rad, uint32_t *t_us);
 bool motion_sense_watching(void); // still, and the references are learned
 bool motion_sense_still(void);    // the robot stands still: the detectors watch or learn
 void motion_sense_log(bool on);

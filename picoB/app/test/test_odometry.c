@@ -36,7 +36,7 @@ static void simulate(float seconds, float left_mps, float right_mps, float turn_
 
 int main(void) {
     const odom_t *o = odom_get();
-    fake_now_us = 1000000;
+    fake_now_us = FAKE_CLOCK_START_US + 1000000;
     assert(odom_init());
 
     simulate(1, 0, 0, 0);

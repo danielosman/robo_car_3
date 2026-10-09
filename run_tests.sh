@@ -1,8 +1,10 @@
 #!/bin/sh
-# Host tests (no Pico needed): the link; PicoB's wheel control, odometry and
+# Host tests (no Pico needed): the link; the shared helpers (time, angles, order
+# statistics); PicoB's wheel control, odometry and
 # brain (PicoA as PicoB sees it); PicoA's rangefinder, world map, pose, the
-# start-up scan and watching end to end, movement detection (change grid, VL53, camera, tracker), body (PicoB as PicoA sees it), robot tests and the
-# WiFi console. Each compiles one module against stubs and fakes and runs it:
+# start-up scan and watching end to end, movement detection (change grid, VL53, camera, tracker), body (PicoB as PicoA sees it), robot tests, the
+# WiFi console and the loop timer. The fake clock crosses time_us_32()'s wrap in
+# every test. Each compiles one module against stubs and fakes and runs it:
 # hardware stubs in picoB/app/test/stubs and common/test/stubs, the fake clock
 # and fake link in common/test/fakes. Stops at the first failure.
 set -e
@@ -20,6 +22,8 @@ build() {
 
 build link_test common/test/link_test.c -Icommon/test/stubs
 build/link_test
+build test_helpers common/test/test_helpers.c -Icommon
+build/test_helpers
 build test_drive picoB/app/test/test_drive.c -IpicoB/app/test/stubs $APP
 build/test_drive
 build test_odometry picoB/app/test/test_odometry.c -IpicoB/app/test/stubs $APP
@@ -28,21 +32,25 @@ build test_brain picoB/app/test/test_brain.c -IpicoB/app/test/stubs $APP
 build/test_brain
 build test_rangefinder picoA/app/test/test_rangefinder.c -IpicoA/app/test/stubs $APP
 build/test_rangefinder
-build test_world_map picoA/app/test/test_world_map.c -IpicoA/app/test/stubs $APP
-build/test_world_map
+# The new map (doc/MAP_DESIGN.md) in simulated rooms; its printed maps go to the log.
+build test_cell_map picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP
+build/test_cell_map > build/test_cell_map.log || { cat build/test_cell_map.log; exit 1; }
+grep -v '^[|+]' build/test_cell_map.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
 build test_pose picoA/app/test/test_pose.c $APP
 build/test_pose
 # The start-up scan and watching end to end; prints the map it made of the simulated room.
 build test_behaviour picoA/app/test/test_behaviour.c -IpicoA/app/test/stubs $APP
 build/test_behaviour
-build test_change_grid picoA/app/test/test_change_grid.c
+build test_change_grid picoA/app/test/test_change_grid.c -Icommon
 build/test_change_grid
 build test_tof_motion picoA/app/test/test_tof_motion.c -IpicoA/app/test/stubs $APP
 build/test_tof_motion
-build test_camera_motion picoA/app/test/test_camera_motion.c -IpicoA/drivers
+build test_camera_motion picoA/app/test/test_camera_motion.c -IpicoA/drivers -Icommon
 build/test_camera_motion
 build test_tracker picoA/app/test/test_tracker.c -Icommon
 build/test_tracker
+build test_loop_stats picoA/app/test/test_loop_stats.c
+build/test_loop_stats
 build test_body picoA/app/test/test_body.c $APP
 build/test_body
 build test_robot_test picoA/app/test/test_robot_test.c $APP

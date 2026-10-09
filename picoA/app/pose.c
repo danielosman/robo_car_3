@@ -1,5 +1,6 @@
 #include <math.h>
 #include "pico/stdlib.h"
+#include "stamp.h"
 #include "body.h"
 #include "pose.h"
 
@@ -31,11 +32,14 @@ void pose_update(void) {
     };
 }
 
-static int32_t after(uint32_t t_us, uint32_t ref_us) { return (int32_t)(t_us - ref_us); }
+static uint32_t origin_changes;
 
 void pose_set_origin(void) {
     if (count) origin = history[newest].pose;
+    origin_changes++;
 }
+
+uint32_t pose_origin_changes(void) { return origin_changes; }
 
 // From odometry's frame to the map's.
 static pose_t in_map(pose_t p) {
@@ -64,7 +68,7 @@ bool pose_at(uint32_t t_us, pose_t *pose) {
 static bool odometry_at(uint32_t t_us, pose_t *pose) {
     if (!count) return false;
     const sample_t *latest = &history[newest];
-    int32_t ahead_us = after(t_us, latest->t_us);
+    int32_t ahead_us = stamp_us(t_us, latest->t_us);
     if (ahead_us >= 0) {
         if (ahead_us > MAX_AHEAD_US) return false;
         float dt = (float)ahead_us * 1e-6f;
@@ -78,9 +82,9 @@ static bool odometry_at(uint32_t t_us, pose_t *pose) {
     for (int k = 1; k < count; k++) {
         const sample_t *a = &history[(newest - k + HISTORY) % HISTORY];
         const sample_t *b = &history[(newest - k + 1 + HISTORY) % HISTORY];
-        if (after(t_us, a->t_us) < 0) continue;
-        float span = (float)after(b->t_us, a->t_us);
-        float f = span > 0 ? (float)after(t_us, a->t_us) / span : 0;
+        if (stamp_us(t_us, a->t_us) < 0) continue;
+        float span = (float)stamp_us(b->t_us, a->t_us);
+        float f = span > 0 ? (float)stamp_us(t_us, a->t_us) / span : 0;
         pose->x_m = a->pose.x_m + f * (b->pose.x_m - a->pose.x_m);
         pose->y_m = a->pose.y_m + f * (b->pose.y_m - a->pose.y_m);
         pose->yaw_rad = a->pose.yaw_rad + f * (b->pose.yaw_rad - a->pose.yaw_rad);
