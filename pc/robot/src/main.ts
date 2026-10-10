@@ -1,15 +1,19 @@
 // RoboCar robot server (ROBOT_WIFI.md): PicoA connects over WiFi, the browser at
 // http://127.0.0.1:8080/ shows its console and sends keys. Every run writes a log
 // file in logs/. PicoA's recordings arrive on a second connection and are saved in
-// recordings/ (recording.ts, doc/TELEMETRY_PLAN.md).
+// recordings/ (recording.ts, doc/TELEMETRY_PLAN.md); each take goes into DuckDB as it
+// ends (store.ts), listed at http://127.0.0.1:8080/takes. Ports: PORT (HTTP 8080),
+// ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one.
 import http from "node:http";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { RobotLink, broadcastAddresses } from "./robot.ts";
-import { RecordingServer } from "./recording.ts";
+import { ROBOT_PORT, RobotLink, broadcastAddresses } from "./robot.ts";
+import { DATA_PORT, RecordingServer } from "./recording.ts";
+import { Store } from "./store.ts";
+import { DB_PATH } from "./import.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HTTP_PORT = Number(process.env.PORT ?? 8080);
@@ -41,10 +45,16 @@ async function main(): Promise<void> {
     add({ kind: "note", text: line });
   }
 
-  const recordings = new RecordingServer({ dir: path.join(root, "recordings") });
+  const recordings = new RecordingServer({ dir: path.join(root, "recordings"), port: Number(process.env.DATA_PORT ?? DATA_PORT) });
   recordings.on("note", note);
+  const store = new Store(DB_PATH);
+  recordings.on("take", take => {
+    store.importTake(take)
+      .then(n => note(`${take.name} stored: ${n.frames} frames, ${n.targets} targets, ${n.odom} odometry reports`))
+      .catch(err => note(`${take.name} NOT stored: ${(err as Error).message}`));
+  });
   const dataPort = await recordings.start();
-  const robot = new RobotLink({ dataPort });
+  const robot = new RobotLink({ dataPort, robotPort: Number(process.env.ROBOT_PORT ?? ROBOT_PORT) });
   robot.on("text", (text: string) => { logFile.write(text); process.stdout.write(text); add({ kind: "text", text }); });
   robot.on("note", note);
   robot.on("bytes", (n: number) => recordings.consoleArrived(n));
@@ -55,8 +65,32 @@ async function main(): Promise<void> {
   const files: Record<string, [string, string]> = {
     "/": ["index.html", "text/html"],
     "/console.js": ["console.js", "text/javascript"],
+    "/takes": ["takes.html", "text/html"],
+    "/takes.js": ["takes.js", "text/javascript"],
+  };
+  const json = (res: http.ServerResponse, code: number, body: unknown) => {
+    res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+    res.end(JSON.stringify(body));
   };
   const server = http.createServer(async (req, res) => {
+    if (req.url === "/api/takes" && req.method === "GET") {
+      try {
+        json(res, 200, await store.query(`SELECT take_id, boot_id, take_no, strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started,
+          key, action, round(duration_s, 1) AS duration_s, end_reason, frames_whole, frames_half, frames_missing,
+          datagrams, datagrams_lost, odom_reports, note FROM takes ORDER BY started_at DESC, take_no DESC`));
+      } catch (err) { json(res, 500, { error: (err as Error).message }); }
+      return;
+    }
+    const noteUrl = /^\/api\/takes\/([0-9a-f]{8}-\d+)\/note$/.exec(req.url ?? "");
+    if (noteUrl && req.method === "POST") {
+      let body = "";
+      req.on("data", c => { if (body.length < 2000) body += c; });
+      req.on("end", () => {
+        store.setNote(noteUrl[1], body.slice(0, 1000)).then(() => json(res, 200, { ok: true }),
+          err => json(res, 500, { error: (err as Error).message }));
+      });
+      return;
+    }
     const file = files[req.url ?? "/"];
     if (!file) { res.writeHead(404); res.end("not found"); return; }
     try {

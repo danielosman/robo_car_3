@@ -122,8 +122,8 @@ static void update_tof(void) {
     if (logging && n > 0 && obs[0].cells == 1)
         for (int z = 0; z < RANGEFINDER_RAYS; z++)
             if (tof_motion_moved(z))
-                printf("         zone row %d col %d: reads %u mm, background %u mm (0: nothing)\n", z / RANGEFINDER_COLS,
-                       z % RANGEFINDER_COLS, (unsigned)f->range_mm[z], (unsigned)tof_motion_background_mm(z));
+                printf("         zone row %d col %d: reads %u mm, background %u mm (0: nothing)\n", z / RANGEFINDER_COLS + 1,
+                       z % RANGEFINDER_COLS + 1, (unsigned)f->range_mm[z], (unsigned)tof_motion_background_mm(z)); // 1-8 (README)
     // The tracker follows directions as the robot sees them: only while it stands still.
     if (!still || !tof_motion_ready()) return;
     track_event_t e = tracker_add(obs, n, f->t_us);

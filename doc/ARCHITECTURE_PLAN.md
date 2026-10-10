@@ -92,7 +92,7 @@ Safety guard; M5 staleness, full-turn check, map changes; M6 map correction.
 |---|---|---|
 | Robot | **12 cm tall**, 23.5 cm wide × 19 cm long, front edge 9.5 cm ahead of the centre | confirmed by Daniel; ROBOT_PLAN §3 says 10 cm high: fixed there in S3 |
 | VL53 | 7 cm up, 2.5 cm ahead of the centre, 3 cm right, level; zones 5.625° | `rangefinder.c` |
-| VL53 rows | **0-based, row 0 at the top, as in the code.** Row r's centre is (r − 3.5) × 5.625° below level; rows 0-3 look up, 4-7 down. Floor along the centre ray: row 4 ≈ 1.43 m, row 5 ≈ 48 cm, row 6 ≈ 29 cm, row 7 ≈ 21 cm | README's "rows 6/7/8" (1-based) get rewritten |
+| VL53 rows | **1-8, row 1 at the top** (README; changed 10 Oct from 0-based; the code's indexes are one less). Row r's centre is (r − 4.5) × 5.625° below level; rows 1-4 look up, 5-8 down. Floor along the centre ray: row 5 ≈ 1.43 m, row 6 ≈ 48 cm, row 7 ≈ 29 cm, row 8 ≈ 21 cm | |
 | Camera | 8.5 cm up, 2.5 cm ahead of the centre, f ≈ 160 px, HFOV 53.1°, VFOV 41.1° | ROBOT_PLAN §3 |
 | A walker | Both sensors see only up to ~46-49 cm at 1 m and ~85-90 cm at 2 m: **legs**, not a torso. All simulations model two legs with a gait | 7 cm + 1 m · tan 22.5°; 8.5 cm + 1 m · tan 20.5° |
 | Height bands | ground G = −7…+3 cm, L1 = 3-13 cm, L2 = 13-23 cm | SURROUNDINGS_PLAN; the ground's top at 3 cm is for Daniel to confirm (§9) |
@@ -288,7 +288,7 @@ consumer uses it in its own way:
   `sigma_eff` > 50 mm.
 
 ```c
-// tof_sensor.h — one VL53 frame, robot order (row 0 top, column 0 left).
+// tof_sensor.h — one VL53 frame, robot order (index 0: row 1, the top; column 1, the left).
 typedef struct { uint16_t range_mm, sigma_mm, signal_kcps; uint8_t status, confidence; } tof_target_t; // 8 B; confidence 0-255
 typedef struct {
     uint32_t seq;                  // counts frames: a gap means one was missed
@@ -926,7 +926,7 @@ Robot:
 1. `z`: a new block with each zone's credible targets (cm) and their confidence
    (0-9), and `weak_mm`. Robot facing a wall at ~1 m:
    - wall zones at 9 (status 5);
-   - floor rows 5-7 credible;
+   - floor rows 6-8 credible;
    - in the upper zones that look into the open room, the floor echo at ~30 cm
      shows in `weak_mm`, not as a target.
 2. A dark object and a white one at ~1 m in front of the left half: both credible;

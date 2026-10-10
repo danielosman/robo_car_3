@@ -9,7 +9,7 @@
 #define SENSOR_X_M       0.025f    // ahead of the centre
 #define SENSOR_Y_M       (-0.03f)  // right of the centre line
 #define SENSOR_Z_M       0.07f     // above the floor
-#define FIRST_FLOOR_ROW  4         // rows 4-7 see the floor
+#define FIRST_FLOOR_ROW  4         // index: rows 5-8 see the floor
 #define DROP_SHARE       1.15f     // a floor zone's reading this much farther than where its upper
                                    // edge meets a flat floor is a reflection (or a drop)
 

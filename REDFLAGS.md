@@ -125,3 +125,12 @@ and the M2 parts of `debug_console`. No behaviour changed; host tests pass.
 | `recorder`, `wifi_console` | (design) | Over TCP, a few packets lost while the robot turned stalled the recording 1-6 s (TCP delivers in order and lwIP waits 1.5-3 s between retries) | **Fixed:** UDP datagrams, nothing retransmitted; losses counted by datagram numbers. The 48 KB buffer and the second TCP connection are gone |
 | `recorder` | Nonobvious code | A frame's two halves may share a datagram or not, and `frames_failed` is counted per refused datagram holding a half, then capped at one per frame | **Accepted:** commented in `recorder_tof()`; `test_recorder` covers a refused frame |
 | `recording.ts` | (limit) | Duplicate datagrams are found by (boot, number) in a set cleared at 100 000 entries | **Accepted:** ~50 datagrams/s, so 30 min of takes; repeats arrive within milliseconds |
+
+### T3 — storage (10 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| `store` | (design) | DuckDB allows one writer per file: the server holding it open would lock out the `duckdb` command line | **Accepted:** opened per operation, one at a time; a take that can't be stored is noted, `npm run import` stores it later |
+| `store`, `rangefinder` | Repetition | The world position of a target is computed on the PC as `rangefinder.c` and `cell_map.c` do on the robot | **Accepted:** the PC must not need the firmware; the zone angle and mounting come from `GEOMETRY`, and the floor landing at z ≈ 0 checks it. T5 (replay) runs the robot's own code |
+| `store` | (limit) | Takes from before UDP have no arrival times: `started_at` is when their file was opened, the same for all takes in it | **Accepted:** three runs, all on 10 Oct; their order is kept by take number |
+

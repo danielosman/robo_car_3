@@ -10,8 +10,9 @@ confidence. Companions: [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) (stages,
 SURROUNDINGS_PLAN.md (the map; points at §3 for the confidence model). Current
 design: [ROBOT_PLAN.md](../ROBOT_PLAN.md) §6.2, §6.6.
 
-Rows and columns are **0-based, as in the code**: row 0 at the top, column 0 at
-the left (as the robot sees it). README's "rows 6 / 7 / 8" are rows 5 / 6 / 7 here.
+Rows and columns are numbered **1-8** (README): row 1 at the top, column 1 at the
+left (as the robot sees it). The code's indexes are one less. (This file counted
+from 0 until 10 Oct; all its row and column numbers were moved up by one then.)
 
 ## 0. The decisions in short
 
@@ -99,15 +100,15 @@ two targets; I could not extract UM3109's text to cite the line. M-S measures it
 Measured on this robot (README): most zones above the floor rows report a faint
 **unsure** target at ~30 cm (signal 3-10 kcps/SPAD against the floor's 150-730),
 the floor's echo inside the sensor; the real target is the next one. Status 12
-zones come and go. Row 5 sometimes reads the wall behind the waxed floor; rows 6-7
+zones come and go. Row 6 sometimes reads the wall behind the waxed floor; rows 7-8
 can read "beyond the floor" in front of glossy furniture. Turning in place the
 robot rolls −3…−5°.
 
 Geometry (cross-plan numbers): the VL53 is 7 cm above the floor (robot 12 cm
 tall), 2.5 cm ahead of centre, 3 cm right; zones 5.625°. Column centres ±2.8°,
-±8.4°, ±14.1°, ±19.7° (+ = left); row r's centre is (r − 3.5) × 5.625° below level:
-rows 0-3 look up, 4-7 down. Floor along the centre ray: row 4 ≈ 1.43 m, row 5 ≈
-48 cm, row 6 ≈ 29 cm (README measured 31), row 7 ≈ 21 cm. The top zone edge is
+±8.4°, ±14.1°, ±19.7° (+ = left); row r's centre is (r − 4.5) × 5.625° below level:
+rows 1-4 look up, 5-8 down. Floor along the centre ray: row 5 ≈ 1.43 m, row 6 ≈
+48 cm, row 7 ≈ 29 cm (README measured 31), row 8 ≈ 21 cm. The top zone edge is
 22.5° up.
 
 **What it sees of a walker** (top of view = 7 cm + d · tan 22.5°; leg ~12 cm wide;
@@ -117,9 +118,9 @@ in stance ~60 % = ~0.67 s, then swinging ~1.1 m in ~0.44 s, ~2.5 m/s):
 | Distance | Sees up to | Zone width | One leg spans | One step spans | 1 m/s is | Rows on the legs |
 |---|---|---|---|---|---|---|
 | 0.3 m | 19 cm | 2.9 cm | (a hand, 8 cm: 2.7 columns) | — | 191°/s | — |
-| 1 m | 48 cm (knees) | 9.8 cm | 6.9° = 1.2 columns | 31° = 5.5 columns | 57°/s | 0-4 (5 rows) |
-| 2 m | 90 cm (hips, hands) | 19.7 cm | 3.4° = 0.6 column | 16° = 2.8 columns | 29°/s | 0-3 (row 4 sees the floor at 1.43 m first) |
-| 3 m | 1.31 m | 29.5 cm | 2.3° = 0.4 column | 10.5° = 1.9 columns | 19°/s | 0-3 |
+| 1 m | 48 cm (knees) | 9.8 cm | 6.9° = 1.2 columns | 31° = 5.5 columns | 57°/s | 1-5 (5 rows) |
+| 2 m | 90 cm (hips, hands) | 19.7 cm | 3.4° = 0.6 column | 16° = 2.8 columns | 29°/s | 1-4 (row 5 sees the floor at 1.43 m first) |
+| 3 m | 1.31 m | 29.5 cm | 2.3° = 0.4 column | 10.5° = 1.9 columns | 19°/s | 1-4 |
 
 Consequences: at 1 m a walker is two blobs of ~6-8 zones (a gap between the legs
 half the time), not one 22-zone body. The leading edge jumps a step (5.5 columns at
@@ -447,11 +448,11 @@ largest lower bound that has been confirmed:
   room with 2-3 such edges in the 45° view, that is ~20-40 % of the view masked for
   targets between the two depths while turning fast, ~10 % while still.
 - **Floor rows while turning.** The robot rolls −3…−5° turning, and a floor zone's
-  range is steep in its angle (row 5: 7 % per 1°; row 4: 35 % per 1°). Floor bins
+  range is steep in its angle (row 6: 7 % per 1°; row 5: 35 % per 1°). Floor bins
   learned level would be wrong, so floor rows predict the floor from
   `view_floor_patch` at the frame's pitch and roll (A2 adds roll), and use bins only
   for things above the floor (bins whose range is nearer than the floor patch).
-  Row 4 tells nothing while |roll| > 2°.
+  Row 5 tells nothing while |roll| > 2°.
 - **Rates while turning.** Fits are in world bearings (§4), so a mover's world rate
   comes out directly; seen from the robot it moves at its world rate − ω_robot.
 
@@ -459,7 +460,7 @@ largest lower bound that has been confirmed:
 
 | | (a) Heading bins (chosen) | (b) Ray-cast each zone into the surroundings map |
 |---|---|---|
-| Vertical reach | every row, any range | the voxel layers are 3-23 cm: rows 0-3 beyond ~40-60 cm look above them, unpredictable |
+| Vertical reach | every row, any range | the voxel layers are 3-23 cm: rows 1-4 beyond ~40-60 cm look above them, unpredictable |
 | Range resolution | the readings' own (mm), σb per bin | 10 cm cells: ±5 cm quantisation against a 30 mm / z ≥ 4 test |
 | Movers | never raise a bin (needs 2 agreeing frames, and movers are nearer) | the map keeps a walker's trail ~0.5 s, and nothing fades: false "background" right where the target walks |
 | Coupling | `tof_motion` alone | movement would depend on the map's update order |
@@ -467,7 +468,7 @@ largest lower bound that has been confirmed:
 | RAM | 12.3 KB | 0 extra |
 
 (a), with (b) as a later cross-check (once the map exists, compare predictions for
-rows 4-7 near the robot). Owner: `tof_motion` (answers the old open question 5).
+rows 5-8 near the robot). Owner: `tof_motion` (answers the old open question 5).
 
 ## 8. Worked examples
 
@@ -475,19 +476,19 @@ Assumed until M-S measures them: σ ≈ 8 mm for a strong target at 1 m, ≈ 20 
 a wall at 2.5-3 m, σb ≈ 20 mm. Frame k is k × 66.7 ms after the first onset.
 
 **Walking at 1 m/s, 1 m away, left to right, wall at 2.5 m; robot still.** Legs at
-Δ = 1.5 m: z ≈ 1500 / 22 = 68. The front leg enters column 0 (rows 0-4): onsets at
+Δ = 1.5 m: z ≈ 1500 / 22 = 68. The front leg enters column 1 (rows 1-5): onsets at
 frame 0. With a neighbour row nearer too, the zones are moved at frame 1 (2 of 4):
 first observation at ~0.07-0.13 s, `APPEARED side +1` (the onset is known at frame
-1 in hindsight). The swinging leg crosses into columns 1-2 within ~2 frames: sign
+1 in hindsight). The swinging leg crosses into columns 2-3 within ~2 frames: sign
 "going right" at frame ~2-3 (0.13-0.2 s), coarse rate 40-140°/s. The front foot
 lands and stays ~0.67 s while the other leg swings past it: the leading edge
 jumps 5.5 columns per step. After ~0.55 s (8 frames) the chain spans a step:
-57 ± 7°/s. The leading edge reaches column 7 at ~0.8 s; `LEAVING` from the
+57 ± 7°/s. The leading edge reaches column 8 at ~0.8 s; `LEAVING` from the
 tracker at the first outer-column observation (it needs only the sign and ≥
-10°/s); the last leg's offset in column 7 at ~1.0 s; `GONE side −1` at ~1.15 s.
+10°/s); the last leg's offset in column 8 at ~1.0 s; `GONE side −1` at ~1.15 s.
 Today: rate good after ~0.5-0.8 s, exit reported ~1.5 s.
 
-**The same at 2 m, wall at 3 m.** Legs at Δ = 1 m, z ≈ 1000 / 28 = 35, rows 0-3.
+**The same at 2 m, wall at 3 m.** Legs at Δ = 1 m, z ≈ 1000 / 28 = 35, rows 1-4.
 Each leg covers ~60 % of a zone: the zone reports the leg if its share of the
 signal is enough, as a second target behind it the wall (≥ 60 cm apart, to be
 verified). A step spans 2.8 columns, a column every 2.9 frames on average. First
@@ -525,7 +526,7 @@ in 1.5 s mark it oscillating (logged, no turn; ROBOT_PLAN §6.5's "react or log"
 The floor echo at ~30 cm is not the hand: signal 3-10, unsure status.
 
 **A box (30 × 20 cm) put down at 60 cm, then left.** It spans 28° (5 columns) and
-rows 2-4 (row 5 sees the floor at 48 cm, in front of it). Hand and box come in
+rows 3-5 (row 6 sees the floor at 48 cm, in front of it). Hand and box come in
 (chains, likely vertical), observations with the hand's rate. The hand's offsets
 run out; the box zones stay nearer, steady (±1 cm), and nothing in their
 observation changes → after 1 s `STOPPED at −5 deg, 0.61 m`; its bins are pinned
@@ -533,7 +534,7 @@ at 0.61 m, the covered background remembered. Taken away: the hand is movement;
 the box zones read the remembered background steadily for 1 s → `REMOVED`, the old
 bins back. Today: only "ended", and the box zones wait 10 s.
 
-**The floor echo.** Zone row 2, col 3: target 1 at 290 mm, status 4, signal 6,
+**The floor echo.** Zone row 3, col 4: target 1 at 290 mm, status 4, signal 6,
 σ 40 → confidence 0, into `weak_mm` = 290; target 2 at 2000 mm, status 5, σ 15 →
 `target = [2000]`, the zone's reading. Nothing nearer than the 2.0 m bins. If M-S
 shows the echo sometimes with status 9, the echo guard takes it to 0.05, below
@@ -892,8 +893,8 @@ worth halving. Host: the 1 m smooth-edge error falls below ±6°/s from 3 column
   test prints the margin; `r` on the robot checks it.
 - **Masking near depth edges while turning** (§7.3): a walker just behind a near
   edge is missed for a few tenths of a second at 1 rad/s.
-- **Floor rows while turning** depend on roll from A2; until then row 4 tells
-  nothing while turning and rows 5-7 use a wider margin.
+- **Floor rows while turning** depend on roll from A2; until then row 5 tells
+  nothing while turning and rows 6-8 use a wider margin.
 - **Legs are thin at 2-3 m** (0.4-0.6 of a zone): a zone may report the wall and
   not the leg. M-S's 2 m walks show how often; the hips and hands at 2 m help.
 - **More sensitive is more false movement** (a door swinging slowly, a pet). The

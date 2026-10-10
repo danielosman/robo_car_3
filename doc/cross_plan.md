@@ -15,7 +15,7 @@ milestone order also lives in ARCHITECTURE_PLAN.md §8.1.
 | Robot height | **12 cm** (confirmed by Daniel) | ROBOT_PLAN §3 says 10 cm (23.5 × 19 × 10); fix there in S3 |
 | Footprint | 23.5 wide × 19 long; front edge 9.5 cm ahead of centre | ROBOT_PLAN §3 |
 | VL53 mounting | 7 cm above the floor, 2.5 cm ahead of centre, 3 cm right, level; zones 5.625° | `rangefinder.c` 10-12 |
-| VL53 rows | **0-based, row 0 at the top, as in the code.** Row r's centre is (r − 3.5) × 5.625° below level: rows 0-3 look up, 4-7 down. Floor along the centre ray: row 4 ≈ 1.43 m, row 5 ≈ 48 cm, row 6 ≈ 29 cm (README measured 31), row 7 ≈ 21 cm | the surroundings plan's "5th / 6th / Row 4" (1-based) and README's "rows 6/7/8" get rewritten |
+| VL53 rows | **1-8, row 1 at the top** (README; changed 10 Oct from 0-based; the code's indexes are one less). Row r's centre is (r − 4.5) × 5.625° below level: rows 1-4 look up, 5-8 down. Floor along the centre ray: row 5 ≈ 1.43 m, row 6 ≈ 48 cm, row 7 ≈ 29 cm (README measured 31), row 8 ≈ 21 cm | |
 | Camera | 8.5 cm up, 2.5 cm ahead of centre, f ≈ 160 px, HFOV 53.1°, VFOV 41.1° | ROBOT_PLAN §3 |
 | What the sensors see of a walker | both sensors see **only up to ~46-49 cm at 1 m** (top zone edge / top image row), ~85-90 cm at 2 m: **legs**, not a 45 cm torso. All sims (tof_sim, sim_room, camera sprites) model two legs with a gait (stance leg still ~60 % of the time, swing leg ~2× walking speed) | geometry: 7 cm + 1 m · tan 22.5°; 8.5 cm + 1 m · tan 20.5° |
 | Ground band | G = −7…+3 cm, L1 = 3-13 cm, L2 = 13-23 cm (surroundings plan; deviation from Daniel's "ground centre 5 cm below the floor" explained there) **(user: OK with "under 3 cm is ground"?)** | |

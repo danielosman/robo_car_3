@@ -70,6 +70,9 @@ Node 24, TypeScript run directly (`npm start` = `node src/main.ts`), like
   arrival time in `pc/robot/recordings/raw/` (git-ignored; a file per robot boot),
   decodes the records and notes each take; `src/decode.ts`
   (`npm run decode -- <file>`) reads a saved file.
+- `src/store.ts`: each take into DuckDB (`recordings/robot.duckdb`) as it ends;
+  `src/import.ts` (`npm run import`) imports every raw file again; the take list
+  at http://127.0.0.1:8080/takes (doc/TELEMETRY_PLAN.md §3).
 - `src/main.ts`: HTTP + WebSocket for the page, log file per server run in
   `pc/robot/logs/` (git-ignored), the last 256 KB of text kept so a reloaded page
   shows the history.

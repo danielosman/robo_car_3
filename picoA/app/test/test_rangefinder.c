@@ -46,11 +46,12 @@ int main(void) {
 
     // The floor rows' limit: beyond where a zone's upper edge meets a flat floor 7 cm
     // below the sensor (+15 %), a reading is a reflection; the rows above have none.
-    float row6_m = rangefinder_floor_limit_m(6 * 8 + 3), row4_m = rangefinder_floor_limit_m(4 * 8 + 3);
-    printf("floor limits: row 7 %.0f cm, row 5 %.0f cm, row 4 %.0f\n", (double)(row6_m * 100), (double)(row4_m * 100),
+    // Rows 1-8 (README); the indexes are one less.
+    float row7_m = rangefinder_floor_limit_m(6 * 8 + 3), row5_m = rangefinder_floor_limit_m(4 * 8 + 3);
+    printf("floor limits: row 7 %.0f cm, row 5 %.0f cm, row 4 %.0f\n", (double)(row7_m * 100), (double)(row5_m * 100),
            (double)rangefinder_floor_limit_m(3 * 8 + 3));
-    assert(fabsf(row6_m - 1.15f * 0.07f / sinf(11.25f * RAD_PER_DEG)) < 0.001f);
-    assert(row4_m == 0 && rangefinder_floor_limit_m(3 * 8 + 3) == 0); // row 4's upper edge is level
+    assert(fabsf(row7_m - 1.15f * 0.07f / sinf(11.25f * RAD_PER_DEG)) < 0.001f);
+    assert(row5_m == 0 && rangefinder_floor_limit_m(3 * 8 + 3) == 0); // row 5's upper edge is level
     printf("rangefinder: all tests passed\n");
     return 0;
 }

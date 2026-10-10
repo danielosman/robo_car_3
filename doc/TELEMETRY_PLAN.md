@@ -22,7 +22,9 @@ recordings now go as **UDP datagrams in a compact format (version 3)**, tested o
 the robot 10 Oct: no stalls, 2-3 % of datagrams lost, mostly one at a time (§2
 "Measured"). The recordings (three TCP runs and one UDP run: 5 s, a scan, a
 minute of watching each) are in `pc/robot/recordings/raw/` and all decode.
-**Next: T3** (storage, DuckDB).
+**T3 (storage) is built** (§3): every take goes into DuckDB as it ends, `npm run
+import` rebuilds it from the raw files, the take list is at
+http://127.0.0.1:8080/takes. **Next: T4**, the three.js viewer.
 
 **Read first:** this file; [REWORK_PLAN.md](REWORK_PLAN.md) (decisions, how to work a
 step); [COMMANDS_PLAN.md](COMMANDS_PLAN.md) (the keys, as built). Background for T6:
@@ -179,7 +181,7 @@ without the datagram counts.
 | Type | Payload (bytes) |
 |---|---|
 | 1 `TAKE_START` (52) | version u8 (3), boot id u32, take number u16 (from 1 per boot), t u32, key char, action char[12] (`scan`, `move`, `turn`, `watch`, `record`; NUL-padded), param f32 (scan, turn: rad, + left; move: m, + forward; watch, record: s), build char[24] (firmware build time) |
-| 2 `GEOMETRY` (82) | sensor position f32[3] (m: forward, left of the centre, up from the floor), zone angle f32 (rad), rows u8, cols u8, zone of each ray u8[64] (ray = row × cols + col, row 0 top, col 0 left; the ray points (row − 3.5) zone angles below horizontal and (3.5 − col) to the left, robot level) |
+| 2 `GEOMETRY` (82) | sensor position f32[3] (m: forward, left of the centre, up from the floor), zone angle f32 (rad), rows u8, cols u8, zone of each ray u8[64] (ray = (row − 1) × cols + (col − 1) for rows and columns 1-8, row 1 top, column 1 left; the ray points (row − 4.5) zone angles below horizontal and (4.5 − col) to the left, robot level) |
 | 3 `TOF_RAW` (13 + 32 × 5 + 8 per target) | half a frame: frame number u32, t u32 (the middle of the measurement), frames not sent before it u16, sensor temperature i8 (°C), first zone u8 (0 or 32), zones u8 (32); then for each zone in the **sensor's** order: targets u8 (≤ 4), ambient u16 (kcps/SPAD), SPADs enabled u16; then its targets, closest first: distance i16 (mm), sigma u16 (mm), signal u16 (kcps/SPAD), reflectance u8 (%), status u8 (5, 6, 9 valid). Ambient, SPADs and signal are the ULD's u32s capped at 65535 |
 | 4 `ODOM` (53) | t u32 (when PicoB measured it, PicoA's clock), PicoB's `odom_report_t` as sent (45: PicoB's t u32, x, y, yaw, v, w, pitch, roll, wheel left, wheel right f32; stationary, motors on, stop reason, motors request, IMU error u8), gyro bias f32 (rad/s) |
 | 5 `DRIVE` (12) | t u32 (sent), v f32 (m/s), w f32 (rad/s); one per command sent to PicoB (every 50 ms) |
@@ -190,45 +192,78 @@ without the datagram counts.
 The pose frame is odometry's from power-up (the scan no longer moves the origin),
 so all takes of one boot share one frame; takes of different boots don't.
 
-## 3. Storage on the PC
-
-T2 already saves every datagram as it arrived (repeats too), with its arrival time,
-in `pc/robot/recordings/raw/<time>-boot-<id>.rec` (a file per robot boot:
-`RCDGRAM3`, then [length u16][arrival ms f64][datagram] each; before UDP the files
-were the TCP stream as it came), and `<same>.arrivals.csv` when the console's text
-arrived. It notes each take in the console (how it ended, frames whole / half /
-missing, datagrams lost, KB/s); `npm run decode -- <file> [--records]` prints the
-same from a file. T3 splits them into takes:
+## 3. Storage on the PC (T3, built 10 Oct)
 
 ```
-pc/robot/recordings/              (git-ignored)
-  2026-10-10/
-    boot-7f3a/                    one robot boot
-      take-001-s-scan.rec         the raw bytes as received, never changed
-      take-002-5-record5s.rec
-  robot.duckdb                    derived: rebuilt from the .rec files at any time
+pc/robot/recordings/                            (git-ignored)
+  raw/2026-10-10-18-08-07-boot-0558a0ee.rec     one robot boot: every datagram as it arrived
+  raw/2026-10-10-18-08-07-boot-0558a0ee.arrivals.csv   when the console's text arrived
+  raw/2026-10-10-17-21-17.795.rec               before UDP: one TCP connection's stream
+  robot.duckdb                                  derived from raw/: rebuilt at any time
 ```
 
-- The **`.rec` files are the truth**: replay reads them; a damaged database is
-  just rebuilt.
-- The server writes a take's file as it arrives and imports it into DuckDB at
-  `TAKE_END` (or when the connection drops: the take is marked "cut").
-- **Tables:**
+- The **raw files are the truth**: a file per robot boot (`RCDGRAM3`, then
+  [length u16][arrival ms f64][datagram] each, repeats too), written as the
+  datagrams arrive and never changed. **Changed from the first plan** (a `.rec`
+  per take in day / boot folders): the per-boot files already hold every take
+  untouched, and copies per take would be a second truth to keep in step; the
+  `takes` table says which file holds each take.
+- The server notes each take as it ends (how it ended, frames whole / half /
+  missing, datagrams lost, KB/s) and imports it into DuckDB (`store.ts`): "take N
+  stored: … frames, … targets". A take whose `TAKE_END` never came is imported
+  as "cut". `npm run import` (in `pc/robot/`) imports every take of every raw file
+  again (`-- <file>` for some): a take's rows are replaced, its note and the truth
+  objects stay. All twelve takes of 10 Oct: 1.4 s.
+- `npm run decode -- <file> [--records]` prints a raw file's takes or records.
+- The database is opened for each operation and closed after it, so the `duckdb`
+  command line (`brew install duckdb`; `duckdb pc/robot/recordings/robot.duckdb`)
+  can use it between them; while the command line holds it, the server can't
+  store a take ("NOT stored"): `npm run import` then.
+- The page **http://127.0.0.1:8080/takes** (link "Takes" on the console) lists
+  the takes, newest first: started, take, key, action, seconds, how it ended,
+  frames whole / half / missing, datagrams lost, odometry reports, and a note to
+  click and change ("cup at 45 cm").
+- **Tables** (`store.ts` has the schema with comments). Times: `t_us` PicoA's
+  clock, `t_s` seconds since the take started. `row` and `col` are 1-8 (README);
+  `zone` is the sensor's own number 0-63.
 
-| Table | One row per | Columns (main) |
+| Table | One row per | Columns |
 |---|---|---|
-| `takes` | take | take_id, boot_id, take_no, day, key, action, params, start/end time, end reason, dropped, file, note |
-| `tof_frames` | ToF frame | take_id, frame_no, t_us, pose at t (interpolated from `ODOM`) |
-| `tof_zones` | zone × frame | take_id, frame_no, row, col, nb_targets, ambient, spads |
-| `tof_targets` | target × zone × frame | take_id, frame_no, row, col, target, distance_mm, sigma_mm, signal, reflectance, status, plus x, y, z in the world (computed at import from pose + `GEOMETRY`) |
-| `odom` | report | take_id, t_us, x, y, yaw, pitch, roll, v, w, flags |
-| `marks`, `drive` | record | take_id, t_us, text / v, w |
-| `truth` | object you place | boot_id (or take_id), name, x, y, z, size: the real cup, box, wall |
+| `takes` | take | take_id (boot id - take number), boot_id, take_no, started_at (local; before UDP: when the file was opened), day, key, action, param, version, build, duration_s, end_reason ('cut' without `TAKE_END`), frames_whole / half / missing, datagrams, datagrams_lost, odom_reports, file, note |
+| `tof_frames` | ToF frame | take_id, frame_no, t_us, t_s, skipped, temp_c, zones (64, or 32 when half was lost), x, y, yaw, pitch of the robot then (NULL if no odometry within 0.1 s) |
+| `tof_zones` | zone × frame | take_id, frame_no, zone (the sensor's), row, col (as the robot sees it), targets, ambient, spads |
+| `tof_targets` | target × zone × frame | take_id, frame_no, zone, row, col, target (0 = closest), distance_mm, sigma_mm, signal, reflectance, status, x, y, z in the world (m, odometry's frame from power-up; NULL without a pose) |
+| `odom` | report | take_id, t_us, t_s, picob_us, x, y, yaw, pitch, roll, v, w, wheel_left, wheel_right, stationary, motors_on, stop_reason, imu_error, gyro_bias |
+| `drive`, `marks`, `wifi` | record | take_id, t_us, t_s; v, w / text / rssi_dbm, console_silent_ms, console_unacked, console_retries, datagrams, datagrams_refused |
+| `truth` | object placed by hand (T4) | boot_id, take_id, name, x, y, z, size_x, size_y, size_z, note |
 
-One scan ≈ 210 frames, 13 k zones, up to 54 k targets: small for DuckDB.
+- **World positions** as the robot's code places them (`rangefinder.c`,
+  `cell_map.c`): the ray at row, col points (row − 3.5) zone angles below
+  horizontal, less the robot's pitch, and (3.5 − col) to the left; from the
+  sensor's position, along the ray by the distance; turned by yaw and moved by
+  x, y (roll ignored, as on the robot). The pose is interpolated between the two
+  odometry reports around the frame's time.
+- **First look (10 Oct, the four scans; rows 1-8):**
+  - **Floor:** rows 7-8 land at z −0.5…−0.3 cm, the floor (the geometry is right);
+    row 6 sees the floor at ~42 cm (+0.8 cm), and the box.
+  - **Row 5 gives no valid return from bare floor closer than 1 m.** In the UDP
+    scan every one came from an object: the box (30-35 cm, left, rows 5-6, signal
+    ~430), the cup (40-45 cm, ~30° right, **row 5 only**, 52 returns over ~20
+    frames, z ~5 cm), the cupboard behind (45-60 cm, rows 3-5, the strongest
+    signal, up to ~1250).
+  - **The cup in every scan, by row 5 only:** scans 1-2 at ~48 cm, 19° left (61-63
+    frames: a 390° scan passes 0-30° twice; Daniel placed it left in scan 1),
+    scans 3-4 at ~45 cm, 30° right (~20 frames). Scan 2's 6 s stall hid 145-321°.
+  - **Not found:** a stronger signal from the cup (median 205-231, other row-5
+    returns at that distance 125-316); a second target on the cup; the cup in rows
+    6-8 (they meet the floor first). The box in scans 1-2 is unclear.
+  - So the cue is a valid row-5 return under 1 m at all, seen again and again at
+    one world spot; the map losing the cup (MAP_DESIGN §8.1) is the vote's doing,
+    for T5/T6. (A first reading, "row 5 sees the floor at +4.7 cm", was wrong:
+    those returns were the cupboard.)
 
-The world x, y, z per target at import means "every 5th-row return within 10 cm of
-the cup" is one query. Example questions:
+The world x, y, z per target means "every 5th-row return within 10 cm of the
+cup" is one query. Example questions:
 - Signal per SPAD of 5th-row zones by distance: cup vs bare floor.
 - How often a 2nd target appears in a zone that sees the cup and the floor.
 - The 5th row's reading over bare floor: where it lands, how it scatters.
@@ -270,8 +305,10 @@ Each changes something visible; robot tests only where the robot changes.
    **Built 10 Oct; three robot runs over TCP (§2 "Measured"): every ODOM recorded
    after a fix, but 1-6 s stalls while turning; now UDP and a compact format
    (version 3): robot test 10 Oct, no stalls, 2-3 % of datagrams lost. Done.**
-3. **T3 Server storage**: `.rec` files per take, DuckDB import, the take list in
-   the page. Check: a take's frames, zones, targets and pose in DuckDB.
+3. **T3 Server storage**: DuckDB import, the take list in the page. Check: a
+   take's frames, zones, targets and pose in DuckDB. **Built 10 Oct** (§3; the raw
+   per-boot files stay the truth instead of per-take copies); all twelve takes
+   of 10 Oct imported; the floor lands at z ≈ 0.
 4. **T4 Viewer**: the three.js point cloud, pose, time slider, filters, truth
    objects.
 5. **T5 Replay**: `cell_map` on takes, voxels in the viewer, variants, scores.

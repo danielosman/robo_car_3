@@ -4,6 +4,27 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: T3, the recordings in DuckDB
+
+Built: `store.ts` (the schema of TELEMETRY_PLAN §3; a take imported as it ends,
+or again: rows replaced, note and truth kept; each target placed in the world as
+`rangefinder.c` / `cell_map.c` do, with the pose interpolated between odometry
+reports), `import.ts` (`npm run import`: every take of every raw file again),
+the take list page (`/takes`, notes editable), `@duckdb/node-api` 1.5.5-r.5.
+Decided while building: the raw per-boot files stay the truth; no per-take copies
+in day / boot folders as first planned. All twelve takes of 10 Oct (three TCP
+runs and the UDP run) imported in 1.4 s: ~650 k targets.
+
+Found (rows 1-8, top to bottom): the floor rows land where they should (rows 7-8:
+z −0.5…−0.3 cm). Row 5 gives no valid return from bare floor under 1 m: all of
+them were the box (30 cm), the cup (40-48 cm, row 5 only, in all four scans) or
+the cupboard behind; the cup's signal is no stronger than other returns at that
+distance. (First read as "row 5 sees the floor at +4.7 cm": wrong, those were the
+cupboard.) Rows and columns are numbered 1-8 everywhere now (README
+"Conventions"): the console's zone lines, the database, the plans (TOF_MOTION,
+SURROUNDINGS, ARCHITECTURE, cross_plan counted from 0 until now; their numbers
+moved up by one).
+
 ## 10 Oct 2026: T2 over UDP on the robot: done
 
 `2026-10-10-18-08-07-boot-0558a0ee.rec`: no stalls. `5`: nothing lost. Scan: 214

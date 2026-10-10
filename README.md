@@ -95,7 +95,8 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   datagram is lost (no waiting behind it) and counted by its number. Idle, nothing
   is sent. The PC saves every datagram in `pc/robot/recordings/raw/` (a file per
   robot boot) and notes each take; `npm run decode -- <file>` in `pc/robot/` prints
-  them.
+  them. Each take also goes into DuckDB (`pc/robot/recordings/robot.duckdb`;
+  `npm run import` rebuilds it), listed at http://127.0.0.1:8080/takes.
 - **Watching** (`a`, 1 minute). The VL53
   watches still and while turning (a background per world direction, no learning
   after a stop). The robot turns toward the biggest movement and follows it: its
@@ -499,6 +500,17 @@ README.md, [ROBOT_PLAN.md](ROBOT_PLAN.md) and [ROBOT_WIFI.md](ROBOT_WIFI.md) sho
 **only the current state**: how things are and how to use and test them. They hold
 no history. What happened (sessions, robot runs, results, fixes) goes only in
 [CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
+
+## Conventions
+
+- **VL53 rows and columns are numbered 1-8** everywhere people read them: the docs,
+  the robot's console (`zone row 5 col 3`), the database (`row`, `col`). Row 1 is
+  the top row, row 8 the bottom; column 1 is on the left as the robot sees it.
+  Rows 1-4 look up, rows 5-8 down (row r's centre is (r − 4.5) × 5.625° below
+  level); rows 7-8 see the floor close by, row 6 further out, row 5 meets it only
+  beyond ~65 cm. Only array indexes in the code start at 0 (`row index 4` is row
+  5); comments that name a row say "index" when they mean one. The sensor's own
+  zone numbers (0-63, `zone` in the database) are not rows.
 
 ## Git conventions
 

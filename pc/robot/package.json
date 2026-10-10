@@ -4,13 +4,17 @@
   "private": true,
   "type": "module",
   "description": "RoboCar PicoA console over WiFi: the robot connects here, the browser shows it (ROBOT_WIFI.md).",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test src/robot.test.ts src/recording.test.ts",
-    "decode": "node src/decode.ts"
+    "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts",
+    "decode": "node src/decode.ts",
+    "import": "node src/import.ts"
   },
   "dependencies": {
+    "@duckdb/node-api": "1.5.5-r.5",
     "ws": "^8.18.0"
   },
   "devDependencies": {

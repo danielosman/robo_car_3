@@ -25,11 +25,11 @@ static motion_obs_t obs[8];
 static float jitter(float mm) { return mm * 0.015f * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }
 static int chance(int one_in) { return rand() % one_in == 0; }
 
-static void set(int row, int col, float mm) {
+static void set(int row, int col, float mm) { // indexes: row 1 is 0
     f.range_mm[row * RANGEFINDER_COLS + col] = (uint16_t)(mm + jitter(mm));
 }
 
-// The room: the top row sees nothing in range except a far door frame (col 7, sure
+// The room: the top row sees nothing in range except a far door frame (column 8, sure
 // or empty), a wall at 2 m, the floor in the lower rows.
 static void room(void) {
     f.t_us += 66667;
@@ -72,7 +72,7 @@ static int watch(int n, void (*scene)(void)) {
     return moving;
 }
 
-static void person(void) { // columns 1-2 (left of centre), rows 1-3 (above the floor rows), at 80 cm
+static void person(void) { // columns 2-3 (left of centre), rows 2-4 (above the floor rows), at 80 cm
     for (int row = 1; row <= 3; row++)
         for (int col = 1; col <= 2; col++) set(row, col, 800.0f);
 }

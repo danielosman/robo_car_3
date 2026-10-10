@@ -196,6 +196,9 @@ export class Take {
   gaps = 0;        // version 1-2: places where ToF frames were left out
   widestGap = 0;   // the most frames left out in one place
   lastTUs: number;
+  records: Parsed[] = [];                  // every record kept (repeats left out), for storing (store.ts)
+  startedAtMs: number | null = null;       // when its first datagram arrived (PC clock); null before UDP
+  file = "";                               // the raw file it is in
   frameZones = new Map<number, number>(); // frame number -> zones arrived
   seqs = new Set<number>();               // datagrams of the take (version 3)
   firstSeq = -1;
@@ -204,6 +207,7 @@ export class Take {
   constructor(start: TakeStart, bytes: number) { this.start = start; this.lastTUs = start.tUs; this.add(start, bytes); }
 
   add(r: Parsed, bytes: number, crcOk = true): void {
+    this.records.push(r);
     this.counts[r.kind] = (this.counts[r.kind] ?? 0) + 1;
     this.bytes += bytes;
     if (!crcOk) this.crcErrors++;
@@ -221,6 +225,17 @@ export class Take {
     this.seqs.add(seq);
   }
 
+  // Frames whole / half / never arrived, datagrams received / lost (version 3).
+  get frameCounts(): { whole: number; half: number; missing: number } {
+    const nums = [...this.frameZones.keys()];
+    const whole = [...this.frameZones.values()].filter(z => z >= 64).length;
+    const range = nums.length ? Math.max(...nums) - Math.min(...nums) + 1 : 0;
+    return { whole, half: this.frameZones.size - whole, missing: range - this.frameZones.size };
+  }
+  get datagramCounts(): { received: number; lost: number } {
+    return { received: this.seqs.size, lost: this.firstSeq < 0 ? 0 : this.lastSeq - this.firstSeq + 1 - this.seqs.size };
+  }
+
   get name(): string { return `take ${this.start.takeNo} (${this.start.key === " " ? "space" : this.start.key} ${this.start.action}, boot ${this.start.bootId})`; }
 
   // One line: how it ended, the frames, what was lost, the size and rate.
@@ -229,13 +244,9 @@ export class Take {
     const rate = (n: number) => (n / Math.max(s, 1e-3)).toFixed(1);
     const parts = [this.end ? this.end.reason : "CUT (no TAKE_END)", `${s.toFixed(1)} s`];
     if (this.start.version >= 3) {
-      const nums = [...this.frameZones.keys()];
-      const whole = [...this.frameZones.values()].filter(z => z >= 64).length, half = this.frameZones.size - whole;
-      const range = nums.length ? Math.max(...nums) - Math.min(...nums) + 1 : 0;
-      parts.push(`${whole} ToF frames (${rate(whole)}/s)` + (half ? `, ${half} half` : "") +
-        `, ${range - this.frameZones.size} missing`);
-      const expected = this.lastSeq - this.firstSeq + 1, lost = expected - this.seqs.size;
-      parts.push(`${this.seqs.size} datagrams, ${lost} lost (${(100 * lost / Math.max(expected, 1)).toFixed(1)} %)` +
+      const { whole, half, missing } = this.frameCounts, { received, lost } = this.datagramCounts;
+      parts.push(`${whole} ToF frames (${rate(whole)}/s)` + (half ? `, ${half} half` : "") + `, ${missing} missing`);
+      parts.push(`${received} datagrams, ${lost} lost (${(100 * lost / Math.max(received + lost, 1)).toFixed(1)} %)` +
         (this.end?.datagramsFailed ? `, ${this.end.datagramsFailed} refused on the robot` : ""));
     } else {
       const frames = this.counts.TOF_RAW ?? 0;
@@ -259,16 +270,19 @@ export class TakeTracker {
   outside = 0; // records outside any take (shouldn't happen)
   onStart: (t: Take) => void = () => {};
   onEnd: (t: Take) => void = () => {};
+  file = "";   // given to each take
   private odoms = new Set<number>();
 
-  // Returns the record, or null for a repeat.
-  add(raw: RawRecord, seq?: number): Parsed | null {
+  // Returns the record, or null for a repeat. arrivalMs: when its datagram arrived.
+  add(raw: RawRecord, seq?: number, arrivalMs?: number | null): Parsed | null {
     const bytes = HEAD + raw.payload.length + CRC;
     let r: Parsed;
     try { r = parseRecord(raw, raw.type === REC.TAKE_START ? 3 : this.current?.start.version ?? 3); } catch { r = { kind: "UNKNOWN", type: raw.type }; }
     if (r.kind === "TAKE_START") {
       this.finish();
       this.current = new Take(r, bytes);
+      this.current.startedAtMs = arrivalMs ?? null;
+      this.current.file = this.file;
       this.odoms.clear();
       this.takes.push(this.current);
       if (seq !== undefined) this.current.datagram(seq);
@@ -324,7 +338,8 @@ export function* readRecordingFile(buf: Buffer): Generator<{ arrivalMs: number |
 
 export interface RecordingServerOptions { port?: number; dir: string }
 
-// Listens for PicoA's datagrams; a file per robot boot. Events: "note" (string).
+// Listens for PicoA's datagrams; a file per robot boot. Events: "note" (string),
+// "take" (Take: ended or cut, with its records).
 export class RecordingServer extends EventEmitter {
   private socket = dgram.createSocket("udp4");
   private port: number;
@@ -370,7 +385,7 @@ export class RecordingServer extends EventEmitter {
     entry.writeDoubleLE(Date.now(), 2);
     this.file!.write(Buffer.concat([entry, msg]));
     if (!this.dedup.fresh(d)) return;
-    for (const r of d.records) this.tracker.add(r, d.seq);
+    for (const r of d.records) this.tracker.add(r, d.seq, Date.now());
     if (d.broken) this.emit("note", `datagram ${d.seq}: a record cut off`);
   }
 
@@ -386,8 +401,9 @@ export class RecordingServer extends EventEmitter {
     this.arrivals = createWriteStream(file.replace(/\.rec$/, ".arrivals.csv"));
     this.arrivals.write("ms,connection,bytes\n");
     this.tracker = new TakeTracker();
+    this.tracker.file = file;
     this.tracker.onStart = t => this.emit("note", `recording ${t.name}`);
-    this.tracker.onEnd = t => this.emit("note", t.summary());
+    this.tracker.onEnd = t => { this.emit("note", t.summary()); this.emit("take", t); };
     this.emit("note", `recordings from boot ${bootId}: saving to raw/${path.basename(file)}`);
   }
 }

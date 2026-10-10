@@ -9,9 +9,10 @@ TOF_MOTION_PLAN.md (owns the per-reading confidence, `tof_quality`) and
 types, one recording path R0, the measurement session M-S, the milestone order)
 are followed here. Sources in §12.
 
-**Conventions.** VL53 rows are **0-based, row 0 at the top**, as in the code: row r's
-centre is (r − 3.5) × 5.625° below level, so rows 0-3 look up and rows 4-7 look down.
-(README's "rows 6 / 7 / 8" are rows 5 / 6 / 7 here.) The robot is **12 cm tall**
+**Conventions.** VL53 rows are numbered **1-8, row 1 at the top** (README; the code's
+indexes are one less): row r's centre is (r − 4.5) × 5.625° below level, so rows 1-4
+look up and rows 5-8 look down. (This file counted from 0 until 10 Oct; all its row
+numbers were moved up by one then.) The robot is **12 cm tall**
 (Daniel; ROBOT_PLAN §3 still says 10 cm and is fixed in S3).
 
 ## 1. In short
@@ -41,7 +42,7 @@ centre is (r − 3.5) × 5.625° below level, so rows 0-3 look up and rows 4-7 l
     → G negative).
 - **Differs from Daniel's suggestion** ("ground cell centred 5 cm below the floor",
   i.e. G = −10…0 cm): the top of the ground band is at **+3 cm**. With a top at 0 the
-  cone rule could never call row 5's or row 6's readings floor, and the hit-point
+  cone rule could never call row 6's or row 7's readings floor, and the hit-point
   method gives a ring of false obstacles (§3.2). Open question 1.
 - Removed: `rangefinder`'s floor learning and the 300 kept start-up frames, the old
   map cells (together −135 KB RAM), `misses_left` / `sightings` / `no_floor` /
@@ -53,7 +54,7 @@ centre is (r − 3.5) × 5.625° below level, so rows 0-3 look up and rows 4-7 l
 | Today | Problem |
 |---|---|
 | Each floor zone learns its floor distance and scatter during the start-up turn | Needs a full turn first (the map is empty until then), 300 kept frames (64 KB) and 33 KB of samples; failed when half the turn looked over a desk edge (CHANGELOG 5 Oct); can't follow a change of floor (carpet edge) after the start |
-| Rows 4, 5, 6-7 each have special rules (horizon row, row 5 "tells nothing" when far, rows 6-7 tell drops, an unlearned row 4 used like the rows above) | Five cases to keep consistent; each was a fix for one robot run |
+| Rows 5, 6, 7-8 each have special rules (horizon row, row 6 "tells nothing" when far, rows 7-8 tell drops, an unlearned row 5 used like the rows above) | Five cases to keep consistent; each was a fix for one robot run |
 | Layer 0 = 2-12 cm, judged by a learned margin per zone; far walls show only as `''` | The 2 cm line is judged per zone in range, the layers by height: two systems |
 | Counters: 6 misses clear, 3 "no floor" make `?` | Every reading counts the same: a sure status 5 and a doubtful status 9 alike |
 | Free space walked along the zone's centre only | Radial lines of unknown cells inside free areas (REDFLAGS M2) |
@@ -64,7 +65,7 @@ centre is (r − 3.5) × 5.625° below level, so rows 0-3 look up and rows 4-7 l
 
 A zone doesn't measure along a line. It sees the nearest (in practice: the
 strongest) surface **anywhere in its cone**, 5.6° tall. Side view of one zone that
-looks down (row 6), with the four lines the rule uses:
+looks down (row 7), with the four lines the rule uses:
 
 ```
  height                                                    range r of the reading
@@ -128,14 +129,14 @@ Binning the centre-ray hit point (centre direction × range → height → layer
 
 | Row | Typical floor reading | Centre-ray height | Floor readings seen | Their centre-ray heights |
 |---|---|---|---|---|
-| 7 | 21 cm | −0.1 cm | 19-24 | +0.6 … −1.1 |
-| 6 | 31 cm | −0.5 cm | 28-33 | +0.2 … −1.0 |
-| 5 | 47 cm | **+0.1 cm** | 35-53 | **+1.9** … −0.8 |
-| 4 | (lower edge grazes the floor) | | 66-80 | **+3.8 … +3.1** |
+| 8 | 21 cm | −0.1 cm | 19-24 | +0.6 … −1.1 |
+| 7 | 31 cm | −0.5 cm | 28-33 | +0.2 … −1.0 |
+| 6 | 47 cm | **+0.1 cm** | 35-53 | **+1.9** … −0.8 |
+| 5 | (lower edge grazes the floor) | | 66-80 | **+3.8 … +3.1** |
 
-- **Ground band −10…0 cm:** row 5's floor lands above 0 about half the time: a ring
+- **Ground band −10…0 cm:** row 6's floor lands above 0 about half the time: a ring
   of false obstacles at ~40-50 cm, the ring M2 had on its first run.
-- **Ground band −7…+3 cm:** fixes rows 5-7, but not row 4 grazing the floor at
+- **Ground band −7…+3 cm:** fixes rows 6-8, but not row 5 grazing the floor at
   66-80 cm (+3.1…+3.8 cm, +1.2 cm more per degree of nose-up). It would need a
   5 cm band, and the slack still grows with range. Sigma doesn't help: the error is
   the cone, not the range.
@@ -144,11 +145,11 @@ Binning the centre-ray hit point (centre direction × range → height → layer
 
 | Row | Floor patch (where the cone meets a flat floor) | OBSTACLE if r < | FLOOR if r ≥ | Range error needed before the floor reads as an obstacle |
 |---|---|---|---|---|
-| 0-3 | never (they look level or up) | always (z_lo ≥ 5.7 cm) | never | — |
-| 4 | 65.7 cm … ∞ | 37.6 cm | never | 28 cm (or 2.9° of pitch) |
-| 5 | 34.4-78.2 cm | 19.7 cm | 44.7 cm | 15 cm |
-| 6 | 23.5-37.5 cm | 13.4 cm | 21.4 cm | 10 cm |
-| 7 | 17.9-24.8 cm | 10.2 cm | 14.2 cm | 8 cm |
+| 1-4 | never (they look level or up) | always (z_lo ≥ 5.7 cm) | never | — |
+| 5 | 65.7 cm … ∞ | 37.6 cm | never | 28 cm (or 2.9° of pitch) |
+| 6 | 34.4-78.2 cm | 19.7 cm | 44.7 cm | 15 cm |
+| 7 | 23.5-37.5 cm | 13.4 cm | 21.4 cm | 10 cm |
+| 8 | 17.9-24.8 cm | 10.2 cm | 14.2 cm | 8 cm |
 
 A floor reading has to be wrong by 8-28 cm of range to become an obstacle. Pitch
 errors move z by r·sin(Δp): 0.35 cm per degree at 20 cm. Roll −5° during turns
@@ -157,21 +158,21 @@ learning is needed.**
 
 What it costs:
 - **The smallest obstacle is 3 cm.** Anything lower is ground and gets driven at.
-  (Today an obstacle of 2-3 cm is also seen only within ~25 cm, by rows 5-6.)
-- **A 3-7 cm object is first seen** when row 4's slice clears H, at r < 37.6 cm
+  (Today an obstacle of 2-3 cm is also seen only within ~25 cm, by rows 6-7.)
+- **A 3-7 cm object is first seen** when row 5's slice clears H, at r < 37.6 cm
   along the ray: **~30 cm ahead of the front edge** (the sensor is 7 cm behind it).
   Today's map shows an 8 cm box at ~40 cm along the ray, about the same. Taller
-  things are seen by row 3 at any range.
-- **The floor is seen out to ~78 cm**, by rows 5-7 only. Row 5 readings of
-  34-44.7 cm say nothing about the surface. A row 5 FLOOR reading at r ≥ 44.7 cm
+  things are seen by row 4 at any range.
+- **The floor is seen out to ~78 cm**, by rows 6-8 only. Row 6 readings of
+  34-44.7 cm say nothing about the surface. A row 6 FLOOR reading at r ≥ 44.7 cm
   marks G from where its cone meets the floor (34 cm) to r, so a reading of 47 cm
   covers 34-47 cm; 47-78 cm stays unclaimed. How big the `.` disc really is depends
-  on how often row 5 reads ≥ 44.7 cm: measured in M-S (§9). Beyond the disc:
+  on how often row 6 reads ≥ 44.7 cm: measured in M-S (§9). Beyond the disc:
   "open, floor not seen" (`:`), as today.
-- **A low box can be read as floor from 45-75 cm.** Row 5's slice at 50 cm is
+- **A low box can be read as floor from 45-75 cm.** Row 6's slice at 50 cm is
   −3.2…+2.5 cm; if its return comes from the lowest 2.5 cm of an 8 cm box's face,
   that is FLOOR, and G in the box's column says floor. The column still isn't
-  drivable: row 4 sees the box (its slice crosses H, so NOTHING), its free space
+  drivable: row 5 sees the box (its slice crosses H, so NOTHING), its free space
   stops 5 cm short of the box, and L1 there stays unknown (§5, test in S2).
 
 ### 3.4 Pitch: where it comes from and the slack
@@ -181,20 +182,20 @@ changes, the accelerometer's gravity direction over ~0.5 s. Braking or speeding 
 at a m/s² tilts the measured gravity by atan(a / g): 2.3° at the drive's 0.4 m/s²
 ramp, and the filter passes part of that for a few tenths of a second. So the
 slack in α is **0.5° + atan(|a| / g)**, with `a` from the change of odometry's
-speed: 0.5° standing or cruising, up to ~2.8° while braking. Row 4 needs 2.9° of
+speed: 0.5° standing or cruising, up to ~2.8° while braking. Row 5 needs 2.9° of
 pitch error before its floor turns into an obstacle. S2 tests a wrong pitch spike.
 
 ### 3.5 Drops
 
 A drop is missing floor where a cone had to meet it. For a zone with a short floor
-patch [d1, d2] (rows 5-7; row 4's patch never ends):
+patch [d1, d2] (rows 6-8; row 5's patch never ends):
 
 - **No credible target** ("nothing" ray), or the nearest credible target **beyond
   d2** (by 10 % + 3 sigma_eff): the cone crossed the floor plane between d1 and d2
   and nothing came back from there → **G cells under the patch get "no floor"**.
 - **Weight:** the ray's confidence (a "nothing" ray has 0.5, the shared model's
-  value; a far credible return its own confidence), times 1 for rows 6-7 and 1/3
-  for row 5 (it reflects off waxed wood ~1 in 24 readings).
+  value; a far credible return its own confidence), times 1 for rows 7-8 and 1/3
+  for row 6 (it reflects off waxed wood ~1 in 24 readings).
 - **Veto:** if the zone's `weak_range_m` (nearest non-credible target) lies inside
   [d1, d2], it probably saw the floor faintly: no G update. A glossy floor often
   reflects the light to the wall but may still return a faint floor target.
@@ -258,8 +259,8 @@ For each ray (one per zone, §6):
    - **to L1 only where the zone's cone at that distance reaches down to
      z_lo ≤ H + 2 cm (5 cm).** Obstacles stand on the floor, so they always fill
      L1's bottom. A cone passing above a low box says nothing about the box. This
-     is how rows 4-7 cover L1's bottom: from about 19 / 10 / 7 / 5 cm along the
-     ray. Row 3 only does it beyond 2.3 m, rows 0-2 never;
+     is how rows 5-8 cover L1's bottom: from about 19 / 10 / 7 / 5 cm along the
+     ray. Row 4 only does it beyond 2.3 m, rows 1-3 never;
    - to L2 at any covered height. What matters in L2 is its lowest part (does
      anything hang down toward the robot?), and the cone sees that first.
    A sub-ray stops where it goes below H: the floor or a drop, not free space.
@@ -292,7 +293,7 @@ is what decisions use for people.
 **Cost:** 64 zones × 5 sub-rays × ≤ 40 steps ≈ 13 k steps per frame at most, ~6 k
 typically. At 30-50 cycles a step: ~2 ms typically and up to ~4.3 ms worst case.
 Target: **typical < 2 ms, worst frame < 5 ms** (printed by `p`, mean and worst).
-If it's over: sub-rays only for rows 0-4 (the long ones).
+If it's over: sub-rays only for rows 1-5 (the long ones).
 
 ### 4.4 Columns and queries
 
@@ -307,9 +308,9 @@ One function decides what a column is, used by the print and every query:
 | OPEN | L1 ≤ −16, L2 ≤ −16, G unknown | `: ` |
 | UNKNOWN | anything else (e.g. L2 still unknown) | blank |
 
-**Is L2 ever free near the robot?** Rows 0-2 look up 8-23°. Row 0's lower edge
+**Is L2 ever free near the robot?** Rows 1-3 look up 8-23°. Row 1's lower edge
 (16.4° up) reaches 13 cm at **20 cm ahead of the sensor** (23 cm from the robot's
-centre). Rows 0-3 together cover all of 13-23 cm from ~38 cm on. Between 20 and
+centre). Rows 1-4 together cover all of 13-23 cm from ~38 cm on. Between 20 and
 38 cm only L2's lower part is seen, which is the part that matters (above ~16 cm
 nothing touches a 12 cm robot). Inside ~20 cm ahead of the sensor, and beside and
 behind the robot within the same distance, **no zone ever sees L2**, however the
@@ -361,7 +362,7 @@ blank unknown   () robot   ** 30 cm ahead of it
 ```
 
 The same symbols as today with new heights (3 cm instead of 2, 13 instead of 12).
-"Obstacle" now also covers walls seen from far away (row 3's slice reaches L1).
+"Obstacle" now also covers walls seen from far away (row 4's slice reaches L1).
 
 `z` prints, per zone:
 - the distance and the confidence (0-9);
@@ -372,70 +373,70 @@ The same symbols as today with new heights (3 cm instead of 2, 13 instead of 12)
 
 Robot level, α = 3.3°, sure readings (w = 1).
 
-**Floor ahead: rows 7 / 6 / 5 at 21 / 31 / 47 cm.**
-- Row 7: slice −1.2 … +1.1 cm → FLOOR. G hits from 16.6 to 19.8 cm ahead of the
+**Floor ahead: rows 8 / 7 / 6 at 21 / 31 / 47 cm.**
+- Row 8: slice −1.2 … +1.1 cm → FLOOR. G hits from 16.6 to 19.8 cm ahead of the
   sensor. Free space: the cone is above H only for the first ~11 cm, under the
   robot.
-- Row 6: −2.3 … +1.2 → FLOOR, G from 22.4 to 30 cm.
-- Row 5: −2.6 … +2.8 → FLOOR (just), G from 34 to 46 cm. A shorter reading:
+- Row 7: −2.3 … +1.2 → FLOOR, G from 22.4 to 30 cm.
+- Row 6: −2.6 … +2.8 → FLOOR (just), G from 34 to 46 cm. A shorter reading:
   - 40 cm: −1.1 … +3.4 → can't tell, no G update; 35 cm likewise;
   - only 19.7 cm or less would be an obstacle.
-- Row 4 (its floor patch starts at 66 cm): any reading of 66 cm or more straddles
+- Row 5 (its floor patch starts at 66 cm): any reading of 66 cm or more straddles
   H → nothing about the surface; free space in L1 up to it.
-- The robot nodding ±2° when braking moves row 5 at 47 cm by ±1.6 cm (and α grows,
+- The robot nodding ±2° when braking moves row 6 at 47 cm by ±1.6 cm (and α grows,
   §3.4): still floor or "can't tell", never an obstacle.
 
 **An 8 cm box, front face 60 cm ahead.**
-- Row 5: the floor in front of the box (34-60 cm) is nearer → FLOOR. If it
+- Row 6: the floor in front of the box (34-60 cm) is nearer → FLOOR. If it
   returned the box's lowest part instead (§3.3): FLOOR in the box's column too.
-- Row 4: its slice at 60 cm is 0.6 … 7.5 cm, all box → reads 60 → crosses H →
+- Row 5: its slice at 60 cm is 0.6 … 7.5 cm, all box → reads 60 → crosses H →
   nothing. Its free space stops at 55 cm, so the box column's L1 stays unknown:
   **not DRIVABLE** even if G says floor.
-- Row 3: slice 6.5 … 13.4 cm; the box fills its lowest 1.5 cm (~20 %). If the VL53
+- Row 4: slice 6.5 … 13.4 cm; the box fills its lowest 1.5 cm (~20 %). If the VL53
   returns it: OBSTACLE in L1. Likely only now and then.
 - Driving closer: from 37.6 cm along the ray (~30 cm ahead of the front edge),
-  row 4's slice lies above H (at 37 cm: 3.1 … 7.3) → OBSTACLE, L1 `##` after 3 frames.
-- **Backing away again:** rows 0-3 pass over the box at 7-23 cm, but their cones
-  don't reach down to 5 cm there, so their misses don't count in L1. Row 4's cone
+  row 5's slice lies above H (at 37 cm: 3.1 … 7.3) → OBSTACLE, L1 `##` after 3 frames.
+- **Backing away again:** rows 1-4 pass over the box at 7-23 cm, but their cones
+  don't reach down to 5 cm there, so their misses don't count in L1. Row 5's cone
   reaches down, but it hits the box. The box stays `##` (today it would clear after
   6 readings that pass over it).
 
 **A wall at 1.5 m.**
-- Row 3: slice 5.7 … 23 cm → hits in L1 and L2 at the wall: `##` (today `''`,
+- Row 4: slice 5.7 … 23 cm → hits in L1 and L2 at the wall: `##` (today `''`,
   because only the centre point counted, 14 cm high).
-- Row 2: slice 20 … 38 cm → a hit in L2 where it overlaps (20-23 cm).
-- Row 4: −9 … +8 cm → nothing about the surface. Its cone reaches below 5 cm, so
-  its sub-rays free L1 up to ~1.45 m. Rows 0-3 free L2.
-- Row 5: the floor, 45-78 cm.
+- Row 3: slice 20 … 38 cm → a hit in L2 where it overlaps (20-23 cm).
+- Row 5: −9 … +8 cm → nothing about the surface. Its cone reaches below 5 cm, so
+  its sub-rays free L1 up to ~1.45 m. Rows 1-4 free L2.
+- Row 6: the floor, 45-78 cm.
 - So: `.` to ~75 cm, `:` to the wall, then `##`.
 
 **A table edge** (robot on a 75 cm desk, the edge 20 cm ahead of the sensor).
-- Row 7's patch (17-23 cm ahead) is half on the desk: it reads ~19 cm → FLOOR on
+- Row 8's patch (17-23 cm ahead) is half on the desk: it reads ~19 cm → FLOOR on
   the desk side.
-- Row 6's patch (23-36 cm) is all beyond the edge. The floor below is 3.4 m away
+- Row 7's patch (23-36 cm) is all beyond the edge. The floor below is 3.4 m away
   along the ray: no return, or a far one. No faint target inside the patch → "no
   floor" in G there, `?` after 2-3 frames.
-- Row 5: a third of a miss on 34-78 cm per frame.
+- Row 6: a third of a miss on 34-78 cm per frame.
 - Result: `.` up to the edge, `?` beyond it, `:` farther (L1 still free: nothing
   stands in the air). Beyond the edge is never drivable: G must be floor.
 
 **A chair leg** (Ø 2.5 cm, 50 cm ahead; seat at 45 cm).
-- At 50 cm a zone is 4.9 cm wide, and the leg fills half. Row 3 (slice 6.6 …
+- At 50 cm a zone is 4.9 cm wide, and the leg fills half. Row 4 (slice 6.6 …
   12.3) returns the leg in most frames → OBSTACLE in L1.
-- Row 4's sub-rays from neighbouring zones pass through the leg's cell low down →
+- Row 5's sub-rays from neighbouring zones pass through the leg's cell low down →
   misses. The leg stays `##` while it is returned in ≥ 1/3 of the frames that look
   through it (§4.2). The seat is above 23 cm: not in the map.
 - At 1.5 m (zone 15 cm wide) the leg may lose to the wall behind it: it is seen as
   the robot comes closer.
 
 **A person walking through** (1 m/s, 1 m ahead, robot still).
-- At 1 m the zones see up to ~46 cm: legs. Rows 0-3 see them → L1/L2 hits. A 10 cm
+- At 1 m the zones see up to ~46 cm: legs. Rows 1-4 see them → L1/L2 hits. A 10 cm
   cell is covered for ~0.3 s (5 frames): from −64 to +80.
-- After they pass: 8 frames (0.53 s) of row 4's misses to free each cell. The map
+- After they pass: 8 frames (0.53 s) of row 5's misses to free each cell. The map
   shows a ~0.5 m trail that clears within a second. Each cell gives one APPEARED
   and one CLEARED change. Decisions about people use movement, not the map.
 
-**A glossy cupboard on waxed wood.** Rows 6-7 sometimes read "beyond the floor" in
+**A glossy cupboard on waxed wood.** Rows 7-8 sometimes read "beyond the floor" in
 front of it (README). With the veto (a faint target inside the patch), those
 readings say nothing. Without one they count as "no floor" and give `?` in front
 of the cupboard, as today (the safe side; accepted).
@@ -504,15 +505,15 @@ or bumper ray fits too. The only VL53 knowledge it keeps is the per-row drop wei
 
 | Alternative | Why not |
 |---|---|
-| Ground band −10…0, centre-ray height (Daniel's first idea) | Row 5's floor sits at −0.8…+1.9: a false ring (§3.2) |
-| Ground band −7…+3, centre-ray height | Fine for rows 5-7; row 4 grazing the floor at 66-80 cm lands at +3.1…+3.8 (+1.2 per degree): needs a 5 cm band, still range-dependent |
+| Ground band −10…0, centre-ray height (Daniel's first idea) | Row 6's floor sits at −0.8…+1.9: a false ring (§3.2) |
+| Ground band −7…+3, centre-ray height | Fine for rows 6-8; row 5 grazing the floor at 66-80 cm lands at +3.1…+3.8 (+1.2 per degree): needs a 5 cm band, still range-dependent |
 | Keep floor learning, as a per-zone range correction | Not needed once the cone decides (8-28 cm of margin); costs ~96 KB, a full turn before anything is mapped, and failed at the desk |
-| "L2 not occupied" instead of free (first draft) | Daniel's rule is achievable: rows 0-2 see L2 from 20 cm ahead of the sensor; only the ring right around the robot needs the rule in §4.4 |
+| "L2 not occupied" instead of free (first draft) | Daniel's rule is achievable: rows 1-3 see L2 from 20 cm ahead of the sensor; only the ring right around the robot needs the rule in §4.4 |
 | Misses count in L1 at any height in the layer (first draft) | Cones passing at 8-12 cm erase a 5 cm box within ~8 frames once the robot backs off (§4.3) |
 | A height per column (elevation map, as on legged robots) | A VL53 reading gives a 1-15 cm slice, not a height; overhangs need layers anyway |
 | OctoMap's octree | 4 800 cells fit in a flat array; an octree saves nothing here |
 | Spread an obstacle's evidence over the arc (Elfes' sonar weights) | The arc covers at most 2 layers below 2 m; full weight in both is simpler and on the safe side |
-| Readings short of the floor patch but under 3 cm high (row 4 at 38-66 cm) as weak obstacles | Would see the 8 cm box from 60 cm, but also cables and rug edges; revisit with M-S data (open question 3) |
+| Readings short of the floor patch but under 3 cm high (row 5 at 38-66 cm) as weak obstacles | Would see the 8 cm box from 60 cm, but also cables and rug edges; revisit with M-S data (open question 3) |
 | Non-credible targets for occupancy at a low weight | The floor echo at ~30 cm would draw a ring; they are used only for the drop veto |
 | Decay toward unknown (Nav2's spatio-temporal voxel layer) | Daniel: nothing fades; age is the behaviour's business |
 | Fixed hit/miss counters (today) | Can't weigh a sure reading more than a doubtful one |
@@ -541,7 +542,7 @@ movement tests; built from today's `cast()` in `test_behaviour.c`):
   - a walker (two legs with a gait, cross-plan §1);
   - a glossy floor: with probability p a zone reports the wall instead of the
     floor, plus a faint non-credible floor target;
-  - the floor echo (a faint target at 30 cm in rows 0-4);
+  - the floor echo (a faint target at 30 cm in rows 1-5);
   - pitch and roll as a function of time, and a separate *measured* pitch that can
     be wrong.
 
@@ -552,11 +553,11 @@ situations are in cross-plan §4's list. What each is for here:
 
 | Situation | Decides |
 |---|---|
-| Open floor; the floor turned by hand | Which statuses rows 4-7 give on the floor; how often row 5 reads ≥ 44.7 cm (the `.` disc) |
+| Open floor; the floor turned by hand | Which statuses rows 5-8 give on the floor; how often row 6 reads ≥ 44.7 cm (the `.` disc) |
 | `n` scan; `r` turns | Roll during turns; pitch while starting and stopping |
 | Table edge 15 cm | The drop rule: no return vs far return; any faint target in the patch? |
 | Glossy cupboard at 40 cm | The veto: does a faint floor target come with the reflections? |
-| Box at 60 / 45 / 30 cm | Row 4's and row 3's returns from a low box; row 5 reading the box as floor |
+| Box at 60 / 45 / 30 cm | Row 5's and row 4's returns from a low box; row 6 reading the box as floor |
 | Chair at 50 cm | How often a leg is returned (vs the 1/3 rule) |
 | Carpet | "Nothing" within 1 m on dark carpet; no false drops at its edge |
 | Walks at 1 / 2 m | The trail and how fast it clears |
@@ -574,29 +575,29 @@ next to the old "what each zone makes of it".
 
 Host tests (`test_classify`):
 - The §3.3 table: for each row, the patch and the obstacle and floor limits within
-  0.5 cm of the numbers above. Row 7 at 21 cm → FLOOR with z_lo −1.2 ± 0.1, z_hi
+  0.5 cm of the numbers above. Row 8 at 21 cm → FLOOR with z_lo −1.2 ± 0.1, z_hi
   1.1 ± 0.1.
 - A flat floor with pitch −2°…+2° in 0.5° steps and roll −5…+5°, noise ±2 cm,
   10 000 random readings per zone across its patch. Expected: **0 OBSTACLE**; rows
-  6-7 always FLOOR; row 5 FLOOR or NOTHING; row 4 never FLOOR. The same with roll
+  7-8 always FLOOR; row 6 FLOOR or NOTHING; row 5 never FLOOR. The same with roll
   ±5° changing *during* a simulated turn, and with the pitch sequence of the M-S
   `n` scan clip.
-- The 8 cm box at 60 / 45 / 35 / 30 cm: row 4 NOTHING, NOTHING, OBSTACLE, OBSTACLE.
-  At 50 cm, row 5 returning the box's base → FLOOR (documented, §3.3).
+- The 8 cm box at 60 / 45 / 35 / 30 cm: row 5 NOTHING, NOTHING, OBSTACLE, OBSTACLE.
+  At 50 cm, row 6 returning the box's base → FLOOR (documented, §3.3).
 - A 2 cm thing at 15-40 cm: never OBSTACLE.
-- The desk edge: rows 6-7 beyond the edge → NO_FLOOR. With `weak_range_m` inside the
+- The desk edge: rows 7-8 beyond the edge → NO_FLOOR. With `weak_range_m` inside the
   patch → NOTHING (veto). A frame with all 64 zones empty → no NO_FLOOR.
-- The floor echo plus a wall at 1.5 m (row 2): the ray is the wall, OBSTACLE.
+- The floor echo plus a wall at 1.5 m (row 3): the ray is the wall, OBSTACLE.
 - Braking: true pitch 0, measured pitch +3° for 0.2 s, a = 0.4 m/s² → α slack 2.8°:
-  0 OBSTACLE in rows 4-7.
-- Golden: the M-S open-floor clips replayed → 0 OBSTACLE in rows 4-7.
+  0 OBSTACLE in rows 5-8.
+- Golden: the M-S open-floor clips replayed → 0 OBSTACLE in rows 5-8.
 
 Robot (PicoA, PicoB running):
-1. On open floor, `z` five times. Expected: rows 6-7 `F`; row 5 `F` or `~`; row 4
-   `~` or `-`; rows 0-3 `#N` (walls) or `-`. Paste one.
+1. On open floor, `z` five times. Expected: rows 7-8 `F`; row 6 `F` or `~`; row 5
+   `~` or `-`; rows 1-4 `#N` (walls) or `-`. Paste one.
 2. A box at 60 cm, then at 35 cm, `z` at each. Expected: at 60 cm the row-4 zones
    behind the box `~`; at 35 cm `#3`-`#4` there.
-3. Robot 15 cm from the table edge (hand ready), `z`. Expected: `v` in row 6 (and
+3. Robot 15 cm from the table edge (hand ready), `z`. Expected: `v` in row 7 (and
    7) across the zones that look over the edge, `F` on the desk side.
 4. Facing the glossy cupboard at ~40 cm, `z` five times: count the `v` (paste).
 
@@ -736,8 +737,8 @@ Robot:
   only assumes the reported range lies within the cone's span at that range. A
   merged return (box plus wall, status 9) can place a phantom surface between them.
   Status 9 has half the confidence and twice the sigma_eff, so it needs 6 frames.
-- **Row 5 on waxed wood** gives many 35-44 cm readings that say nothing. If row 5
-  rarely reaches 44.7 cm, the `.` disc shrinks to ~37 cm (rows 6-7). M-S measures it.
+- **Row 6 on waxed wood** gives many 35-44 cm readings that say nothing. If row 6
+  rarely reaches 44.7 cm, the `.` disc shrinks to ~37 cm (rows 7-8). M-S measures it.
 - **Pitch while braking** (§3.4): the slack covers the accelerometer's share; a
   bigger filter error (bumps, a wheel on a sill) could still shift floor and drop
   edges, never by enough to turn the floor into obstacles (2.9° needed).
@@ -746,7 +747,7 @@ Robot:
 - **The L2 ring rule** (§4.4) is an assumption: a shelf at 13-16 cm within 25 cm of
   where the robot was put down would be called free.
 - **Low boxes kept forever** while nothing looks at their base: a box taken away
-  while the robot is farther than ~2 m stays `##` until row 4 looks there again.
+  while the robot is farther than ~2 m stays `##` until row 5 looks there again.
   That is the safe side.
 - **CPU:** worst frames may exceed 5 ms; fallback in §4.3.
 - **Changes** are noisier with weighting: hysteresis in §4.3, grouping in M5.
@@ -760,7 +761,7 @@ Robot:
    §3.2)? Can the wheels (Ø 9 cm) cross 3 cm reliably?
 2. **Clearance:** L1 ends at 13 cm (12 cm robot + 1 cm), and L2 (13-23 cm) must be
    free too, with the ring rule of §4.4. OK, or is "not occupied" enough for L2?
-3. Should a reading **short of the floor patch but under 3 cm high** (row 4 at
+3. Should a reading **short of the floor patch but under 3 cm high** (row 5 at
    38-66 cm) count as a weak obstacle, to see an 8 cm box from 60 cm?
 4. **Grid size:** 6 × 6 m costs ~29 KB. Decide before M4.
 5. **`max_m` for "nothing":** 1 m still right on dark carpet and black furniture

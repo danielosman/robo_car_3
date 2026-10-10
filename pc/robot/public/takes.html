@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboCar takes</title>
+<style>
+:root { color-scheme:dark; } * { box-sizing:border-box; }
+body { margin:0; padding:12px 16px; font:14px/1.4 system-ui,sans-serif; background:#111; color:#ddd; }
+h1 { font-size:18px; margin:0 0 4px; }
+p { color:#888; margin:0 0 12px; font-size:13px; }
+.wrap { overflow-x:auto; }
+table { border-collapse:collapse; font:13px ui-monospace,Menlo,monospace; }
+th, td { padding:3px 8px; border-bottom:1px solid #2a2a2a; text-align:right; white-space:nowrap; }
+th { color:#888; font-weight:normal; position:sticky; top:0; background:#111; }
+td.l, th.l { text-align:left; }
+tr.boot td { border-top:1px solid #555; }
+.bad { color:#f0a080; } .cut { color:#f06060; }
+td.note { cursor:pointer; color:#bfe0ff; white-space:normal; min-width:160px; text-align:left; }
+td.note:empty::before { content:"add a note"; color:#555; }
+</style>
+</head>
+<body>
+<h1>Takes</h1>
+<p>Newest first, from DuckDB (pc/robot/recordings/robot.duckdb). Click a note to change it. <button id="reload">Reload</button></p>
+<div class="wrap"><table id="takes"></table></div>
+<script src="takes.js"></script>
+</body>
+</html>

@@ -201,6 +201,7 @@ static void save_for_pc(void) {
 }
 
 static void test_take(void) {
+    odom.t_us = time_us_32() - 1000 - 20000; // the reports on PicoA's clock: the PC places the frames
     recorder_key('s');
     odom_report();
     recorder_take_start("scan", 6.8f);
@@ -234,7 +235,7 @@ static void test_take(void) {
     rec_geometry_t g;
     memcpy(&g, records[1].payload, sizeof g);
     assert(g.rows == 8 && g.cols == 8 && g.zone_rad == ZONE_RAD && g.sensor_m[2] == SENSOR_Z_M);
-    assert(g.zone_of_ray[0] == 56 && g.zone_of_ray[7] == 0 && g.zone_of_ray[8] == 57); // row 0 col 0: zone 56
+    assert(g.zone_of_ray[0] == 56 && g.zone_of_ray[7] == 0 && g.zone_of_ray[8] == 57); // row 1 column 1: zone 56
     rec_wifi_t wifi;
     memcpy(&wifi, records[3].payload, sizeof wifi);
     assert(records[3].len == 46 && wifi.rssi_dbm == -61 && wifi.console.retries == 2 && wifi.console_silent_ms == 300);
