@@ -36,6 +36,9 @@ build/test_rangefinder
 build test_cell_map picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP
 build/test_cell_map > build/test_cell_map.log || { cat build/test_cell_map.log; exit 1; }
 grep -v '^[|+]' build/test_cell_map.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
+build test_cell_map_readings picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP -DTEST_READINGS
+build/test_cell_map_readings > build/test_cell_map_readings.log || { cat build/test_cell_map_readings.log; exit 1; }
+grep -v '^[|+]' build/test_cell_map_readings.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
 build test_pose picoA/app/test/test_pose.c $APP
 build/test_pose
 # The actions end to end (scan, move, turn, watch) on a simulated robot in a simulated room.

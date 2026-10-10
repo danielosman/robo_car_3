@@ -291,6 +291,10 @@ A page on the existing Node server (`pc/robot`), beside the console:
   same takes. With `truth`, each gets a score (truth cells found, false blocked
   cells): "is the cup in the map?" becomes a number per variant.
 - Recorded takes with truth become regression tests (`run_tests.sh`).
+- **Started 10 Oct:** `npm run frames -- <take> <file>` (pc/robot) writes a take's
+  frames as the map receives them; `tools/replay.sh <take>` runs `cell_map.c` on
+  them in both variants (MAP_DESIGN §9) and lists every column where they
+  differ. Truth objects and scores come with the viewer.
 
 ## 6. Steps
 

@@ -7,6 +7,12 @@
 // confidence q; it keeps its best measurement and changes only for a better one, or
 // for 3 good-enough ones in a row (q ≥ 0.3). Nothing assumes a floor: floor is G
 // occupied.
+// Two variants (MAP_DESIGN.md §9): VOTES, as above (built 8 Oct), and READINGS (10
+// Oct, from the recordings): each zone's reading is judged as a whole by where its
+// cone can meet the floor: closer than that it is an obstacle (all of it, its low
+// rays too), on the floor it is floor, straddling it unsure (no hit); and a ray
+// passing a cell only counts against what it would have hit (it passed at or below
+// the highest point hit there). The robot runs VOTES until replay shows READINGS better.
 // World frame: the map frame of pose.h.
 #include <stdbool.h>
 #include "pose.h"
@@ -24,6 +30,11 @@ typedef enum {
     COLUMN_DRIVABLE, // G occupied (floor seen), L1 and L2 free
     COLUMN_OPEN,     // L1 and L2 free, G unknown
 } column_t;
+
+typedef enum { CELL_MAP_VOTES, CELL_MAP_READINGS } cell_map_variant_t;
+// floor_margin (READINGS): a reading is an obstacle if it is closer than this share of
+// where its cone first meets the floor (0.9: 10 % for pitch and noise).
+void cell_map_set_variant(cell_map_variant_t variant, float floor_margin);
 
 void cell_map_clear(void);
 // One frame, measured with the robot at `pose` (its pitch is used).

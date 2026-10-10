@@ -1,4 +1,5 @@
-// Host test for picoA/app/cell_map.c (doc/MAP_DESIGN.md) in simulated rooms: each
+// Host test for picoA/app/cell_map.c (doc/MAP_DESIGN.md), both variants (VOTES; with
+// -DTEST_READINGS, READINGS, which must also block the low box), in simulated rooms: each
 // VL53 zone reads the nearest surface over 5 x 5 directions across its cone, ±1.5 %
 // noise. After a start-up turn: an empty room has its walls and no obstacle on the
 // open floor, a box is blocked, a table top at 15-20 cm is an overhang, nothing beyond
@@ -102,6 +103,12 @@ static int count(float x0, float x1, float y0, float y1, column_t kind) {
 }
 
 int main(void) {
+#ifdef TEST_READINGS // run_tests.sh runs this test with each variant
+    cell_map_set_variant(CELL_MAP_READINGS, 0.9f);
+    printf("variant READINGS\n");
+#else
+    printf("variant VOTES\n");
+#endif
     srand(1);
     pose_t home = {0, 0, 0, 0};
 
@@ -151,7 +158,12 @@ int main(void) {
     add_box(-0.2f, 0.2f, -0.6f, -0.5f, 0, 0.07f);
     scan_at(0, 0);
     int low_front = count(-0.2f, 0.2f, -0.6f, -0.5f, COLUMN_BLOCKED);
-    printf("low box (7 cm) 50 cm to the right: %d of 4 front columns blocked (KNOWN: should be 4, open question)\n", low_front);
+#ifdef TEST_READINGS
+    printf("low box (7 cm) 50 cm to the right: %d of 4 front columns blocked\n", low_front);
+    assert(low_front >= 3);
+#else
+    printf("low box (7 cm) 50 cm to the right: %d of 4 front columns blocked (KNOWN: should be 4; READINGS fixes it)\n", low_front);
+#endif
 
     // A hole 30 x 40 cm in the floor 50-80 cm ahead. KNOWN: zones that see the floor
     // beside it stop all their rays at that distance, so a few rays into the hole mark

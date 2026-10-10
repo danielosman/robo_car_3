@@ -155,3 +155,60 @@ attempts that failed are in REWORK_CHANGELOG.md.
     closeness per cell and dropped with fix 1's attempt; it may fit again together
     with a fix for point 1.
 11. 2.5 cm objects are ground by design (the 3 cm band): fine.
+
+## 9. The READINGS variant (10 Oct, from the recordings)
+
+**Why.** The recordings (TELEMETRY_PLAN §3) show the cup in every scan, seen only by
+row 5 at 40-48 cm, and replaying the four scans through this map (§4, "VOTES")
+shows why it is lost (§8.1): in the cup's L1 cell, row 5's hits are outvoted by
+rays of rows 3-4 passing over the cup inside the same 10 cm-tall cell, and a third
+of row 5's rays end below 3 cm, in G, where they count as floor. Whether a cell
+wins depends on where the cup stands in the grid: one cell in scans 3-4, none in
+scans 1-2. Row 5 never returned bare floor closer than 1 m.
+
+**The rules** (`cell_map_set_variant(CELL_MAP_READINGS, margin)`; Daniel, 10 Oct):
+1. **A reading is judged as a whole**, by where its zone's cone first meets the
+   floor (its lower edge, with the robot's pitch: row 8 ~18 cm, row 7 ~24, row 6
+   ~34, row 5 ~63-71, rows 1-4 never):
+   - **closer than `margin` (0.9) × that: an obstacle.** No floor can be there. All
+     9 rays' hits count, in L1 or above: rays ending below 3 cm are lifted to L1.
+   - **otherwise all rays ending below 3 cm: floor** (as in §3; beyond the floor
+     patch's far end, a drop, as before);
+   - **otherwise unsure** (straddling 3 cm: grazing the floor, or a low thing on
+     it): its rays ending below 3 cm mark the floor, the others nothing.
+2. **A ray only clears what it would have hit:** a pass counts against a cell
+   only if the ray passed it at or below the highest point hit there (this frame,
+   or kept while the cell is occupied) + 1 cm. Rays over a low thing don't erase it.
+3. Everything else as §3-§6 (the vote per frame, the merge, around the robot).
+
+**Host tests** (`test_cell_map`, both variants): READINGS passes every room; the
+7 cm box at 50 cm (§8.1) is 4 of 4 blocked (VOTES 1 of 4); a chair leg moved away
+and a walker are gone 1 frame after.
+
+**Replay** (`tools/replay.sh <take>`, 10 Oct scans; cells ≥ 10 % confident):
+
+| | VOTES | READINGS | READINGS, "lowest hit" (tried) |
+|---|---|---|---|
+| Cup, scans 1-2 (left, 47-57 cm) | not on the map | 2 cells | 2 cells |
+| Cup, scans 3-4 (right, 45 cm) | 1 cell | 1 cell | 1 cell |
+| Box (left, 35-45 cm) | partly | +1-2 cells | +2-3 cells |
+| Cupboard behind (45-65 cm) | not on the map | not on the map | 3-4 cells |
+| Chair base (right, 35-85 cm; Daniel's office chair on wheels) | — | 2-3 cells | 3-6 cells |
+| Chair seat area (right, ~1 m) | 2 cells, close votes (48 vs 40) | freed (43 vs 40) | freed |
+| 1-1.6 m behind-left | some blocked | some freed | many new overhangs |
+| Simulated chair leg moved away | 1 frame | 1 frame | 30 frames (fails) |
+
+"Lowest hit" (rule 2 against the lowest point hit) keeps the cupboard but lets
+almost nothing clear a cell hit near the floor: moved things stay ~2 s.
+
+The room (Daniel): the robot started 30 cm further left from scan 3 on (the cup
+moves from 19° left to 30° right in the data: it stayed, the robot moved); the
+cupboard behind it, later behind-right; an office chair on wheels to the right,
+a wall behind the chair. The wall is hidden by the chair: at ~90 cm right rows
+1-4 hit the chair's seat and back (11-52 cm high). Row 5's readings beyond ~1 m
+land 1-8 cm *below* the floor: reflections in the waxed floor, which both
+variants turn into "no floor" (`?`) beyond 1 m (an older limit, §8.3).
+
+**Open:** why the cupboard loses in both variants; the reflections; then the
+robot runs READINGS (a robot test) or the rules change. The robot runs VOTES
+until then.

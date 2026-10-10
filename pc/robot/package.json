@@ -11,7 +11,8 @@
     "start": "node src/main.ts",
     "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts",
     "decode": "node src/decode.ts",
-    "import": "node src/import.ts"
+    "import": "node src/import.ts",
+    "frames": "node src/frames.ts"
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.5-r.5",

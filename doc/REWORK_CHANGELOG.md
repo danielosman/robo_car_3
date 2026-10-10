@@ -4,6 +4,22 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: the cup in replay; the READINGS map variant
+
+Replay of the four scans through `cell_map.c` (tools/replay.sh): the cup's L1
+cell loses to rays of rows 3-4 passing over it, and a third of row 5's rays end
+in G; it is on the map in scans 3-4 (one cell), not in 1-2. Daniel's rules,
+built as a second variant (MAP_DESIGN §9): a reading judged as a whole by where
+its cone meets the floor (closer: an obstacle, all of it in L1 or above;
+straddling: unsure), and a ray only clearing what it would have hit. Tried and
+changed while building: hits weighted by the ray's full length (walls 20 %
+weaker: now as VOTES); unsure readings giving nothing (floor seen in 60 cells
+instead of 129: now their floor-height rays mark floor); passes compared with the
+lowest hit (a moved chair leg stayed 30 frames: now the highest). Result: the cup
+in all four scans, the 7 cm test box blocked, no false obstacles in the simulated
+rooms; the cupboard still missing; cells right of the robot to check with
+Daniel. The robot still runs VOTES.
+
 ## 10 Oct 2026: T3, the recordings in DuckDB
 
 Built: `store.ts` (the schema of TELEMETRY_PLAN §3; a take imported as it ends,
