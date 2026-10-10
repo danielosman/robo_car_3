@@ -4,6 +4,26 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: end of the day; `f` will stop before obstacles
+
+Daniel: `f` keeps moving 50 cm, but stops 15 cm before an obstacle on the map (M4
+step 1; recorded in COMMANDS_PLAN and REWORK_PLAN "Next" with the points to settle
+before coding; not coded). T6 dropped: done by the day's analysis. The telemetry
+plan is done; next is M4. The handover for the next session: REWORK_PLAN "Next".
+
+## 10 Oct 2026: the recorded scans as a regression test
+
+`test_map_replay`: the five scans of 10 Oct (frames in `picoA/app/test/data/`)
+through the map; READINGS must find the cup, box, chair base and cupboard in each
+(where Daniel put them) and block nothing within 30 cm. Passes; VOTES misses the
+cup in 2, the box in 3, the chair in 2. Cost on the Mac: READINGS 1.1-1.6× VOTES
+per frame on average, the worst frame the same. On the robot (a scan, recording on):
+the longest loop iteration 29.2 ms (`surroundings` 27.3 ms; VOTES ~22 ms), mean 57
+µs: fits (frames every 66 ms, DRIVE every 50 ms). The link's "21 lost" didn't
+change during the scan (likely at power-up, while the ToF firmware loads).
+Daniel: `f` keeps meaning "move 50 cm" (what it does with something blocked ahead
+is for M4); driving already feeds the map (every frame, placed by odometry).
+
 ## 10 Oct 2026: T4 and T5, the viewer and replay
 
 Built: `/viewer` (three.js 0.186.1 from npm, served locally; first from a CDN

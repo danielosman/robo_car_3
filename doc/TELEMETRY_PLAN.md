@@ -26,8 +26,11 @@ minute of watching each) are in `pc/robot/recordings/raw/` and all decode.
 import` rebuilds it from the raw files, the take list is at
 http://127.0.0.1:8080/takes. **T4 (the viewer) is built** (§4): http://127.0.0.1:8080/viewer
 shows a take in 3D with both replayed maps and truth boxes with a score. The
-robot runs the READINGS map since 10 Oct (MAP_DESIGN §9). **Next: T6**, the cup
-session, scored in the viewer (T5's replay is there already, §5).
+robot runs the READINGS map since 10 Oct (MAP_DESIGN §9). **T5 (replay) is built**
+with it, and the five scans are a regression test. **T6 is dropped**: the cup
+session was done by the analysis of 10 Oct. **This plan is done; the next work is
+M4** (REWORK_PLAN "Next"): telemetry stays the tool: record (`R`), look (/viewer),
+replay (`tools/replay.sh`).
 
 **Read first:** this file; [REWORK_PLAN.md](REWORK_PLAN.md) (decisions, how to work a
 step); [COMMANDS_PLAN.md](COMMANDS_PLAN.md) (the keys, as built). Background for T6:
@@ -333,11 +336,15 @@ Each changes something visible; robot tests only where the robot changes.
 4. **T4 Viewer**: the three.js point cloud, pose, time slider, filters, truth
    objects. **Built 10 Oct** (§4).
 5. **T5 Replay**: `cell_map` on takes, voxels in the viewer, variants, scores.
-   **Built 10 Oct** with T4 (§5): both variants per take; regression tests from
-   takes with truth still to come.
+   **Built 10 Oct** with T4 (§5): both variants per take; the five scans are a
+   regression test (`test_map_replay`, MAP_DESIGN §9), no truth boxes needed: the
+   objects' regions come from where Daniel put them.
 6. **T6 The cup session**: scans with nothing, the cup at 45 / 80 cm, the 7 cm box;
    truth placed; then the hypotheses (signal, 2nd target, the 5th row's floor
-   returns) and map fixes, tested on these takes.
+   returns) and map fixes, tested on these takes. **Dropped 10 Oct (Daniel): done
+   by the analysis of that day** (§3 "First look", MAP_DESIGN §9): the cup is seen
+   by row 5 in every scan, its signal no stronger, no 2nd target; the map's vote
+   lost it, and the READINGS map finds it. Truth boxes stay optional in the viewer.
 
 ## 7. Open (Daniel)
 

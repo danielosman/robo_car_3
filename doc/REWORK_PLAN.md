@@ -104,12 +104,47 @@ The robot:
 
 ## Next
 
-**A session on telemetry starts at [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) §0.**
-T1-T6 in TELEMETRY_PLAN §6. T1 (the commands) is built and tested on the robot;
-T2 (recording on the robot) is built and tested on the robot (UDP, 10 Oct); T3
-(DuckDB, the take list) and T4 with T5 (the 3D viewer, replay of both map
-variants, truth boxes and scores) are built. The robot runs the READINGS map
-(MAP_DESIGN §9). Next: T6, the cup session, scored in the viewer.
+**Where things stand (end of 10 Oct).** The telemetry plan is done (TELEMETRY_PLAN
+T1-T5; T6, the cup session, was done by the analysis on 10 Oct and dropped): with
+`R` on, every action is recorded (UDP), stored in DuckDB and viewable in 3D at
+http://127.0.0.1:8080/viewer with the map replayed. The recordings showed why the
+map lost the cup; **the robot runs the new READINGS map** (MAP_DESIGN §9): cup,
+box, chair base and cupboard found in all five recorded scans
+(`test_map_replay`), the worst loop iteration 29 ms on the robot. Everything is
+committed and pushed.
+
+**Start the next session here:**
+1. Read this file, then [COMMANDS_PLAN.md](COMMANDS_PLAN.md) (the keys) and
+   [MAP_DESIGN.md](MAP_DESIGN.md) §9 (the map the robot runs). Telemetry and the
+   viewer: [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) §0.
+2. `./run_tests.sh` (all green), `cmake --build build`; `npm start` in `pc/robot/`
+   (console http://127.0.0.1:8080/, takes /takes, viewer /viewer). After a power-up
+   press `R` to record.
+3. **Next step: M4 step 1, `f` with the map** (Daniel, 10 Oct): `f` keeps moving
+   50 cm, but **stops 15 cm before an obstacle on the map**. Not coded yet. To
+   settle with Daniel before coding (suggestions in brackets):
+   - 15 cm from the robot's front edge (ROBOT_PLAN §3: 9.5 cm ahead of the centre)
+     to the nearest blocked cell's edge along the path. [yes]
+   - Which cells stop it: blocked (3-13 cm) for sure; overhang (13-23 cm) too? The
+     robot is 10-12 cm tall. [overhang too, for now]
+   - How wide the path is: the robot's 23.5 cm plus a margin on each side. [+5 cm]
+   - Unknown cells ahead (never seen): drive or not? [drive: the VL53 looks ahead
+     while moving, and the map takes every frame]
+   - An obstacle already within 15 cm at the start: don't move, print why.
+   - Backwards (`r`): the VL53 only looks forward, so behind there is only what
+     earlier scans saw. [stop on what the map has, say it can't see there]
+   - Checked every frame while driving (the map grows as it drives), slowing down
+     near the stop point as today's move does near its end.
+   - Printing: "Move stopped: obstacle 15 cm ahead (map), moved 32 cm".
+   - Host test first (test_behaviour: a box in the simulated room), then replay of
+     a recorded drive, then the robot (`f` towards the cup; recording on).
+4. Then: the map's 6 × 6 m window follows the robot (point 7 below), needed once
+   the robot drives more than a few moves; then M4's driving towards movement.
+
+**Also open, small:** `p` right after a power-up, to confirm the link's "lost"
+messages come from the start-up (REWORK_CHANGELOG, 10 Oct); M1's `b` and carpet
+tests (README "M1"); the cupboard missing in the earlier scans and the rare blips
+(MAP_DESIGN §9).
 
 ## Open suggestions and discussion points
 

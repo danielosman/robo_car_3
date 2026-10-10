@@ -216,6 +216,17 @@ the replay of the take gives the same blocked cells as the robot printed (441 of
 The `?` beyond ~1 m stay (Daniel, 10 Oct): the floor there isn't sure either way.
 **Open:** the cupboard was missing in the earlier scans (both variants).
 
+**Regression test on the recordings** (`test_map_replay`, run_tests.sh): the five
+scans' frames are in `picoA/app/test/data/` (exported with `npm run frames`); in
+each, the cup, the box, the chair base and the cupboard (where Daniel put them)
+must have a blocked or overhang column, and nothing may be blocked within 30 cm
+of the robot. READINGS passes; VOTES misses the cup in scans 1-2, the box in 3 of
+5, the chair in 2. **Cost:** on the Mac READINGS takes 1.1-1.6× VOTES per frame on
+average, the worst frame about the same. On the robot (10 Oct, a scan with
+recording on): the longest loop iteration 29.2 ms, 27.3 ms of it in
+`surroundings` (VOTES: ~22 ms); mean 57 µs. Fits: a frame every 66 ms, DRIVE every
+50 ms (PicoB stops after 250 ms), 16 odometry reports kept (320 ms).
+
 **Blips (10 Oct, Daniel saw one in the viewer):** an overhang cell 67 cm behind
 the robot where nothing stands: one target in one frame (row 3, 61 cm, signal 11,
 status 5; the light in that direction was normal). The map takes a cell's first

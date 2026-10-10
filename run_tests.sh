@@ -3,7 +3,7 @@
 # statistics); PicoB's wheel control, odometry and
 # brain (PicoA as PicoB sees it); PicoA's rangefinder, world map, pose, the
 # actions end to end, movement detection (change grid, VL53, camera, tracker), body (PicoB as PicoA sees it), the
-# recorder, the WiFi console and the loop timer. The fake clock crosses time_us_32()'s wrap in
+# map on recorded scans, the recorder, the WiFi console and the loop timer. The fake clock crosses time_us_32()'s wrap in
 # every test. Each compiles one module against stubs and fakes and runs it:
 # hardware stubs in picoB/app/test/stubs and common/test/stubs, the fake clock
 # and fake link in common/test/fakes. Stops at the first failure.
@@ -39,6 +39,9 @@ grep -v '^[|+]' build/test_cell_map.log | grep -v '^Map (9\|^up =\|^? no\|^blank
 build test_cell_map_readings picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP -DTEST_READINGS
 build/test_cell_map_readings > build/test_cell_map_readings.log || { cat build/test_cell_map_readings.log; exit 1; }
 grep -v '^[|+]' build/test_cell_map_readings.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
+# The map on the recorded scans of 10 Oct (picoA/app/test/data): the cup, box, chair, cupboard found.
+build test_map_replay picoA/app/test/test_map_replay.c -IpicoA/app/test/stubs $APP
+build/test_map_replay
 build test_pose picoA/app/test/test_pose.c $APP
 build/test_pose
 # The actions end to end (scan, move, turn, watch) on a simulated robot in a simulated room.

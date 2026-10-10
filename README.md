@@ -59,7 +59,8 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, the shared helpers, PicoB's wheel control, odometry and `brain`,
   PicoA's `body`, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the actions
-  (scan, move, turn, watch, record) in a simulated room, the recorder, the WiFi console and the loop timer. The fake
+  (scan, move, turn, watch, record) in a simulated room, the map on five recorded scans (`test_map_replay`: the cup,
+  box, chair and cupboard found), the recorder, the WiFi console and the loop timer. The fake
   clock starts 30 s before `time_us_32()` wraps, so every test crosses the wrap (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position

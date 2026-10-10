@@ -16,11 +16,11 @@ state, decisions and open points). It replaced this plan's map (§4, §14: now
 [doc/MAP_DESIGN.md](doc/MAP_DESIGN.md)), the VL53's learning after a stop (§6.2)
 and turning after a target leaving the view (§6.6); those sections say so.
 
-**Next session:**
-1. Open from M1: the `b` test and the carpet tests (README, "M1").
-2. The rework's open points (REWORK_PLAN.md), as Daniel picks them.
-3. Then M4: driving forward only where the map's columns ahead are drivable, facing
-   the farthest drivable corridor.
+**Next session: start at [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md) "Next".** It holds
+where things stand (end of 10 Oct: recording, the 3D viewer, the new map) and the
+next step: M4 step 1, `f` still moving 50 cm but stopping 15 cm before an obstacle
+on the map (decided by Daniel, details to settle there). Also open: M1's `b` and
+carpet tests (README, "M1").
 
 **Files:**
 
