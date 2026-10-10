@@ -6,22 +6,15 @@
 #include "stamp.h"
 #include "body.h"
 #include "motion.h"
-#include "surroundings.h"
-#include "cell_map.h"
 #include "pose.h"
 #include "motion_sense.h"
 #include "behaviour.h"
 
 #define SCAN_RAD         (390 * RAD_PER_DEG) // a full turn plus 30° of overlap (§5.4)
+#define WATCH_US         60000000  // watching ends after a minute
 #define START_TIMEOUT_US 3000000   // the motors switching on and the robot standing still
-#define SETTLE_MIN_US    300000    // after a turn, before using what the robot sees
-#define SETTLE_MAX_US    3000000
-#define HEADINGS         36        // candidate headings, every 10°
-#define SAME_FREE_M      0.05f     // headings this close to the best count as equally open
-#define VIEW_HALF_RAD    (25 * RAD_PER_DEG) // the camera's half field of view: where it will watch
-#define VIEW_STEP_RAD    (5 * RAD_PER_DEG)
-#define FREE_FROM_M      0.15f     // the robot's own footprint isn't looked at
-#define FREE_MAX_M       2.0f      // the map reaches 2 m around the robot
+#define SETTLE_MIN_US    300000    // done: standing still this long at least...
+#define SETTLE_MAX_US    3000000   // ...and at most this long, before the motors go off
 #define FOLLOW_START_RAD (8 * RAD_PER_DEG) // the movement this far off straight ahead: turn towards it...
 #define FOLLOW_STOP_RAD  (3 * RAD_PER_DEG) // ...until it is this close, and
 #define FOLLOW_STILL_RADPS (5 * RAD_PER_DEG) // no faster than this
@@ -32,119 +25,67 @@
 #define FOLLOW_JUMP_RAD  (15 * RAD_PER_DEG)
 // printf takes doubles; the (double) casts below are for printing only.
 
-// After each turn the robot settles (stands still) before the next step. Then it
-// watches (WATCHING), turning towards the biggest movement.
-typedef enum {
-    IDLE, STARTING, SCANNING, SETTLING_AFTER_SCAN, FACING, SETTLING_AFTER_FACING,
-    WATCH_STARTING, WATCHING
-} state_t;
-static state_t state;
-static float start_yaw_rad, target_yaw_rad;
-static absolute_time_t deadline, settle_min_end;
-static bool following;        // turning towards a movement
+typedef enum { SCAN, MOVE, TURN, WATCH } action_t;
+static const char *const action_name[] = {"Scan", "Move", "Turn", "Watch"};
+
+// STARTING: the motors switching on; RUNNING: the action; SETTLING: done, standing
+// still before the motors go off.
+static enum { IDLE, STARTING, RUNNING, SETTLING } state;
+static action_t action;
+static float goal;              // MOVE: metres (+ = forward); TURN: radians (+ = left)
+static odom_report_t start;     // the robot when the action began running
+static absolute_time_t deadline, settle_min_end, run_start;
+static bool following;          // watching: turning towards a movement
 // The movement's recent directions in the world (the map's yaw, unwrapped), when seen.
 static float seen_rad[FOLLOW_HISTORY];
 static uint32_t seen_us[FOLLOW_HISTORY];
 static int seen_n;
 static uint32_t last_seen_us;
 
-static const char *activity(void) { return state >= WATCH_STARTING ? "Watching" : "Start-up scan"; }
-
-static void end(const char *why) {
+// Ends the action early, saying why; the motors go off unless another action follows.
+static void end_early(const char *why, bool motors_off) {
     if (state == IDLE) return;
     body_drive(0, 0);
-    if (why) printf("%s stopped: %s\n", activity(), why);
+    if (motors_off) body_motors(false);
+    motion_sense_log(false);
+    printf("%s stopped: %s\n", action_name[action], why);
     state = IDLE;
 }
 
-// The direction to watch from: the most free space across the camera's view (§7).
-// Where several headings are about as open (often: the map's 2 m reach), the middle
-// of the widest such sector.
-static float most_open_heading(const pose_t *p, float *free_m) {
-    float score_m[HEADINGS], best_m = -1;
-    for (int h = 0; h < HEADINGS; h++) {
-        float heading = (float)h * 2 * PI_F / HEADINGS, sum_m = 0;
-        int n = 0;
-        for (float a = heading - VIEW_HALF_RAD; a <= heading + VIEW_HALF_RAD + 1e-3f; a += VIEW_STEP_RAD, n++) {
-            float dx = cosf(a), dy = sinf(a);
-            sum_m += FREE_FROM_M + cell_map_free_distance(p->x_m + FREE_FROM_M * dx, p->y_m + FREE_FROM_M * dy,
-                                                          dx, dy, FREE_MAX_M - FREE_FROM_M);
-        }
-        score_m[h] = sum_m / (float)n;
-        best_m = fmaxf(best_m, score_m[h]);
-    }
-    // The longest run (around the circle) of headings within SAME_FREE_M of the best,
-    // counted from where each run begins.
-    bool open[HEADINGS];
-    int n_open = 0;
-    for (int h = 0; h < HEADINGS; h++) n_open += open[h] = score_m[h] >= best_m - SAME_FREE_M;
-    int best_start = 0, best_len = n_open; // all open: any heading will do
-    if (n_open < HEADINGS) {
-        best_len = 0;
-        for (int start = 0; start < HEADINGS; start++) {
-            if (!open[start] || open[(start + HEADINGS - 1) % HEADINGS]) continue;
-            int len = 0;
-            while (open[(start + len) % HEADINGS]) len++;
-            if (len > best_len) { best_len = len; best_start = start; }
-        }
-    }
-    *free_m = best_m;
-    return (float)(best_start + (best_len - 1) / 2.0f) * 2 * PI_F / HEADINGS;
-}
-
-static void settle(state_t next_state) {
-    body_drive(0, 0);
-    state = next_state;
-    settle_min_end = make_timeout_time_us(SETTLE_MIN_US);
-    deadline = make_timeout_time_us(SETTLE_MAX_US);
-}
-
-static bool settled(const odom_report_t *o) {
-    return (time_reached(settle_min_end) && o->stationary) || time_reached(deadline);
-}
-
-// After the scan: turn to the most open direction. Headings are the map's: 0 = where
-// the robot faced when the scan started.
-static void face_most_open(void) {
-    pose_t p;
-    pose_now(&p);
-    float free_m, heading = most_open_heading(&p, &free_m);
-    float turn_rad = wrap_pi(heading - p.yaw_rad);
-    target_yaw_rad = body_odom()->yaw_rad + turn_rad; // turning is measured on odometry's yaw
-    printf("Most open direction: heading %+.0f deg, %.1f m free on average across the view; turning %+.0f deg\n",
-           (double)(wrap_pi(heading) * DEG_PER_RAD), (double)free_m, (double)(turn_rad * DEG_PER_RAD));
-    state = FACING;
-}
-
-void behaviour_scan(void) {
-    end("started again");
-    printf("Start-up scan: turning %.0f deg in place (~%.0f s) to map the surroundings\n",
-           (double)(SCAN_RAD * DEG_PER_RAD), (double)(SCAN_RAD / MOTION_TURN_RADPS));
+static void begin(action_t a, float g) {
+    end_early("another action started", false);
+    action = a;
+    goal = g;
     body_drive(0, 0);
     body_motors(true);
     state = STARTING;
     deadline = make_timeout_time_us(START_TIMEOUT_US);
 }
 
-void behaviour_watch(void) {
-    end("started again");
-    body_drive(0, 0);
-    body_motors(true);
-    state = WATCH_STARTING;
-    deadline = make_timeout_time_us(START_TIMEOUT_US);
+void behaviour_scan(void) {
+    begin(SCAN, SCAN_RAD);
+    printf("Scan: turning %.0f deg left in place (~%.0f s)\n", (double)(SCAN_RAD * DEG_PER_RAD),
+           (double)(SCAN_RAD / MOTION_TURN_RADPS));
 }
 
-void behaviour_stop(void) { end("by command"); }
+void behaviour_move(float distance_m) {
+    begin(MOVE, distance_m);
+    printf("Move: %.0f cm %s\n", (double)fabsf(distance_m * 100), distance_m > 0 ? "forward" : "back");
+}
+
+void behaviour_turn(float angle_rad) {
+    begin(TURN, angle_rad);
+    printf("Turn: %.0f deg %s\n", (double)fabsf(angle_rad * DEG_PER_RAD), angle_rad > 0 ? "left" : "right");
+}
+
+void behaviour_watch(void) {
+    begin(WATCH, 0);
+    printf("Watch: for %d s the robot turns towards the biggest movement (space stops)\n", WATCH_US / 1000000);
+}
+
+void behaviour_stop(void) { end_early("by command", true); }
 
 bool behaviour_busy(void) { return state != IDLE; }
-bool behaviour_watching(void) { return state == WATCHING; }
-
-static void start_watching(void) {
-    printf("Watching for movement: the robot turns towards the biggest movement (s stops)\n");
-    following = false;
-    seen_n = 0;
-    state = WATCHING;
-}
 
 // A new sighting of the biggest movement, at t_us, in the world's directions. A gap
 // or a jump starts the history again (another movement).
@@ -213,55 +154,80 @@ static void watch(void) {
     body_drive(0, turn ? fmaxf(-MOTION_TURN_RADPS, fminf(MOTION_TURN_RADPS, w)) : 0);
 }
 
+// What the action did, by odometry, once the robot stands still.
+static void say_done(const odom_report_t *o) {
+    float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
+    float c = cosf(start.yaw_rad), s = sinf(start.yaw_rad);
+    printf("%s done: %.1f s; odometry: %+.1f cm forward, %+.1f cm left, turned %+.1f deg\n", action_name[action],
+           (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f), (double)((c * dx + s * dy) * 100),
+           (double)((-s * dx + c * dy) * 100), (double)((o->yaw_rad - start.yaw_rad) * DEG_PER_RAD));
+}
+
+// Runs the action; returns true when it is done.
+static bool step(const odom_report_t *o) {
+    switch (action) {
+    case SCAN:
+    case TURN: {
+        float dir = goal < 0 ? -1.0f : 1.0f;
+        float remaining_rad = fabsf(goal) - dir * (o->yaw_rad - start.yaw_rad);
+        if (remaining_rad <= 0) return true;
+        body_drive(0, motion_turn_rate(dir * remaining_rad));
+        return false;
+    }
+    case MOVE: {
+        float dir = goal < 0 ? -1.0f : 1.0f;
+        float remaining_m = fabsf(goal) - hypotf(o->x_m - start.x_m, o->y_m - start.y_m);
+        if (remaining_m <= 0) return true;
+        body_drive(motion_speed(dir * remaining_m), 0);
+        return false;
+    }
+    case WATCH:
+        if (absolute_time_diff_us(run_start, get_absolute_time()) >= WATCH_US) return true;
+        watch();
+        return false;
+    }
+    return true;
+}
+
 void behaviour_update(void) {
     if (state == IDLE) return;
     const odom_report_t *o = body_odom();
-    if (!body_connected()) { end("PicoB not connected"); return; }
-    if (state != STARTING && state != WATCH_STARTING && !o->motors_on) {
-        printf("%s stopped: PicoB switched the motors off (%s)\n", activity(), stop_reason_text(o->stop_reason));
+    if (!body_connected()) { end_early("PicoB not connected", true); return; }
+    if (state != STARTING && !o->motors_on) {
+        printf("%s stopped: PicoB switched the motors off (%s)\n", action_name[action], stop_reason_text(o->stop_reason));
+        body_drive(0, 0);
+        motion_sense_log(false);
         state = IDLE;
         return;
     }
     switch (state) {
     case STARTING:
         if (o->motors_on && o->stationary) {
-            surroundings_restart();
-            start_yaw_rad = o->yaw_rad;
-            state = SCANNING;
+            start = *o;
+            run_start = get_absolute_time();
+            following = false;
+            seen_n = 0;
+            motion_sense_log(action == WATCH); // movement lines only while watching
+            state = RUNNING;
         } else if (time_reached(deadline)) {
-            end(o->motors_on ? "the robot isn't standing still" : "the motors didn't switch on");
+            end_early(o->motors_on ? "the robot isn't standing still" : "the motors didn't switch on", true);
         }
         break;
-    case SCANNING: {
-        float remaining_rad = SCAN_RAD - (o->yaw_rad - start_yaw_rad);
-        if (remaining_rad <= 0) settle(SETTLING_AFTER_SCAN);
-        else body_drive(0, motion_turn_rate(remaining_rad));
-        break;
-    }
-    case SETTLING_AFTER_SCAN:
-        if (settled(o)) face_most_open();
-        break;
-    case SETTLING_AFTER_FACING:
-        if (settled(o)) {
-            pose_t p;
-            pose_now(&p);
-            printf("Facing heading %+.0f deg (0 = where the scan started, + = left)\n",
-                   (double)(wrap_pi(p.yaw_rad) * DEG_PER_RAD));
-            start_watching();
+    case RUNNING:
+        if (step(o)) {
+            body_drive(0, 0);
+            state = SETTLING;
+            settle_min_end = make_timeout_time_us(SETTLE_MIN_US);
+            deadline = make_timeout_time_us(SETTLE_MAX_US);
         }
         break;
-    case FACING: {
-        float remaining_rad = target_yaw_rad - o->yaw_rad;
-        if (fabsf(remaining_rad) < 1 * RAD_PER_DEG) settle(SETTLING_AFTER_FACING);
-        else body_drive(0, motion_turn_rate(remaining_rad));
-        break;
-    }
-    case WATCH_STARTING:
-        if (o->motors_on) start_watching();
-        else if (time_reached(deadline)) end("the motors didn't switch on");
-        break;
-    case WATCHING:
-        watch();
+    case SETTLING:
+        if ((time_reached(settle_min_end) && o->stationary) || time_reached(deadline)) {
+            motion_sense_log(false);
+            say_done(o);
+            body_motors(false);
+            state = IDLE;
+        }
         break;
     case IDLE:
         break;

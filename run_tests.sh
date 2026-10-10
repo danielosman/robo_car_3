@@ -2,7 +2,7 @@
 # Host tests (no Pico needed): the link; the shared helpers (time, angles, order
 # statistics); PicoB's wheel control, odometry and
 # brain (PicoA as PicoB sees it); PicoA's rangefinder, world map, pose, the
-# start-up scan and watching end to end, movement detection (change grid, VL53, camera, tracker), body (PicoB as PicoA sees it), robot tests, the
+# actions end to end, movement detection (change grid, VL53, camera, tracker), body (PicoB as PicoA sees it), the
 # WiFi console and the loop timer. The fake clock crosses time_us_32()'s wrap in
 # every test. Each compiles one module against stubs and fakes and runs it:
 # hardware stubs in picoB/app/test/stubs and common/test/stubs, the fake clock
@@ -38,7 +38,7 @@ build/test_cell_map > build/test_cell_map.log || { cat build/test_cell_map.log; 
 grep -v '^[|+]' build/test_cell_map.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
 build test_pose picoA/app/test/test_pose.c $APP
 build/test_pose
-# The start-up scan and watching end to end; prints the map it made of the simulated room.
+# The actions end to end (scan, move, turn, watch) on a simulated robot in a simulated room.
 build test_behaviour picoA/app/test/test_behaviour.c -IpicoA/app/test/stubs $APP
 build/test_behaviour
 build test_change_grid picoA/app/test/test_change_grid.c -Icommon
@@ -53,11 +53,6 @@ build test_loop_stats picoA/app/test/test_loop_stats.c
 build/test_loop_stats
 build test_body picoA/app/test/test_body.c $APP
 build/test_body
-build test_robot_test picoA/app/test/test_robot_test.c $APP
-# The drift test prints a progress line every 15 s of simulated time: keep them
-# out of the way, but show everything if the test fails.
-build/test_robot_test > build/test_robot_test.log || { cat build/test_robot_test.log; exit 1; }
-grep -v '^Drift [0-9]' build/test_robot_test.log
 build test_wifi_console picoA/app/test/test_wifi_console.c -IpicoA/app/test/stubs $APP
 build/test_wifi_console > build/test_wifi_console.log || { cat build/test_wifi_console.log; exit 1; }
 grep -v '^WiFi:\|^Server:' build/test_wifi_console.log

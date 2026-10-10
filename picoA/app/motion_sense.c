@@ -30,7 +30,6 @@ static uint32_t last_frame_us, adjustments, last_target_log_us;
 static bool moving;          // the latest ToF frame had movement...
 static float strongest_rad;  // ...the biggest blob's direction (+ = left)...
 static uint32_t strongest_us; // ...measured then
-static uint32_t origins; // pose's origin changes seen: the ToF's bins are in the map's frame
 
 // Robot time in seconds, in front of every line of the movement log.
 void motion_sense_stamp(void) { printf("%8.1f ", (double)((float)(clock_since_start_us() / 1000) / 1000.0f)); }
@@ -111,7 +110,6 @@ static void update_tof(void) {
     if (!f || (have_frame && f->t_us == last_frame_us)) return;
     have_frame = true;
     last_frame_us = f->t_us;
-    if (pose_origin_changes() != origins) { origins = pose_origin_changes(); tof_motion_restart(); }
     tof_view_t view = tof_view(f->t_us);
     turn_dps = (view.yaw_end_rad - view.yaw_start_rad) * RANGEFINDER_HZ * DEG_PER_RAD;
     motion_obs_t obs[MAX_OBS];
@@ -174,4 +172,3 @@ bool motion_sense_strongest(float *bearing_rad, uint32_t *t_us) {
     return true;
 }
 void motion_sense_log(bool on) { logging = on; }
-bool motion_sense_logging(void) { return logging; }

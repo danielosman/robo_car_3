@@ -408,6 +408,10 @@ time, not the send time (`brain.c:101`), and the hardware watchdog (§7, I24).
 
 ### 2.6 Telemetry, console, recording
 
+**Recording (the Records and host tool parts below) is replaced by
+[TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) (10 Oct 2026):** one take per action, no
+images yet, `.rec` files and DuckDB on the PC. The text ring and the console stay.
+
 - **Text:** one ring that `printf` writes into (via an stdio driver). USB and the
   WiFi console connection drain at most N bytes per loop. When the ring is full,
   whole lines are dropped and counted; nothing waits.

@@ -19,6 +19,8 @@ everything outside the rework (M1's open tests, M4-M6).
 | [SURROUNDINGS_PLAN.md](SURROUNDINGS_PLAN.md) | The first map design. **§3-§4.3 (cone rule, log-odds) are replaced by MAP_DESIGN.md**; its layers, columns and the L2 rule near the robot (§4.4) are what was built | background |
 | [CAMERA_MOTION_PLAN.md](CAMERA_MOTION_PLAN.md) | Camera: features tracked frame to frame, ego-motion from the gyro, movement while turning. Not started | the camera work |
 | [cross_plan.md](cross_plan.md) | The reviewer's numbers and shared types across the plans; its step order is outdated | when plans disagree on names or numbers |
+| [COMMANDS_PLAN.md](COMMANDS_PLAN.md) | **Next.** Keys and states: idle at start, one key one operation, scan only 390°, move / turn / direction | the robot's keys |
+| [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) | **Next.** Raw ToF + pose per action (a take) to the PC, `.rec` files, DuckDB, a three.js viewer, replay of the map code on recordings | anything about data, recordings, the viewer |
 | [GLOSSARY.md](GLOSSARY.md) | The terms; MAP_DESIGN.md adds zone, cell, column, ray | when a word is unclear |
 | [RobotMotionTrackingAlgorithms.md](RobotMotionTrackingAlgorithms.md) | The inspiration (a Gemini conversation); not a spec | background only |
 
@@ -52,8 +54,12 @@ The robot:
 - The camera's movement detector will be one reader of a universal feature record;
   no camera images to the PC for now (CAMERA_MOTION_PLAN §11).
 - Recordings (for replay on the Mac) are not in git: a git-ignored `recordings/`.
-- After a watchdog reset without USB: the start-up scan; after 3 resets within a
-  minute, stay idle and say why.
+- **The robot does nothing by itself** (10 Oct): idle with the motors off after
+  power-up and after a reset (no start-up scan); one key, one operation; no
+  test-only actions (COMMANDS_PLAN.md).
+- **Raw sensor data and the pose go to the PC, not the map** (10 Oct), only while
+  an action runs (one take per action), stored as `.rec` files and in DuckDB;
+  hypotheses and map fixes are tested on recordings (TELEMETRY_PLAN.md).
 - Camera while watching: sharp and dark rather than noisy (exposure ≤ 10 ms, gain
   ≤ 8).
 - No climbing worries for now: the robot drives slowly in controlled rooms.
@@ -78,12 +84,25 @@ The robot:
 - **The map** (`cell_map`, MAP_DESIGN.md): fed every frame, the scan's too; `m`
   prints it (the scan doesn't); the most open direction after the scan comes from
   it. The old map and the floor learning are gone.
-- **Watching** (`behaviour`): turns toward the biggest VL53 movement and follows it
+- **Commands** (COMMANDS_PLAN, T1, 10 Oct): idle with the motors off at start-up,
+  WiFi connects with or without USB, one key one operation, the same on USB and
+  WiFi: space stop, `s` scan (390° only), `f` move 50 cm, `t` turn 30°, `r`
+  direction, `a` watch 1 min, `C` clear the map. `robot_test` and the 15 s status
+  are gone; the map's frame is odometry's from power-up. Robot test passed (10 Oct).
+- **Watching** (`behaviour`, `a`, 1 minute): turns toward the biggest VL53 movement and follows it
   (world directions, its angular speed from a line through the last 0.5 s, plus 2 ×
   the angle still to go, at most ~29°/s; starts at 8°, stops below 3° when it is
   about still; its speed is dropped once past where it was last seen). Smooth on
   the robot (9 Oct). When the biggest movement is one zone, the log prints that
   zone's reading and background.
+
+## Next
+
+**A session on telemetry starts at [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) §0.**
+T1-T6 in TELEMETRY_PLAN §6. T1 (the commands) is built and tested on the robot;
+next T2, recording on the robot. Then storage, the viewer, replay, and the
+cup session. Map fixes (point 1 below) wait
+for its data.
 
 ## Open suggestions and discussion points
 
@@ -96,6 +115,8 @@ Not decided; each needs Daniel's yes before it is built.
    height and pitch to recognise a zone whose reading is where its lowest ray meets
    the floor (floor), so other readings are real surfaces that rays passing over
    them don't erase. Two other fixes were tried and failed (REWORK_CHANGELOG, 9 Oct).
+   10 Oct: the cup loses the vote in every frame, mostly to rays passing over it
+   inside the 3-13 cm layer (MAP_DESIGN §8.1); waits for real data (T6).
 2. Under a table top ~0.8 m away: false "blocked" columns (host test: 6).
 3. A small hole next to floor gets a few floor hits (a long drop is handled).
 4. Standing still, the floor is seen only in rings (~20, 30, 45, 70 cm).
@@ -130,7 +151,7 @@ Not decided; each needs Daniel's yes before it is built.
     (protocol v5), roll in the pose, `camera_next()` for several readers (V1).
 18. A3: printing that never blocks the loop (printing the map switches the motors
     off today), the watchdog and the crash-loop guard.
-19. R0 and M-S: recording on the robot, replay on the Mac, one measurement session.
+19. R0 and M-S: replaced by TELEMETRY_PLAN.md (recording per take, no images yet).
 20. V3 (core 1 for the camera): explicit stacks first; core 1's stack sits where
     core 0's overflows today. `observations()` in `tof_motion.c` keeps 3.2 KB on the
     stack.

@@ -34,7 +34,7 @@ typedef struct {
     float x_m, y_m;
 } tof_view_t;
 
-void tof_motion_restart(void); // forgets everything (a new map origin)
+void tof_motion_restart(void); // forgets everything
 bool tof_motion_ready(void);   // the view in front is known
 // Feeds one frame measured from `view`; fills up to max observations, the most zones
 // first, and returns how many.

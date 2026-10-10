@@ -1,17 +1,15 @@
 // PicoA robot firmware, the brain. Talks to PicoB over the link, maps the
-// surroundings with the ToF sensor, watches for movement and turns after it; a
-// serial monitor on USB or the robot server over WiFi (ROBOT_WIFI.md) shows the map
-// and odometry, starts the start-up scan and watching, and runs the calibration tests.
+// surroundings with the ToF sensor and watches for movement. It does nothing by
+// itself: a serial monitor on USB or the robot server over WiFi (ROBOT_WIFI.md),
+// with the same keys, starts each action (doc/COMMANDS_PLAN.md).
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "clock_start.h"
 #include "pico/stdio_usb.h"
-#include "tusb.h"
 #include "body.h"
 #include "pose.h"
 #include "surroundings.h"
 #include "behaviour.h"
-#include "robot_test.h"
 #include "debug_console.h"
 #include "wifi_console.h"
 #include "camera.h"
@@ -20,17 +18,11 @@
 
 #define USB_CHECK_US 3000000 // after power-up: time for a computer to enumerate the USB
 
-// On USB (a computer, not a charger), wait for the serial monitor and its keys.
-// Without USB, connect to WiFi, then do the start-up scan whether that worked or not.
+// Connects to WiFi once the USB had time to enumerate, with or without a computer
+// on USB: both consoles take the same keys. Then the robot waits, motors off.
 static void start_up(absolute_time_t usb_check) {
-    static enum { CHECK_USB, CONNECT_WIFI, DONE } step;
-    if (step == CHECK_USB) {
-        if (tud_mounted()) step = DONE;
-        else if (time_reached(usb_check)) { step = CONNECT_WIFI; wifi_console_start(); }
-    } else if (step == CONNECT_WIFI && wifi_console_settled()) {
-        step = DONE;
-        behaviour_scan();
-    }
+    static bool started;
+    if (!started && time_reached(usb_check)) { started = true; wifi_console_start(); }
 }
 
 static void stage_done(const char *stage) { loop_stats_stage(stage, time_us_32()); }
@@ -56,8 +48,6 @@ int main(void) {
         stage_done("motion_sense");
         behaviour_update();
         stage_done("behaviour");
-        robot_test_update();
-        stage_done("robot_test");
         wifi_console_update();
         stage_done("wifi");
         debug_console_update();

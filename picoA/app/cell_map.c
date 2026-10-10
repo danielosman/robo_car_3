@@ -25,7 +25,11 @@
 static uint8_t grid[CELL_LAYERS][GRID][GRID];
 static uint16_t hit_sum[CELL_LAYERS][GRID][GRID], pass_sum[CELL_LAYERS][GRID][GRID]; // this frame
 
-void cell_map_clear(void) { memset(grid, 0, sizeof grid); }
+void cell_map_clear(void) {
+    memset(grid, 0, sizeof grid);
+    memset(hit_sum, 0, sizeof hit_sum);
+    memset(pass_sum, 0, sizeof pass_sum);
+}
 
 static int grid_index(float m) { return (int)floorf(m / GRID_M) + GRID / 2; }
 static bool in_grid(int ix, int iy, int layer) {

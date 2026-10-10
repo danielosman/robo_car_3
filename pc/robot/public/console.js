@@ -1,10 +1,11 @@
 // The robot's console in the browser: the log, the connection status, and the
 // serial monitor's keys as buttons (typing them works too).
 const KEYS = [
-  ["Robot", [["g", "motors on"], ["s", "stop"], ["p", "status"], ["l", "link"], ["w", "WiFi"], ["h", "help"]]],
-  ["Map", [["n", "scan"], ["m", "map"], ["z", "ToF frame"]]],
-  ["Watch", [["a", "watch"], ["v", "movement log"], ["o", "ToF backgrounds"], ["k", "camera backgrounds"], ["c", "camera frame"]]],
-  ["Tests", [["q", "square"], ["d", "drift"], ["r", "turns"], ["f", "forward"], ["b", "back"], ["t", "last result"]]],
+  ["Robot", [[" ", "stop"], ["p", "status"], ["W", "WiFi"], ["h", "help"]]],
+  ["Actions", [["s", "scan"], ["f", "move 50 cm"], ["t", "turn 30°"], ["a", "watch 1 min"]]],
+  ["Settings", [["r", "direction"]]],
+  ["Map", [["C", "clear map"], ["m", "map"], ["z", "ToF frame"]]],
+  ["Look", [["o", "ToF backgrounds"], ["k", "camera backgrounds"], ["c", "camera frame"]]],
 ];
 const MAX_CHARS = 1024 * 1024;
 const log = document.getElementById("log");
@@ -20,9 +21,9 @@ for (const [group, keys] of KEYS) {
   document.getElementById("keys").append(label);
   for (const [key, what] of keys) {
     const b = document.createElement("button");
-    b.innerHTML = `<kbd>${key}</kbd>`;
+    b.innerHTML = `<kbd>${key === " " ? "space" : key}</kbd>`;
     b.append(what);
-    if (key === "s") b.className = "stop";
+    if (key === " ") b.className = "stop";
     b.onclick = () => sendKey(key);
     buttons.push(b);
     document.getElementById("keys").append(b);

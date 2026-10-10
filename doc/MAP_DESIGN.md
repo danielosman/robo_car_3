@@ -127,6 +127,13 @@ attempts that failed are in REWORK_CHANGELOG.md.
    zone whose reading is where its lowest ray meets the floor; its rays end at
    floor height, and other readings are real surfaces that passes over them don't
    erase.
+   **10 Oct (simulation, a 6.5 cm cup at 25-60 cm):** the cup loses the vote in
+   *every* frame, at every distance (hits 13-23 % of passes), so the merge never
+   sees it. ~80 % of the passes cross the cup's L1 cell *above* the cup (rows 3-4,
+   counting from 1, at 7-13 cm): L1 is too tall for a low object. Beyond ~71 cm
+   the 5th row's zone holds floor and object together; the simulation (nearest
+   surface) then sees no cup at all, the real VL53 (strongest return) is unknown.
+   Next: real data first (TELEMETRY_PLAN.md), then fixes tested on it.
 2. **Under a table top at ~0.8 m:** the 4th zone row's rays all stop at the
    underside, the lower ones end in L1 with no ray passing those cells: false
    "blocked" (host test: 6 columns). Driving closer erases them.

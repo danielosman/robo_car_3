@@ -17,15 +17,7 @@ map come later.
 
 | At power-up | What PicoA does |
 |---|---|
-| **USB connected** (a computer enumerated the Pico; a charger doesn't count), checked ~3 s after boot | Nothing: no scan, no WiFi. Waits for the serial monitor and keys. `n` starts the scan (then watching), `a` watching, `w` connects to WiFi |
-| **No USB** | Connects to WiFi, then does the 390° start-up scan whether that worked or not, then watches (turns after movement; `s` stops) |
-
-"WiFi worked or not" means the first of: connected to the server; WiFi failed
-(wrong password, network not found, no answer after 15 s); or WiFi joined but no
-server found within 5 s. Waiting for the server first means the scan's map reaches
-the browser. The WiFi attempt also gives the gyro its still second.
-
-The scan no longer starts when a serial monitor opens.
+| With or without USB | ~3 s after boot it connects to WiFi, then waits with the motors off. Nothing starts by itself (doc/COMMANDS_PLAN.md): every action is a key, the same on USB and over WiFi. `W` shows how WiFi is connected (or tries again) |
 
 ## Connection
 
@@ -94,12 +86,13 @@ whether `node` may accept incoming connections: Allow.
 
 ## Test (repeat after changes to the WiFi console or the server)
 
-1. Robot on USB, serial monitor open. Nothing happens at start-up.
-2. `npm start` in `pc/robot/`; open http://127.0.0.1:8080/.
-3. Press `w` in the serial monitor; watch the statuses.
+1. `npm start` in `pc/robot/`; open http://127.0.0.1:8080/.
+2. Robot on USB, serial monitor open. At start-up it connects to WiFi and does
+   nothing else.
+3. Watch the statuses in both; `W` prints how it is connected.
 4. Once connected: the page's buttons (`p`, `m`, …); answers show in both.
 5. Unplug the USB (battery on): the page keeps working.
-6. Power up without USB: it connects, then scans; the browser shows both.
+6. Power up without USB: it connects and waits; `s` on the page scans.
 
 ## Later
 

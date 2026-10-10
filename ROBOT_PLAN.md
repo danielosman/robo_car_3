@@ -35,7 +35,7 @@ and turning after a target leaving the view (§6.6); those sections say so.
 | `common/link.*`, `common/link_msgs.h` | inter-Pico link and its messages, timing constants, stop reasons |
 | `common/stamp.h`, `geom.h`, `stats.h` | time differences across the wrap, bearings and `wrap_pi`, n-th value / median / sort |
 | `picoB/app/` | `main.c` (the loop), `brain.*` (PicoA as PicoB sees it: messages, safety stops), `drive.*` (wheel control), `odometry.*` |
-| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF zones and their directions), `cell_map.*` (the map, doc/MAP_DESIGN.md), `surroundings.*` (frames → map), `behaviour.*` (start-up scan, watching and turning to look), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs, blobs as observations), `loop_stats.*` (loop time per 10 s, printed by `p`), `motion_obs.h`, `debug_console.*`, `robot_test.*` (square, drift, turns, straight) |
+| `picoA/app/` | `main.c`, `body.*` (PicoB as PicoA sees it, incl. its clock), `pose.*` (pose at a given time), `rangefinder.*` (ToF zones and their directions), `cell_map.*` (the map, doc/MAP_DESIGN.md), `surroundings.*` (frames → map), `behaviour.*` (the actions: scan, move, turn, watch; doc/COMMANDS_PLAN.md), `motion.h` (turn/drive profiles), `motion_sense.*` (movement while still: feeds the detectors, logs), `tof_motion.*` (VL53 movement), `camera_motion.*` (camera movement), `tracker.*` (one target in the VL53's movement), `change_grid.*` (last 4 frames per cell, blobs, blobs as observations), `loop_stats.*` (loop time per 10 s, printed by `p`), `motion_obs.h`, `debug_console.*` (the keys) |
 | `picoA/drivers/camera.*` | HM0360 camera: continuous capture, own exposure control, row times; shared with the bring-up firmware |
 | `picoX/drivers/`, `picoX/bringup/` | drivers shared with the bring-up firmware; bring-up test firmware |
 | `*/test/`, `run_tests.sh` | host tests with stubbed drivers |
@@ -43,7 +43,7 @@ and turning after a target leaving the view (§6.6); those sections say so.
 **Build, test, flash:**
 - `cmake -S . -B build -G Ninja` (first time), `cmake --build build`.
 - `./run_tests.sh`: host tests (link, helpers; PicoB drive, odometry, brain; PicoA body,
-  robot_test, rangefinder, world map, pose, start-up scan, movement detection, loop
+  rangefinder, world map, pose, the actions, movement detection, loop
   timer), all crossing the 32-bit clock's wrap; run after every change.
   It stops at the first failure.
 - Flash `build/picoA/picoA_app.uf2` → PicoA, `build/picoB/picoB_app.uf2` → PicoB.
@@ -807,7 +807,7 @@ the names are open to change.
 | Module | Interface | Hides |
 |---|---|---|
 | `body` | `body_update()`, `body_connected()`, `body_odom()`, `body_status()`, `body_motors(on)`, `body_drive(v, ω)` | PicoB as PicoA sees it: the link protocol, greeting and version check, repeating DRIVE for PicoB's safety stop, re-sending MOTORS until PicoB has acted on it, printing PicoB's log lines |
-| `robot_test` (M0, M1) | `robot_test_start(test)`, `robot_test_stop()`, `robot_test_update()`, `robot_test_result()` | the calibration tests as a table (steps, progress, result), driving to distances and angles, early stops and their results |
+| `behaviour` | `behaviour_scan()`, `behaviour_move(m)`, `behaviour_turn(rad)`, `behaviour_watch()`, `behaviour_stop()` | one action at a time (doc/COMMANDS_PLAN.md): motors on while it runs, driving to distances and angles, how it ended. Replaced `robot_test` (10 Oct 2026) |
 | `camera` (driver, `picoA/drivers/camera.c`) ✅ | `camera_init()`, `camera_update()`, `camera_frame(&frame)` (non-blocking: the newest complete frame, with its exposure, gain, a settling flag and its row times, `camera_row_time()`), `camera_hold_exposure(bool)`, `camera_exposure(&e)` | PIO/DMA capture into three buffers, HM0360 registers, its own exposure control (10 ms steps against flicker, then gain; the sensor's auto-exposure off), the frame length following the exposure, the measured line period, the rolling shutter |
 | `rangefinder` (on top of the `tof` driver) | `rangefinder_poll(&scan)` → 64 rays **in the robot frame** (origin, unit direction, distance, and floor / obstacle / no target) plus a timestamp | zone order, the 90° rotation, the 3 cm offset and 7 cm height, per-zone floor calibration and pitch adjustment, VL53 status codes and settings |
 | `world_map` | `map_add_scan(scan, pose, changes)`, `map_cell_state(point)`, `map_staleness(pose, sectors)`, `map_free_distance(point, direction)` | cell size, layers, rolling window, timers, ray walking, change detection |

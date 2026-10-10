@@ -4,6 +4,63 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: T1, the commands (COMMANDS_PLAN)
+
+Daniel's answers: stop on space; one turn key (`t`, right in back direction);
+motors off as much as possible; `C` clears the map; watching lasts a minute; when
+the WiFi can't keep up, ToF frames are dropped and the data must say so; USB and
+WiFi behave the same.
+
+Built: the robot is idle with the motors off at start-up and connects to WiFi with
+or without USB (no start-up scan, no scan after WiFi). `behaviour` has four actions
+(scan 390° only, move, turn, watch 1 min), each switching the motors on at its
+start and off at its end, printing "done" with what odometry measured or "stopped"
+and why; a new action replaces the running one. The console: space stop, `s`, `f`,
+`t`, `r` (direction), `a`, `C`, `p` (with link counters and the direction), `W`; gone:
+`g`, `n`, `l`, `q`, `d`, `b`, `w`, the last test result and the 15 s status line.
+`robot_test` and its test are removed (moves + telemetry replace them), and with
+them `pose_set_origin()` (the map's frame is odometry's from power-up); the most
+open direction is gone. The page's buttons follow the keys. Host tests:
+`test_behaviour` checks idle, scan, turn ±30°, move ±50 cm, stop, replacing,
+clearing and the 1-minute watch.
+
+Found: the behaviour test's 8 cm box at 40 cm was found with 3 of 6 random seeds;
+the old test passed by luck of its seed. It is the cup problem (MAP_DESIGN §8.1),
+so the test reports it as KNOWN instead of asserting it.
+
+Robot test (Daniel): every key as expected. Scan 14.9 s, +390.8°; moves +50.2-50.3
+cm, 0.0-0.1° off; turns +30.5-31.1° (back direction −30.5°); keys pressed while an
+action runs replace it (the new one counts from where the robot is then).
+
+Then `v` removed (Daniel): the movement lines are printed only while watching;
+idle, nothing is printed (the camera's lines came while idle). Telemetry will record
+them as `MARK`s during a take.
+
+## 10 Oct 2026: the cup and the box; plans for commands and telemetry
+
+Daniel's runs: a glossy 6.5 cm cup ~45 cm ahead, a bit left, was on the map once
+(one cell, 40 cm ahead, 20 cm **right**); a second scan with the cup and the 7 cm box
+to the right showed no cup, and the only new obstacle was 50 cm to the **left**,
+beside the robot. The room itself was right in both (not a mirror: the zone order,
+the yaw sign, pose timing and the print all check out). The placements are not
+explained. Between the runs the robot was turned back by hand (yaw 464.6° → 358.9°),
+so both maps share one "up".
+
+Simulation (scratch, not committed), the cup's 3-13 cm cell over a 390° scan: the
+cup loses the vote in every frame at 25-60 cm (hits 13-23 % of the passes); ~80 %
+of the passes go over the cup inside the layer (rows 3-4 from 1, at 7-13 cm).
+Making hits count 4× kept the cup but brought back the ring of false obstacles at
+~0.7-0.8 m (as on 9 Oct). Beyond ~71 cm the 5th row sees floor and cup in one zone;
+what the real VL53 reads there is unknown (the simulation's nearest-surface model
+says floor).
+
+Daniel: the fixes argued from the simulation are weak; get the real data to the PC.
+New plans: COMMANDS_PLAN.md (idle at start, one key one operation, scan = 390°
+only, move / turn / direction, no test-only actions, no 15 s status) and
+TELEMETRY_PLAN.md (raw ToF with all targets + pose per action as a take, `.rec`
+files and DuckDB, a three.js viewer, replay). Replaces R0 / M-S and the start-up
+scan after a watchdog reset. No code changed.
+
 ## 9 Oct 2026 (evening): robot test of smooth following, the old map gone
 
 Daniel's run (scan, `m`, then `a` with `v`, walking across both ways, stopping):

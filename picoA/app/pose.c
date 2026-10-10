@@ -16,7 +16,6 @@ typedef struct {
 static sample_t history[HISTORY];
 static int count, newest;      // newest: index of the latest sample
 static uint32_t last_report_t_us; // PicoB's t_us of the latest report taken
-static pose_t origin;             // the map frame's origin, in odometry's frame
 
 void pose_update(void) {
     if (!body_connected()) return;
@@ -32,40 +31,13 @@ void pose_update(void) {
     };
 }
 
-static uint32_t origin_changes;
-
-void pose_set_origin(void) {
-    if (count) origin = history[newest].pose;
-    origin_changes++;
-}
-
-uint32_t pose_origin_changes(void) { return origin_changes; }
-
-// From odometry's frame to the map's.
-static pose_t in_map(pose_t p) {
-    float dx = p.x_m - origin.x_m, dy = p.y_m - origin.y_m;
-    float c = cosf(origin.yaw_rad), s = sinf(origin.yaw_rad);
-    p.x_m = c * dx + s * dy;
-    p.y_m = -s * dx + c * dy;
-    p.yaw_rad -= origin.yaw_rad;
-    return p;
-}
-
 bool pose_now(pose_t *pose) {
     if (!count) return false;
-    *pose = in_map(history[newest].pose);
+    *pose = history[newest].pose;
     return true;
 }
-
-static bool odometry_at(uint32_t t_us, pose_t *pose);
 
 bool pose_at(uint32_t t_us, pose_t *pose) {
-    if (!odometry_at(t_us, pose)) return false;
-    *pose = in_map(*pose);
-    return true;
-}
-
-static bool odometry_at(uint32_t t_us, pose_t *pose) {
     if (!count) return false;
     const sample_t *latest = &history[newest];
     int32_t ahead_us = stamp_us(t_us, latest->t_us);

@@ -58,8 +58,8 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, the shared helpers, PicoB's wheel control, odometry and `brain`,
-  PicoA's `body`, robot tests, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the start-up scan
-  and watching in a simulated room, the WiFi console and the loop timer. The fake
+  PicoA's `body`, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the actions
+  (scan, move, turn, watch) in a simulated room, the WiFi console and the loop timer. The fake
   clock starts 30 s before `time_us_32()` wraps, so every test crosses the wrap (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
@@ -76,33 +76,33 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   cell for occupied, weighted by closeness and the VL53's status; a cell keeps its
   best measurement and changes for a better one or 3 good-enough ones in a row. No
   floor learning. `pose.c` gives the pose at the moment a frame was measured;
-  `surroundings.c` feeds every frame to the map; `behaviour.c` runs the start-up scan
-  and the watching (turning towards the biggest movement). PicoB's clock is translated from the ODOM
+  `surroundings.c` feeds every frame to the map (in odometry's frame, from power-up);
+  `behaviour.c` runs the actions. PicoB's clock is translated from the ODOM
   reports in `body.c`.
-- **Start-up (`main.c`):** powered up on USB (a computer, not a charger), PicoA
-  waits for the serial monitor and keys: no scan, no WiFi. Without USB it connects
-  to WiFi, then does the start-up scan whether that worked or not (ROBOT_WIFI.md).
-- **Start-up scan:** at power-up without USB, or with `n`, the robot turns 390° in
-  place, mapping all around (nothing to learn first; the map isn't printed: `m`
-  does), turns to face the most open direction and prints its heading, then
-  watches. `n` clears the map and makes the robot's heading the map's up.
-- **Watching** (`behaviour.c`): after the scan, or with `a`, motors on. The VL53
+- **Start-up (`main.c`):** the robot does nothing by itself ([doc/COMMANDS_PLAN.md](doc/COMMANDS_PLAN.md)):
+  motors off, it connects to WiFi (with or without USB) and waits for keys, the
+  same on USB and over WiFi.
+- **Actions** (`behaviour.c`), one per key, motors on while it runs and off at its
+  end, which it prints (done with what odometry measured, or stopped and why):
+  `s` scan (390° left in place, nothing else), `f` move 50 cm, `t` turn 30°, `a`
+  watch for 1 minute. `r` switches the direction: back, `f` moves back and `t`
+  turns right. Space stops; a new action replaces the running one.
+- **Watching** (`a`, 1 minute). The VL53
   watches still and while turning (a background per world direction, no learning
   after a stop). The robot turns toward the biggest movement and follows it: its
   angular speed plus 2 × the angle still to go, at most ~29°/s, starting when it is
   8° off, stopping within 3° once it is about still, never past where it was last
   seen; movement at the edge of the view is inspected too. A thing that stops is
-  background 1 s after the robot stands still. `s` stops.
-- **PicoA console** (`debug_console.c`), on USB and over WiFi: a status line every
-  15 s (none while a test runs); keys `g` motors on, `s` stop, `p` status now (with
-  a WiFi line, the loop time over the last 10 s, `loop_stats.c`, and the free RAM), `t` last test result, `l` link counters, `w` connect to WiFi, `h` help; `a` watch from here; map: `n` start-up scan again (then watch), `m` print the
-  map, `z` one ToF frame; tests `q` square, `d` drift, `r` 10 turns, `f` / `b` 2 m
-  forward / back (`robot_test.c`); camera `c` one frame as 20 × 15 blocks, with its
-  exposure; movement `v` log on / off (both sensors; each line starts with the robot's
+  background 1 s after the robot stands still. Space stops.
+- **PicoA console** (`debug_console.c`), on USB and over WiFi, the same keys (one
+  key, one operation; nothing printed by itself): space stop, `p` status (pose, link
+  counters, WiFi, the loop time over the last 10 s, `loop_stats.c`, the free RAM, the
+  direction), `h` help, `W` connect to WiFi; the actions above; map `C` clear, `m`
+  print, `z` one ToF frame; camera `c` one frame as 20 × 15 blocks, with its
+  exposure; movement lines only while watching (both sensors; each line starts with the robot's
   time in s), `o` each ToF zone's background,
-  `k` each camera block's. Unplugging the USB doesn't stop the robot. A
-  test that stops early says why and what it measured so far. The keys and the
-  last result are printed ~1 s after a serial monitor opens or the robot server
+  `k` each camera block's. Unplugging the USB doesn't stop the robot. The keys
+  are printed ~1 s after a serial monitor opens or the robot server
   connects (sooner gets lost on the Mac).
 - **WiFi console** (`wifi_console.c`, [ROBOT_WIFI.md](ROBOT_WIFI.md)): joins the
   network in `picoA/app/wifi_config.h` (git-ignored: copy
@@ -152,8 +152,7 @@ box shows up at ~40 cm, not at 60 cm); a low obstacle can fall between two zone
 rows at some distances; layer 0 (2-12 cm) is only seen within ~1 m.
 
 **To watch:** a false `##` stays until the robot looks through it 6 times; stray
-`##` that never go away would show it. After a safety stop, `f` and `g` once
-printed nothing though the robot drove; not seen since. Scans on a desk: keep a hand ready.
+`##` that never go away would show it. Scans on a desk: keep a hand ready.
 
 ### Memory and stack (computed from the build, PicoA)
 
@@ -170,48 +169,45 @@ header). Re-run it after adding big locals and before core 1 is started.
 **M0** (after changes to `drive`, `odometry` or the link):
 1. Flash `picoB_app` onto PicoB and `picoA_app` onto PicoA. Keep the robot still
    for ~1 s after power-up (gyro bias). Battery on J11 for the motors.
-2. Open a serial monitor on **PicoA**. Expected: status lines with x/y/yaw, and
-   PicoB's messages as `B: ...`. "PicoB not connected (received 0 bytes)" means the
-   UART isn't working; `l` shows the link counters (`bad` and `lost` should stay ~0).
+2. Open a serial monitor on **PicoA**, press `p`. Expected: a status line with
+   x/y/yaw, and PicoB's messages as `B: ...`. "PicoB not connected (received 0
+   bytes)" means the UART isn't working; `p` also shows the link counters (`bad`
+   and `lost` should stay ~0).
 3. Without motors, check the IMU orientation: lift the **front** → pitch goes
    positive; lift the **left side** → roll goes positive; turn the robot **left** by
    hand → yaw goes up (`to_robot_frame()` in `picoB/app/odometry.c`).
-4. On the floor with room for a 70 cm square: press `q`. The robot drives forward
-   50 cm and turns left 90°, four times, pausing between legs, then prints where
-   odometry thinks it is. Mark the start, measure the real end position and heading,
-   and compare. `s` stops at any time.
+4. On the floor with room: `f` (50 cm forward), `t` three times (90° left), `f`
+   again. Each prints "done" with what odometry measured. Mark the start, measure
+   the real position and heading, and compare. Space stops at any time.
 
 **M1** (calibration). Paste the serial log of each step:
-1. **Tilt stop:** press `q` and lift one side of the robot past 15°. Expected:
-   `B: Motors off: tilted too far` and the test stops. `g` switches the motors on
-   again.
-2. **Gyro drift, `d`:** robot on the floor, don't touch it for 10 min. Every 15 s:
-   yaw (should stay put) and gyro bias. At the end: how far the bias wandered.
-3. **Gyro scale, `r`:** a mark on the floor in line with the robot's front. It turns
-   10 × 360° left (~2 min), one line per turn, and stops at 3600° by the gyro.
-   Estimate how far it ended from the mark (N° short = gyro reads N/36 % too much).
-   It also prints the effective track width from the wheels.
-4. **Encoder distance, `f` / `b`:** tape measure along a 2 m path, robot at 0. Press
-   `f`, then unplug the USB: it drives 2 m and stops. Measure where it really got
-   to, plug back in and read its own numbers. `b` drives back.
-5. **Carpet:** `r`, `f` and `q` again on the carpet, the square across its edge.
-   Look for false safety stops and a slower turn rate; also `n` there (floor
-   learned, no false `?`).
+1. **Tilt stop:** press `s` (scan) and lift one side of the robot past 15°.
+   Expected: `B: Motors off: tilted too far` and "Scan stopped: PicoB switched the
+   motors off (tilted too far)".
+2. **Gyro drift:** robot on the floor, don't touch it for 10 min; `p` at the start
+   and the end: yaw should stay put, the gyro bias wander little. (With telemetry,
+   TELEMETRY_PLAN, this becomes a recording.)
+3. **Gyro scale:** a mark on the floor in line with the robot's front; `t` 12 times
+   (360°). Estimate how far it ended from the mark.
+4. **Encoder distance:** tape measure, robot at 0; `f` four times (2 m). Measure
+   where it really got to and compare with the four "done" lines; `r`, then `f`
+   four times back.
+5. **Carpet:** `s`, `f` and `t` on the carpet. Look for false safety stops and a
+   slower turn rate.
 
 **M2** (map; only PicoA):
 1. Robot on the floor with ~1 m of room around it, battery on. Keep it still ~1 s
    after power-up (gyro bias).
-2. Plug the USB into PicoA and open the serial monitor. After ~1 s: the keys. Press
-   `n`: "Start-up scan: turning 390 deg…". The robot turns ~14 s. (Without USB it
-   scans by itself after trying the WiFi.)
-3. Expected: "Most open direction…", a short turn, "Facing heading …", then
-   watching. Press `m` for the map.
+2. Plug the USB into PicoA and open the serial monitor. After ~1 s: the keys. The
+   robot does nothing. Press `s`: "Scan: turning 390 deg left…". The robot turns
+   ~14 s.
+3. Expected: "Scan done: … turned +390 deg", motors off. Press `m` for the map.
 4. Check the map against the room: walls and furniture legs where they are, `.`
    rings and `:` around the robot, no `##` on open floor.
 5. `z` prints one ToF frame (cm as the robot sees it; `?N` = unsure, VL53 status N).
-6. Drive the square (`q`) and press `m`: walls and objects stay where they were,
-   braking draws no obstacles. To see a removed object clear, turn without `n`
-   (`r`, `s` after one turn, `m`).
+6. Move and turn (`f`, `t`) and press `m`: walls and objects stay where they were,
+   braking draws no obstacles. To see a removed object clear, scan again (`s`, `m`);
+   `C` clears the map.
 7. At a table edge (held, motors off), `m`: `?` along the edge, `:` beyond it.
 
 **Camera** (M3a; only PicoA, motors not needed):
@@ -239,7 +235,8 @@ header). Re-run it after adding big locals and before core 1 is started.
 
 **Movement, VL53** (M3a; PicoA, with PicoB running so PicoA knows the robot is still;
 motors off). Robot on the floor facing ~2 m of open room:
-1. Flash `picoA_app` onto PicoA. Press `v`: "Movement log on". Stand behind the robot,
+1. Flash `picoA_app` onto PicoA. Press `a` (watching prints the movement lines; the
+   robot turns towards movement, so step 2 turns it too). Stand behind the robot,
    keep still for a minute. Expected: no "Movement" lines (paste any that come).
 2. Walk across in front of the robot at ~1 m, left to right as the robot sees it.
    Expected: "Movement (ToF): N zones, +X deg (+ = left), …, 1.0 m" about twice a
@@ -250,12 +247,11 @@ motors off). Robot on the floor facing ~2 m of open room:
    farther), only from your hand.
 5. `o` with nothing moving: each zone's background in cm (`--` nothing); then with
    you standing in view: `*` on the zones that see you.
-6. `n` (scan): no movement lines while it turns; afterwards `o` says "learning the
-   view", then "watching".
+6. `s` (scan): no movement lines while it turns; afterwards `o` says "watching".
 
 **Movement, camera** (M3a; PicoA, with PicoB running; motors off). Robot on the
 floor facing ~2 m of the room, room lights on:
-1. Press `v`: "Movement log on". Stand behind the robot, keep still for a minute.
+1. Press `a` (watching, 1 min). Stand behind the robot, keep still for a minute.
    Expected: no "Movement (camera)" lines (paste any that come, with a `k`).
 2. `k`: "watching", each block's background (as in `c`) and its noise (tenths of a
    brightness level; expected ~10-40). Paste it.
@@ -276,7 +272,7 @@ floor facing ~2 m of the room, room lights on:
    quiet. Paste the log. Also watch your shadow.
 
 **Target, VL53** (M3a; PicoA, with PicoB running; motors off). Robot on the floor
-facing ~2 m of room; `v` on. The tracker follows one target in the VL53's movement:
+facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL53's movement:
 1. Walk across at ~1 m, left to right. Expected: "Target (new): +15 deg …, 1.0 m",
    then "Target: … going right at N deg/s" twice a second (N roughly your walking
    speed / distance: ~1 m/s at 1 m ≈ 57 deg/s), then "Target left the view on the
@@ -287,9 +283,9 @@ facing ~2 m of room; `v` on. The tracker follows one target in the VL53's moveme
 4. While you walk, someone else (or a waved hand) on the other side: the target stays
    on you.
 
-**Watching** (both Picos, battery on). Robot on the floor with room to turn, `v` on:
-1. `n` (scan), then `a`: "Watching for movement…". Stand behind the robot: it stays
-   put.
+**Watching** (both Picos, battery on). Robot on the floor with room to turn:
+1. `s` (scan), then `a`: "Watch: for 60 s…". Stand behind the robot: it stays
+   put. After a minute: "Watch done", motors off.
 2. Walk across at ~1-2 m at a steady pace, left to right. Expected: "Watching:
    movement at N deg, turning towards it", movement lines "(turning at N deg/s)"
    during the turn, following without stop-and-go; stop in front of it: "facing the
@@ -297,20 +293,22 @@ facing ~2 m of room; `v` on. The tracker follows one target in the VL53's moveme
 3. The same right to left, and once fast (it follows at ~29°/s, then "nothing
    moves").
 4. A one-zone movement prints the zone's reading and background (to tell a real
-   edge movement from noise). Paste the log; `s` stops.
+   edge movement from noise). Paste the log; space stops.
 
 **WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,
    build, flash `picoA_app`.
-2. Robot on USB, serial monitor open: nothing happens at start-up.
+2. Robot on USB, serial monitor open: the robot does nothing at start-up (motors
+   off) and tries the WiFi.
 3. `npm ci` then `npm start` in `pc/robot/`; open **http://127.0.0.1:8080/** ("Waiting
    for robot…"). The first time, allow `node` to accept incoming connections.
-4. Press `w` in the serial monitor: "WiFi: connecting…", "WiFi: connected, IP …",
-   "Server: found at …", "Server: connected". The page shows "Robot connected" and
-   the keys.
+4. Expected ~3 s after power-up: "WiFi: connecting…", "WiFi: connected, IP …",
+   "Server: found at …", "Server: connected" (`W` shows how it is connected). The
+   page shows "Robot connected" and the keys.
 5. Press `p` and `m` on the page: the answers show on the page and in the serial
    monitor. Unplug the USB (battery on): the page keeps working.
-6. Power up without USB: the statuses and then the start-up scan show on the page.
+6. Power up without USB: the statuses show on the page, the robot waits; `s` on
+   the page scans.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

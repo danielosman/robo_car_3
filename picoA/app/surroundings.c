@@ -21,9 +21,6 @@ void surroundings_update(void) {
     cell_map_add(&frame, &pose);
 }
 
-void surroundings_restart(void) {
-    pose_set_origin(); // the map's x axis: where the robot faces now
-    cell_map_clear();
-}
+void surroundings_clear(void) { cell_map_clear(); }
 
 const range_frame_t *surroundings_last_frame(void) { return have_frame ? &last : NULL; }

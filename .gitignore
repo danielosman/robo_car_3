@@ -4,3 +4,4 @@ node_modules/
 .cache/
 picoA/app/wifi_config.h
 pc/robot/logs/
+.DS_Store

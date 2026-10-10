@@ -4,7 +4,6 @@
 #include "units.h"
 #include "link.h"
 #include "body.h"
-#include "robot_test.h"
 #include "behaviour.h"
 #include "surroundings.h"
 #include "cell_map.h"
@@ -17,34 +16,36 @@
 #include "loop_stats.h"
 #include "debug_console.h"
 
-#define STATUS_PERIOD_US  15000000 // not while a test or the scan runs: they print their own progress
 #define GREETING_DELAY_US 1000000  // the Mac drops what arrives the moment the port opens
+#define MOVE_M            0.5f
+#define TURN_RAD          (30 * RAD_PER_DEG)
 // printf takes doubles; the (double) casts below are for printing only.
 
+// The same keys on USB and over WiFi (both are stdio). One key, one operation
+// (doc/COMMANDS_PLAN.md); the robot does nothing by itself.
 static bool usb_was_connected, wifi_was_connected, greeted;
-static absolute_time_t next_status, greeting_time;
+static absolute_time_t greeting_time;
+static bool backwards; // the direction setting: f moves back, t turns right
 
-static void help(void) {
-    printf("Keys: g = motors on, s = stop (motors off), p = print status now (with loop time and RAM), l = link counters, h = help\n"
-           "WiFi: w = connect (or show how it is connected)\n"
-           "Map: n = start-up scan again (390 deg turn, then watch), m = print the map, z = one ToF frame\n"
-           "Watch: a = watch from here, turning towards the biggest movement (s stops)\n"
-           "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
-           "Movement: v = log on / off; backgrounds now: o = each ToF zone, k = each camera block\n"
-           "Tests: q = square, d = drift (still), r = turns, f / b = straight forward / back,\n"
-           "       t = print the last test result again\n");
+static const char *direction(void) {
+    return backwards ? "back (f moves back, t turns right)" : "forward (f moves forward, t turns left)";
 }
 
-static void print_last_result(void) {
-    if (robot_test_running()) printf("A test is running\n");
-    else if (*robot_test_result()) printf("Last test result:\n%s", robot_test_result());
-    else printf("No test result yet\n");
+static void help(void) {
+    printf("Keys: space = stop (motors off), p = status, h = help; the robot does nothing by itself\n"
+           "Actions (motors on while one runs): s = scan (390 deg left), f = move %.0f cm, t = turn %.0f deg,\n"
+           "       a = watch movement for 1 min\n"
+           "Settings: r = direction forward / back (now %s)\n"
+           "Map: C = clear the map, m = print the map, z = one ToF frame\n"
+           "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
+           "Movement backgrounds now: o = each ToF zone, k = each camera block\n"
+           "WiFi: W = connect (or show how it is connected)\n",
+           (double)(MOVE_M * 100), (double)(TURN_RAD * DEG_PER_RAD), backwards ? "back" : "forward");
 }
 
 static void greet(void) {
     printf("\nPicoA robot firmware (M3)\n");
     help();
-    print_last_result();
 }
 
 static void print_link(void) {
@@ -153,19 +154,13 @@ static void print_camera_motion(void) {
 static void print_map(void) {
     pose_t p;
     if (!pose_now(&p)) { printf("No odometry yet\n"); return; }
-    if (body_odom()->motors_on) {
+    if (behaviour_busy() || body_odom()->motors_on) {
         // Printing takes longer than PicoB waits for drive commands.
         behaviour_stop();
-        robot_test_stop();
         body_motors(false);
-        printf("Motors off for printing the map (g switches them on)\n");
+        printf("Stopped for printing the map, motors off\n");
     }
     cell_map_print(&p, 0);
-}
-
-static void start_test(robot_test_t t) {
-    behaviour_stop();
-    robot_test_start(t);
 }
 
 static void print_status(void) {
@@ -208,37 +203,31 @@ void debug_console_update(void) {
         if (!time_reached(greeting_time)) return;
         greeted = true;
         greet();
-        next_status = make_timeout_time_us(STATUS_PERIOD_US);
     }
 
     switch (getchar_timeout_us(0)) {
-    case 'g': body_motors(true); printf("Motors on\n"); break;
-    case 's': behaviour_stop(); robot_test_stop(); body_motors(false); printf("Stopped, motors off\n"); break;
-    case 'n': robot_test_stop(); behaviour_scan(); break;
-    case 'a': robot_test_stop(); behaviour_watch(); break;
+    case ' ': behaviour_stop(); body_motors(false); printf("Stopped, motors off\n"); break;
+    case 's': behaviour_scan(); break;
+    case 'f': behaviour_move(backwards ? -MOVE_M : MOVE_M); break;
+    case 't': behaviour_turn(backwards ? -TURN_RAD : TURN_RAD); break;
+    case 'a': behaviour_watch(); break;
+    case 'r': backwards = !backwards; printf("Direction: %s\n", direction()); break;
+    case 'C': surroundings_clear(); printf("Map cleared\n"); break;
     case 'm': print_map(); break;
     case 'z': print_frame(); break;
     case 'c': print_camera(); break;
     case 'o': print_tof_motion(); break;
     case 'k': print_camera_motion(); break;
-    case 'v':
-        motion_sense_log(!motion_sense_logging());
-        printf("Movement log %s\n", motion_sense_logging() ? "on" : "off");
+    case 'p':
+        print_status();
+        print_link();
+        wifi_console_print_status();
+        loop_stats_print();
+        print_ram();
+        printf("Direction: %s\n", direction());
         break;
-    case 'q': start_test(ROBOT_TEST_SQUARE); break;
-    case 'd': start_test(ROBOT_TEST_DRIFT); break;
-    case 'r': start_test(ROBOT_TEST_TURNS); break;
-    case 'f': start_test(ROBOT_TEST_FORWARD); break;
-    case 'b': start_test(ROBOT_TEST_BACK); break;
-    case 'p': print_status(); wifi_console_print_status(); loop_stats_print(); print_ram(); break;
-    case 'w': wifi_console_start(); break;
-    case 't': print_last_result(); break;
-    case 'l': print_link(); break;
+    case 'W': wifi_console_start(); break;
     case 'h': case '?': help(); break;
     default: break;
-    }
-    if (time_reached(next_status)) {
-        next_status = make_timeout_time_us(STATUS_PERIOD_US);
-        if (!robot_test_running() && (!behaviour_busy() || behaviour_watching())) print_status();
     }
 }

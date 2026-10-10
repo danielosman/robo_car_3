@@ -40,13 +40,6 @@ int main(void) {
     assert(!pose_at(T(3060000), &p));   // too far ahead
     assert(pose_at(T(3000000 - 1260000), &p)); // the oldest kept report: 63 x 20 ms back
     assert(!pose_at(T(3000000 - 1300000), &p)); // older than the history
-    // A new origin: the robot is at (0, 0) facing 0 from now on; 100 ms later it
-    // has turned 0.1 rad and moved forward 1 cm (in its starting direction, roughly).
-    pose_set_origin();
-    assert(pose_now(&p) && fabsf(p.x_m) < 1e-6f && fabsf(p.y_m) < 1e-6f && fabsf(p.yaw_rad) < 1e-6f);
-    for (uint32_t t = 3020000; t <= 3100000; t += 20000) report_at(t);
-    assert(pose_now(&p) && fabsf(p.yaw_rad - 0.1f) < 1e-5f);
-    assert(fabsf(p.x_m - 0.01f * cosf(3.0f)) < 1e-4f && fabsf(p.y_m + 0.01f * sinf(3.0f)) < 1e-4f);
-    printf("OK: pose interpolates, extrapolates 50 ms, keeps 1.26 s, moves its origin\n");
+    printf("OK: pose interpolates, extrapolates 50 ms, keeps 1.26 s\n");
     return 0;
 }
