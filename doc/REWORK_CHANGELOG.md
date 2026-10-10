@@ -4,6 +4,22 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: T4 and T5, the viewer and replay
+
+Built: `/viewer` (three.js 0.186.1 from npm, served locally; first from a CDN
+at an old version, changed on Daniel's word; DuckDB 1.5.6-r.1 and ws 8.22.0 to
+their newest too): a take's targets in the room coloured by row,
+signal, status, height or target, filters, click a point for its data; the
+robot's path; a time slider with the robot and its rays; the take replayed in
+both map variants as cubes (or their difference); truth boxes per boot and each
+variant's score (found, cells not explained). Server: `viewer_api.ts`,
+`replay.ts` (builds `tools/replay_map.c` with `cc` when the map code changes; the
+tool gained `--json`); `takes.geometry` and `truth.truth_id` added (an import
+again fills the geometry). Tests: scoring, truth boxes, a take's view and both
+maps replayed from the firmware's sample take. Checked in headless Chrome: the
+last scan with the cup, box, chair and cupboard; a test truth box on the cup
+scored "found" by both variants (removed again).
+
 ## 10 Oct 2026: the robot runs the READINGS map
 
 Robot test (take `0b9377b7-1`, a scan, then `m`): the cup (front-right, row 5),

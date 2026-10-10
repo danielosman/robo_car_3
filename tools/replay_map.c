@@ -4,6 +4,10 @@
 // differ, with its distance and bearing from where the take started. Built and run
 // by tools/replay.sh:
 //   tools/replay.sh <take_id> [floor margin, default 0.9]
+// With --json (the viewer, pc/robot/src/replay.ts) it prints both maps' cells as
+// JSON instead: {"frames": n, "votes": [...], "readings": [...]}, each cell
+// [x, y, column, ground, L1, L2, confidence %] (column: column_t; layers: cell_state3_t,
+// a layer counting as unknown below MIN_CONFIDENCE; confidence: the highest of the three).
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +48,29 @@ static void load(const char *path) {
 }
 
 static column_t result[2][GRID][GRID];
+static bool json;
+
+static void json_cells(void) {
+    bool first = true;
+    printf("[");
+    for (int ix = 0; ix < GRID; ix++)
+        for (int iy = 0; iy < GRID; iy++) {
+            int st[CELL_LAYERS], conf = 0;
+            bool known = false;
+            for (int l = 0; l < CELL_LAYERS; l++) {
+                st[l] = layer_state(ix, iy, l, MIN_CONFIDENCE);
+                known |= st[l] != CELL_STATE_UNKNOWN;
+                int c = C_CONF(grid[l][ix][iy]) * 100 / 15;
+                if (st[l] != CELL_STATE_UNKNOWN && c > conf) conf = c;
+            }
+            if (!known) continue;
+            float x = ((float)ix - GRID / 2.0f + 0.5f) * GRID_M, y = ((float)iy - GRID / 2.0f + 0.5f) * GRID_M;
+            printf("%s[%.2f,%.2f,%d,%d,%d,%d,%d]", first ? "" : ",", (double)x, (double)y,
+                   column_of(ix, iy, MIN_CONFIDENCE), st[0], st[1], st[2], conf);
+            first = false;
+        }
+    printf("]");
+}
 
 static void run(int v, cell_map_variant_t variant, float margin, const pose_t *home) {
     cell_map_set_variant(variant, margin);
@@ -51,6 +78,11 @@ static void run(int v, cell_map_variant_t variant, float margin, const pose_t *h
     for (int i = 0; i < n_frames; i++) cell_map_add(&frames[i].f, &frames[i].p);
     for (int ix = 0; ix < GRID; ix++)
         for (int iy = 0; iy < GRID; iy++) result[v][ix][iy] = column_of(ix, iy, MIN_CONFIDENCE);
+    if (json) {
+        printf("%s\"%s\":", v ? "," : "", variant == CELL_MAP_VOTES ? "votes" : "readings");
+        json_cells();
+        return;
+    }
     printf("\n=== %s ===\n", variant == CELL_MAP_VOTES ? "VOTES (the robot today)" : "READINGS");
     cell_map_print(home, MIN_CONFIDENCE);
 }
@@ -62,11 +94,22 @@ static const char *name(column_t c) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 2) { fprintf(stderr, "usage: replay_map <frames file> [floor margin]\n"); return 2; }
-    float margin = argc > 2 ? strtof(argv[2], NULL) : 0.9f;
+    if (argc < 2) { fprintf(stderr, "usage: replay_map <frames file> [floor margin] [--json]\n"); return 2; }
+    float margin = 0.9f;
+    for (int a = 2; a < argc; a++) {
+        if (!strcmp(argv[a], "--json")) json = true;
+        else margin = strtof(argv[a], NULL);
+    }
     load(argv[1]);
-    if (!n_frames) { fprintf(stderr, "no frames\n"); return 1; }
     pose_t home = {0, 0, 0, 0}; // where the take's odometry frame starts: up = facing at power-up
+    if (json) {
+        printf("{\"frames\":%d,\"margin\":%.2f,", n_frames, (double)margin);
+        run(0, CELL_MAP_VOTES, margin, &home);
+        run(1, CELL_MAP_READINGS, margin, &home);
+        printf("}\n");
+        return 0;
+    }
+    if (!n_frames) { fprintf(stderr, "no frames\n"); return 1; }
     printf("%d frames; floor margin %.2f\n", n_frames, (double)margin);
     run(0, CELL_MAP_VOTES, margin, &home);
     run(1, CELL_MAP_READINGS, margin, &home);

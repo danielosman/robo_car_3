@@ -24,7 +24,10 @@ the robot 10 Oct: no stalls, 2-3 % of datagrams lost, mostly one at a time (§2
 minute of watching each) are in `pc/robot/recordings/raw/` and all decode.
 **T3 (storage) is built** (§3): every take goes into DuckDB as it ends, `npm run
 import` rebuilds it from the raw files, the take list is at
-http://127.0.0.1:8080/takes. **Next: T4**, the three.js viewer.
+http://127.0.0.1:8080/takes. **T4 (the viewer) is built** (§4): http://127.0.0.1:8080/viewer
+shows a take in 3D with both replayed maps and truth boxes with a score. The
+robot runs the READINGS map since 10 Oct (MAP_DESIGN §9). **Next: T6**, the cup
+session, scored in the viewer (T5's replay is there already, §5).
 
 **Read first:** this file; [REWORK_PLAN.md](REWORK_PLAN.md) (decisions, how to work a
 step); [COMMANDS_PLAN.md](COMMANDS_PLAN.md) (the keys, as built). Background for T6:
@@ -268,20 +271,32 @@ cup" is one query. Example questions:
 - How often a 2nd target appears in a zone that sees the cup and the floor.
 - The 5th row's reading over bare floor: where it lands, how it scatters.
 
-## 4. The viewer (three.js)
+## 4. The viewer (T4, built 10 Oct)
 
-A page on the existing Node server (`pc/robot`), beside the console:
-- **Take list**: day, boot, key, action, end reason, note; pick one take or
-  several from one boot.
-- **Point cloud** of `tof_targets` in world coordinates, coloured by signal,
-  reflectance, status, row or target number; filters (rows, status, target
-  number, signal range, time).
-- **Robot pose** and its trail; a **time slider** through the take showing the
-  frame's 64 zones as rays.
-- **Truth objects**: place a box where the real cup was (x, y, size); saved in
-  `truth`.
-- **Map voxels** from replay (§5), one variant or two side by side.
-- A query box for DuckDB SQL, results as a table (later: plotted).
+**http://127.0.0.1:8080/viewer** (`?take=<id>`), served by `pc/robot`
+(`viewer_api.ts`); three.js (npm, pinned like every dependency: `npm install`)
+comes from the server too, `/vendor/three/`, no internet needed:
+- **Take**: a list of all takes; the URL keeps the one shown.
+- **Points**: every target of the take where it was in the room (`tof_targets`
+  x, y, z), coloured by row, signal, status, height or target number; filters:
+  rows 1-8, sure only (status 5, 6, 9), closest target only, frames all / up to
+  the slider / the slider's only; point size. Click a point: its row, column,
+  target, distance, signal, status, height, frame and time (the slider jumps there).
+- **Map**: the take replayed through the robot's own map code (§5) as 10 cm
+  cubes: blocked (L1) red, overhang (L2) orange, floor seen / no floor as tiles;
+  READINGS (what the robot runs), VOTES (before), or the difference (blue only
+  READINGS, purple only VOTES); the floor margin.
+- **Time**: a slider through the frames, play at 15 frames/s; the robot (a box)
+  and its rays to each zone's closest target.
+- **The path**: the odometry, a grey line on the floor.
+- **Truth**: boxes where things really stood (name, x, y, size, height; shift-click
+  the floor for x, y), kept per boot in the `truth` table (each boot has its own
+  odometry frame); drawn as yellow frames.
+- **Score**, per variant: each truth box found or not (a blocked or overhang cell
+  on it, how many), and the solid cells within 1.5 m of the start on no box ("not
+  explained": false, or not placed yet).
+
+Not built (yet): several takes at once, the DuckDB query box.
 
 ## 5. Replay: the robot's code on recordings
 
@@ -291,10 +306,12 @@ A page on the existing Node server (`pc/robot`), beside the console:
   same takes. With `truth`, each gets a score (truth cells found, false blocked
   cells): "is the cup in the map?" becomes a number per variant.
 - Recorded takes with truth become regression tests (`run_tests.sh`).
-- **Started 10 Oct:** `npm run frames -- <take> <file>` (pc/robot) writes a take's
+- **Built 10 Oct:** `npm run frames -- <take> <file>` (pc/robot) writes a take's
   frames as the map receives them; `tools/replay.sh <take>` runs `cell_map.c` on
   them in both variants (MAP_DESIGN §9) and lists every column where they
-  differ. Truth objects and scores come with the viewer.
+  differ; with `--json` (the viewer, `replay.ts`, which builds the tool with `cc`
+  whenever the map code changed) it gives the cells. The replay matches the
+  robot's own map (MAP_DESIGN §9). Scores against truth: in the viewer.
 
 ## 6. Steps
 
@@ -314,8 +331,10 @@ Each changes something visible; robot tests only where the robot changes.
    per-boot files stay the truth instead of per-take copies); all twelve takes
    of 10 Oct imported; the floor lands at z ≈ 0.
 4. **T4 Viewer**: the three.js point cloud, pose, time slider, filters, truth
-   objects.
+   objects. **Built 10 Oct** (§4).
 5. **T5 Replay**: `cell_map` on takes, voxels in the viewer, variants, scores.
+   **Built 10 Oct** with T4 (§5): both variants per take; regression tests from
+   takes with truth still to come.
 6. **T6 The cup session**: scans with nothing, the cup at 45 / 80 cm, the 7 cm box;
    truth placed; then the hypotheses (signal, 2nd target, the 5th row's floor
    returns) and map fixes, tested on these takes.

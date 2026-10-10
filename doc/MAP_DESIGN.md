@@ -215,3 +215,15 @@ the replay of the take gives the same blocked cells as the robot printed (441 of
 441 within 1 m; whole map 1555 of 1560, the rest from frames before the take).
 The `?` beyond ~1 m stay (Daniel, 10 Oct): the floor there isn't sure either way.
 **Open:** the cupboard was missing in the earlier scans (both variants).
+
+**Blips (10 Oct, Daniel saw one in the viewer):** an overhang cell 67 cm behind
+the robot where nothing stands: one target in one frame (row 3, 61 cm, signal 11,
+status 5; the light in that direction was normal). The map takes a cell's first
+verdict, so one echo makes it. Tried on the five scans, not kept: (a) occupied
+only from a second frame on: the blip goes, but so does a chair-base cell hit in
+22 frames that won the vote once; (b) readings under 1 m with signal below 20
+ignored (17 of 45 one-frame cells have no stronger hit, none of the 119 cells hit
+in 4+ frames): the blip goes, but so do chair-base cells at 60-65 cm in two other
+scans (the dark base echoes weakly too). Kept as it is: a blip is rare (one in the
+last scan), and the next rays through its cell clear it. Revisit with recordings
+of driving.

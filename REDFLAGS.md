@@ -134,3 +134,11 @@ and the M2 parts of `debug_console`. No behaviour changed; host tests pass.
 | `store`, `rangefinder` | Repetition | The world position of a target is computed on the PC as `rangefinder.c` and `cell_map.c` do on the robot | **Accepted:** the PC must not need the firmware; the zone angle and mounting come from `GEOMETRY`, and the floor landing at z ≈ 0 checks it. T5 (replay) runs the robot's own code |
 | `store` | (limit) | Takes from before UDP have no arrival times: `started_at` is when their file was opened, the same for all takes in it | **Accepted:** three runs, all on 10 Oct; their order is kept by take number |
 
+### T4/T5 — viewer and replay (10 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| `viewer.html` | (dependency) | three.js came from a CDN at first (an old 0.160.0): the viewer needed the internet | **Fixed (Daniel):** npm `three` 0.186.1, served by the server from `node_modules` (`/vendor/three/`); all dependencies pinned at their newest (10 Oct) |
+| `viewer_api`, `replay` | (security) | SQL built from strings | **Accepted:** the server listens on 127.0.0.1 only; take, boot and truth ids are checked against strict patterns first, text is quoted; a test feeds an injection |
+| `replay` | Nonobvious code | The server compiles the replay tool with `cc` when the map code is newer than the binary | **Accepted:** the replay must run the robot's current code; replay results are cached per take, margin and build |
+

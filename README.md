@@ -96,7 +96,9 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   is sent. The PC saves every datagram in `pc/robot/recordings/raw/` (a file per
   robot boot) and notes each take; `npm run decode -- <file>` in `pc/robot/` prints
   them. Each take also goes into DuckDB (`pc/robot/recordings/robot.duckdb`;
-  `npm run import` rebuilds it), listed at http://127.0.0.1:8080/takes.
+  `npm run import` rebuilds it), listed at http://127.0.0.1:8080/takes and shown
+  in 3D at http://127.0.0.1:8080/viewer: the points, the robot's path and rays,
+  the map replayed in both variants, truth boxes and each map's score.
 - **Watching** (`a`, 1 minute). The VL53
   watches still and while turning (a background per world direction, no learning
   after a stop). The robot turns toward the biggest movement and follows it: its

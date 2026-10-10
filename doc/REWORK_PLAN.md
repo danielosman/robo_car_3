@@ -107,9 +107,9 @@ The robot:
 **A session on telemetry starts at [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) §0.**
 T1-T6 in TELEMETRY_PLAN §6. T1 (the commands) is built and tested on the robot;
 T2 (recording on the robot) is built and tested on the robot (UDP, 10 Oct); T3
-(DuckDB, the take list) is built; next T4, the viewer. Then the viewer, replay, and the cup
-session. Map fixes (point 1 below) wait
-for its data.
+(DuckDB, the take list) and T4 with T5 (the 3D viewer, replay of both map
+variants, truth boxes and scores) are built. The robot runs the READINGS map
+(MAP_DESIGN §9). Next: T6, the cup session, scored in the viewer.
 
 ## Open suggestions and discussion points
 

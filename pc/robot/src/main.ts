@@ -2,7 +2,8 @@
 // http://127.0.0.1:8080/ shows its console and sends keys. Every run writes a log
 // file in logs/. PicoA's recordings arrive on a second connection and are saved in
 // recordings/ (recording.ts, doc/TELEMETRY_PLAN.md); each take goes into DuckDB as it
-// ends (store.ts), listed at http://127.0.0.1:8080/takes. Ports: PORT (HTTP 8080),
+// ends (store.ts), listed at http://127.0.0.1:8080/takes and shown in 3D at /viewer
+// (viewer_api.ts). Ports: PORT (HTTP 8080),
 // ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one.
 import http from "node:http";
 import { createWriteStream } from "node:fs";
@@ -14,6 +15,7 @@ import { ROBOT_PORT, RobotLink, broadcastAddresses } from "./robot.ts";
 import { DATA_PORT, RecordingServer } from "./recording.ts";
 import { Store } from "./store.ts";
 import { DB_PATH } from "./import.ts";
+import { handleViewerApi } from "./viewer_api.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HTTP_PORT = Number(process.env.PORT ?? 8080);
@@ -67,12 +69,15 @@ async function main(): Promise<void> {
     "/console.js": ["console.js", "text/javascript"],
     "/takes": ["takes.html", "text/html"],
     "/takes.js": ["takes.js", "text/javascript"],
+    "/viewer": ["viewer.html", "text/html"],
+    "/viewer.js": ["viewer.js", "text/javascript"],
   };
   const json = (res: http.ServerResponse, code: number, body: unknown) => {
     res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify(body));
   };
   const server = http.createServer(async (req, res) => {
+    if (await handleViewerApi(req, res, store)) return;
     if (req.url === "/api/takes" && req.method === "GET") {
       try {
         json(res, 200, await store.query(`SELECT take_id, boot_id, take_no, strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started,
@@ -91,7 +96,17 @@ async function main(): Promise<void> {
       });
       return;
     }
-    const file = files[req.url ?? "/"];
+    // three.js for the viewer, from node_modules (npm install): /vendor/three/build/…, /vendor/three/addons/…
+    const vendor = /^\/vendor\/three\/(build|addons)\/([\w./-]+\.js)$/.exec(new URL(req.url ?? "/", "http://localhost").pathname);
+    if (vendor && !vendor[2].includes("..")) {
+      const dir = path.join(root, "node_modules", "three", vendor[1] === "build" ? "build" : "examples/jsm");
+      try {
+        res.writeHead(200, { "content-type": "text/javascript", "cache-control": "max-age=3600" });
+        res.end(await readFile(path.join(dir, vendor[2])));
+      } catch { res.writeHead(404); res.end("not found"); }
+      return;
+    }
+    const file = files[new URL(req.url ?? "/", "http://localhost").pathname];
     if (!file) { res.writeHead(404); res.end("not found"); return; }
     try {
       const data = await readFile(path.join(root, "public", file[0]));

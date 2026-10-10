@@ -9,16 +9,17 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts",
+    "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts src/viewer_api.test.ts",
     "decode": "node src/decode.ts",
     "import": "node src/import.ts",
     "frames": "node src/frames.ts"
   },
   "dependencies": {
-    "@duckdb/node-api": "1.5.5-r.5",
-    "ws": "^8.18.0"
+    "@duckdb/node-api": "1.5.6-r.1",
+    "three": "0.186.1",
+    "ws": "8.22.0"
   },
   "devDependencies": {
-    "@types/ws": "^8.5.12"
+    "@types/ws": "8.18.2"
   }
 }

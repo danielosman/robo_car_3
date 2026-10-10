@@ -37,9 +37,12 @@ CREATE TABLE IF NOT EXISTS marks (take_id VARCHAR, t_us UINTEGER, t_s DOUBLE, te
 CREATE TABLE IF NOT EXISTS wifi (
   take_id VARCHAR, t_us UINTEGER, t_s DOUBLE, rssi_dbm INTEGER, console_silent_ms INTEGER,
   console_unacked INTEGER, console_retries INTEGER, datagrams INTEGER, datagrams_refused INTEGER);
-CREATE TABLE IF NOT EXISTS truth (  -- what really stood there (entered by hand, T4)
+CREATE TABLE IF NOT EXISTS truth (  -- what really stood there (placed in the viewer): a box per object
   boot_id VARCHAR, take_id VARCHAR, name VARCHAR,
   x DOUBLE, y DOUBLE, z DOUBLE, size_x DOUBLE, size_y DOUBLE, size_z DOUBLE, note VARCHAR);
+-- Added later: kept by "IF NOT EXISTS", filled by importing again (npm run import).
+ALTER TABLE takes ADD COLUMN IF NOT EXISTS geometry VARCHAR;   -- GEOMETRY as JSON (the viewer's rays)
+ALTER TABLE truth ADD COLUMN IF NOT EXISTS truth_id VARCHAR;
 `;
 const TAKE_TABLES = ["tof_frames", "tof_zones", "tof_targets", "odom", "drive", "marks", "wifi"];
 const POSE_GAP_S = 0.1; // a frame further than this from any odometry report has no pose
@@ -129,11 +132,12 @@ export class Store {
       await c.run(
         `INSERT INTO takes VALUES ($1, $2, $3, ${startedMs === null ? "NULL" : `make_timestamp(${Math.round(startedMs * 1000)}::BIGINT)`},
            ${startedMs === null ? "NULL" : `CAST(make_timestamp(${Math.round(startedMs * 1000)}::BIGINT) AS DATE)`},
-           $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
+           $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
         [id, start.bootId, start.takeNo, start.key, start.action, start.param, start.version, start.build,
          elapsed(start.tUs, end?.tUs ?? lastTime(take.records, start.tUs)), end ? end.reason : "cut",
          start.version >= 3 ? whole : take.counts.TOF_RAW ?? 0, half, start.version >= 3 ? missing : end?.framesDropped ?? 0,
-         received, lost, odoms.length, take.file, (old[0]?.note as string | undefined) ?? ""]);
+         received, lost, odoms.length, take.file, (old[0]?.note as string | undefined) ?? "",
+         geometry ? JSON.stringify({ sensorM: geometry.sensorM, zoneRad: geometry.zoneRad, rows: geometry.rows, cols: geometry.cols }) : null]);
 
       const frames = await c.createAppender("tof_frames"), zones = await c.createAppender("tof_zones");
       const targets = await c.createAppender("tof_targets");
