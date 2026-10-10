@@ -9,6 +9,7 @@
 #include "cell_map.h"
 #include "pose.h"
 #include "wifi_console.h"
+#include "recorder.h"
 #include "camera.h"
 #include "tof_motion.h"
 #include "camera_motion.h"
@@ -34,13 +35,14 @@ static const char *direction(void) {
 static void help(void) {
     printf("Keys: space = stop (motors off), p = status, h = help; the robot does nothing by itself\n"
            "Actions (motors on while one runs): s = scan (390 deg left), f = move %.0f cm, t = turn %.0f deg,\n"
-           "       a = watch movement for 1 min\n"
-           "Settings: r = direction forward / back (now %s)\n"
+           "       a = watch movement for 1 min, 5 = record 5 s standing still (motors off)\n"
+           "Settings: r = direction forward / back (now %s), R = recording on / off (now %s)\n"
            "Map: C = clear the map, m = print the map, z = one ToF frame\n"
            "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
            "Movement backgrounds now: o = each ToF zone, k = each camera block\n"
            "WiFi: W = connect (or show how it is connected)\n",
-           (double)(MOVE_M * 100), (double)(TURN_RAD * DEG_PER_RAD), backwards ? "back" : "forward");
+           (double)(MOVE_M * 100), (double)(TURN_RAD * DEG_PER_RAD), backwards ? "back" : "forward",
+           recorder_on() ? "on" : "off");
 }
 
 static void greet(void) {
@@ -205,12 +207,22 @@ void debug_console_update(void) {
         greet();
     }
 
-    switch (getchar_timeout_us(0)) {
+    int key = getchar_timeout_us(0);
+    if (key == PICO_ERROR_TIMEOUT) return;
+    recorder_key((char)key);
+    switch (key) {
     case ' ': behaviour_stop(); body_motors(false); printf("Stopped, motors off\n"); break;
     case 's': behaviour_scan(); break;
     case 'f': behaviour_move(backwards ? -MOVE_M : MOVE_M); break;
     case 't': behaviour_turn(backwards ? -TURN_RAD : TURN_RAD); break;
     case 'a': behaviour_watch(); break;
+    case '5': behaviour_record(); break;
+    case 'R':
+        recorder_set(!recorder_on());
+        if (!recorder_on()) printf("Recording: off\n");
+        else if (recorder_ready()) printf("Recording: on; each action is recorded\n");
+        else printf("Recording: on, but no recording connection: actions run unrecorded until it is up\n");
+        break;
     case 'r': backwards = !backwards; printf("Direction: %s\n", direction()); break;
     case 'C': surroundings_clear(); printf("Map cleared\n"); break;
     case 'm': print_map(); break;
@@ -224,6 +236,7 @@ void debug_console_update(void) {
         wifi_console_print_status();
         loop_stats_print();
         print_ram();
+        recorder_print_status();
         printf("Direction: %s\n", direction());
         break;
     case 'W': wifi_console_start(); break;

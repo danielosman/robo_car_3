@@ -16,6 +16,8 @@
 // Each zone's ray with the robot level: how far below horizontal (rad) and how far left.
 static float zone_down_rad[RANGEFINDER_RAYS], zone_left_rad[RANGEFINDER_RAYS];
 static bool have_zones;
+static const VL53L8CX_ResultsData *raw; // the sensor's data behind the latest frame
+static uint32_t frames_read;
 
 static void make_zones(void) {
     for (int row = 0; row < RANGEFINDER_ROWS; row++)
@@ -57,15 +59,28 @@ static uint16_t closest_sure_mm(const VL53L8CX_ResultsData *r, int zone) {
     return RANGE_INVALID;
 }
 
+// The sensor is turned 90° on the PCB (same as the bring-up viewer's rotation).
+int rangefinder_zone(int ray) {
+    return (RANGEFINDER_COLS - 1 - ray % RANGEFINDER_COLS) * RANGEFINDER_ROWS + ray / RANGEFINDER_COLS;
+}
+
+float rangefinder_zone_rad(void) { return ZONE_RAD; }
+
+// All of the sensor's outputs for the latest frame, in its own zone order, until the
+// next rangefinder_poll(); NULL before the first. For recorder.c, which declares it
+// itself: the type is tof.h's, which rangefinder.h's users don't include.
+const VL53L8CX_ResultsData *rangefinder_raw(void) { return raw; }
+
 bool rangefinder_poll(range_frame_t *frame) {
     const VL53L8CX_ResultsData *r = tof_poll();
     if (!r) return false;
+    raw = r;
+    frame->number = ++frames_read;
     // Data is read up to POLL_US after it's ready; the measurement took the whole period.
     frame->t_us = time_us_32() - 1000000u / RANGEFINDER_HZ / 2 - POLL_US / 2;
     for (int row = 0; row < RANGEFINDER_ROWS; row++)
         for (int col = 0; col < RANGEFINDER_COLS; col++) {
-            // The sensor is turned 90° on the PCB (same as the bring-up viewer's rotation).
-            int zone = (RANGEFINDER_COLS - 1 - col) * RANGEFINDER_ROWS + row, i = row * RANGEFINDER_COLS + col;
+            int i = row * RANGEFINDER_COLS + col, zone = rangefinder_zone(i);
             frame->range_mm[i] = closest_sure_mm(r, zone);
             frame->status[i] = r->target_status[zone * VL53L8CX_NB_TARGET_PER_ZONE];
         }

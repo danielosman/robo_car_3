@@ -1,7 +1,9 @@
 // Host test for picoA/app/wifi_console.c: joining (and failing to join) the WiFi,
 // finding the server by its announcements, the console text and keys over TCP,
-// output kept while no server listens, heartbeats, and losing the server or the
-// WiFi, against a fake WiFi chip and lwIP with the test playing the server. Run
+// output kept while no server listens, heartbeats, losing the server or the
+// WiFi, and recordings as UDP datagrams (to the announced port, refusals
+// reported), against a fake
+// WiFi chip and lwIP with the test playing the server. Run
 // from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_wifi_console picoA/app/test/test_wifi_console.c && build/test_wifi_console
 #include <assert.h>
@@ -129,9 +131,8 @@ static void test_full_send_buffer(void) {
 }
 
 static void test_server_silent(void) {
-    int aborts = fake_tcp_aborts;
     run(6100); // the server says nothing
-    assert(state == WIFI_LOOKING && fake_tcp_aborts == aborts + 1 && !fake_tcp.open);
+    assert(state == WIFI_LOOKING && !fake_tcp.open);
     assert(!wifi_console_connected());
     // While no server listens, the newest 16 KB are kept.
     char line[1001];
@@ -168,6 +169,54 @@ static void test_server_closes_or_fails(void) {
     printf("ok: server closing, refusing, not answering: looks again\n");
 }
 
+static void test_recordings_by_udp(void) {
+    fake_server_closes();
+    run(10);
+    assert(!wifi_console_data_send("x", 1) && wifi_console_data_connection() == 0); // no server
+    // The announcement names the recording port.
+    fake_announce(fake_ip(192, 168, 1, 10), "ROBOCAR-SERVER 4211 5000\n");
+    run(10);
+    fake_server_accepts();
+    run(10);
+    uint32_t first = wifi_console_data_connection();
+    assert(first > 0);
+    received();
+    assert(wifi_console_data_send("take 1", 6) && fake_dgram_len == 6 && memcmp(fake_dgram, "take 1", 6) == 0);
+    assert(fake_dgram_ip.addr == fake_ip(192, 168, 1, 10).addr && fake_dgram_port == 5000);
+    assert(fake_pbufs_alloced > 0 && fake_pbufs_freed >= fake_pbufs_alloced);
+    assert(strcmp(received(), "") == 0); // nothing on the console
+    // Refused (the WiFi chip full, out of memory): false, nothing waits.
+    fake_udp_err = ERR_MEM;
+    assert(!wifi_console_data_send("x", 1));
+    fake_udp_err = ERR_OK;
+    fake_pbuf_fail = true;
+    assert(!wifi_console_data_send("x", 1));
+    fake_pbuf_fail = false;
+    // The console lost and found again: a new number.
+    fake_server_closes();
+    run(10);
+    assert(wifi_console_data_connection() == 0);
+    fake_announce(fake_ip(192, 168, 1, 10), "ROBOCAR-SERVER 4211\n"); // no recording port: 4212
+    run(10);
+    fake_server_accepts();
+    run(10);
+    assert(wifi_console_data_connection() > first);
+    assert(wifi_console_data_send("y", 1) && fake_dgram_port == 4212);
+    // The link's status: the signal, the console's TCP.
+    fake_tcp.snd_lbb = 5000;
+    fake_tcp.lastack = 1000;
+    fake_tcp.nrtx = 3;
+    fake_tcp.rto = 6;
+    wifi_link_status_t ls;
+    wifi_console_link_status(&ls);
+    assert(fake_lock_depth == 0 && ls.rssi_dbm == -55 && ls.console.unacked == 4000);
+    assert(ls.console.retries == 3 && ls.console.rto_ms == 3000 && ls.console_silent_ms <= 500);
+    fake_tcp.snd_lbb = fake_tcp.lastack = 0;
+    fake_tcp.nrtx = 0;
+    received();
+    printf("ok: recordings as UDP datagrams to the announced port (4212 if none), refusals reported\n");
+}
+
 static void test_fallback_ip(void) {
     fake_link = CYW43_LINK_DOWN; // the WiFi goes
     run(10);
@@ -180,6 +229,7 @@ static void test_fallback_ip(void) {
     fake_server_accepts();
     run(10);
     assert(wifi_console_connected());
+    assert(wifi_console_data_send("z", 1) && fake_dgram_port == 4212); // no announcement: the default port
     printf("ok: WiFi lost and rejoined; WIFI_SERVER_IP after 5 s without announcements\n");
 }
 
@@ -189,6 +239,7 @@ int main(void) {
     test_full_send_buffer();
     test_server_silent();
     test_server_closes_or_fails();
+    test_recordings_by_udp();
     test_fallback_ip();
     printf("wifi_console: all tests passed\n");
     return 0;

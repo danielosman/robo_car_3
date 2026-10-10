@@ -2,8 +2,8 @@
 
 The robot's keys and states, reworked (Daniel, 10 Oct 2026). Goes with
 [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md): every action here is one recorded take.
-Status: **built (T1, 10 Oct 2026)** except `5` and `R`, which come with recording (T2).
-Host tests pass; robot test passed (10 Oct).
+Status: **built (T1, 10 Oct 2026)**; robot test passed (10 Oct). `5` and `R` built
+with recording (T2, 10 Oct), host-tested; their robot test is T2's.
 
 ## Rules (Daniel)
 
@@ -42,7 +42,7 @@ At an action's end the motors are switched off: idle is always "motors off".
 | `t` | action | **Turn** 30° in place: left in forward direction, right in back direction |
 | `r` | setting | **Direction** forward ⇄ back; prints the new direction |
 | `a` | action | **Watch**: turn towards the biggest movement and follow it, for 1 minute (or until stop) |
-| `5` | action | **Record 5 s**: the robot does nothing, the telemetry records 5 s (only with recording on). T2 |
+| `5` | action | **Record 5 s**: the robot does nothing (motors off), the telemetry records 5 s (only with recording on and its connection up; else it says why). T2 |
 | `R` | setting | **Recording** on / off (TELEMETRY_PLAN §2). T2 |
 | `C` | action (instant) | **Clear the map**: what the map keeps and the frame being added (the odometry frame stays) |
 | `p` | print | Status: pose, PicoB link counters, WiFi, loop time, RAM, direction, recording on/off |

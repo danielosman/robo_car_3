@@ -17,6 +17,7 @@
 // One measurement as the robot sees it: range_mm[row * 8 + col], row 0 at the top,
 // column 0 at the left.
 typedef struct {
+    uint32_t number;                    // counts every frame the sensor gave since power-up, from 1
     uint32_t t_us;                      // PicoA's clock (time_us_32()), middle of the measurement
     uint16_t range_mm[RANGEFINDER_RAYS]; // closest sure target along each ray, or RANGE_NO_TARGET / RANGE_INVALID
     uint8_t status[RANGEFINDER_RAYS];   // VL53 status of the first target, for printing why a zone is unsure
@@ -31,6 +32,11 @@ void rangefinder_ray_direction(int ray, float dir[3]);
 // from its centre (+ = down, left), with the robot pitched nose up by pitch_rad.
 void rangefinder_sub_ray_direction(int ray, float down_frac, float left_frac, float pitch_rad, float dir[3]);
 void rangefinder_origin(float origin[3]);
+// For recording the sensor's own data (recorder.c): the sensor zone each ray reads
+// (the mounting), and the angle between neighbouring rays. A ray at row, col points
+// (row - 3.5) zone angles below horizontal and (3.5 - col) to the left.
+int rangefinder_zone(int ray);
+float rangefinder_zone_rad(void);
 // For a zone that sees the floor: the farthest reading that can still be its floor
 // (robot level; farther ones are reflections or a drop, and tell nothing about what
 // stands there). 0 for zones with no such limit.

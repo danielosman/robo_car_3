@@ -1,6 +1,7 @@
 // RoboCar robot server (ROBOT_WIFI.md): PicoA connects over WiFi, the browser at
 // http://127.0.0.1:8080/ shows its console and sends keys. Every run writes a log
-// file in logs/.
+// file in logs/. PicoA's recordings arrive on a second connection and are saved in
+// recordings/ (recording.ts, doc/TELEMETRY_PLAN.md).
 import http from "node:http";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -8,6 +9,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { RobotLink, broadcastAddresses } from "./robot.ts";
+import { RecordingServer } from "./recording.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HTTP_PORT = Number(process.env.PORT ?? 8080);
@@ -39,9 +41,13 @@ async function main(): Promise<void> {
     add({ kind: "note", text: line });
   }
 
-  const robot = new RobotLink();
+  const recordings = new RecordingServer({ dir: path.join(root, "recordings") });
+  recordings.on("note", note);
+  const dataPort = await recordings.start();
+  const robot = new RobotLink({ dataPort });
   robot.on("text", (text: string) => { logFile.write(text); process.stdout.write(text); add({ kind: "text", text }); });
   robot.on("note", note);
+  robot.on("bytes", (n: number) => recordings.consoleArrived(n));
   robot.on("status", status => broadcast({ type: "status", status }));
   await robot.start();
   note(`server started; announcing on ${broadcastAddresses().join(", ") || "no network"}; log ${path.relative(root, logPath)}`);

@@ -24,12 +24,17 @@ map come later.
 1. **WiFi:** joins the network in `picoA/app/wifi_config.h` (git-ignored; copy
    `wifi_config.example.h`). No power saving on the WiFi chip (keys answer at once,
    broadcasts aren't missed).
-2. **Finding the server:** the server broadcasts `ROBOCAR-SERVER 4211` on UDP port
-   **4210** every second to every network it is on. The robot connects to the
-   sender's IP on the port in the message. No IP address in the firmware. Fallback:
+2. **Finding the server:** the server broadcasts `ROBOCAR-SERVER 4211 4212` on UDP
+   port **4210** every second to every network it is on. The robot connects to the
+   sender's IP on the first port in the message (the console); the second is where
+   recordings go (UDP, default 4212). No IP address in the firmware. Fallback:
    `WIFI_SERVER_IP` in `wifi_config.h`, tried after 5 s without an announcement.
 3. **The console:** one TCP connection. Robot → server: the console text, exactly
    what USB shows. Server → robot: keys.
+   **Recordings** (doc/TELEMETRY_PLAN.md): UDP datagrams to the server while the
+   console is connected, robot → server only. A lost one is lost: nothing waits
+   behind it (over TCP, a few lost packets while the robot turned stalled
+   everything for seconds).
 4. **Heartbeats:** the robot sends `\x01rssi -55\n` every 2 s (signal strength;
    the server strips it from the text, the console never prints `\x01`); the
    server sends a `\0` byte every 2 s (the robot ignores it). Either side drops the
@@ -61,6 +66,10 @@ Node 24, TypeScript run directly (`npm start` = `node src/main.ts`), like
 - `src/robot.ts`: the announcements, the robot's TCP connection, heartbeats,
   stripping the status records. One robot at a time; a new connection replaces the
   old one.
+- `src/recording.ts`: recordings (UDP 4212): saves every datagram with its
+  arrival time in `pc/robot/recordings/raw/` (git-ignored; a file per robot boot),
+  decodes the records and notes each take; `src/decode.ts`
+  (`npm run decode -- <file>`) reads a saved file.
 - `src/main.ts`: HTTP + WebSocket for the page, log file per server run in
   `pc/robot/logs/` (git-ignored), the last 256 KB of text kept so a reloaded page
   shows the history.
@@ -68,7 +77,8 @@ Node 24, TypeScript run directly (`npm start` = `node src/main.ts`), like
   robot…" / "Robot connected: IP, signal, since 14:32" / "Robot lost at 14:40"),
   a button per key, and the scrolling log. Typing a key on the page sends it too.
 
-Ports: HTTP 8080 (`PORT` to change), robot TCP 4211, announcements UDP 4210.
+Ports: HTTP 8080 (`PORT` to change), robot TCP 4211 (console), recordings UDP
+4212, announcements UDP 4210.
 
 **Can block it:** routers that don't pass broadcasts between devices (guest
 networks, "client isolation"): use `WIFI_SERVER_IP`. The first time, macOS asks
@@ -76,8 +86,8 @@ whether `node` may accept incoming connections: Allow.
 
 ## Firmware
 
-- `picoA/app/wifi_console.*`: the WiFi chip, lwIP, the announcements, the TCP
-  connection, heartbeats; plugs into the Pico SDK's stdio as a second output and
+- `picoA/app/wifi_console.*`: the WiFi chip, lwIP, the announcements, the two TCP
+  connection (console), the recordings' datagrams, heartbeats; plugs into the Pico SDK's stdio as a second output and
   input next to USB, so `printf` and `getchar` in `debug_console.c` work unchanged.
   lwIP runs in the background (`pico_cyw43_arch_lwip_threadsafe_background`).
   Host test: `picoA/app/test/test_wifi_console.c`.

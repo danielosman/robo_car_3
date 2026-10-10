@@ -2,8 +2,8 @@
 // serial monitor's keys as buttons (typing them works too).
 const KEYS = [
   ["Robot", [[" ", "stop"], ["p", "status"], ["W", "WiFi"], ["h", "help"]]],
-  ["Actions", [["s", "scan"], ["f", "move 50 cm"], ["t", "turn 30°"], ["a", "watch 1 min"]]],
-  ["Settings", [["r", "direction"]]],
+  ["Actions", [["s", "scan"], ["f", "move 50 cm"], ["t", "turn 30°"], ["a", "watch 1 min"], ["5", "record 5 s"]]],
+  ["Settings", [["r", "direction"], ["R", "recording"]]],
   ["Map", [["C", "clear map"], ["m", "map"], ["z", "ToF frame"]]],
   ["Look", [["o", "ToF backgrounds"], ["k", "camera backgrounds"], ["c", "camera frame"]]],
 ];

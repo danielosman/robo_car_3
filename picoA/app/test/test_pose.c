@@ -7,10 +7,17 @@
 #include "../pose.c"
 
 static odom_report_t report;
-static uint32_t report_time_us;
+static uint32_t report_time_us, report_count;
 bool body_connected(void) { return true; }
 const odom_report_t *body_odom(void) { return &report; }
 uint32_t body_odom_time_us(void) { return report_time_us; }
+uint32_t body_odom_count(void) { return report_count; }
+bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) {
+    if (n != report_count) return false; // the fake keeps only the latest
+    *r = report;
+    *t_us = report_time_us;
+    return true;
+}
 
 // PicoA's clock: 2 s before it wraps, so the history below spans the wrap.
 #define T(us) (0u - 2000000u + (uint32_t)(us))
@@ -24,6 +31,7 @@ static void report_at(uint32_t t_us) {
     report.pitch_rad = 0.01f;
     report.v_mps = 0.1f;
     report.w_radps = 1.0f;
+    report_count++;
     pose_update();
 }
 

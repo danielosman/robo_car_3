@@ -6,9 +6,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 #define VL53L8CX_NB_TARGET_PER_ZONE 4U
-typedef struct {
+typedef struct { // the ULD's outputs the app uses, with the ULD's types
+    int8_t silicon_temp_degc;
+    uint32_t ambient_per_spad[64];
     uint8_t nb_target_detected[64];
+    uint32_t nb_spads_enabled[64];
+    uint32_t signal_per_spad[64 * VL53L8CX_NB_TARGET_PER_ZONE];
+    uint16_t range_sigma_mm[64 * VL53L8CX_NB_TARGET_PER_ZONE];
     int16_t distance_mm[64 * VL53L8CX_NB_TARGET_PER_ZONE];
+    uint8_t reflectance[64 * VL53L8CX_NB_TARGET_PER_ZONE];
     uint8_t target_status[64 * VL53L8CX_NB_TARGET_PER_ZONE];
 } VL53L8CX_ResultsData;
 typedef struct { uint8_t zones, hz, order, mode; uint16_t integration_ms; uint8_t sharpener; } tof_settings_t;

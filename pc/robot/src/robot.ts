@@ -17,6 +17,7 @@ export type RobotStatus =
 
 export interface RobotLinkOptions {
   robotPort?: number;          // 0: any free port (tests)
+  dataPort?: number;           // the recording connection's, announced too (recording.ts); 0: none
   announcePort?: number;
   announceTo?: string[];       // default: every IPv4 network's broadcast address
   announceEveryMs?: number;
@@ -56,7 +57,8 @@ export function broadcastAddresses(): string[] {
   return [...out];
 }
 
-// Events: "text" (string), "status" (RobotStatus), "note" (string: what the server saw).
+// Events: "text" (string), "status" (RobotStatus), "note" (string: what the server saw),
+// "bytes" (number: a piece of the robot's stream arrived).
 export class RobotLink extends EventEmitter {
   status: RobotStatus = { state: "waiting" };
   private socket: net.Socket | null = null;
@@ -68,7 +70,7 @@ export class RobotLink extends EventEmitter {
   constructor(opts: RobotLinkOptions = {}) {
     super();
     this.opts = {
-      robotPort: ROBOT_PORT, announcePort: ANNOUNCE_PORT, announceTo: [],
+      robotPort: ROBOT_PORT, dataPort: 0, announcePort: ANNOUNCE_PORT, announceTo: [],
       announceEveryMs: 1000, heartbeatEveryMs: 2000, silenceMs: 6000, ...opts,
     };
   }
@@ -82,7 +84,7 @@ export class RobotLink extends EventEmitter {
     await new Promise<void>(resolve => this.udp.bind(() => resolve()));
     this.udp.setBroadcast(true);
     const announce = () => {
-      const message = Buffer.from(`ROBOCAR-SERVER ${port}\n`);
+      const message = Buffer.from(`ROBOCAR-SERVER ${port}${this.opts.dataPort ? ` ${this.opts.dataPort}` : ""}\n`);
       const targets = this.opts.announceTo.length ? this.opts.announceTo : broadcastAddresses();
       for (const to of targets) this.udp.send(message, this.opts.announcePort, to, () => { /* a network without broadcast */ });
     };
@@ -130,6 +132,7 @@ export class RobotLink extends EventEmitter {
 
     socket.on("data", (chunk: Buffer) => {
       lastHeard = Date.now();
+      this.emit("bytes", chunk.length);
       const { text, records } = splitter.push(chunk);
       for (const r of records) {
         const m = /^rssi (-?\d+)$/.exec(r);

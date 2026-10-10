@@ -59,7 +59,7 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, the shared helpers, PicoB's wheel control, odometry and `brain`,
   PicoA's `body`, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the actions
-  (scan, move, turn, watch) in a simulated room, the WiFi console and the loop timer. The fake
+  (scan, move, turn, watch, record) in a simulated room, the recorder, the WiFi console and the loop timer. The fake
   clock starts 30 s before `time_us_32()` wraps, so every test crosses the wrap (`npm test` in `pc/robot/` for the server). Run it after every change.
 - **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
   side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
@@ -85,8 +85,17 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
 - **Actions** (`behaviour.c`), one per key, motors on while it runs and off at its
   end, which it prints (done with what odometry measured, or stopped and why):
   `s` scan (390° left in place, nothing else), `f` move 50 cm, `t` turn 30°, `a`
-  watch for 1 minute. `r` switches the direction: back, `f` moves back and `t`
-  turns right. Space stops; a new action replaces the running one.
+  watch for 1 minute, `5` record 5 s (standing still, motors off; only with
+  recording on). `r` switches the direction: back, `f` moves back and `t` turns
+  right. Space stops; a new action replaces the running one.
+- **Recording** (`recorder.c`, [doc/TELEMETRY_PLAN.md](doc/TELEMETRY_PLAN.md)): `R`
+  switches it on (off at power-up). Then each action is a take: its raw data goes
+  to the PC as UDP datagrams beside the console (every ToF frame with all of the
+  sensor's outputs, odometry, drive commands, the console's lines and keys); a lost
+  datagram is lost (no waiting behind it) and counted by its number. Idle, nothing
+  is sent. The PC saves every datagram in `pc/robot/recordings/raw/` (a file per
+  robot boot) and notes each take; `npm run decode -- <file>` in `pc/robot/` prints
+  them.
 - **Watching** (`a`, 1 minute). The VL53
   watches still and while turning (a background per world direction, no learning
   after a stop). The robot turns toward the biggest movement and follows it: its
@@ -96,8 +105,9 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   background 1 s after the robot stands still. Space stops.
 - **PicoA console** (`debug_console.c`), on USB and over WiFi, the same keys (one
   key, one operation; nothing printed by itself): space stop, `p` status (pose, link
-  counters, WiFi, the loop time over the last 10 s, `loop_stats.c`, the free RAM, the
-  direction), `h` help, `W` connect to WiFi; the actions above; map `C` clear, `m`
+  counters, WiFi, the loop time over the last 10 s, `loop_stats.c`, the free RAM,
+  recording, the direction), `h` help, `W` connect to WiFi, `R` recording on / off;
+  the actions above; map `C` clear, `m`
   print, `z` one ToF frame; camera `c` one frame as 20 × 15 blocks, with its
   exposure; movement lines only while watching (both sensors; each line starts with the robot's
   time in s), `o` each ToF zone's background,
@@ -158,7 +168,7 @@ rows at some distances; layer 0 (2-12 cm) is only seen within ~1 m.
 
 | | Value |
 |---|---|
-| RAM | 385 of 512 KB static (.bss 377, .data 8), ~136 KB free; no `malloc` linked |
+| RAM | 389 of 512 KB static (.bss 381, .data 8), ~132 KB free; no `malloc` linked. Recording (T2, UDP) adds 4 KB: a 1.4 KB datagram, a 1.2 KB half frame, odometry copies |
 | Core-0 stack | ~6 KB worst case: main loop 4.2 KB (`observations()` in `tof_motion.c` 3.2 KB), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
 
 `tools/stack_depth.py` recomputes the stack (how to build for it: the script's
@@ -309,6 +319,27 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
    monitor. Unplug the USB (battery on): the page keeps working.
 6. Power up without USB: the statuses show on the page, the robot waits; `s` on
    the page scans.
+
+**Recording** (T2; both Picos, battery on, WiFi console working; [doc/TELEMETRY_PLAN.md](doc/TELEMETRY_PLAN.md)).
+Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
+1. Restart the server (`npm start` in `pc/robot/`) so it runs the new code.
+2. `p`: a line "Recording: off (R), server connected; 0 takes since power-up (boot
+   …), 0 datagrams, 0 refused". `5`: "Record: recording is off".
+3. `R`: "Recording: on; each action is recorded". `5`: "Record: 5 s…", then
+   "Record done", "Recorded take 1: … ToF frames sent, 0 failed; … datagrams, 0
+   refused; … KB". On the page: "recordings from boot …: saving to
+   raw/…-boot-….rec", then "take 1 (5 record, …): done; 5.0 s; ~75 ToF frames
+   (15/s), 0 missing; … datagrams, 0 lost…".
+4. Robot on the floor with room: `s` (scan). Then `a` (watch) and walk around it
+   for the minute. Each ends with a "Recorded take" line and a take note on the
+   page. Expected: ~15 frames/s, no stalls; while turning, a few datagrams lost
+   (half frames and "missing" frames in the note); how many is what this test
+   measures.
+5. During a watch press `p`, then space: the take ends "stopped".
+6. `npm run decode -- recordings/raw/<the file>.rec` in `pc/robot/`: the same
+   takes, no CRC errors, no "cut off".
+7. Optional: stop the server during a take: the robot prints "take N cut" and
+   goes on; restart it, `R` is still on, the next action is recorded.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

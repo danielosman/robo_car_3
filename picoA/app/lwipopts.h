@@ -1,7 +1,9 @@
 #pragma once
 // lwIP settings for PicoA's WiFi console (wifi_console.c): no OS, lwIP runs in the
-// background (pico_cyw43_arch_lwip_threadsafe_background). One TCP connection and
-// one UDP listener; the send buffer holds a printed map with room to spare.
+// background (pico_cyw43_arch_lwip_threadsafe_background). One TCP connection (the
+// console) and one UDP socket (the server's announcements in, recordings out:
+// ~50 datagrams/s of up to 1.4 KB, each freed once handed to the WiFi chip); the
+// send buffer holds a printed map with room to spare.
 #define NO_SYS                      1
 #define LWIP_SOCKET                 0
 #define LWIP_NETCONN                0

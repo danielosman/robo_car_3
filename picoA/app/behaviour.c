@@ -8,10 +8,12 @@
 #include "motion.h"
 #include "pose.h"
 #include "motion_sense.h"
+#include "recorder.h"
 #include "behaviour.h"
 
 #define SCAN_RAD         (390 * RAD_PER_DEG) // a full turn plus 30° of overlap (§5.4)
 #define WATCH_US         60000000  // watching ends after a minute
+#define RECORD_US        5000000   // record 5 s
 #define START_TIMEOUT_US 3000000   // the motors switching on and the robot standing still
 #define SETTLE_MIN_US    300000    // done: standing still this long at least...
 #define SETTLE_MAX_US    3000000   // ...and at most this long, before the motors go off
@@ -25,8 +27,9 @@
 #define FOLLOW_JUMP_RAD  (15 * RAD_PER_DEG)
 // printf takes doubles; the (double) casts below are for printing only.
 
-typedef enum { SCAN, MOVE, TURN, WATCH } action_t;
-static const char *const action_name[] = {"Scan", "Move", "Turn", "Watch"};
+typedef enum { SCAN, MOVE, TURN, WATCH, RECORD } action_t;
+static const char *const action_name[] = {"Scan", "Move", "Turn", "Watch", "Record"};
+static const char *const take_name[] = {"scan", "move", "turn", "watch", "record"}; // in recordings
 
 // STARTING: the motors switching on; RUNNING: the action; SETTLING: done, standing
 // still before the motors go off.
@@ -43,23 +46,25 @@ static int seen_n;
 static uint32_t last_seen_us;
 
 // Ends the action early, saying why; the motors go off unless another action follows.
-static void end_early(const char *why, bool motors_off) {
+static void end_early(rec_end_t reason, const char *why, bool motors_off) {
     if (state == IDLE) return;
     body_drive(0, 0);
     if (motors_off) body_motors(false);
     motion_sense_log(false);
     printf("%s stopped: %s\n", action_name[action], why);
     state = IDLE;
+    recorder_take_end(reason);
 }
 
 static void begin(action_t a, float g) {
-    end_early("another action started", false);
+    end_early(REC_END_REPLACED, "another action started", false);
     action = a;
     goal = g;
     body_drive(0, 0);
     body_motors(true);
     state = STARTING;
     deadline = make_timeout_time_us(START_TIMEOUT_US);
+    recorder_take_start(take_name[a], a == WATCH ? WATCH_US * 1e-6f : g);
 }
 
 void behaviour_scan(void) {
@@ -83,7 +88,22 @@ void behaviour_watch(void) {
     printf("Watch: for %d s the robot turns towards the biggest movement (space stops)\n", WATCH_US / 1000000);
 }
 
-void behaviour_stop(void) { end_early("by command", true); }
+// Recording only: the robot stands still with the motors off, and nothing is
+// checked (it runs without PicoB too).
+void behaviour_record(void) {
+    if (!recorder_on()) { printf("Record: recording is off (R switches it on)\n"); return; }
+    if (!recorder_ready()) { printf("Record: not recorded: no recording connection\n"); return; }
+    end_early(REC_END_REPLACED, "another action started", true);
+    action = RECORD;
+    goal = 0;
+    start = *body_odom();
+    run_start = get_absolute_time();
+    state = RUNNING;
+    recorder_take_start(take_name[RECORD], RECORD_US * 1e-6f);
+    printf("Record: %d s, the robot stands still\n", RECORD_US / 1000000);
+}
+
+void behaviour_stop(void) { end_early(REC_END_STOPPED, "by command", true); }
 
 bool behaviour_busy(void) { return state != IDLE; }
 
@@ -156,6 +176,10 @@ static void watch(void) {
 
 // What the action did, by odometry, once the robot stands still.
 static void say_done(const odom_report_t *o) {
+    if (action == RECORD) {
+        printf("Record done: %.1f s\n", (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f));
+        return;
+    }
     float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
     float c = cosf(start.yaw_rad), s = sinf(start.yaw_rad);
     printf("%s done: %.1f s; odometry: %+.1f cm forward, %+.1f cm left, turned %+.1f deg\n", action_name[action],
@@ -185,19 +209,34 @@ static bool step(const odom_report_t *o) {
         if (absolute_time_diff_us(run_start, get_absolute_time()) >= WATCH_US) return true;
         watch();
         return false;
+    case RECORD:
+        return absolute_time_diff_us(run_start, get_absolute_time()) >= RECORD_US;
     }
     return true;
+}
+
+static void finish(const odom_report_t *o) {
+    motion_sense_log(false);
+    say_done(o);
+    body_motors(false);
+    state = IDLE;
+    recorder_take_end(REC_END_DONE);
 }
 
 void behaviour_update(void) {
     if (state == IDLE) return;
     const odom_report_t *o = body_odom();
-    if (!body_connected()) { end_early("PicoB not connected", true); return; }
+    if (action == RECORD) {
+        if (step(o)) finish(o);
+        return;
+    }
+    if (!body_connected()) { end_early(REC_END_PICOB_LOST, "PicoB not connected", true); return; }
     if (state != STARTING && !o->motors_on) {
         printf("%s stopped: PicoB switched the motors off (%s)\n", action_name[action], stop_reason_text(o->stop_reason));
         body_drive(0, 0);
         motion_sense_log(false);
         state = IDLE;
+        recorder_take_end(REC_END_SAFETY_STOP);
         return;
     }
     switch (state) {
@@ -210,7 +249,7 @@ void behaviour_update(void) {
             motion_sense_log(action == WATCH); // movement lines only while watching
             state = RUNNING;
         } else if (time_reached(deadline)) {
-            end_early(o->motors_on ? "the robot isn't standing still" : "the motors didn't switch on", true);
+            end_early(REC_END_NO_START, o->motors_on ? "the robot isn't standing still" : "the motors didn't switch on", true);
         }
         break;
     case RUNNING:
@@ -222,12 +261,7 @@ void behaviour_update(void) {
         }
         break;
     case SETTLING:
-        if ((time_reached(settle_min_end) && o->stationary) || time_reached(deadline)) {
-            motion_sense_log(false);
-            say_done(o);
-            body_motors(false);
-            state = IDLE;
-        }
+        if ((time_reached(settle_min_end) && o->stationary) || time_reached(deadline)) finish(o);
         break;
     case IDLE:
         break;

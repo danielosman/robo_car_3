@@ -11,15 +11,19 @@
 //          movement is 8° off and stops within 3° once it is about still, or when
 //          nothing moves. Its movement lines are printed (motion_sense's log) only
 //          while watching.
-// Each action switches the motors on at its start and off at its end, and says how
-// it ended: done (after standing still), stopped, replaced by another action, a
-// safety stop on PicoB, or PicoB lost.
+//   Record: 5 s with the robot standing still, motors off, only with recording on
+//          and its connection up (it is only for the recording).
+// Each action (but Record) switches the motors on at its start and off at its end,
+// and says how it ended: done (after standing still), stopped, replaced by another
+// action, a safety stop on PicoB, or PicoB lost. With recording on, each action is
+// one take (recorder.h), from its start to its end.
 #include <stdbool.h>
 
 void behaviour_scan(void);
 void behaviour_move(float distance_m);
 void behaviour_turn(float angle_rad);
 void behaviour_watch(void);
+void behaviour_record(void);
 void behaviour_stop(void);   // ends the running action: the robot stands still, motors off
 bool behaviour_busy(void);
 void behaviour_update(void); // call every loop iteration

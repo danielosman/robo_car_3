@@ -5,3 +5,4 @@ node_modules/
 picoA/app/wifi_config.h
 pc/robot/logs/
 .DS_Store
+pc/robot/recordings/

@@ -15,20 +15,25 @@ typedef struct {
 
 static sample_t history[HISTORY];
 static int count, newest;      // newest: index of the latest sample
-static uint32_t last_report_t_us; // PicoB's t_us of the latest report taken
+static uint32_t taken;          // body's reports taken so far
 
+// Every report body has received since the last call, even several in one loop
+// iteration.
 void pose_update(void) {
-    if (!body_connected()) return;
-    const odom_report_t *o = body_odom();
-    if (count && o->t_us == last_report_t_us) return;
-    last_report_t_us = o->t_us;
-    newest = (newest + 1) % HISTORY;
-    if (count < HISTORY) count++;
-    history[newest] = (sample_t){
-        .t_us = body_odom_time_us(),
-        .pose = {o->x_m, o->y_m, o->yaw_rad, o->pitch_rad},
-        .v_mps = o->v_mps, .w_radps = o->w_radps,
-    };
+    uint32_t n = body_odom_count();
+    if (n - taken > BODY_ODOM_KEPT) taken = n - BODY_ODOM_KEPT; // the older ones are gone
+    while (taken != n) {
+        odom_report_t o;
+        uint32_t t_us;
+        if (!body_odom_get(++taken, &o, &t_us)) continue; // no longer kept
+        newest = (newest + 1) % HISTORY;
+        if (count < HISTORY) count++;
+        history[newest] = (sample_t){
+            .t_us = t_us,
+            .pose = {o.x_m, o.y_m, o.yaw_rad, o.pitch_rad},
+            .v_mps = o.v_mps, .w_radps = o.w_radps,
+        };
+    }
 }
 
 bool pose_now(pose_t *pose) {

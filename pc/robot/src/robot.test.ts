@@ -21,7 +21,7 @@ async function startLink(silenceMs = 3000) {
   const listener = dgram.createSocket("udp4");
   await new Promise<void>(r => listener.bind(0, "127.0.0.1", () => r()));
   const link = new RobotLink({
-    robotPort: 0, announcePort: listener.address().port, announceTo: ["127.0.0.1"],
+    robotPort: 0, dataPort: 4999, announcePort: listener.address().port, announceTo: ["127.0.0.1"],
     announceEveryMs: 50, heartbeatEveryMs: 50, silenceMs,
   });
   const statuses: RobotStatus[] = [];
@@ -45,7 +45,7 @@ const until = async (ok: () => boolean) => { for (let i = 0; i < 200 && !ok(); i
 test("announces itself, passes text and keys, shows the signal", async () => {
   const { link, port, announcement, statuses } = await startLink();
   try {
-    assert.equal(announcement, `ROBOCAR-SERVER ${port}\n`);
+    assert.equal(announcement, `ROBOCAR-SERVER ${port} 4999\n`);
     const text: string[] = [];
     link.on("text", t => text.push(t));
     const r = await robot(port);

@@ -1,6 +1,7 @@
 #include "pico/stdlib.h"
 #include "pose.h"
 #include "cell_map.h"
+#include "recorder.h"
 #include "surroundings.h"
 
 static bool have_frame;
@@ -16,6 +17,7 @@ void surroundings_update(void) {
     if (!rangefinder_poll(&frame)) return;
     last = frame;
     have_frame = true;
+    recorder_tof(&frame);
     pose_t pose;
     if (!pose_at(frame.t_us, &pose)) return; // no odometry for that moment (PicoB not connected)
     cell_map_add(&frame, &pose);

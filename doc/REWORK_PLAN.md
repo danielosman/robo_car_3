@@ -89,6 +89,12 @@ The robot:
   WiFi: space stop, `s` scan (390° only), `f` move 50 cm, `t` turn 30°, `r`
   direction, `a` watch 1 min, `C` clear the map. `robot_test` and the 15 s status
   are gone; the map's frame is odometry's from power-up. Robot test passed (10 Oct).
+- **Recording** (TELEMETRY_PLAN T2, 10 Oct): `R` on, then each action (and `5`,
+  record 5 s) is a take sent raw as UDP datagrams (`recorder.c`); the PC saves
+  them and notes each take (`pc/robot/src/recording.ts`, `npm run decode`).
+  Over TCP it stalled 1-6 s while turning; over UDP (10 Oct) no stalls, 2-3 % of
+  datagrams lost, mostly single ones at some headings (the batteries under the
+  antenna).
 - **Watching** (`behaviour`, `a`, 1 minute): turns toward the biggest VL53 movement and follows it
   (world directions, its angular speed from a line through the last 0.5 s, plus 2 ×
   the angle still to go, at most ~29°/s; starts at 8°, stops below 3° when it is
@@ -100,8 +106,9 @@ The robot:
 
 **A session on telemetry starts at [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) §0.**
 T1-T6 in TELEMETRY_PLAN §6. T1 (the commands) is built and tested on the robot;
-next T2, recording on the robot. Then storage, the viewer, replay, and the
-cup session. Map fixes (point 1 below) wait
+T2 (recording on the robot) is built and tested on the robot (UDP, 10 Oct); next
+T3, storage. Then the viewer, replay, and the cup
+session. Map fixes (point 1 below) wait
 for its data.
 
 ## Open suggestions and discussion points

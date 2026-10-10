@@ -1,6 +1,7 @@
 // Host test for picoA/app/body.c: the greeting and version check, repeating
 // DRIVE, re-sending MOTORS until PicoB has acted on it (also after a safety stop),
-// respecting PicoB's safety stops, PicoB restarting, and the connection timeout,
+// respecting PicoB's safety stops, PicoB restarting, the connection timeout, and
+// keeping every report (several can arrive in one loop iteration),
 // against a fake link with the test playing PicoB. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon/test/fakes -Icommon -o build/test_body picoA/app/test/test_body.c && build/test_body
 #include <assert.h>
@@ -183,6 +184,32 @@ int main(void) {
         if (i >= 40) assert(fabsf((float)(int32_t)(body_odom_time_us() - (uint32_t)sent_us)) < 1000);
         fake_now_us = sent_us + LINK_ODOM_PERIOD_US;
     }
+
+    // A long loop iteration: three reports arrive before one body_update(); all are
+    // kept, numbered, with their times. More than BODY_ODOM_KEPT: the oldest go.
+    uint32_t before = body_odom_count();
+    uint32_t b0 = b_odom.t_us;
+    for (int i = 1; i <= 3; i++) {
+        b_odom.t_us = b0 + (uint32_t)i * 20000u;
+        b_odom.x_m = (float)i;
+        fake_link_deliver(MSG_ODOM, &b_odom, sizeof b_odom);
+    }
+    fake_now_us += 60000;
+    body_update();
+    assert(body_odom_count() == before + 3);
+    for (uint32_t i = 1; i <= 3; i++) {
+        odom_report_t r;
+        uint32_t t_us, t_next;
+        assert(body_odom_get(before + i, &r, &t_us) && r.x_m == (float)i);
+        if (i < 3) assert(body_odom_get(before + i + 1, &r, &t_next) && t_next - t_us == 20000);
+    }
+    odom_report_t r;
+    uint32_t t_us;
+    assert(!body_odom_get(before + 4, &r, &t_us) && !body_odom_get(0, &r, &t_us));
+    for (int i = 0; i < BODY_ODOM_KEPT; i++) fake_link_deliver(MSG_ODOM, &b_odom, sizeof b_odom);
+    body_update();
+    assert(!body_odom_get(before + 3, &r, &t_us) && body_odom_get(before + 4, &r, &t_us));
+    printf("ok: every report kept and numbered, also several in one loop iteration\n");
 
     printf("OK: body greets, repeats DRIVE, re-sends MOTORS, respects safety stops, times out, syncs clocks\n");
     return 0;

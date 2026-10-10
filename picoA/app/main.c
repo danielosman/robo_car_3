@@ -15,6 +15,7 @@
 #include "camera.h"
 #include "motion_sense.h"
 #include "loop_stats.h"
+#include "recorder.h"
 
 #define USB_CHECK_US 3000000 // after power-up: time for a computer to enumerate the USB
 
@@ -30,6 +31,7 @@ static void stage_done(const char *stage) { loop_stats_stage(stage, time_us_32()
 int main(void) {
     clock_start();
     stdio_init_all();
+    recorder_init();
     absolute_time_t usb_check = make_timeout_time_us(USB_CHECK_US);
     body_init();
     bool tof_ok = surroundings_init(); // ~2 s: uploads the ToF sensor's firmware
@@ -39,6 +41,7 @@ int main(void) {
         start_up(usb_check);
         body_update();
         pose_update();
+        recorder_update();
         stage_done("body");
         surroundings_update();
         stage_done("surroundings");

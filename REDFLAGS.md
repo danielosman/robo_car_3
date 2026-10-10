@@ -111,3 +111,17 @@ and the M2 parts of `debug_console`. No behaviour changed; host tests pass.
 | `behaviour` | Shallow module (considered) | Four actions share one small state machine (starting, running, settling) with a `switch` per action in `step()` | **Accepted:** one place says how every action starts and ends (motors, "done", "stopped: why"); a table of action structs would be more code for four cases |
 | `pose`, `motion_sense` | Dead code | `pose_set_origin()` had no caller once the scan stopped moving the origin | **Fixed (T1):** removed, with the origin check in `motion_sense` |
 | `test_behaviour` | (test gap) | The low box was asserted "seen" though it is found with about half the random seeds: the test passed by its seed | **Fixed (T1):** reported as KNOWN (MAP_DESIGN §8.1) until the map fix is tested on recordings |
+
+### T2 — recording (10 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| `wifi_console` | Repetition | A second connection would have copied the console's connect, send, callbacks and drop | **Fixed:** `conn_t` for both; the callbacks get it via `tcp_arg()`, only receiving differs (keys vs nothing) |
+| `recorder`, `rangefinder` | Nonobvious code | `rangefinder_raw()` returns tof.h's type, so it is declared in `recorder.c`, not in `rangefinder.h` (whose users, and their host tests, don't include the ULD) | **Accepted:** commented at both ends |
+| `recorder` | Nonobvious code | The marks are taken inside `printf` (a stdio output), so nothing the record path calls may print: a lost connection only sets `cut`, printed by `recorder_update()` | **Accepted:** commented on `put()` |
+| `recorder` | Information leakage (considered) | The record layouts live in `recorder.c` and again in `recording.ts` | **Accepted:** TELEMETRY_PLAN §2.1 is the contract, and the Node test decodes the firmware's own bytes from `test_recorder`, so a mismatch fails a test |
+| `recorder` | (limit) | `TAKE_START`'s build time is `recorder.c`'s compile time, not the whole firmware's | **Open:** a git hash from CMake if it matters |
+| `recorder`, `pose` | (limit) | A new ODOM is noticed by its time changing once per loop: two reports in one loop iteration keep only the second | **Fixed (after the robot test):** accepted at first on the belief that the loop runs far faster than 50 Hz; the recording showed 5 % of reports lost (loop iterations of 10-20 ms, sometimes more). `body` now keeps the last 16 reports numbered; `pose` and `recorder` take every new one |
+| `recorder`, `wifi_console` | (design) | Over TCP, a few packets lost while the robot turned stalled the recording 1-6 s (TCP delivers in order and lwIP waits 1.5-3 s between retries) | **Fixed:** UDP datagrams, nothing retransmitted; losses counted by datagram numbers. The 48 KB buffer and the second TCP connection are gone |
+| `recorder` | Nonobvious code | A frame's two halves may share a datagram or not, and `frames_failed` is counted per refused datagram holding a half, then capped at one per frame | **Accepted:** commented in `recorder_tof()`; `test_recorder` covers a refused frame |
+| `recording.ts` | (limit) | Duplicate datagrams are found by (boot, number) in a set cleared at 100 000 entries | **Accepted:** ~50 datagrams/s, so 30 min of takes; repeats arrive within milliseconds |

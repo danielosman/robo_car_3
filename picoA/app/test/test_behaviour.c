@@ -9,8 +9,10 @@
 // after each action. Watching: a person (a fake motion_sense, which reports them
 // while they are in the VL53's view) walks in and stops; the robot turns towards
 // them and stops facing them; one walking faster than it turns gets away and it
-// stops; watching ends after a minute.
-// The test provides body.h's functions as the robot. Run from the repo root:
+// stops; watching ends after a minute. Each action is one take for the recorder,
+// ended with the right reason; record 5 s stands still with the motors off, only
+// with recording ready.
+// The test provides body.h's and recorder.h's functions. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_behaviour picoA/app/test/test_behaviour.c -lm && build/test_behaviour
 #include <assert.h>
 #include <stdio.h>
@@ -42,7 +44,7 @@
 
 // --- The simulated robot ---
 static odom_report_t sim, report;
-static uint32_t report_time_us;
+static uint32_t report_time_us, report_count;
 static bool motors_wanted;
 static uint64_t motors_changed_us;
 static float cmd_v, cmd_w, v, w, still_s, max_yaw_rad;
@@ -50,6 +52,13 @@ static float cmd_v, cmd_w, v, w, still_s, max_yaw_rad;
 bool body_connected(void) { return true; }
 const odom_report_t *body_odom(void) { return &report; }
 uint32_t body_odom_time_us(void) { return report_time_us; }
+uint32_t body_odom_count(void) { return report_count; }
+bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) {
+    if (n != report_count) return false; // the fake keeps only the latest
+    *r = report;
+    *t_us = report_time_us;
+    return true;
+}
 void body_motors(bool on) { motors_wanted = on; motors_changed_us = fake_now_us; if (!on) cmd_v = cmd_w = 0; }
 void body_drive(float v_mps, float w_radps) { cmd_v = v_mps; cmd_w = w_radps; }
 
@@ -99,6 +108,24 @@ bool motion_sense_watching(void) { return still_s >= 1.5f; }
 void motion_sense_stamp(void) {}
 static bool movement_log;
 void motion_sense_log(bool on) { movement_log = on; }
+
+// --- A fake recorder: the takes as behaviour starts and ends them ---
+static bool rec_ready, take_running;
+static char take_action[16];
+static float take_param;
+static int takes, frames_recorded;
+static rec_end_t take_end;
+bool recorder_on(void) { return rec_ready; }
+bool recorder_ready(void) { return rec_ready; }
+void recorder_take_start(const char *action, float param) {
+    assert(!take_running); // the previous take has ended
+    take_running = true;
+    snprintf(take_action, sizeof take_action, "%s", action);
+    take_param = param;
+    takes++;
+}
+void recorder_take_end(rec_end_t reason) { assert(take_running); take_running = false; take_end = reason; }
+void recorder_tof(const range_frame_t *frame) { (void)frame; frames_recorded++; }
 
 static float approach_to(float x, float target, float step) {
     return x < target ? fminf(x + step, target) : fmaxf(x - step, target);
@@ -178,6 +205,7 @@ static void tick(void) {
         report = sim;
         report.t_us = (uint32_t)fake_now_us;
         report_time_us = (uint32_t)fake_now_us;
+        report_count++;
     }
     if (fake_now_us >= next_frame_us) { next_frame_us += TOF_US; measure_frame(); }
     if (pending_at_us && fake_now_us >= pending_at_us) { fake_tof = pending; fake_tof_fresh = true; pending_at_us = 0; }
@@ -239,7 +267,9 @@ int main(void) {
     // The scan: 390° left, then it stands still with the motors off (no turn to the
     // most open direction, no watching).
     behaviour_scan();
+    assert(take_running && strcmp(take_action, "scan") == 0 && fabsf(take_param - SCAN_RAD) < 1e-6f);
     float seconds = run_action(40);
+    assert(!take_running && take_end == REC_END_DONE && takes == 1);
     printf("scan done in %.0f s; turned %.1f deg\n", (double)seconds, (double)DEG(sim.yaw_rad));
     assert(seconds > 14 && seconds < 25);
     assert(fabsf(DEG(sim.yaw_rad) - 390) < 3 && fabsf(DEG(max_yaw_rad) - DEG(sim.yaw_rad)) < 0.5f);
@@ -307,19 +337,44 @@ int main(void) {
     run(3);
     assert(sim.yaw_rad > yaw + 10 * RAD_PER_DEG);
     behaviour_stop();
-    assert(!behaviour_busy() && !motors_wanted);
+    assert(!behaviour_busy() && !motors_wanted && !take_running && take_end == REC_END_STOPPED);
     run(1);
     assert(!sim.motors_on && w == 0);
     yaw = sim.yaw_rad;
     behaviour_turn(30 * RAD_PER_DEG);
     run(0.5f);
+    int before = takes;
     behaviour_turn(-30 * RAD_PER_DEG);
-    assert(motors_wanted);
+    assert(motors_wanted && take_end == REC_END_REPLACED && takes == before + 1 && take_running);
+    assert(strcmp(take_action, "turn") == 0 && take_param < 0);
     run_action(10);
+    assert(take_end == REC_END_DONE);
     float after_replace = DEG(sim.yaw_rad - yaw);
     printf("turn +30 replaced by turn -30 after 0.5 s: turned %+.1f deg in all\n", (double)after_replace);
     assert(after_replace < -15 && after_replace > -30);
     printf("ok: stop, and a new action replacing the running one\n");
+
+    // Record 5 s: only with recording ready; the robot stands, motors off, PicoB or not.
+    before = takes;
+    behaviour_record();
+    assert(!behaviour_busy() && takes == before);
+    rec_ready = true;
+    yaw = sim.yaw_rad;
+    behaviour_record();
+    assert(behaviour_busy() && take_running && strcmp(take_action, "record") == 0 && take_param == 5.0f);
+    int frames = frames_recorded;
+    run(4.9f);
+    assert(behaviour_busy() && !motors_wanted && !sim.motors_on);
+    run(0.2f);
+    assert(!behaviour_busy() && take_end == REC_END_DONE && sim.yaw_rad == yaw);
+    assert(frames_recorded - frames >= 74 && frames_recorded - frames <= 78); // 15 Hz
+    behaviour_record();
+    behaviour_scan(); // replaces it
+    assert(take_end == REC_END_REPLACED && strcmp(take_action, "scan") == 0);
+    behaviour_stop();
+    run(1);
+    rec_ready = false;
+    printf("ok: record 5 s stands still, motors off; each action is a take with how it ended\n");
 
     // The map is cleared by C (surroundings_clear), not by a scan.
     surroundings_clear();

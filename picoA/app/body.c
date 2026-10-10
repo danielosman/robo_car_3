@@ -21,8 +21,11 @@
 static bool greeted;
 static bool motors_wanted;
 static uint8_t motors_request; // numbers our MOTORS requests; PicoB echoes the last one it acted on
-static drive_msg_t drive;
+static drive_msg_t drive, drive_sent;
+static uint32_t drives_sent, drive_sent_us;
 static odom_report_t odom;
+static struct { odom_report_t report; uint32_t t_us; } kept[BODY_ODOM_KEPT]; // report n at n % BODY_ODOM_KEPT
+static uint32_t odom_count;
 static status_report_t status;
 static absolute_time_t last_report, next_drive, next_motors, next_hello;
 static uint32_t block_min[OFFSET_BLOCKS], block_start_us, offset_us;
@@ -89,6 +92,9 @@ static void on_message(const link_msg_t *m) {
             memcpy(&odom, m->body, sizeof odom);
             last_report = get_absolute_time();
             track_clock(time_us_32() - odom.t_us, time_us_32());
+            odom_count++;
+            kept[odom_count % BODY_ODOM_KEPT].report = odom;
+            kept[odom_count % BODY_ODOM_KEPT].t_us = body_odom_time_us();
         }
         break;
     case MSG_STATUS:
@@ -122,6 +128,9 @@ void body_update(void) {
     if (time_reached(next_drive)) {
         next_drive = make_timeout_time_us(DRIVE_PERIOD_US);
         link_send(MSG_DRIVE, &drive, sizeof drive);
+        drive_sent = drive;
+        drive_sent_us = time_us_32();
+        drives_sent++;
     }
     // PicoB acted on our last request, then switched the motors off by itself
     // (its LOG says why): respect that. Switching them on again is a decision for
@@ -145,7 +154,23 @@ const odom_report_t *body_odom(void) { return &odom; }
 
 uint32_t body_odom_time_us(void) { return odom.t_us + offset_us - ODOM_WIRE_US; }
 
+uint32_t body_odom_count(void) { return odom_count; }
+
+bool body_odom_get(uint32_t n, odom_report_t *report, uint32_t *t_us) {
+    if (n == 0 || n > odom_count || odom_count - n >= BODY_ODOM_KEPT) return false;
+    *report = kept[n % BODY_ODOM_KEPT].report;
+    *t_us = kept[n % BODY_ODOM_KEPT].t_us;
+    return true;
+}
+
 const status_report_t *body_status(void) { return &status; }
+
+uint32_t body_drive_sent(float *v_mps, float *w_radps, uint32_t *t_us) {
+    *v_mps = drive_sent.v_mps;
+    *w_radps = drive_sent.w_radps;
+    *t_us = drive_sent_us;
+    return drives_sent;
+}
 
 void body_motors(bool on) {
     motors_wanted = on;

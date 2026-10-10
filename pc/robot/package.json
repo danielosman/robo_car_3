@@ -7,7 +7,8 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test src/robot.test.ts"
+    "test": "node --test src/robot.test.ts src/recording.test.ts",
+    "decode": "node src/decode.ts"
   },
   "dependencies": {
     "ws": "^8.18.0"

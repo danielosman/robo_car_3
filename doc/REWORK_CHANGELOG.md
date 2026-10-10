@@ -4,6 +4,98 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: T2 over UDP on the robot: done
+
+`2026-10-10-18-08-07-boot-0558a0ee.rec`: no stalls. `5`: nothing lost. Scan: 214
+whole frames, 7 half, 5 missing of 226, 3.0 % of datagrams lost. Watch: 877
+whole, 28 half, 7 missing of 912, 2.3 % lost, 9 refused on the robot. Losses
+mostly single datagrams (31 of 39 runs, at most 6 in a row); odometry gaps 9 in
+all, 80-221 ms. 24-28 KB/s (was 30-36). The losses depend on the heading (this run
+4-9 % between 0 and 135°, none facing 315-360°): the antenna over the batteries.
+
+## 10 Oct 2026: T2 third run: why it stalls; UDP and a compact format
+
+The third run (`2026-10-10-17-42-34.324.rec`, with `WIFI` records): stalls of 4 s
+in the scan and 3 s while watching. The signal follows the heading: −56 dBm
+facing one way, −63…−68 over about half a turn (the batteries sit 1-2 cm under
+the Pico's antenna); in each stall TCP's window collapsed (25 → 1.5 KB) and it
+waited 1.5-3 s for retries; nothing was ever refused on the robot, and the
+console's text and heartbeats kept arriving during every stall. So: a few lost
+packets, and TCP holding everything behind them.
+
+Daniel: send less, and use UDP. Done: record version 3. The sensor's ambient,
+SPADs and signal as u16 (measured ranges far below; capped at 65535), a frame
+~1.45 KB instead of ~2; each frame as two halves of 32 zones; datagrams of at
+most 1400 B with a number, small records within 50 ms, each ODOM repeated in the
+next datagram, the take's first datagram sent twice and its last three times; no
+retransmission. The TCP recording connection and its 48 KB buffer are gone
+(RAM: recording costs 4 KB, ~132 KB free; lwIP back to 32 KB). The PC listens
+on UDP 4212, saves every datagram with its arrival time in a file per boot, keeps
+one of each repeat, counts lost datagrams and half / missing frames per take, and
+still reads the TCP files. Tests: `test_recorder` (datagrams, halves, caps,
+repeats, refusals, the 50 ms flush), `test_wifi_console` (datagrams to the
+announced port), Node (both formats, the firmware's own datagrams, the UDP
+server).
+
+## 10 Oct 2026: T2 recheck: longer WiFi stalls; measuring them
+
+The recheck (`2026-10-10-17-32-19.506.rec`): odometry complete outside the stalls
+(249 of 250 in 5 s), but the connection stalled completely three times in the scan
+(6 s worst; 123 frames and 252 other records left out) and once while watching (3
+s, 44 frames): even ODOM is lost once the 48 KB buffer is full. The first run had
+one 0.9 s stall. The headings during the stalls show no single bad direction. Two
+causes fit: the WiFi link (signal, interference; TCP waits 0.5, 1, 1.5 s... after
+each loss) or the WiFi chip refusing packets at this rate. Added to tell them
+apart: a `WIFI` record every 0.5 s during a take (RSSI; what waits and what TCP
+holds, retries, timeout, windows, refusals, for both connections; record version
+2), and on the PC `<file>.arrivals.csv` with when each piece of both connections
+arrived.
+
+## 10 Oct 2026: T2 robot test, and two fixes
+
+The first recording (`pc/robot/recordings/raw/2026-10-10-17-21-17.795.rec`): `5`
+(5.0 s, 76 frames), a scan (15.0 s, 214 frames, 13 left out in one 0.9 s WiFi
+stall), a minute of watching (60.3 s, 913 frames, none left out). 30-36 KB/s, ~2
+KB a frame (most zones report 2+ targets), no CRC errors, nothing cut; the robot's
+counts and the decoder's agree; odometry kept flowing through the stall, as meant.
+
+Found: 5 % of the odometry reports missing (always one at a time): only the latest
+report per loop iteration was taken, and iterations take 10-20 ms, sometimes over
+20 (drive commands go every ~65 ms instead of 50 for the same reason; harmless
+against PicoB's 250 ms). Fixed: `body` keeps the last 16 reports numbered, `pose`
+and `recorder` take every new one (tests in `test_body`, `test_recorder`). The
+send ring 16 → 48 KB (~1.5 s of stall); RAM ~60 KB free.
+
+## 10 Oct 2026: T2, recording on the robot (TELEMETRY_PLAN)
+
+Daniel's answers: a decoder on the PC in T2; `5` as COMMANDS_PLAN has it; leave
+out ToF frames when the WiFi is behind (a 4 KB reserve), no separate WiFi speed
+test: the robot test measures it; the latest ODOM right after the take starts; the
+32-bit clock stays (runs are shorter than its 71.6 min wrap); `GEOMETRY` doesn't
+send each ray's direction (the PC computes it; send as little as possible); a
+connection lost during a take cuts it, one that comes up during a take doesn't
+record the rest; commits carry no AI co-author trailer (written into the plan).
+
+Built: `recorder.c` (takes, the seven record types of TELEMETRY_PLAN §2.1, CRC-32,
+the drop rule, the console's lines taken from stdout as marks, `R`, status in
+`p`); `behaviour` starts and ends a take with each action and says how it ended,
+and has the record-5-s action (motors off, without PicoB too); `wifi_console`
+keeps a second TCP connection for recordings (the two connections share one
+`conn_t` code path) with a 16 KB ring, its port from the announcement
+(`ROBOCAR-SERVER 4211 4212`); `rangefinder` numbers its frames and gives the raw
+results and the zone order; `body` gives the drive commands sent. lwIP memory 32 →
+56 KB, TCP segments 32 → 64. On the PC, `recording.ts` (listener on 4212, raw bytes
+saved per connection in `pc/robot/recordings/raw/`, decoder, a note per take with
+frames, gaps and KB/s) and `decode.ts` (`npm run decode`). Host tests: new
+`test_recorder` (every record decoded and CRC-checked; frames left out while
+odometry still goes; a cut take; R off), `test_wifi_console` (the recording
+connection), `test_behaviour` (a take per action with its end reason; record 5 s);
+Node tests decode the firmware's own bytes (`build/test_recorder.rec`). RAM +44
+KB (~92 KB free).
+
+Found: a ToF frame is smaller than the plan's 3.1 KB: only the targets found are
+sent, ~1.2 KB with one per zone (0.6 KB with none).
+
 ## 10 Oct 2026: T1, the commands (COMMANDS_PLAN)
 
 Daniel's answers: stop on space; one turn key (`t`, right in back direction);
