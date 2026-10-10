@@ -209,6 +209,9 @@ a wall behind the chair. The wall is hidden by the chair: at ~90 cm right rows
 land 1-8 cm *below* the floor: reflections in the waxed floor, which both
 variants turn into "no floor" (`?`) beyond 1 m (an older limit, §8.3).
 
-**Open:** why the cupboard loses in both variants; the reflections; then the
-robot runs READINGS (a robot test) or the rules change. The robot runs VOTES
-until then.
+**The robot runs READINGS since 10 Oct** (`surroundings.c`). Robot test (10 Oct,
+take `0b9377b7-1`): the cup, the box, the chair base and the cupboard on the map;
+the replay of the take gives the same blocked cells as the robot printed (441 of
+441 within 1 m; whole map 1555 of 1560, the rest from frames before the take).
+The `?` beyond ~1 m stay (Daniel, 10 Oct): the floor there isn't sure either way.
+**Open:** the cupboard was missing in the earlier scans (both variants).

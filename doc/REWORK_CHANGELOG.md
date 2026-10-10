@@ -4,6 +4,15 @@ What happened in the rework (doc/REWORK_PLAN.md), newest first: robot runs, resu
 what was tried, decided, kept or dropped. The plan files hold only the current state
 and the open suggestions; the history is here. Before the rework: ../CHANGELOG.md.
 
+## 10 Oct 2026: the robot runs the READINGS map
+
+Robot test (take `0b9377b7-1`, a scan, then `m`): the cup (front-right, row 5),
+the box, the chair base and the cupboard on the map. Replayed on the PC, the take
+gives the robot's printed map: blocked cells the same 441 of 441 within 1 m (the
+whole 4 × 4 m 1555 of 1560: the robot also mapped frames before the take; its
+printout was centred one cell over, the robot ending a hair right of 0). Daniel:
+the `?` beyond ~1 m (waxed-floor reflections) are fine, the floor isn't sure there.
+
 ## 10 Oct 2026: the cup in replay; the READINGS map variant
 
 Replay of the four scans through `cell_map.c` (tools/replay.sh): the cup's L1

@@ -12,7 +12,8 @@
 // cone can meet the floor: closer than that it is an obstacle (all of it, its low
 // rays too), on the floor it is floor, straddling it unsure (no hit); and a ray
 // passing a cell only counts against what it would have hit (it passed at or below
-// the highest point hit there). The robot runs VOTES until replay shows READINGS better.
+// the highest point hit there). The robot runs READINGS since 10 Oct (surroundings.c);
+// VOTES stays for replay and the host test.
 // World frame: the map frame of pose.h.
 #include <stdbool.h>
 #include "pose.h"

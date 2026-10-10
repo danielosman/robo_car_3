@@ -8,6 +8,7 @@ static bool have_frame;
 static range_frame_t last;
 
 bool surroundings_init(void) {
+    cell_map_set_variant(CELL_MAP_READINGS, 0.9f); // MAP_DESIGN §9 (10 Oct)
     cell_map_clear();
     return rangefinder_init();
 }
