@@ -1,13 +1,12 @@
 // Regression test on real recordings (doc/MAP_DESIGN.md §9): the five scans of 10 Oct
 // (picoA/app/test/data/*.frames, exported with pc/robot `npm run frames`: each frame
-// as the robot's map received it) through picoA/app/cell_map.c, READINGS (what the
-// robot runs). Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
+// as the robot's map received it) through picoA/app/cell_map.c. Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
 // on wheels to the right, a cupboard behind; from scan 3 on the robot started 30 cm
 // further left (the cup then ahead-right). Each object must have a blocked or
 // overhang column in its region; nothing may be blocked within 30 cm of the robot
 // (floor only). A move (`f`) pointed at the cup would stop before it: the first
-// obstacle on its path (the robot's width plus 5 cm each side) is the cup's cell. VOTES (before) is printed for comparison: it misses the cup in scans
-// 1-2. Run from the repo root (run_tests.sh does):
+// obstacle on its path (the robot's width plus 5 cm each side) is the cup's cell.
+// Run from the repo root (run_tests.sh does):
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_map_replay picoA/app/test/test_map_replay.c -lm && build/test_map_replay
 #include <assert.h>
 #include <stdio.h>
@@ -86,8 +85,7 @@ static int solid_near(float radius_m) {
     return n;
 }
 
-static void run(int n, cell_map_variant_t variant) {
-    cell_map_set_variant(variant, 0.9f);
+static void run(int n) {
     cell_map_clear();
     for (int i = 0; i < n; i++) cell_map_add(&frames[i].f, &frames[i].p);
 }
@@ -97,14 +95,12 @@ int main(void) {
         const scan_t *s = &scans[k];
         int n = load(s->take);
         assert(n > 50);
-        int found[4], before[4];
-        run(n, CELL_MAP_VOTES);
-        for (int o = 0; o < 4 && s->objects[o].name; o++) before[o] = solid_in(&s->objects[o]);
-        run(n, CELL_MAP_READINGS);
+        int found[4];
+        run(n);
         printf("%s (%d frames):", s->take, n);
         for (int o = 0; o < 4 && s->objects[o].name; o++) {
             found[o] = solid_in(&s->objects[o]);
-            printf(" %s %d (VOTES %d)", s->objects[o].name, found[o], before[o]);
+            printf(" %s %d", s->objects[o].name, found[o]);
         }
         int near = solid_near(0.3f);
         // f towards the cup: its first obstacle is within a cell of the cup's region.

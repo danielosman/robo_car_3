@@ -18,7 +18,7 @@
 #define G_TOP_M       (G_BOTTOM_M + GRID_M) // 3 cm: above this an end point is no floor
 #define Z_STEP_M      0.002f    // hit heights kept in 2 mm steps above G_BOTTOM_M
 #define NO_HIT_Z      255
-#define PASS_BELOW_M  0.01f     // READINGS: a pass counts if this close above the highest hit, or lower
+#define PASS_BELOW_M  0.01f     // a pass counts if this close above the highest hit, or lower
 
 // A cell: state (2 bits), doubt (2 bits), confidence 0-15 (4 bits).
 #define C_STATE(c)  ((c) & 3)
@@ -28,16 +28,12 @@
 
 static uint8_t grid[CELL_LAYERS][GRID][GRID];
 static uint16_t hit_sum[CELL_LAYERS][GRID][GRID], pass_sum[CELL_LAYERS][GRID][GRID]; // this frame
-// READINGS: the highest point hit in an occupied cell (kept), and in this frame: what
-// stands there reaches at least that high.
+// The highest point hit in an occupied cell (kept), and in this frame: what stands
+// there reaches at least that high.
 static uint8_t hit_z[CELL_LAYERS][GRID][GRID], frame_hit_z[CELL_LAYERS][GRID][GRID];
-static cell_map_variant_t variant = CELL_MAP_VOTES;
-static float floor_margin = 0.9f;
+static float floor_margin = CELL_MAP_FLOOR_MARGIN;
 
-void cell_map_set_variant(cell_map_variant_t v, float margin) {
-    variant = v;
-    floor_margin = margin;
-}
+void cell_map_set_floor_margin(float margin) { floor_margin = margin; }
 
 void cell_map_clear(void) {
     memset(grid, 0, sizeof grid);
@@ -54,7 +50,7 @@ static uint8_t z_code(float z_m) {
 // The higher of two hit heights (NO_HIT_Z: none).
 static uint8_t higher(uint8_t a, uint8_t b) { return a == NO_HIT_Z ? b : b == NO_HIT_Z ? a : a > b ? a : b; }
 
-// READINGS: a pass at or below this height in the cell counts against it (it would
+// A pass at or below this height in the cell counts against it (it would
 // have hit what stands there); any pass if nothing was hit there.
 static float pass_limit_m(int layer, int ix, int iy) {
     uint8_t z = higher(frame_hit_z[layer][ix][iy], hit_z[layer][ix][iy]);
@@ -74,15 +70,15 @@ static void add_weight(uint16_t *sum, float w) {
 }
 
 // What a ray's end cell gets: a hit, a pass (nothing in range: it went on), or
-// nothing (READINGS: an unsure reading, or an obstacle's hit placed before); LIFTED
-// (READINGS, an obstacle): a hit, in L1 if the ray ends in the ground layer, and its
+// nothing (an unsure reading, or an obstacle's hit placed before); LIFTED (an
+// obstacle): a hit, in L1 if the ray ends in the ground layer, and its
 // height noted for this frame's passes.
 typedef enum { END_HIT, END_PASS, END_NONE, END_LIFTED } ray_end_t;
 
 // Walks one ray (3D DDA over the grid): every cell it passes gets a pass, the cell
 // it ends in what `end` says. A ground cell gets a pass only from a ray leaving it
 // through its bottom. Below the ground layer it stops (it went through the floor's
-// place: a hole, or noise); above L2 going up it stops too. READINGS: a pass above
+// place: a hole, or noise); above L2 going up it stops too. A pass above
 // the highest point hit in a cell doesn't count there (it wouldn't have hit it).
 static void walk_ray(const float o[3], const float d[3], float length_m, ray_end_t end, float v, bool passes) {
     float p[3] = {o[0] / GRID_M, o[1] / GRID_M, (o[2] - G_BOTTOM_M) / GRID_M};
@@ -119,7 +115,7 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
             else if (through) {
                 float t_out = last ? length_m : t_max[axis];
                 float low_m = fminf(o[2] + t * d[2], o[2] + t_out * d[2]); // the ray's lowest point in the cell
-                if (variant == CELL_MAP_VOTES || low_m <= pass_limit_m(layer, ix, iy)) add_weight(&pass_sum[layer][ix][iy], w);
+                if (low_m <= pass_limit_m(layer, ix, iy)) add_weight(&pass_sum[layer][ix][iy], w);
             }
         }
         if (last) return;
@@ -161,7 +157,7 @@ static void around_the_robot(const pose_t *pose) {
         }
 }
 
-// READINGS: how a zone's reading is judged as a whole.
+// How a zone's reading is judged as a whole.
 typedef enum { READ_OBSTACLE, READ_FLOOR, READ_UNSURE } reading_t;
 
 // Closer than where the zone's cone first meets the floor (its lower edge, with the
@@ -191,12 +187,12 @@ void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
     float o[3] = {pose->x_m + c * origin[0] - s * origin[1], pose->y_m + s * origin[0] + c * origin[1], origin[2]};
     static const float frac[3] = {-1.0f / 3, 0, 1.0f / 3}; // 1/6, 1/2, 5/6 of the zone
     reading_t judged_as[RANGEFINDER_RAYS];
-    // READINGS: first every reading's judgement and the obstacles' hits, so that this
-    // frame's passes already know where things were hit.
+    // First every reading's judgement and the obstacles' hits, so that this frame's
+    // passes already know where things were hit.
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         uint16_t mm = frame->range_mm[i];
-        judged_as[i] = READ_FLOOR; // VOTES: every reading as the floor rules have it
-        if (variant == CELL_MAP_VOTES || mm == RANGE_INVALID || mm == RANGE_NO_TARGET) continue;
+        judged_as[i] = READ_FLOOR;
+        if (mm == RANGE_INVALID || mm == RANGE_NO_TARGET) continue;
         float length_m = (float)mm / 1000.0f, v = frame->status[i] == 5 ? 1.0f : 0.5f;
         judged_as[i] = judge(i, length_m, origin[2], pose->pitch_rad, frac);
         if (judged_as[i] != READ_OBSTACLE) continue;
@@ -231,7 +227,7 @@ void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
                 if (hit_sum[l][ix][iy] || pass_sum[l][ix][iy]) {
                     decide_cell(&grid[l][ix][iy], (float)hit_sum[l][ix][iy] / WEIGHT_ONE,
                                 (float)pass_sum[l][ix][iy] / WEIGHT_ONE);
-                    // READINGS: an occupied cell keeps the highest point hit in it; a freed one forgets it.
+                    // An occupied cell keeps the highest point hit in it; a freed one forgets it.
                     if (C_STATE(grid[l][ix][iy]) != CELL_STATE_OCCUPIED) hit_z[l][ix][iy] = NO_HIT_Z;
                     else hit_z[l][ix][iy] = higher(hit_z[l][ix][iy], frame_hit_z[l][ix][iy]);
                 }

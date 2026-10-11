@@ -36,9 +36,6 @@ build/test_rangefinder
 build test_cell_map picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP
 build/test_cell_map > build/test_cell_map.log || { cat build/test_cell_map.log; exit 1; }
 grep -v '^[|+]' build/test_cell_map.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
-build test_cell_map_readings picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP -DTEST_READINGS
-build/test_cell_map_readings > build/test_cell_map_readings.log || { cat build/test_cell_map_readings.log; exit 1; }
-grep -v '^[|+]' build/test_cell_map_readings.log | grep -v '^Map (9\|^up =\|^? no\|^blank'
 # The map on the recorded scans of 10 Oct (picoA/app/test/data): the cup, box, chair, cupboard found.
 build test_map_replay picoA/app/test/test_map_replay.c -IpicoA/app/test/stubs $APP
 build/test_map_replay

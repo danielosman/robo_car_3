@@ -1,5 +1,5 @@
 // Tests for viewer_api.ts and replay.ts: scoring a map against truth boxes, truth
-// boxes kept per boot, a take's view (frames, targets, path), and both maps replayed
+// boxes kept per boot, a take's view (frames, targets, path), and the map replayed
 // by the robot's own map code (built here with cc) from the firmware's sample take
 // (build/test_recorder.rec, written by ./run_tests.sh). Run with `npm test`.
 import { test } from "node:test";
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import { Store } from "./store.ts";
 import { takesIn } from "./import.ts";
 import { addTruth, deleteTruth, listTruth, score, takeView, type Truth } from "./viewer_api.ts";
-import { exportFrames, replayMaps, type Cell } from "./replay.ts";
+import { exportFrames, replayMap, type Cell } from "./replay.ts";
 
 const box = (name: string, x: number, y: number, s = 0.08): Truth =>
   ({ truth_id: name, boot_id: "7f3a5c01", name, x, y, z: 0, size_x: s, size_y: s, size_z: 0.1, note: "" });
@@ -29,7 +29,7 @@ test("a map's score: truth boxes found, solid cells nobody explains", () => {
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const sample = path.join(repo, "build/test_recorder.rec");
 
-test("truth boxes per boot; the view and both replayed maps of a take", { skip: !existsSync(sample) && "run ./run_tests.sh first" }, async () => {
+test("truth boxes per boot; the view and the replayed map of a take", { skip: !existsSync(sample) && "run ./run_tests.sh first" }, async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-view-"));
   try {
     const store = new Store(path.join(dir, "robot.duckdb"));
@@ -52,9 +52,9 @@ test("truth boxes per boot; the view and both replayed maps of a take", { skip: 
     const frames = await exportFrames(store, "7f3a5c01-1");
     assert.equal(frames.split("\n").length - 1, 2);
     assert.equal(frames.split("\n")[0].split(" ").length, 6 + 2 * 64);
-    const maps = await replayMaps(store, "7f3a5c01-1");
-    assert.ok(maps.frames === 2 && maps.votes.length > 0 && maps.readings.length > 0);
-    assert.ok(maps.readings.every(c => c.length === 7 && c[6] >= 0 && c[6] <= 100));
+    const map = await replayMap(store, "7f3a5c01-1");
+    assert.ok(map.frames === 2 && map.cells.length > 0);
+    assert.ok(map.cells.every(c => c.length === 7 && c[6] >= 0 && c[6] <= 100));
     await assert.rejects(exportFrames(store, "x'; DROP TABLE takes; --"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -89,8 +89,8 @@ test("a whole drive: the takes of a boot on one timeline, replayed into one map"
 
     const frames = await exportFrames(store, "7f3a5c01-all");
     assert.equal(frames.split("\n").length - 1, 2 * (await exportFrames(store, "7f3a5c01-1")).split("\n").length - 2);
-    const maps = await replayMaps(store, "7f3a5c01-all");
-    assert.ok(maps.frames === 4 && maps.readings.length > 0);
+    const map = await replayMap(store, "7f3a5c01-all");
+    assert.ok(map.frames === 4 && map.cells.length > 0);
     await assert.rejects(exportFrames(store, "7f3a5c01-al'; --"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

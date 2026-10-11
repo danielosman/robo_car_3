@@ -55,9 +55,7 @@ a { color:#7aa7d9; }
   <div class="row">size <input type="range" id="size" min="1" max="8" value="3"></div>
 
   <h2>Map (replayed)</h2>
-  <div class="row"><select id="variant"><option value="readings">READINGS (the robot)</option><option value="votes">VOTES (before)</option>
-    <option value="diff">difference</option><option value="none">none</option></select>
-    margin <input type="number" id="margin" value="0.9" step="0.05" min="0.3" max="1.5"></div>
+  <div class="row">floor margin <input type="number" id="margin" value="0.9" step="0.05" min="0.3" max="1.5"></div>
   <div class="row"><label><input type="checkbox" id="l1" checked> blocked</label><label><input type="checkbox" id="l2" checked> overhang</label>
     <label><input type="checkbox" id="floor"> floor seen</label><label><input type="checkbox" id="nofloor"> no floor</label></div>
 
@@ -73,7 +71,7 @@ a { color:#7aa7d9; }
   <div class="row">height <input type="number" id="tsz" step="0.01" value="0.10"> <button id="tadd">add</button></div>
   <table id="truth"></table>
   <h2>Score</h2>
-  <div id="score"><small>place truth boxes to score the maps</small></div>
+  <div id="score"><small>place truth boxes to score the map</small></div>
 
   <h2>Point</h2>
   <div id="info"><small>click a point</small></div>

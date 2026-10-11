@@ -1,6 +1,6 @@
 // Replay for the viewer (doc/TELEMETRY_PLAN.md §5): a take's frames as the robot's
 // map receives them, run through the robot's own map code (tools/replay_map.c, built
-// here from picoA/app/cell_map.c) in both variants, VOTES and READINGS.
+// here from picoA/app/cell_map.c).
 import { execFile } from "node:child_process";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -67,14 +67,14 @@ async function binary(): Promise<number> {
 
 // [x, y, column, ground, L1, L2, confidence %] per cell (tools/replay_map.c --json).
 export type Cell = [number, number, number, number, number, number, number];
-export interface Maps { frames: number; margin: number; votes: Cell[]; readings: Cell[] }
+export interface ReplayedMap { frames: number; margin: number; cells: Cell[] }
 export const COLUMN = { UNKNOWN: 0, BLOCKED: 1, OVERHANG: 2, NO_FLOOR: 3, DRIVABLE: 4, OPEN: 5 } as const;
 
-const cache = new Map<string, Maps>();
+const cache = new Map<string, ReplayedMap>();
 
-// Both variants' maps of a take or a drive; kept until the map code changes (or, a
-// drive, until it has more frames).
-export async function replayMaps(store: Store, take: string, margin = 0.9): Promise<Maps> {
+// The map of a take or a drive; kept until the map code changes (or, a drive, until it
+// has more frames).
+export async function replayMap(store: Store, take: string, margin = 0.9): Promise<ReplayedMap> {
   const built = await binary();
   const [size] = await store.query(`SELECT count(*) AS n, max(frame_no) AS last FROM tof_frames WHERE ${takesOf(take)}`);
   const key = `${take} ${margin} ${built} ${size.n} ${size.last}`;
@@ -83,7 +83,7 @@ export async function replayMaps(store: Store, take: string, margin = 0.9): Prom
   const file = path.join(BUILD, `${take}.frames`);
   writeFileSync(file, await exportFrames(store, take));
   const { stdout } = await run(BINARY, [file, String(margin), "--json"], { maxBuffer: 64 << 20 });
-  const maps = JSON.parse(stdout) as Maps;
-  cache.set(key, maps);
-  return maps;
+  const map = JSON.parse(stdout) as ReplayedMap;
+  cache.set(key, map);
+  return map;
 }

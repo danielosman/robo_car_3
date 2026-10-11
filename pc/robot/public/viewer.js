@@ -1,6 +1,6 @@
 // The recordings in 3D (doc/TELEMETRY_PLAN.md §4): a take's targets (or a whole
 // drive's: every take of one power-up, in order) where they were in the room, the robot's path, the robot and its rays at a moment, the replayed map as
-// cubes (READINGS, VOTES or where they differ), and truth boxes with each map's score.
+// cubes, and truth boxes with the map's score.
 // World frame: odometry's from power-up, x forward at power-up, y left, z up (m).
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -52,7 +52,7 @@ resize();
 renderer.setAnimationLoop(() => renderer.render(scene, camera));
 
 // --- state ---
-let data = null, maps = null, truth = [], frameIndex = 0, playing = null;
+let data = null, map = null, truth = [], frameIndex = 0, playing = null;
 let pointsObj = null, shown = [], mapObj = new THREE.Group(), robotObj = new THREE.Group(), pathObj = null, truthObj = new THREE.Group();
 scene.add(mapObj, robotObj, truthObj);
 
@@ -121,18 +121,8 @@ const solid = c => c[2] === COLUMN.BLOCKED || c[2] === COLUMN.OVERHANG;
 
 function buildMap() {
   mapObj.clear();
-  if (!maps) return;
-  const variant = $("variant").value;
-  if (variant === "none") return status();
-  if (variant === "diff") {
-    const key = c => `${c[0]},${c[1]}`;
-    const r = new Map(maps.readings.filter(solid).map(c => [key(c), c])), v = new Map(maps.votes.filter(solid).map(c => [key(c), c]));
-    const z = c => (c[4] === 2 ? L1_Z : L2_Z);
-    mapObj.add(instanced(cube, 0x40c0ff, 0.55, [...r].filter(([k]) => !v.has(k)).map(([, c]) => [c[0], c[1], z(c)])));
-    mapObj.add(instanced(cube, 0xc060ff, 0.55, [...v].filter(([k]) => !r.has(k)).map(([, c]) => [c[0], c[1], z(c)])));
-    return status();
-  }
-  const cells = maps[variant];
+  if (!map) return;
+  const cells = map.cells;
   if ($("l1").checked) mapObj.add(instanced(cube, 0xe04040, 0.4, cells.filter(c => c[4] === 2).map(c => [c[0], c[1], L1_Z])));
   if ($("l2").checked) mapObj.add(instanced(cube, 0xf0a030, 0.35, cells.filter(c => c[5] === 2).map(c => [c[0], c[1], L2_Z])));
   if ($("floor").checked) mapObj.add(instanced(tile, 0x2e9d42, 0.35, cells.filter(c => c[3] === 2).map(c => [c[0], c[1], 0])));
@@ -140,13 +130,13 @@ function buildMap() {
   status();
 }
 
-async function loadMaps() {
-  maps = null;
+async function loadMap() {
+  map = null;
   mapObj.clear();
   status("replaying the map…");
-  const res = await fetch(`/api/takes/${data.take.take_id}/maps?margin=${$("margin").value}`);
-  maps = await res.json();
-  if (!res.ok) { status(`map: ${maps.error}`); maps = null; return; }
+  const res = await fetch(`/api/takes/${data.take.take_id}/map?margin=${$("margin").value}`);
+  map = await res.json();
+  if (!res.ok) { status(`map: ${map.error}`); map = null; return; }
   buildMap();
   loadScore();
 }
@@ -213,14 +203,14 @@ async function loadTruth() {
 }
 
 async function loadScore() {
-  if (!truth.length) { $("score").innerHTML = "<small>place truth boxes to score the maps</small>"; return; }
+  if (!truth.length) { $("score").innerHTML = "<small>place truth boxes to score the map</small>"; return; }
   const res = await fetch(`/api/takes/${data.take.take_id}/score?margin=${$("margin").value}`);
   const s = await res.json();
   if (!res.ok) { $("score").textContent = s.error; return; }
   const cell = o => `<td class="${o.found ? "yes" : "no"}">${o.found ? `yes (${o.cells})` : "no"}</td>`;
-  let html = "<table><tr><th></th><th>READINGS</th><th>VOTES</th></tr>";
-  s.readings.objects.forEach((o, k) => { html += `<tr><td>${o.name}</td>${cell(o)}${cell(s.votes.objects[k])}</tr>`; });
-  html += `<tr><td>not explained</td><td>${s.readings.unexplained} of ${s.readings.solid}</td><td>${s.votes.unexplained} of ${s.votes.solid}</td></tr></table>
+  let html = "<table><tr><th></th><th>found</th></tr>";
+  s.objects.forEach(o => { html += `<tr><td>${o.name}</td>${cell(o)}</tr>`; });
+  html += `<tr><td>not explained</td><td>${s.unexplained} of ${s.solid}</td></tr></table>
     <small>found: a blocked or overhang cell on the box (cells); not explained: such cells within 1.5 m of the start on no box</small>`;
   $("score").innerHTML = html;
 }
@@ -282,10 +272,9 @@ $("play").onclick = () => {
 function status(text) {
   if (text !== undefined) { $("status").textContent = text; return; }
   if (!data) return;
-  const t = data.take, solidN = maps && $("variant").value !== "none" && $("variant").value !== "diff" ? maps[$("variant").value].filter(solid).length : null;
+  const t = data.take, solidN = map ? map.cells.filter(solid).length : null;
   $("status").textContent = `${t.take_id} · ${t.key} ${t.action} · ${t.duration_s} s · ${t.started}\n` +
-    `${shown.length} of ${data.points.x.length} points shown` + (solidN !== null ? ` · ${solidN} blocked or overhang columns` : "") +
-    ($("variant").value === "diff" ? "\ndifference: blue only READINGS, purple only VOTES" : "");
+    `${shown.length} of ${data.points.x.length} points shown` + (solidN !== null ? ` · ${solidN} blocked or overhang columns` : "");
 }
 
 async function load(id) {
@@ -304,7 +293,7 @@ async function load(id) {
   buildPath();
   buildPoints();
   await loadTruth();
-  loadMaps();
+  loadMap();
 }
 
 async function start() {
@@ -333,7 +322,7 @@ async function start() {
 $("take").onchange = () => load($("take").value);
 for (const id of ["colour", "valid", "closest", "frames", "size"]) $(id).oninput = buildPoints;
 $("rows").oninput = buildPoints;
-for (const id of ["variant", "l1", "l2", "floor", "nofloor"]) $(id).oninput = buildMap;
-$("margin").onchange = loadMaps;
+for (const id of ["l1", "l2", "floor", "nofloor"]) $(id).oninput = buildMap;
+$("margin").onchange = loadMap;
 $("rays").oninput = buildRobot;
 start();

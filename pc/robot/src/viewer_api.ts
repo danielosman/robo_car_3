@@ -1,16 +1,16 @@
 // The viewer's data (doc/TELEMETRY_PLAN.md §4): a take's frames, targets and path,
-// both replayed maps, the truth boxes Daniel places, and how well each map finds them.
+// the replayed map, the truth boxes Daniel places, and how well the map finds them.
 // <id> is a take (<boot>-<n>) or a whole drive (<boot>-all): all takes of a boot in
 // order, on one timeline, their frames replayed into one map.
 //   GET    /api/takes/<id>/view          the take, its frames, targets (world x, y, z), odometry
-//   GET    /api/takes/<id>/maps?margin=  both variants' cells (replay.ts)
-//   GET    /api/takes/<id>/score?margin= per variant: each truth box found or not, cells not explained
+//   GET    /api/takes/<id>/map?margin=   the map's cells (replay.ts)
+//   GET    /api/takes/<id>/score?margin= each truth box found or not, cells not explained
 //   GET    /api/truth?boot=<boot id>     the truth boxes of a boot (one odometry frame per boot)
 //   POST   /api/truth                    {boot_id, name, x, y, z, size_x, size_y, size_z, note} -> {truth_id}
 //   DELETE /api/truth/<truth id>
 import type http from "node:http";
 import type { Store } from "./store.ts";
-import { COLUMN, isDriveId, isViewId, replayMaps, takesOf, type Cell } from "./replay.ts";
+import { COLUMN, isDriveId, isViewId, replayMap, takesOf, type Cell } from "./replay.ts";
 
 export interface Truth { truth_id: string; boot_id: string; name: string; x: number; y: number; z: number; size_x: number; size_y: number; size_z: number; note: string }
 export interface Score { objects: { truth_id: string; name: string; found: boolean; cells: number }[]; unexplained: number; solid: number }
@@ -140,7 +140,7 @@ export async function handleViewerApi(req: http.IncomingMessage, res: http.Serve
     res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
     res.end(JSON.stringify(body));
   };
-  const take = /^\/api\/takes\/([^/]+)\/(view|maps|score)$/.exec(url.pathname);
+  const take = /^\/api\/takes\/([^/]+)\/(view|map|score)$/.exec(url.pathname);
   const margin = Math.min(1.5, Math.max(0.3, Number(url.searchParams.get("margin") ?? 0.9) || 0.9));
   try {
     if (take && req.method === "GET") {
@@ -149,13 +149,13 @@ export async function handleViewerApi(req: http.IncomingMessage, res: http.Serve
       if (take[2] === "view") {
         const view = await takeView(store, id);
         if (view) send(200, view); else send(404, { error: "no such take" });
-      } else if (take[2] === "maps") {
-        send(200, await replayMaps(store, id, margin));
+      } else if (take[2] === "map") {
+        send(200, await replayMap(store, id, margin));
       } else {
         const [row] = await store.query(`SELECT boot_id FROM takes WHERE ${takesOf(id)} LIMIT 1`);
         if (!row) { send(404, { error: "no such take" }); return true; }
-        const [maps, truth] = await Promise.all([replayMaps(store, id, margin), listTruth(store, row.boot_id as string)]);
-        send(200, { votes: score(maps.votes, truth), readings: score(maps.readings, truth) });
+        const [map, truth] = await Promise.all([replayMap(store, id, margin), listTruth(store, row.boot_id as string)]);
+        send(200, score(map.cells, truth));
       }
       return true;
     }

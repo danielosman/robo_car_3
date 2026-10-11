@@ -1,19 +1,15 @@
 #pragma once
 // The map as doc/MAP_DESIGN.md describes it: 10 cm cells in three layers (G ground
 // −7…+3 cm, L1 3-13 cm, L2 13-23 cm), 6 x 6 m around the map's origin. Each VL53
-// zone shoots 9 rays as long as its reading: the cells a ray passes are evidence for
-// free, the cell it ends in for occupied, each ray weighted by closeness (a sigmoid
-// around 1.5 m) and the VL53's confidence. Per frame a cell gets one verdict and a
-// confidence q; it keeps its best measurement and changes only for a better one, or
-// for 3 good-enough ones in a row (q ≥ 0.3). Nothing assumes a floor: floor is G
-// occupied.
-// Two variants (MAP_DESIGN.md §9): VOTES, as above (built 8 Oct), and READINGS (10
-// Oct, from the recordings): each zone's reading is judged as a whole by where its
-// cone can meet the floor: closer than that it is an obstacle (all of it, its low
-// rays too), on the floor it is floor, straddling it unsure (no hit); and a ray
-// passing a cell only counts against what it would have hit (it passed at or below
-// the highest point hit there). The robot runs READINGS since 10 Oct (surroundings.c);
-// VOTES stays for replay and the host test.
+// zone shoots 9 rays as long as its reading. Each zone's reading is judged as a whole
+// by where its cone can meet the floor: closer than that it is an obstacle (all of it,
+// its low rays too, hits in L1 or above), on the floor it is floor, straddling it
+// unsure (only its floor-height rays hit). The cells a ray passes are evidence for
+// free, but only against what it would have hit (it passed at or below the highest
+// point hit there); the cell it ends in for occupied. Each ray is weighted by
+// closeness (a sigmoid around 1.5 m) and the VL53's confidence. Per frame a cell gets
+// one verdict and a confidence q; it keeps its best measurement and changes only for
+// a better one, or for 3 good-enough ones in a row (q ≥ 0.3).
 // World frame: the map frame of pose.h.
 #include <stdbool.h>
 #include "pose.h"
@@ -32,10 +28,10 @@ typedef enum {
     COLUMN_OPEN,     // L1 and L2 free, G unknown
 } column_t;
 
-typedef enum { CELL_MAP_VOTES, CELL_MAP_READINGS } cell_map_variant_t;
-// floor_margin (READINGS): a reading is an obstacle if it is closer than this share of
-// where its cone first meets the floor (0.9: 10 % for pitch and noise).
-void cell_map_set_variant(cell_map_variant_t variant, float floor_margin);
+// A reading is an obstacle if it is closer than this share of where its cone first
+// meets the floor (10 % for pitch and noise). Changed only to try other values in replay.
+#define CELL_MAP_FLOOR_MARGIN 0.9f
+void cell_map_set_floor_margin(float margin);
 
 void cell_map_clear(void);
 // One frame, measured with the robot at `pose` (its pitch is used).
