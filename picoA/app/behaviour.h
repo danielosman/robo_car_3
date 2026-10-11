@@ -1,5 +1,5 @@
 #pragma once
-// What the robot does when a key asks for it (doc/COMMANDS_PLAN.md): one action at
+// What the robot does when a key asks for it (doc/ARCHITECTURE.md, actions): one action at
 // a time, nothing by itself.
 //   Scan:  turn 390° left in place (a full turn plus 30° of overlap). The map is fed
 //          from every frame anyway; the scan only turns.

@@ -23,7 +23,7 @@
 // printf takes doubles; the (double) casts below are for printing only.
 
 // The same keys on USB and over WiFi (both are stdio). One key, one operation
-// (doc/COMMANDS_PLAN.md); the robot does nothing by itself.
+// (doc/ARCHITECTURE.md, console); the robot does nothing by itself.
 static bool usb_was_connected, wifi_was_connected, greeted;
 static absolute_time_t greeting_time;
 static bool backwards; // the direction setting: f moves back, t turns right

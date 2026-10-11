@@ -1,6 +1,6 @@
 #pragma once
 // Movement in front of the VL53L8CX, while the robot stands still and while it
-// turns in place (TOF_MOTION_PLAN.md §7). Each zone uses the frame's nearest sure
+// turns in place (doc/archive/TOF_MOTION_PLAN.md §7). Each zone uses the frame's nearest sure
 // target, as the map does, or nothing; in a floor zone, readings beyond its floor
 // are reflections and tell nothing.
 //

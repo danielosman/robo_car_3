@@ -1,4 +1,4 @@
-// The viewer's data (doc/TELEMETRY_PLAN.md §4): a take's frames, targets and path,
+// The viewer's data (doc/ARCHITECTURE.md, the PC): a take's frames, targets and path,
 // the replayed map, the truth boxes Daniel places, and how well the map finds them.
 // <id> is a take (<boot>-<n>) or a whole drive (<boot>-all): all takes of a boot in
 // order, on one timeline, their frames replayed into one map.

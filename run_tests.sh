@@ -32,7 +32,7 @@ build test_brain picoB/app/test/test_brain.c -IpicoB/app/test/stubs $APP
 build/test_brain
 build test_rangefinder picoA/app/test/test_rangefinder.c -IpicoA/app/test/stubs $APP
 build/test_rangefinder
-# The new map (doc/MAP_DESIGN.md) in simulated rooms; its printed maps go to the log.
+# The map (doc/ARCHITECTURE.md) in simulated rooms; its printed maps go to the log.
 build test_cell_map picoA/app/test/test_cell_map.c -IpicoA/app/test/stubs $APP
 build/test_cell_map > build/test_cell_map.log || { cat build/test_cell_map.log; exit 1; }
 grep -v '^[|+]' build/test_cell_map.log | grep -v '^Map (9\|^up =\|^? no\|^blank'

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Replay (doc/TELEMETRY_PLAN.md §5): a recorded take through the robot's map code
+# Replay (doc/ARCHITECTURE.md, the PC): a recorded take through the robot's map code
 # (tools/replay_map.c). Needs the take in DuckDB (pc/robot:
 # npm run import).
 #   tools/replay.sh <take_id> [floor margin, default 0.9]

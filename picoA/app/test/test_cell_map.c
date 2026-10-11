@@ -1,4 +1,4 @@
-// Host test for picoA/app/cell_map.c (doc/MAP_DESIGN.md) in simulated rooms: each
+// Host test for picoA/app/cell_map.c (doc/ARCHITECTURE.md, the map) in simulated rooms: each
 // VL53 zone reads the nearest surface over 5 x 5 directions across its cone, ±1.5 %
 // noise. After a start-up turn: an empty room has its walls and no obstacle on the
 // open floor, a box is blocked, a table top at 15-20 cm is an overhang, nothing beyond

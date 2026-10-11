@@ -1,5 +1,5 @@
 #pragma once
-// One target among the VL53's movement observations (ROBOT_PLAN.md §6.6). The
+// One target among the VL53's movement observations (doc/archive/ROBOT_PLAN.md §6.6). The
 // tracker follows one target: the biggest blob at first; afterwards the biggest blob
 // that reaches within 10° of where the target is expected (its last direction moved
 // on by its angular speed) and is not more than 0.5 m nearer or farther (a person

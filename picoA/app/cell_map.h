@@ -1,5 +1,5 @@
 #pragma once
-// The map as doc/MAP_DESIGN.md describes it: 10 cm cells in three layers (G ground
+// The map (doc/ARCHITECTURE.md): 10 cm cells in three layers (G ground
 // −7…+3 cm, L1 3-13 cm, L2 13-23 cm), 6 x 6 m around the map's origin. Each VL53
 // zone shoots 9 rays as long as its reading. Each zone's reading is judged as a whole
 // by where its cone can meet the floor: closer than that it is an obstacle (all of it,

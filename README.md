@@ -3,10 +3,14 @@
 Firmware for a fully autonomous robot car on two Pico 2 boards and a custom PCB.
 PCB bring-up is complete (tag `pcb-bringup-v1`): every connected part was
 verified with the bring-up firmware and viewer described below. The robot
-firmware (`app/` per Pico) is being built milestone by milestone to
-[ROBOT_PLAN.md](ROBOT_PLAN.md). PicoA (a Pico 2 W) also sends its console over
-WiFi to a server on the PC ([ROBOT_WIFI.md](ROBOT_WIFI.md)). The code is the source
+firmware (`app/` per Pico) maps its surroundings with a ToF sensor, watches for
+movement and turns to follow it, and drives on command; PicoA (a Pico 2 W) sends
+its console and recordings over WiFi to a server on the PC. The code is the source
 of truth for configuration and protocol details.
+
+**Start here:** [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) (how the robot works,
+module by module, and Daniel's decisions), [doc/TODO.md](doc/TODO.md) (what is
+left), "How we work" below. History: [doc/CHANGELOG.md](doc/CHANGELOG.md).
 
 ```
 robo_car_3/
@@ -14,8 +18,9 @@ robo_car_3/
 ├── pico_sdk_import.cmake
 ├── .vscode/             # Run / Flash / Debug ask which firmware (picoA/… or picoB/…)
 ├── run_tests.sh         # host tests, no Pico needed
+├── doc/                 # ARCHITECTURE.md, TODO.md, CHANGELOG.md, GLOSSARY.md; archive/: the old plans
 ├── common/              # shared by both Picos: the inter-Pico link, time/angle/statistics helpers (+ host tests)
-├── tools/               # stack_depth.py: worst-case stack from the call graph
+├── tools/               # lint.sh; replay.sh + replay_map.c (the map on a recording); stack_depth.py
 ├── picoA/               # A1 — sensors: camera, ToF, color (MLX90640 planned)
 │   ├── CMakeLists.txt   # picoA_drivers library + one executable per firmware
 │   ├── drivers/         # ToF, camera (HM0360), OPT4048; lib/vl53l8cx/ = ST ULD driver
@@ -43,91 +48,22 @@ across the clock's wrap, `geom.h` bearings and angles, `stats.h` n-th value and
 median; `clock_start.h`: both Picos start their clock 30 s before
 `time_us_32()` wraps, so every run crosses the wrap 30 s after power-up) is in `common/`.
 
-## Robot firmware (`picoA_app`, `picoB_app`) — in progress
+## Robot firmware (`picoA_app`, `picoB_app`)
 
-Built to [ROBOT_PLAN.md](ROBOT_PLAN.md), milestone by milestone. **Done: M0 (link,
-wheel control, odometry), M1 (calibration, on waxed wood; `b` and the carpet still
-to test), M2 (map).** Now: the rework ([doc/REWORK_PLAN.md](doc/REWORK_PLAN.md)):
-the VL53 watches while still and while turning (`tof_motion.c`), the map is
-[doc/MAP_DESIGN.md](doc/MAP_DESIGN.md)'s (`cell_map.c`), and watching follows the
-biggest movement (`behaviour.c`); the camera's movement detection (`camera_motion.c`)
-watches while still. What happened is in [CHANGELOG.md](CHANGELOG.md) and, for the
-rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
+How it works, module by module: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md). In
+short: the robot does nothing by itself; one key, one action (`s` scan, `f` move,
+`t` turn, `a` watch, `5` record, space stop; `h` lists all keys), the same on USB
+and on the WiFi console page. With `R` each action is recorded and can be looked at
+in 3D at http://127.0.0.1:8080/viewer.
 
-- **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
-  both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
+- **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
+  at the first failure. The fake clock starts 30 s before `time_us_32()` wraps, so
+  every test crosses the wrap. `npm test` and `npm run typecheck` in `pc/robot/` for
+  the server. Run them after every change.
 - **Linters:** `tools/lint.sh`: cppcheck on the C (`brew install cppcheck`), ESLint
   and tsc on `pc/robot` (`npm run lint`, `npm run typecheck`). Kept clean.
-- **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
-  at the first failure: the link, the shared helpers, PicoB's wheel control, odometry and `brain`,
-  PicoA's `body`, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the actions
-  (scan, move, turn, watch, record) in a simulated room, the map on five recorded scans (`test_map_replay`: the cup,
-  box, chair and cupboard found), the recorder, the WiFi console and the loop timer. The fake
-  clock starts 30 s before `time_us_32()` wraps, so every test crosses the wrap (`npm test` in `pc/robot/` for the server). Run it after every change.
-- **PicoB** (`picoB/app/`): wheel speed control per side on both encoders of the
-  side (averaged), with the turn rate trimmed by the gyro (`drive.c`); position
-  from the encoders, heading from the gyro with the bias re-measured whenever the
-  robot stands still, tilt (`odometry.c`); the link protocol and safety stops
-  (`brain.c`, PicoA as PicoB sees it). Motors stay off until PicoA greets it and
-  switches them on; it switches them off by itself if PicoA's drive commands stop
-  for 250 ms, any wheel doesn't follow its side's target for 1 s, or the robot
-  tilts more than 15° (`picoB/app/drive.h`).
-- **PicoA map** ([doc/MAP_DESIGN.md](doc/MAP_DESIGN.md)): `rangefinder.c` reads the
-  VL53L8CX's 64 zones (8 × 8, 15 Hz) and knows their directions; `cell_map.c` shoots
-  9 rays per zone as long as its reading into 10 cm cells in three layers (ground
-  −7…+3 cm, 3-13 cm, 13-23 cm), 6 × 6 m: cells passed are evidence for free, the end
-  cell for occupied, weighted by closeness and the VL53's status; a cell keeps its
-  best measurement and changes for a better one or 3 good-enough ones in a row. No
-  floor learning. `pose.c` gives the pose at the moment a frame was measured;
-  `surroundings.c` feeds every frame to the map (in odometry's frame, from power-up);
-  `behaviour.c` runs the actions. PicoB's clock is translated from the ODOM
-  reports in `body.c`.
-- **Start-up (`main.c`):** the robot does nothing by itself ([doc/COMMANDS_PLAN.md](doc/COMMANDS_PLAN.md)):
-  motors off, it connects to WiFi (with or without USB) and waits for keys, the
-  same on USB and over WiFi.
-- **Actions** (`behaviour.c`), one per key, motors on while it runs and off at its
-  end, which it prints (done with what odometry measured, or stopped and why):
-  `s` scan (390° left in place, nothing else), `f` move 50 cm (stopping 15 cm
-  before an obstacle on the map, front or back edge to its cell; not at all if one
-  is within 15 cm), `t` turn 30°, `a`
-  watch for 1 minute, `5` record 5 s (standing still, motors off; only with
-  recording on). `r` switches the direction: back, `f` moves back and `t` turns
-  right. Space stops; a new action replaces the running one.
-- **Recording** (`recorder.c`, [doc/TELEMETRY_PLAN.md](doc/TELEMETRY_PLAN.md)): `R`
-  switches it on (off at power-up). Then each action is a take: its raw data goes
-  to the PC as UDP datagrams beside the console (every ToF frame with all of the
-  sensor's outputs, odometry, drive commands, the console's lines and keys); a lost
-  datagram is lost (no waiting behind it) and counted by its number. Idle, nothing
-  is sent. The PC saves every datagram in `pc/robot/recordings/raw/` (a file per
-  robot boot) and notes each take; `npm run decode -- <file>` in `pc/robot/` prints
-  them. Each take also goes into DuckDB (`pc/robot/recordings/robot.duckdb`;
-  `npm run import` rebuilds it), listed at http://127.0.0.1:8080/takes and shown
-  in 3D at http://127.0.0.1:8080/viewer: the points, the robot's path and rays,
-  the map replayed in both variants, truth boxes and each map's score; a take, or
-  the whole drive (every take since a power-up, replayed into one map).
-- **Watching** (`a`, 1 minute). The VL53
-  watches still and while turning (a background per world direction, no learning
-  after a stop). The robot turns toward the biggest movement and follows it: its
-  angular speed plus 2 × the angle still to go, at most ~29°/s, starting when it is
-  8° off, stopping within 3° once it is about still, never past where it was last
-  seen; movement at the edge of the view is inspected too. A thing that stops is
-  background 1 s after the robot stands still. Space stops.
-- **PicoA console** (`debug_console.c`), on USB and over WiFi, the same keys (one
-  key, one operation; nothing printed by itself): space stop, `p` status (pose, link
-  counters, WiFi, the loop time over the last 10 s, `loop_stats.c`, the free RAM,
-  recording, the direction), `h` help, `W` connect to WiFi, `R` recording on / off;
-  the actions above; map `C` clear, `m`
-  print, `z` one ToF frame; camera `c` one frame as 20 × 15 blocks, with its
-  exposure; movement lines only while watching (both sensors; each line starts with the robot's
-  time in s), `o` each ToF zone's background,
-  `k` each camera block's. Unplugging the USB doesn't stop the robot. The keys
-  are printed ~1 s after a serial monitor opens or the robot server
-  connects (sooner gets lost on the Mac).
-- **WiFi console** (`wifi_console.c`, [ROBOT_WIFI.md](ROBOT_WIFI.md)): joins the
-  network in `picoA/app/wifi_config.h` (git-ignored: copy
-  `wifi_config.example.h`), finds the server by its UDP announcements, sends
-  everything printed and takes keys; reconnects by itself, and losing it doesn't
-  stop the robot.
+- **Replay:** `tools/replay.sh <take id>` runs the robot's map code on a recorded
+  take (needs the take in DuckDB: `npm run import` in `pc/robot/`).
 
 ### The map as printed (`m`)
 
@@ -147,8 +83,8 @@ Only on `m` (the scan doesn't print it). 4 × 4 m around the robot, 10 cm column
 Standing still, the floor is seen in rings at each zone row's distance (~20, 30, 45,
 70 cm); driving fills the rest.
 
-Cells stay as last measured. A flat face often fills two cells (`####`): the map
-marks where the face was seen, not how thick the object is.
+A flat face often fills two cells (`####`): the map marks where the face was seen,
+not how thick the object is.
 
 ### Measured on the robot (waxed wood)
 
@@ -165,19 +101,11 @@ marks where the face was seen, not how thick the object is.
 | VL53 unsure readings | most zones above the floor rows report a faint unsure target at ~30 cm (signal 3-10 kcps/SPAD), the distance where rows 7-8 see the floor (150-730): the floor's echo inside the sensor; the real target is the next one, sure. Use only sure targets (status 5, 6, 9) |
 | VL53 on the waxed floor | the 6th row sometimes reads a reflection (e.g. the wall); rows 7-8 can read "beyond the floor" in front of glossy furniture (`?`); status 12 zones (two surfaces in one zone) come and go with the scene |
 
-**Known geometry limits:** each zone is 5.6° tall and reports the nearest surface
-in it, so a low obstacle reads like the floor behind it until it is close (an 8 cm
-box shows up at ~40 cm, not at 60 cm); a low obstacle can fall between two zone
-rows at some distances; layer 0 (2-12 cm) is only seen within ~1 m.
-
-**To watch:** a false `##` stays until the robot looks through it 6 times; stray
-`##` that never go away would show it. Scans on a desk: keep a hand ready.
-
 ### Memory and stack (computed from the build, PicoA)
 
 | | Value |
 |---|---|
-| RAM | 389 of 512 KB static (.bss 381, .data 8), ~132 KB free; no `malloc` linked. Recording (T2, UDP) adds 4 KB: a 1.4 KB datagram, a 1.2 KB half frame, odometry copies |
+| RAM | ~195 KB free of 512 (11 Oct; `p` prints it); everything static, no `malloc` linked |
 | Core-0 stack | ~6 KB worst case: main loop 4.2 KB (`observations()` in `tof_motion.c` 3.2 KB), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
 
 `tools/stack_depth.py` recomputes the stack (how to build for it: the script's
@@ -204,8 +132,7 @@ header). Re-run it after adding big locals and before core 1 is started.
    Expected: `B: Motors off: tilted too far` and "Scan stopped: PicoB switched the
    motors off (tilted too far)".
 2. **Gyro drift:** robot on the floor, don't touch it for 10 min; `p` at the start
-   and the end: yaw should stay put, the gyro bias wander little. (With telemetry,
-   TELEMETRY_PLAN, this becomes a recording.)
+   and the end: yaw should stay put, the gyro bias wander little.
 3. **Gyro scale:** a mark on the floor in line with the robot's front; `t` 12 times
    (360°). Estimate how far it ended from the mark.
 4. **Encoder distance:** tape measure, robot at 0, 2.5 m of free floor ahead (a
@@ -315,7 +242,7 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
 4. A one-zone movement prints the zone's reading and background (to tell a real
    edge movement from noise). Paste the log; space stops.
 
-**WiFi console** (only PicoA; [ROBOT_WIFI.md](ROBOT_WIFI.md)):
+**WiFi console** (only PicoA):
 1. Copy `picoA/app/wifi_config.example.h` to `wifi_config.h`, fill in the network,
    build, flash `picoA_app`.
 2. Robot on USB, serial monitor open: the robot does nothing at start-up (motors
@@ -330,7 +257,7 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
 6. Power up without USB: the statuses show on the page, the robot waits; `s` on
    the page scans.
 
-**Recording** (T2; both Picos, battery on, WiFi console working; [doc/TELEMETRY_PLAN.md](doc/TELEMETRY_PLAN.md)).
+**Recording** (both Picos, battery on, WiFi console working).
 Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
 1. Restart the server (`npm start` in `pc/robot/`) so it runs the new code.
 2. `p`: a line "Recording: off (R), server connected; 0 takes since power-up (boot
@@ -372,7 +299,7 @@ WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):
 
 - **HM0360 / Arducam B0319 camera:** the robot's camera driver (`drivers/camera.c`),
   streamed over USB: **160×120, Sub4, no binning**, exposure set by the driver.
-  Binning gives stripes and isn't used ([notes](picoA/CAMERA_STRIPES_TODO.md)).
+  Binning gives stripes and isn't used ([notes](doc/archive/CAMERA_STRIPES_TODO.md)).
 - **VL53L8CX ToF:** working **8×8** ranging over SPI0; default **10 Hz**, up to four
   targets per zone. LPn is not wired to the Pico—the Pololu carrier holds it high.
 - **OPT4048 color sensor:** I2C0 0x44 (GP4/5, 400 kHz), auto-range, 100 ms per
@@ -522,10 +449,34 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 
 ## Docs
 
-README.md, [ROBOT_PLAN.md](ROBOT_PLAN.md) and [ROBOT_WIFI.md](ROBOT_WIFI.md) show
-**only the current state**: how things are and how to use and test them. They hold
-no history. What happened (sessions, robot runs, results, fixes) goes only in
-[CHANGELOG.md](CHANGELOG.md); red flags in [REDFLAGS.md](REDFLAGS.md).
+- **README.md** (this): how to build, run and test.
+- **[doc/ARCHITECTURE.md](doc/ARCHITECTURE.md)**: how the robot works now, module by
+  module, where the code is, and Daniel's decisions. Only the current state.
+- **[doc/TODO.md](doc/TODO.md)**: what is left: big features and ideas, and small
+  fixes to existing modules.
+- **[doc/CHANGELOG.md](doc/CHANGELOG.md)**: what happened, newest first (robot runs,
+  results, what was tried and dropped, review findings). Only history.
+- **[doc/GLOSSARY.md](doc/GLOSSARY.md)**: the words.
+- **[doc/archive/](doc/archive/)**: the old plans and reviews, unchanged. TODO.md
+  links into them where they hold a design not built yet.
+
+## How we work
+
+- **Visible progress first.** Each step should change something the robot does;
+  groundwork (timing, telemetry) only when a feature needs it.
+- **Ask before changing behaviour that wasn't agreed.** An idea in TODO.md needs
+  Daniel's yes before it is built.
+- **A step:** read the code it changes (and the archived plan part, if there is
+  one); host tests first where they make sense; `./run_tests.sh` and
+  `tools/lint.sh` stay green; build.
+- **Robot tests only when a step changes what the robot does** or needs the
+  robot's numbers. A pure refactor is checked by the host tests (same output before
+  and after) and rides along with the next robot test. Hand Daniel the steps in the
+  style of "Robot tests" above and wait for the log.
+- **After a step:** update ARCHITECTURE.md (what changed), TODO.md (what is done or
+  new), README (how to use or test it), and the CHANGELOG (what happened, including
+  any red flags found in a review pass).
+- **Commit only when Daniel asks.**
 
 ## Conventions
 

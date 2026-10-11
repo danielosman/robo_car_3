@@ -1,4 +1,4 @@
-// End-to-end host test of the actions (doc/COMMANDS_PLAN.md): picoA/app/behaviour.c
+// End-to-end host test of the actions (doc/ARCHITECTURE.md, actions): picoA/app/behaviour.c
 // with the real surroundings, rangefinder, cell_map and pose, on a simulated robot
 // in a simulated room seen by a simulated ToF sensor (rays cast at the floor, the
 // walls and a box; like the real sensor, each zone reports the nearest point of its
@@ -315,7 +315,7 @@ int main(void) {
                     cell_map_column(BOX_X - 0.05f, BOX_Y + 0.05f) == COLUMN_BLOCKED;
     printf("walls: %d of %d wall columns found; %d false obstacles on the floor; %d of %d columns within 60 cm free\n",
            wall_cells, wall_checked, false_obstacles, near_free, near_cells);
-    // KNOWN (MAP_DESIGN.md §8.1): the 8 cm box at 40 cm is found with about half of
+    // KNOWN (doc/archive/MAP_DESIGN.md §8.1): the 8 cm box at 40 cm is found with about half of
     // the random seeds; not asserted until the map fix tested on recordings.
     printf("box (8 cm, 40 cm away): %s (KNOWN: found about half the time)\n", box_seen ? "seen" : "missed");
     assert(wall_cells >= wall_checked * 8 / 10);

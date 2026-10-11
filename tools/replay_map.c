@@ -1,4 +1,4 @@
-// Replay (doc/TELEMETRY_PLAN.md §5): runs picoA/app/cell_map.c on a recorded take's
+// Replay (doc/ARCHITECTURE.md, the PC): runs picoA/app/cell_map.c on a recorded take's
 // frames (pc/robot: npm run frames), prints the map and every blocked or overhang
 // column with its distance and bearing from where the take started. Built and run by
 // tools/replay.sh:

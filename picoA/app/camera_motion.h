@@ -1,5 +1,5 @@
 #pragma once
-// Movement in front of the camera while the robot stands still (ROBOT_PLAN.md §6.3).
+// Movement in front of the camera while the robot stands still (doc/archive/ROBOT_PLAN.md §6.3).
 // Each 8 x 8-pixel block of the 160 x 120 image is a cell (20 x 15); its value is
 // its mean brightness. After camera_motion_restart() the camera's exposure is let
 // reach its target and is then held, and each block learns over 1 s what it

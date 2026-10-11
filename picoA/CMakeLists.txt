@@ -24,8 +24,8 @@ pico_enable_stdio_usb(picoA_bringup 1)
 target_link_libraries(picoA_bringup picoA_drivers)
 pico_add_extra_outputs(picoA_bringup)
 
-# Robot firmware (ROBOT_PLAN.md). M2: link to PicoB, map from the ToF sensor,
-# start-up scan, debug console (USB and WiFi, ROBOT_WIFI.md), calibration tests.
+# Robot firmware, the brain (doc/ARCHITECTURE.md): link to PicoB, map from the ToF
+# sensor, movement detection, the actions, console (USB and WiFi), recording.
 add_executable(picoA_app app/main.c app/body.c app/pose.c app/rangefinder.c app/surroundings.c app/behaviour.c app/debug_console.c app/wifi_console.c
     app/change_grid.c app/tof_motion.c app/camera_motion.c app/tracker.c app/motion_sense.c app/loop_stats.c app/cell_map.c
     app/recorder.c)

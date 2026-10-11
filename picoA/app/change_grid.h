@@ -1,5 +1,5 @@
 #pragma once
-// Which cells of a sensor's grid show movement (ROBOT_PLAN.md §6.1). A detector (the
+// Which cells of a sensor's grid show movement (doc/archive/ROBOT_PLAN.md §6.1). A detector (the
 // VL53's zones, the camera's blocks) scores every cell every frame by how unlike its
 // reference it behaves; the grid decides from that. A cell has moved when its scores
 // over the last CHANGE_GRID_WINDOW frames add up to the threshold, or to the lower

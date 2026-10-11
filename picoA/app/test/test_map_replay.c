@@ -1,4 +1,4 @@
-// Regression test on real recordings (doc/MAP_DESIGN.md §9): the five scans of 10 Oct
+// Regression test on real recordings (doc/archive/MAP_DESIGN.md §9): the five scans of 10 Oct
 // (picoA/app/test/data/*.frames, exported with pc/robot `npm run frames`: each frame
 // as the robot's map received it) through picoA/app/cell_map.c. Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
 // on wheels to the right, a cupboard behind; from scan 3 on the robot started 30 cm

@@ -1,4 +1,4 @@
-// Recordings from the robot (doc/TELEMETRY_PLAN.md): PicoA sends its records (§2.1)
+// Recordings from the robot (doc/ARCHITECTURE.md): PicoA sends its records (recorder.c)
 // as UDP datagrams to port 4212. Each boot's datagrams are saved as they arrive,
 // never changed, in recordings/raw/<time>-boot-<id>.rec (each with its arrival
 // time), and decoded on the way for a note per take (frames, datagrams lost, the

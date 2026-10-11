@@ -1,6 +1,6 @@
 #pragma once
 // Speed commands that finish a move on target: full speed, slowing down near the
-// end so the robot stops close to it. Shared by the robot tests and behaviour.
+// end so the robot stops close to it. Used by behaviour.
 #include <math.h>
 
 #define MOTION_SPEED_MPS      0.10f

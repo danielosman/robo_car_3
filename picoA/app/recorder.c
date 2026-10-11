@@ -20,7 +20,7 @@
 
 const VL53L8CX_ResultsData *rangefinder_raw(void); // rangefinder.c
 
-// The records (doc/TELEMETRY_PLAN.md §2.1): [type u8][length u16][payload][CRC-32 u32]
+// The records (the rec_*_t below; field by field in doc/archive/TELEMETRY_PLAN.md §2.1): [type u8][length u16][payload][CRC-32 u32]
 // of type, length and payload; little-endian, packed. They travel in UDP datagrams:
 // a header (rec_dgram_t), then whole records.
 enum { REC_TAKE_START = 1, REC_GEOMETRY, REC_TOF_RAW, REC_ODOM, REC_DRIVE, REC_MARK, REC_TAKE_END, REC_WIFI };

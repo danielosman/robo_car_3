@@ -1,5 +1,5 @@
 #pragma once
-// How long the main loop takes (ARCHITECTURE_PLAN.md A1). main marks the start of
+// How long the main loop takes (doc/archive/ARCHITECTURE_PLAN.md A1). main marks the start of
 // every iteration and the end of every stage in it. Per 10 s window: the
 // iterations, their mean and longest time, and the stage that took longest once
 // (the one to look at when the longest iteration is too long).

@@ -1,7 +1,7 @@
-// RoboCar robot server (ROBOT_WIFI.md): PicoA connects over WiFi, the browser at
+// RoboCar robot server (doc/ARCHITECTURE.md, the PC): PicoA connects over WiFi, the browser at
 // http://127.0.0.1:8080/ shows its console and sends keys. Every run writes a log
 // file in logs/. PicoA's recordings arrive on a second connection and are saved in
-// recordings/ (recording.ts, doc/TELEMETRY_PLAN.md); each take goes into DuckDB as it
+// recordings/ (recording.ts); each take goes into DuckDB as it
 // ends (store.ts), listed at http://127.0.0.1:8080/takes and shown in 3D at /viewer
 // (viewer_api.ts). Ports: PORT (HTTP 8080),
 // ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one.

@@ -1,4 +1,4 @@
-// The recordings in DuckDB (doc/TELEMETRY_PLAN.md §3): one row per take, ToF
+// The recordings in DuckDB (doc/ARCHITECTURE.md, the PC): one row per take, ToF
 // frame, zone and target (each target also in world coordinates), odometry report,
 // drive command, mark and WiFi status. Derived from the raw files: a take can be
 // imported again at any time and replaces its rows; its note and the truth objects

@@ -1,4 +1,4 @@
-// The robot's side of the server (ROBOT_WIFI.md): announces the server on the
+// The robot's side of the server (doc/ARCHITECTURE.md, the PC): announces the server on the
 // home network, accepts PicoA's TCP connection, passes its console text on and
 // keys back, and keeps the connection alive with heartbeats. One robot at a time.
 import dgram from "node:dgram";

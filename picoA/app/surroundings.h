@@ -1,5 +1,5 @@
 #pragma once
-// What the robot knows about its surroundings: the map (cell_map.h, doc/MAP_DESIGN.md),
+// What the robot knows about its surroundings: the map (cell_map.h, doc/ARCHITECTURE.md),
 // kept up to date from every ToF frame, placed where the robot was when the frame was
 // measured. Nothing has to be learned first: every frame is mapped as it comes,
 // in odometry's frame (from where PicoB started).

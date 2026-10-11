@@ -1,4 +1,4 @@
-// The recordings in 3D (doc/TELEMETRY_PLAN.md §4): a take's targets (or a whole
+// The recordings in 3D (doc/ARCHITECTURE.md, the PC): a take's targets (or a whole
 // drive's: every take of one power-up, in order) where they were in the room, the robot's path, the robot and its rays at a moment, the replayed map as
 // cubes, and truth boxes with the map's score.
 // World frame: odometry's from power-up, x forward at power-up, y left, z up (m).

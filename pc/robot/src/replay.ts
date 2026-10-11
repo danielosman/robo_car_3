@@ -1,4 +1,4 @@
-// Replay for the viewer (doc/TELEMETRY_PLAN.md §5): a take's frames as the robot's
+// Replay for the viewer (doc/ARCHITECTURE.md, the PC): a take's frames as the robot's
 // map receives them, run through the robot's own map code (tools/replay_map.c, built
 // here from picoA/app/cell_map.c).
 import { execFile } from "node:child_process";

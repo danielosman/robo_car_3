@@ -1,12 +1,12 @@
 #pragma once
-// Recording (doc/TELEMETRY_PLAN.md): with recording on, each action is a take, and
+// Recording (doc/ARCHITECTURE.md): with recording on, each action is a take, and
 // while it runs the raw data goes to the PC over the recording connection
 // (wifi_console.h): every ToF frame with all of the sensor's outputs, PicoB's
 // odometry reports, the drive commands, and the console's lines and keys as marks.
 // Nothing is sent when no action runs. When the connection can't keep up, whole
 // ToF frames are left out (counted, and each frame says how many were left out
 // before it); the rest is kept. Without the connection the action runs unrecorded.
-// The record format is in doc/TELEMETRY_PLAN.md §2.1.
+// The record layouts are the rec_*_t structs in recorder.c.
 #include <stdbool.h>
 #include <stdint.h>
 #include "rangefinder.h"

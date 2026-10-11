@@ -1,7 +1,7 @@
 // PicoA robot firmware, the brain. Talks to PicoB over the link, maps the
 // surroundings with the ToF sensor and watches for movement. It does nothing by
-// itself: a serial monitor on USB or the robot server over WiFi (ROBOT_WIFI.md),
-// with the same keys, starts each action (doc/COMMANDS_PLAN.md).
+// itself: a serial monitor on USB or the robot server over WiFi (wifi_console.h),
+// with the same keys, starts each action (doc/ARCHITECTURE.md).
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "clock_start.h"

@@ -260,7 +260,7 @@ struct senosr_reg hm0360_320x240_trim_2[] = {
 
     // --- Output format + sub-sample + stream-on (keep this block LAST) ------
     // The only readout: 160x120, Sub4, no binning (binning gives stripes:
-    // CAMERA_STRIPES_TODO.md). camera.c then sets the exposure and frame length.
+    // doc/archive/CAMERA_STRIPES_TODO.md). camera.c then sets the exposure and frame length.
     {0x310F,0x40},   // OUTPUT_FMT: [6]=1 4-bit serial enable (D0-D3), [7]=0 1-bit off.
                      //   slew [5:3]/[2:0]=0 (kept from 1-bit). 1-bit used 0x80.
     {0x0380,0x02},   // H_SUB: Sub4 horizontal -> 640->160 columns

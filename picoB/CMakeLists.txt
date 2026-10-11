@@ -19,7 +19,7 @@ pico_enable_stdio_usb(picoB_bringup 1)
 target_link_libraries(picoB_bringup picoB_drivers)
 pico_add_extra_outputs(picoB_bringup)
 
-# Robot firmware (ROBOT_PLAN.md): wheel control and odometry, commanded by PicoA.
+# Robot firmware, the body (doc/ARCHITECTURE.md): wheel control and odometry, commanded by PicoA.
 add_executable(picoB_app app/main.c app/brain.c app/odometry.c app/drive.c)
 pico_set_program_name(picoB_app "picoB_app")
 pico_set_program_version(picoB_app "0.1")

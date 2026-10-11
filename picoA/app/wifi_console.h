@@ -1,11 +1,11 @@
 #pragma once
-// PicoA's console over WiFi (ROBOT_WIFI.md): once started, everything printed also
+// PicoA's console over WiFi (doc/ARCHITECTURE.md, console): once started, everything printed also
 // goes to the robot server on the PC, and keys typed there arrive through getchar,
 // next to USB. Joins the network in wifi_config.h, finds the server by its UDP
 // announcements and keeps reconnecting by itself; prints each step ("WiFi: ...",
 // "Server: ..."). Output while no server listens is kept (the last 16 KB) and sent
 // when one does. Losing the connection doesn't stop the robot.
-// Recordings (recorder.c, doc/TELEMETRY_PLAN.md) go to the server as UDP datagrams,
+// Recordings (recorder.c) go to the server as UDP datagrams,
 // beside the console: a lost one is lost, and nothing waits behind it.
 #include <stdbool.h>
 #include <stdint.h>

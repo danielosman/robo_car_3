@@ -1,5 +1,5 @@
 #pragma once
-// Copy to wifi_config.h (git-ignored), fill in, rebuild picoA_app (ROBOT_WIFI.md).
+// Copy to wifi_config.h (git-ignored), fill in, rebuild picoA_app (README, WiFi console test).
 #define WIFI_SSID     "MyNetwork"
 #define WIFI_PASSWORD "secret"
 // Optional: the PC's IP, tried when no server announcement arrives (routers that

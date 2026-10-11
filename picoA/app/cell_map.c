@@ -125,7 +125,7 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
     }
 }
 
-// One frame's verdict on a cell, against what it keeps (MAP_DESIGN.md §4).
+// One frame's verdict on a cell, against what it keeps (doc/ARCHITECTURE.md, the map).
 static void decide_cell(uint8_t *cell, float h, float p) {
     if (h == p) return;
     int verdict = h > p ? CELL_STATE_OCCUPIED : CELL_STATE_FREE;

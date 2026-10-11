@@ -1,5 +1,5 @@
 #pragma once
-// Movement around the robot (ROBOT_PLAN.md §6). The VL53 (tof_motion) watches all
+// Movement around the robot (doc/ARCHITECTURE.md, movement detection). The VL53 (tof_motion) watches all
 // the time, still and turning in place, against a background kept per world
 // direction (no learning after a stop). The camera (camera_motion) watches only while
 // the robot stands still (PicoB says so; with no PicoB the robot can't move): after
