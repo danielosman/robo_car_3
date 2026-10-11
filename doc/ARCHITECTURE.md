@@ -323,8 +323,11 @@ Rules the code follows; change them only with Daniel's word.
 - Raw sensor data and the pose go to the PC, not the map, and only while an action
   runs (one take per action). Hypotheses and map changes are tested on recordings.
 - Recordings stay out of git.
-- No camera images to the PC for now; the camera's movement detection will be one
-  reader of a feature record ([archive/CAMERA_MOTION_PLAN.md](archive/CAMERA_MOTION_PLAN.md)).
+- Camera pictures go to the server at 160 × 120, never larger; the server does all
+  image recognition (TODO.md, "Pictures to the server"; not built yet). Camera
+  features go to the server too and are not kept on the robot; the camera's movement
+  detection will be one reader of a feature record
+  ([archive/CAMERA_MOTION_PLAN.md](archive/CAMERA_MOTION_PLAN.md)).
 - Camera while watching: sharp and dark rather than noisy (exposure ≤ 10 ms, gain
   ≤ 8). For the camera work; the driver doesn't cap it yet.
 - Datagram loss of up to 20 % per take is not acceptable (resending: TODO.md).
