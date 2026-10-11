@@ -38,7 +38,7 @@ At an action's end the motors are switched off: idle is always "motors off".
 |---|---|---|
 | **space** | stop | Ends the running action, robot stands still, motors off. Works in every state |
 | `s` | action | **Scan**: turn 390° left in place (~14 s). Only that: no map clear, no origin change, no turn to the most open direction, no watching after |
-| `f` | action | **Move** 0.5 m straight, forward or back by the direction setting. **Decided 10 Oct, not built yet (M4, REWORK_PLAN "Next"): it stops 15 cm before an obstacle on the map**; otherwise it still moves 50 cm (not "drive until an obstacle") |
+| `f` | action | **Move** 0.5 m straight, forward or back by the direction setting, but **stops 15 cm before an obstacle on the map** (built 11 Oct, M4 step 1; robot test passed 11 Oct): the front (back) edge to the nearest blocked or overhang cell in its path (the robot's 23.5 cm plus 5 cm each side), checked every loop while it drives, slowing down near the stop point; unknown cells count as free. Within 15 cm already: it doesn't move and says why. Back: the VL53 can't see there, so only what the map already has stops it. Not "drive until an obstacle": at most 50 cm |
 | `t` | action | **Turn** 30° in place: left in forward direction, right in back direction |
 | `r` | setting | **Direction** forward ⇄ back; prints the new direction |
 | `a` | action | **Watch**: turn towards the biggest movement and follow it, for 1 minute (or until stop) |

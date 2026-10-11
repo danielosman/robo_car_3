@@ -287,7 +287,7 @@ static void update_server(void) {
             settled = true;
             ip_addr_t fallback;
             if (*WIFI_SERVER_IP && ipaddr_aton(WIFI_SERVER_IP, &fallback)) {
-                printf("Server: no announcement, trying WIFI_SERVER_IP %s:%u...\n", WIFI_SERVER_IP, SERVER_PORT);
+                printf("Server: no announcement, trying WIFI_SERVER_IP %s:%d...\n", WIFI_SERVER_IP, SERVER_PORT);
                 connect_to(&fallback, SERVER_PORT, DATA_PORT);
             } else {
                 deadline = make_timeout_time_us(FIND_SERVER_US);

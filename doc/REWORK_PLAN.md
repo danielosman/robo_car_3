@@ -89,6 +89,16 @@ The robot:
   WiFi: space stop, `s` scan (390° only), `f` move 50 cm, `t` turn 30°, `r`
   direction, `a` watch 1 min, `C` clear the map. `robot_test` and the 15 s status
   are gone; the map's frame is odometry's from power-up. Robot test passed (10 Oct).
+- **`f` stops before obstacles** (M4 step 1, 11 Oct; **robot test passed 11 Oct**, a
+  drive of 36 takes around the room, boot 54564d43: stops 15-25 cm before furniture): 15 cm
+  from the front (back) edge to the nearest blocked or overhang cell of the map in
+  its path (23.5 cm + 5 cm each side; `cell_map_obstacle_along()`), checked every
+  loop while driving, slowing near the stop point; unknown cells are free; within
+  15 cm it doesn't start. The cell's corner counts, so the real gap is 15-25 cm.
+  Take end reason "obstacle". Host test (a 20 cm box put down after the scan, the
+  wall behind) and the five recorded scans (`f` at the cup finds the cup first).
+- **The viewer's whole drive** (11 Oct): every take of a boot on one timeline,
+  replayed into one map (`<boot>-all`).
 - **Recording** (TELEMETRY_PLAN T2, 10 Oct): `R` on, then each action (and `5`,
   record 5 s) is a take sent raw as UDP datagrams (`recorder.c`); the PC saves
   them and notes each take (`pc/robot/src/recording.ts`, `npm run decode`).
@@ -104,7 +114,15 @@ The robot:
 
 ## Next
 
-**Where things stand (end of 10 Oct).** The telemetry plan is done (TELEMETRY_PLAN
+**11 Oct: M4 step 1 is done** (Current state above): `f` stops 15 cm before an
+obstacle on the map, the viewer shows a whole drive, and the robot test passed: a
+drive around the room (36 takes, boot 54564d43, recorded), the stops 15-25 cm
+before the furniture, one move refused (within 15 cm). Daniel: the braking is fine,
+keep it (the brief speed-up below stays as it is). **Next: point 4 below** (the
+map's window follows the robot), and look at the drive in the viewer (whole drive,
+boot 54564d43): the drift between the first and last scan, false cells.
+
+**Where things stood (end of 10 Oct).** The telemetry plan is done (TELEMETRY_PLAN
 T1-T5; T6, the cup session, was done by the analysis on 10 Oct and dropped): with
 `R` on, every action is recorded (UDP), stored in DuckDB and viewable in 3D at
 http://127.0.0.1:8080/viewer with the map replayed. The recordings showed why the
@@ -117,12 +135,14 @@ committed and pushed.
 1. Read this file, then [COMMANDS_PLAN.md](COMMANDS_PLAN.md) (the keys) and
    [MAP_DESIGN.md](MAP_DESIGN.md) §9 (the map the robot runs). Telemetry and the
    viewer: [TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) §0.
-2. `./run_tests.sh` (all green), `cmake --build build`; `npm start` in `pc/robot/`
+2. `./run_tests.sh` (all green), `cmake --build build`; in `pc/robot/` `npm test`,
+   `npm run typecheck`; `tools/lint.sh` (cppcheck, ESLint, tsc: all clean);
+   `npm start`
    (console http://127.0.0.1:8080/, takes /takes, viewer /viewer). After a power-up
    press `R` to record.
-3. **Next step: M4 step 1, `f` with the map** (Daniel, 10 Oct): `f` keeps moving
-   50 cm, but **stops 15 cm before an obstacle on the map**. Not coded yet. To
-   settle with Daniel before coding (suggestions in brackets):
+3. **M4 step 1, `f` with the map** (Daniel, 10 Oct; **built 11 Oct**, all the
+   suggestions in brackets accepted by Daniel): `f` keeps moving 50 cm, but
+   **stops 15 cm before an obstacle on the map**. What was settled:
    - 15 cm from the robot's front edge (ROBOT_PLAN §3: 9.5 cm ahead of the centre)
      to the nearest blocked cell's edge along the path. [yes]
    - Which cells stop it: blocked (3-13 cm) for sure; overhang (13-23 cm) too? The
@@ -137,11 +157,21 @@ committed and pushed.
      near the stop point as today's move does near its end.
    - Printing: "Move stopped: obstacle 15 cm ahead (map), moved 32 cm".
    - Host test first (test_behaviour: a box in the simulated room), then replay of
-     a recorded drive, then the robot (`f` towards the cup; recording on).
+     a recorded drive (none recorded yet: checked on the five scans instead), then
+     the robot (recording on).
 4. Then: the map's 6 × 6 m window follows the robot (point 7 below), needed once
    the robot drives more than a few moves; then M4's driving towards movement.
 
-**Also open, small:** `p` right after a power-up, to confirm the link's "lost"
+**Also open, small:** in 2 of the 4 obstacle stops (takes 16, 27) the robot braked,
+then sped up again briefly: a cell one in front of the furniture (overhang, seen
+from afar) was erased by closer readings, so the stop point moved back 5-8 cm and
+the speed (set by the room left alone) rose. Daniel (11 Oct): fine, not changed.
+If it is ever wanted: no speed-up after braking unless the room grows > 20 cm.
+Datagram loss reached 20 % per take (Daniel: not acceptable): planned as
+TELEMETRY_PLAN T7, lost datagrams resent from a ring.
+The watch test's overshoot for a 25°/s walker is 1-4° by
+the random seed, the limit 3° (test_behaviour re-seeds before watching; seeds 4
+and 12 fail on the code of 10 Oct too): loosen the limit or look at it. `p` right after a power-up, to confirm the link's "lost"
 messages come from the start-up (REWORK_CHANGELOG, 10 Oct); M1's `b` and carpet
 tests (README "M1"); the cupboard missing in the earlier scans and the rare blips
 (MAP_DESIGN §9).
@@ -210,7 +240,8 @@ Not decided; each needs Daniel's yes before it is built.
 
 1. Read the code it changes, and the plan part if there is one. If the plan is wrong
    against the code, say so and fix the plan.
-2. Host tests first where they make sense; `./run_tests.sh` stays green.
+2. Host tests first where they make sense; `./run_tests.sh` and `tools/lint.sh`
+   stay green.
 3. Build. A robot test only if the step changes what the robot does (above); hand
    Daniel the steps in the README's "Robot tests" style and wait for the log.
 4. Update README / ROBOT_PLAN / this file (current state), REWORK_CHANGELOG.md

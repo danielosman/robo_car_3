@@ -1,8 +1,14 @@
 # RoboCar — architecture plan
 
-Status: **plan, not agreed yet; nothing here is implemented.** It takes everything
-the robot does today as a spec, designs the firmware from scratch for it, compares
-that with the code, and turns the differences into small milestones, each leaving
+Status (11 Oct 2026): **A0 and A1 done; R0 and M-S replaced by
+[TELEMETRY_PLAN.md](TELEMETRY_PLAN.md) (recording per take, no images); the rest
+(A2-A6, V3) is groundwork done only when a feature needs it** (REWORK_PLAN points
+17-21). The order in §8.1 is outdated: the map and the ToF heading background were
+built another way (MAP_DESIGN.md, REWORK_PLAN "Current state"), and A3/A5's robot
+tests still use keys that are gone (COMMANDS_PLAN.md).
+
+It takes everything the robot does today as a spec, designs the firmware from
+scratch for it, compares that with the code, and turns the differences into small milestones, each leaving
 a working robot. It is the **master plan for the order of work** (§8.1) of four
 plans written together:
 - [CAMERA_MOTION_PLAN.md](CAMERA_MOTION_PLAN.md): `vision`, features tracked from

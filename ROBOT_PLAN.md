@@ -18,8 +18,8 @@ and turning after a target leaving the view (§6.6); those sections say so.
 
 **Next session: start at [doc/REWORK_PLAN.md](doc/REWORK_PLAN.md) "Next".** It holds
 where things stand (end of 10 Oct: recording, the 3D viewer, the new map) and the
-next step: M4 step 1, `f` still moving 50 cm but stopping 15 cm before an obstacle
-on the map (decided by Daniel, details to settle there). Also open: M1's `b` and
+step: M4 step 1, `f` still moving 50 cm but stopping 15 cm before an obstacle on
+the map: built and robot-tested 11 Oct (REWORK_PLAN "Next" has what follows). Also open: M1's `b` and
 carpet tests (README, "M1").
 
 **Files:**

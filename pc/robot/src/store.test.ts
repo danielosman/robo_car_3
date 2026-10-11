@@ -28,7 +28,7 @@ test("world points: the robot's geometry, turned and moved", () => {
   close(y, -0.03 + Math.cos(h) * Math.sin(h));
   close(z, 0.07 + Math.sin(h));
   // The robot at (1, 2), turned 90° left: forward is +y, left is -x.
-  [x, y, z] = worldPoint(geometry, { x: 1, y: 2, yaw: 90 * DEG, pitch: 0 }, 4, 4, 1);
+  [x, y] = worldPoint(geometry, { x: 1, y: 2, yaw: 90 * DEG, pitch: 0 }, 4, 4, 1);
   close(x, 1 + 0.03 - Math.cos(h) * Math.sin(h));
   close(y, 2 + 0.025 + Math.cos(h) * Math.cos(h));
   // The bottom row (8) is 3.5 zones down; at the distance where that ray meets the floor, z = 0.

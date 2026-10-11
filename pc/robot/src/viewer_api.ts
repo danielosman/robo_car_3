@@ -1,5 +1,7 @@
 // The viewer's data (doc/TELEMETRY_PLAN.md §4): a take's frames, targets and path,
 // both replayed maps, the truth boxes Daniel places, and how well each map finds them.
+// <id> is a take (<boot>-<n>) or a whole drive (<boot>-all): all takes of a boot in
+// order, on one timeline, their frames replayed into one map.
 //   GET    /api/takes/<id>/view          the take, its frames, targets (world x, y, z), odometry
 //   GET    /api/takes/<id>/maps?margin=  both variants' cells (replay.ts)
 //   GET    /api/takes/<id>/score?margin= per variant: each truth box found or not, cells not explained
@@ -8,7 +10,7 @@
 //   DELETE /api/truth/<truth id>
 import type http from "node:http";
 import type { Store } from "./store.ts";
-import { COLUMN, isTakeId, replayMaps, type Cell } from "./replay.ts";
+import { COLUMN, isDriveId, isViewId, replayMaps, takesOf, type Cell } from "./replay.ts";
 
 export interface Truth { truth_id: string; boot_id: string; name: string; x: number; y: number; z: number; size_x: number; size_y: number; size_z: number; note: string }
 export interface Score { objects: { truth_id: string; name: string; found: boolean; cells: number }[]; unexplained: number; solid: number }
@@ -46,17 +48,53 @@ function columns(rows: Record<string, unknown>[], names: string[], decimals: Rec
   return out;
 }
 
+// A drive's timeline: each take's times (s since it started) are moved to seconds
+// since the drive's first frame, by the robot's clock (t_us, across its wrap). Takes
+// without frames are left out.
+async function timeShifts(store: Store, id: string): Promise<Map<string, number>> {
+  const firsts = await store.query(`SELECT take_id, arg_min(t_us, frame_no) AS t_us, arg_min(t_s, frame_no) AS t_s
+    FROM tof_frames WHERE ${takesOf(id)} GROUP BY take_id ORDER BY min(frame_no)`);
+  const shifts = new Map<string, number>();
+  if (!firsts.length) return shifts;
+  const t0 = Number(firsts[0].t_us), s0 = Number(firsts[0].t_s);
+  for (const f of firsts)
+    shifts.set(f.take_id as string, ((Number(f.t_us) - t0 + 2 ** 32) % 2 ** 32) / 1e6 - Number(f.t_s) + s0);
+  return shifts;
+}
+
+export interface ViewTake {
+  take_id: string; boot_id: string; take_no: number; key: string; action: string; duration_s: number; end_reason: string;
+  started: string; note: string; geometry: { sensorM: number[]; rows: number } | null;
+}
+
+// The takes of a view: one, or a drive's in order, summed up as one.
+async function viewTake(store: Store, id: string): Promise<ViewTake | null> {
+  const takes = await store.query(`SELECT take_id, boot_id, take_no, key, action, round(duration_s, 1) AS duration_s, end_reason,
+    strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started, geometry, note FROM takes WHERE ${takesOf(id)} ORDER BY take_no`);
+  if (!takes.length) return null;
+  const geometry = takes.find(t => t.geometry)?.geometry as string | undefined;
+  const take = isDriveId(id) ? {
+    take_id: id, boot_id: takes[0].boot_id, take_no: 0, key: takes.map(t => t.key).join(""), action: `drive (${takes.length} takes)`,
+    duration_s: Math.round(takes.reduce((s, t) => s + Number(t.duration_s ?? 0), 0) * 10) / 10,
+    end_reason: takes.map(t => t.end_reason).join(", "), started: takes[0].started, note: "",
+  } : takes[0];
+  return { ...take, geometry: geometry ? JSON.parse(geometry) : null } as ViewTake;
+}
+
 export async function takeView(store: Store, id: string) {
-  const [take] = await store.query(`SELECT take_id, boot_id, take_no, key, action, round(duration_s, 1) AS duration_s, end_reason,
-    strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started, geometry, note FROM takes WHERE take_id = '${id}'`);
+  const take = await viewTake(store, id);
   if (!take) return null;
-  const frames = await store.query(`SELECT frame_no, t_s, x, y, yaw, pitch, zones FROM tof_frames
-    WHERE take_id = '${id}' AND x IS NOT NULL ORDER BY frame_no`);
+  const which = takesOf(id), shifts = await timeShifts(store, id);
+  // Times on the drive's timeline; rows of a take without frames are left out.
+  const shifted = (rows: Record<string, unknown>[]) => rows.filter(r => shifts.has(r.take_id as string))
+    .map(r => ({ ...r, t_s: Number(r.t_s) + shifts.get(r.take_id as string)! }));
+  const frames = shifted(await store.query(`SELECT take_id, frame_no, t_s, x, y, yaw, pitch, zones FROM tof_frames
+    WHERE ${which} AND x IS NOT NULL ORDER BY frame_no`));
   const points = await store.query(`SELECT frame_no, row, col, target, distance_mm, status, signal, x, y, z FROM tof_targets
-    WHERE take_id = '${id}' AND x IS NOT NULL ORDER BY frame_no, row, col, target`);
-  const odom = await store.query(`SELECT t_s, x, y, yaw FROM odom WHERE take_id = '${id}' ORDER BY t_s`);
+    WHERE ${which} AND x IS NOT NULL ORDER BY frame_no, row, col, target`);
+  const odom = shifted(await store.query(`SELECT take_id, t_s, x, y, yaw FROM odom WHERE ${which}`)).sort((a, b) => a.t_s - b.t_s);
   return {
-    take: { ...take, geometry: take.geometry ? JSON.parse(take.geometry as string) : null },
+    take,
     frames: columns(frames, ["frame_no", "t_s", "x", "y", "yaw", "pitch", "zones"], { t_s: 3, x: 4, y: 4, yaw: 4, pitch: 4 }),
     points: columns(points, ["frame_no", "row", "col", "target", "distance_mm", "status", "signal", "x", "y", "z"], { x: 3, y: 3, z: 3 }),
     odom: columns(odom, ["t_s", "x", "y", "yaw"], { t_s: 3, x: 4, y: 4, yaw: 4 }),
@@ -107,14 +145,14 @@ export async function handleViewerApi(req: http.IncomingMessage, res: http.Serve
   try {
     if (take && req.method === "GET") {
       const id = take[1];
-      if (!isTakeId(id)) { send(400, { error: "not a take id" }); return true; }
+      if (!isViewId(id)) { send(400, { error: "not a take id" }); return true; }
       if (take[2] === "view") {
         const view = await takeView(store, id);
         if (view) send(200, view); else send(404, { error: "no such take" });
       } else if (take[2] === "maps") {
         send(200, await replayMaps(store, id, margin));
       } else {
-        const [row] = await store.query(`SELECT boot_id FROM takes WHERE take_id = '${id}'`);
+        const [row] = await store.query(`SELECT boot_id FROM takes WHERE ${takesOf(id)} LIMIT 1`);
         if (!row) { send(404, { error: "no such take" }); return true; }
         const [maps, truth] = await Promise.all([replayMaps(store, id, margin), listTruth(store, row.boot_id as string)]);
         send(200, { votes: score(maps.votes, truth), readings: score(maps.readings, truth) });

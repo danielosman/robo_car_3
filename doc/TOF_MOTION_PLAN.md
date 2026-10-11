@@ -1,11 +1,16 @@
 # RoboCar — ToF movement plan (VL53L8CX)
 
-Planning only, no code. How the VL53L8CX finds movement, standing still **and
-while the robot turns**, from first principles: each zone's distance as a signal
-over time, neighbours compared in time and space, the robot's own rotation
-predicted from the gyro, and the sensor's quality numbers turned into a
-confidence. Companions: [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) (stages,
-`tof_frame_t`, the R0 recording path, the merged milestone order),
+Status (11 Oct 2026): **§7 (the heading background, T-R) is built in a simpler form**
+(REWORK_PLAN "Current state": 8 rows × 256 bins, no learning after a stop, works
+while turning); the confidence model (§3, T1), the z-test (T2), edge times and
+rates (T3), events (T4) and the fill fraction (T5) are not built.
+
+How the VL53L8CX finds movement, standing still **and while the robot turns**, from
+first principles: each zone's distance as a signal over time, neighbours compared in
+time and space, the robot's own rotation predicted from the gyro, and the sensor's
+quality numbers turned into a confidence. Companions:
+[ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) (stages, `tof_frame_t`, the R0
+recording path, the merged milestone order),
 [CAMERA_MOTION_PLAN.md](CAMERA_MOTION_PLAN.md) (`motion_obs_t`),
 SURROUNDINGS_PLAN.md (the map; points at §3 for the confidence model). Current
 design: [ROBOT_PLAN.md](../ROBOT_PLAN.md) §6.2, §6.6.

@@ -199,7 +199,11 @@ export class Store {
           if (!values) continue;
           const [tUs, ...rest] = values;
           a.appendVarchar(id); a.appendUInteger(tUs); a.appendDouble(rel(tUs));
-          for (const v of rest) typeof v === "string" ? a.appendVarchar(v) : table === "drive" ? a.appendDouble(v) : a.appendInteger(v);
+          for (const v of rest) {
+            if (typeof v === "string") a.appendVarchar(v);
+            else if (table === "drive") a.appendDouble(v);
+            else a.appendInteger(v);
+          }
           a.endRow();
         }
         a.closeSync();

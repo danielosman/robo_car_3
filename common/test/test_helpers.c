@@ -36,7 +36,7 @@ int main(void) {
     srand(1);
     for (int trial = 0; trial < 2000; trial++) {
         int n = 1 + rand() % 300;
-        float v[300], sorted[300], work[300];
+        float v[300] = {0}, sorted[300], work[300];
         for (int i = 0; i < n; i++) v[i] = (float)(rand() % (trial % 2 ? 20 : 100000));
         memcpy(sorted, v, sizeof v);
         qsort(sorted, (size_t)n, sizeof sorted[0], compare);

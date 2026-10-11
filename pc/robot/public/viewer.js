@@ -1,5 +1,5 @@
-// The recordings in 3D (doc/TELEMETRY_PLAN.md §4): a take's targets where they were in
-// the room, the robot's path, the robot and its rays at a moment, the replayed map as
+// The recordings in 3D (doc/TELEMETRY_PLAN.md §4): a take's targets (or a whole
+// drive's: every take of one power-up, in order) where they were in the room, the robot's path, the robot and its rays at a moment, the replayed map as
 // cubes (READINGS, VOTES or where they differ), and truth boxes with each map's score.
 // World frame: odometry's from power-up, x forward at power-up, y left, z up (m).
 import * as THREE from "three";
@@ -309,14 +309,22 @@ async function load(id) {
 
 async function start() {
   const takes = await (await fetch("/api/takes")).json();
-  for (const t of takes) {
+  const ids = new Set(), perBoot = new Map();
+  for (const t of takes) perBoot.set(t.boot_id, (perBoot.get(t.boot_id) ?? 0) + 1);
+  const option = (value, text) => {
     const o = document.createElement("option");
-    o.value = t.take_id;
-    o.textContent = `${t.started} · ${t.take_id} · ${t.key} ${t.action}${t.note ? ` · ${t.note}` : ""}`;
+    o.value = value;
+    o.textContent = text;
     $("take").append(o);
+    ids.add(value);
+  };
+  for (const t of takes) { // newest first: a boot's whole drive above its newest take
+    if (perBoot.get(t.boot_id) > 1 && !ids.has(`${t.boot_id}-all`))
+      option(`${t.boot_id}-all`, `${t.started} · ${t.boot_id} · whole drive, ${perBoot.get(t.boot_id)} takes`);
+    option(t.take_id, `${t.started} · ${t.take_id} · ${t.key} ${t.action}${t.note ? ` · ${t.note}` : ""}`);
   }
   const wanted = new URLSearchParams(location.search).get("take");
-  const id = takes.some(t => t.take_id === wanted) ? wanted : takes[0]?.take_id;
+  const id = ids.has(wanted) ? wanted : takes[0]?.take_id;
   if (!id) { status("no takes yet: record one (R, then an action)"); return; }
   $("take").value = id;
   load(id);

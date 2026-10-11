@@ -17,7 +17,7 @@ static size_t send(uint8_t type, const uint8_t *body, size_t len) {
 int main(void) {
     link_init();
     srand(1);
-    uint8_t body[LINK_MAX_BODY]; link_msg_t m; int checked = 0;
+    uint8_t body[LINK_MAX_BODY] = {0}; link_msg_t m; int checked = 0;
     // 1. Round trips: every length, random bodies full of zeros and 0xFF.
     for (int round = 0; round < 2000; round++) {
         size_t len = (size_t)(rand() % (LINK_MAX_BODY + 1));

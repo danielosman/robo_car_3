@@ -271,6 +271,28 @@ float cell_map_free_distance(float x_m, float y_m, float dx, float dy, float max
     return max_m;
 }
 
+float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m) {
+    float nearest = max_m;
+    float ends_x[2] = {x_m, x_m + max_m * dx}, ends_y[2] = {y_m, y_m + max_m * dy};
+    float wx = fabsf(dy) * half_width_m, wy = fabsf(dx) * half_width_m; // the path's half width along x and y
+    for (int ix = grid_index(fminf(ends_x[0], ends_x[1]) - wx); ix <= grid_index(fmaxf(ends_x[0], ends_x[1]) + wx); ix++)
+        for (int iy = grid_index(fminf(ends_y[0], ends_y[1]) - wy); iy <= grid_index(fmaxf(ends_y[0], ends_y[1]) + wy); iy++) {
+            column_t c = column_of(ix, iy, 0);
+            if (c != COLUMN_BLOCKED && c != COLUMN_OVERHANG) continue;
+            float along_lo = 1e9f, along_hi = -1e9f, side_lo = 1e9f, side_hi = -1e9f;
+            for (int k = 0; k < 4; k++) { // the cell's corners in the path's frame
+                float cx = (float)(ix - GRID / 2 + (k & 1)) * GRID_M - x_m;
+                float cy = (float)(iy - GRID / 2 + (k >> 1)) * GRID_M - y_m;
+                float along = cx * dx + cy * dy, side = -cx * dy + cy * dx;
+                along_lo = fminf(along_lo, along); along_hi = fmaxf(along_hi, along);
+                side_lo = fminf(side_lo, side); side_hi = fmaxf(side_hi, side);
+            }
+            if (side_hi <= -half_width_m || side_lo >= half_width_m || along_hi <= 0) continue;
+            nearest = fminf(nearest, fmaxf(along_lo, 0));
+        }
+    return nearest;
+}
+
 #define PRINT_GRID 40 // 4 m
 
 void cell_map_print(const pose_t *robot, float min_confidence) {

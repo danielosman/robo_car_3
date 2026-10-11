@@ -1,8 +1,12 @@
 # Surroundings: the ground as a cell, evidence per reading (plan)
 
-Status: **plan, nothing implemented.** It replaces ROBOT_PLAN.md §4.2-§4.5 and the
-floor parts of §14 (per-zone floor learning, floor rows, the 2 cm obstacle margin,
-the "no floor" counter, four layers from 2 cm). Written next to
+Status (11 Oct 2026): **partly built, partly replaced.** §3-§4.3 (cone rule,
+log-odds) are replaced by [MAP_DESIGN.md](MAP_DESIGN.md); the layers, columns and
+the L2 rule near the robot (§4.4) are built, and floor learning is gone (S3's
+outcome). S1/S2 as written are not built; S4 (queries for M4) is open.
+
+It replaces ROBOT_PLAN.md §4.2-§4.5 and the floor parts of §14 (per-zone floor
+learning, floor rows, the 2 cm obstacle margin, the "no floor" counter, four layers from 2 cm). Written next to
 [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) (modules, `view`, `ray_meas_t`),
 TOF_MOTION_PLAN.md (owns the per-reading confidence, `tof_quality`) and
 [CAMERA_MOTION_PLAN.md](CAMERA_MOTION_PLAN.md). The cross-plan decisions (shared

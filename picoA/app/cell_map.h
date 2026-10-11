@@ -47,6 +47,11 @@ column_t cell_map_column(float x_m, float y_m);
 // How far from (x, y) along the unit direction (dx, dy) the columns are free (open or
 // drivable): up to the first one that isn't, the window's edge, or max_m.
 float cell_map_free_distance(float x_m, float y_m, float dx, float dy, float max_m);
+// How far along a path from (x, y) in the unit direction (dx, dy), half_width_m to
+// each side, the nearest blocked or overhang column starts: the nearest corner of
+// such a cell that overlaps the path (exact for a path along the grid, up to a few
+// cm early for one across it); max_m if none is closer. Unknown columns don't count.
+float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m);
 // 4 x 4 m around the robot, x (forward at the scan's start) up, y left; cells set by
 // a measurement less confident than min_confidence count as unknown.
 void cell_map_print(const pose_t *robot, float min_confidence);

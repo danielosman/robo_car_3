@@ -14,7 +14,7 @@ import { EventEmitter } from "node:events";
 export const DATA_PORT = 4212;
 export const REC = { TAKE_START: 1, GEOMETRY: 2, TOF_RAW: 3, ODOM: 4, DRIVE: 5, MARK: 6, TAKE_END: 7, WIFI: 8 } as const;
 // rec_end_t (picoA/app/recorder.h)
-export const END_REASONS = ["done", "stopped", "replaced", "safety stop", "PicoB lost", "didn't start", "recording off"];
+export const END_REASONS = ["done", "stopped", "replaced", "safety stop", "PicoB lost", "didn't start", "recording off", "obstacle"];
 export const FILE_MAGIC = "RCDGRAM3"; // a file of datagrams: then [length u16][arrival ms f64][datagram] each
 const HEAD = 3, CRC = 4, DGRAM_HEAD = 9;
 
@@ -42,7 +42,7 @@ export function encodeDatagram(version: number, bootId: number, seq: number, rec
 // Splits a stream of records into records, wherever the chunks end (TCP files;
 // inside a datagram, the records are whole).
 export class RecordReader {
-  private buf = Buffer.alloc(0);
+  private buf: Buffer = Buffer.alloc(0);
 
   push(chunk: Buffer): RawRecord[] {
     this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;

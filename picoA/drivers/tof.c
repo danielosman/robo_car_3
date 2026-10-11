@@ -63,7 +63,7 @@ bool tof_start(const tof_settings_t *s) {
     running = true;
     errors = 0;
     last_data = next_poll = get_absolute_time();
-    printf("TOF running: %ux%u %uHz, %s order, %u targets/zone, %s mode, integration %ums, sharpener %u%%\n",
+    printf("TOF running: %dx%d %uHz, %s order, %u targets/zone, %s mode, integration %ums, sharpener %u%%\n",
            res == 64 ? 8 : 4, res == 64 ? 8 : 4, hz, s->order == 1 ? "closest" : "strongest",
            VL53L8CX_NB_TARGET_PER_ZONE, s->mode == 1 ? "continuous" : "autonomous", ms, sharp);
     return true;

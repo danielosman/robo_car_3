@@ -5,7 +5,8 @@
 // on wheels to the right, a cupboard behind; from scan 3 on the robot started 30 cm
 // further left (the cup then ahead-right). Each object must have a blocked or
 // overhang column in its region; nothing may be blocked within 30 cm of the robot
-// (floor only). VOTES (before) is printed for comparison: it misses the cup in scans
+// (floor only). A move (`f`) pointed at the cup would stop before it: the first
+// obstacle on its path (the robot's width plus 5 cm each side) is the cup's cell. VOTES (before) is printed for comparison: it misses the cup in scans
 // 1-2. Run from the repo root (run_tests.sh does):
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_map_replay picoA/app/test/test_map_replay.c -lm && build/test_map_replay
 #include <assert.h>
@@ -106,7 +107,13 @@ int main(void) {
             printf(" %s %d (VOTES %d)", s->objects[o].name, found[o], before[o]);
         }
         int near = solid_near(0.3f);
-        printf("; blocked within 30 cm: %d\n", near);
+        // f towards the cup: its first obstacle is within a cell of the cup's region.
+        const region_t *cup = &s->objects[0];
+        float cx = (cup->x0 + cup->x1) / 2, cy = (cup->y0 + cup->y1) / 2, r = hypotf(cx, cy);
+        float to_cup = cell_map_obstacle_along(0, 0, cx / r, cy / r, 0.235f / 2 + 0.05f, 1.5f);
+        printf("; blocked within 30 cm: %d; f towards the cup (%.0f cm away): obstacle at %.0f cm\n", near,
+               (double)(r * 100), (double)(to_cup * 100));
+        assert(to_cup > r - 0.2f && to_cup < r);
         for (int o = 0; o < 4 && s->objects[o].name; o++) assert(found[o] > 0);
         assert(near == 0);
     }

@@ -72,7 +72,7 @@ static void send_motors(void) {
 
 static void on_hello(const hello_msg_t *h) {
     if (h->version != LINK_PROTOCOL_VERSION) {
-        printf("PicoB protocol v%u, mine v%u: reflash both Picos\n", h->version, LINK_PROTOCOL_VERSION);
+        printf("PicoB protocol v%u, mine v%d: reflash both Picos\n", h->version, LINK_PROTOCOL_VERSION);
         greeted = false;
         return;
     }

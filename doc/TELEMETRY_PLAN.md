@@ -5,7 +5,8 @@ Why (Daniel, 10 Oct 2026): the map's problems (the cup and the box at ~45 cm, MA
 the fixes built on it were weak. We need the real sensor's data on the PC: look at
 it in 3D, query it, form hypotheses (e.g. "a 5th-row zone with a cup in it returns
 more signal than plain floor") and test map variants on the same recordings.
-Status: **T1 built and tested; T2 built, host-tested, robot test pending.** Replaces ARCHITECTURE_PLAN §2.6's recording part
+Status (11 Oct 2026): **T1-T5 built and tested on the robot; T6 dropped; T7 (resend
+lost datagrams) planned, not built** (§6). Replaces ARCHITECTURE_PLAN §2.6's recording part
 (R0) and REWORK_PLAN's open point 19. Keys: [COMMANDS_PLAN.md](COMMANDS_PLAN.md).
 
 ## 0. Start here (a new session)
@@ -28,9 +29,11 @@ http://127.0.0.1:8080/takes. **T4 (the viewer) is built** (§4): http://127.0.0.
 shows a take in 3D with both replayed maps and truth boxes with a score. The
 robot runs the READINGS map since 10 Oct (MAP_DESIGN §9). **T5 (replay) is built**
 with it, and the five scans are a regression test. **T6 is dropped**: the cup
-session was done by the analysis of 10 Oct. **This plan is done; the next work is
-M4** (REWORK_PLAN "Next"): telemetry stays the tool: record (`R`), look (/viewer),
-replay (`tools/replay.sh`).
+session was done by the analysis of 10 Oct. **T1-T6 are done; the next work is
+M4** (REWORK_PLAN "Next"): telemetry stays the tool: record (`R`), look (/viewer,
+a take or a whole drive), replay (`tools/replay.sh`). **Open: T7** (§6, 11 Oct):
+the drive of 11 Oct lost up to 20 % of datagrams per take; lost ones are to be
+resent from a ring on the robot.
 
 **Read first:** this file; [REWORK_PLAN.md](REWORK_PLAN.md) (decisions, how to work a
 step); [COMMANDS_PLAN.md](COMMANDS_PLAN.md) (the keys, as built). Background for T6:
@@ -54,7 +57,9 @@ are in `picoA/app/recorder.c` and §2.1):
   raw API); recordings go as UDP datagrams to port 4212 (`wifi_console_data_send()`).
 - `pc/robot/` (Node 24, TypeScript run directly, `ws`): `src/robot.ts` (the
   robot's TCP connection, `ROBOT_PORT` 4211), `src/main.ts` (HTTP 8080, WebSocket to
-  the page, the log in `logs/`), `public/console.js` (the page's keys). `npm test`.
+  the page, the log in `logs/`), `public/console.js` (the page's keys). `npm test`;
+  `npm run typecheck` (tsc, a dev dependency since 11 Oct; Node runs the `.ts` files
+  without it).
 - Host tests: `./run_tests.sh` (C, stops at the first failure); firmware:
   `cmake --build build` → `build/picoA/picoA_app.uf2`.
 
@@ -143,7 +148,7 @@ co-author trailer** (no `Co-Authored-By:` line), whatever a tool's default is
 | `ODOM` | every PicoB report (50 Hz) | PicoA time of the measurement, x, y, yaw, pitch, roll, v, w, still/moving, motors, safety stop, gyro bias |
 | `DRIVE` | each command sent to PicoB | v, w |
 | `MARK` | console lines printed during the take, keys pressed | text |
-| `TAKE_END` | action end | how it ended (done / stop / safety stop / PicoB lost / replaced), records sent, records, ToF frames and datagrams refused |
+| `TAKE_END` | action end | how it ended (done / stop / safety stop / PicoB lost / replaced / obstacle), records sent, records, ToF frames and datagrams refused |
 | `WIFI` | every 0.5 s | signal, the console's TCP state, datagrams sent and refused |
 
 **Measured over TCP (three robot runs, 10 Oct):** 15.1 ToF frames/s, ~2 KB a
@@ -193,7 +198,7 @@ without the datagram counts.
 | 5 `DRIVE` (12) | t u32 (sent), v f32 (m/s), w f32 (rad/s); one per command sent to PicoB (every 50 ms) |
 | 6 `MARK` (4 + text) | t u32, text (UTF-8, no terminator, ≤ 160) |
 | 8 `WIFI` (46) | every 0.5 s during a take, and in its first datagram: t u32, RSSI i8 (dBm), ms since the server was last heard on the console u32; the console's TCP (29): bytes waiting in our buffer u32, unacknowledged in TCP u32, TCP send queue u16 (pbufs), retransmissions of the oldest segment u8, retransmission timeout u16 (ms), congestion window u32, the server's window u32, `tcp_write` / `tcp_output` refusals since power-up u32 each; datagrams sent and refused since power-up u32 each |
-| 7 `TAKE_END` (33) | t u32, reason u8 (0 done, 1 stopped, 2 replaced, 3 safety stop, 4 PicoB lost, 5 didn't start, 6 recording off), records sent before it u32, records in refused datagrams u32, ToF frames sent u32, ToF frames with a half refused u32, bytes sent before it u32, datagrams sent (repeats included) u32, datagrams refused u32 |
+| 7 `TAKE_END` (33) | t u32, reason u8 (0 done, 1 stopped, 2 replaced, 3 safety stop, 4 PicoB lost, 5 didn't start, 6 recording off, 7 obstacle: a move stopped before one on the map), records sent before it u32, records in refused datagrams u32, ToF frames sent u32, ToF frames with a half refused u32, bytes sent before it u32, datagrams sent (repeats included) u32, datagrams refused u32 |
 
 The pose frame is odometry's from power-up (the scan no longer moves the origin),
 so all takes of one boot share one frame; takes of different boots don't.
@@ -279,7 +284,11 @@ cup" is one query. Example questions:
 **http://127.0.0.1:8080/viewer** (`?take=<id>`), served by `pc/robot`
 (`viewer_api.ts`); three.js (npm, pinned like every dependency: `npm install`)
 comes from the server too, `/vendor/three/`, no internet needed:
-- **Take**: a list of all takes; the URL keeps the one shown.
+- **Take**: a list of all takes; the URL keeps the one shown. Above a boot's
+  takes, its **whole drive** (`<boot>-all`, 11 Oct): every take of that power-up in
+  order, on one timeline (each take's times moved by the robot's clock), its
+  frames replayed into one map, as the robot's map was built (but for what
+  happened between takes, unrecorded: the robot stands still then).
 - **Points**: every target of the take where it was in the room (`tof_targets`
   x, y, z), coloured by row, signal, status, height or target number; filters:
   rows 1-8, sure only (status 5, 6, 9), closest target only, frames all / up to
@@ -345,6 +354,56 @@ Each changes something visible; robot tests only where the robot changes.
    by the analysis of that day** (§3 "First look", MAP_DESIGN §9): the cup is seen
    by row 5 in every scan, its signal no stronger, no 2nd target; the map's vote
    lost it, and the READINGS map finds it. Truth boxes stay optional in the viewer.
+7. **T7 No lost datagrams: resent from a ring** (planned 11 Oct, Daniel; not built).
+   *Why:* the drive of 11 Oct (boot 54564d43, 36 takes) lost 0-20 % of datagrams
+   per take (worst: turn 8 20 %, moves 19, 20 15-19 %); not acceptable. They are
+   lost on the air between the robot and the router: the robot refused none (it
+   handed every one to the WiFi chip), the PC is on Ethernet with no UDP drops,
+   the robot sends unicast with power-save off (the chip already retries). The
+   signal explains it only loosely (takes at ≥ −62 dBm lost 3.8 %, weaker ~7 %;
+   turn 8 lost 20 % at −59 dBm). The robot can't know which were lost: the chip
+   drops a datagram silently after its retries, `udp_sendto()` said OK when it was
+   handed over. The PC knows: the datagrams are numbered (`seq`).
+   *How:*
+   - The robot keeps a copy of each datagram sent in a **ring of ~25-50 KB**
+     (1-2 s of data at 22-28 KB/s; static, no `malloc`).
+   - The PC reports, every ~0.2 s during a take, the highest number it has seen
+     and which below it are missing; over the console's TCP connection (already
+     open; a small new message) or a UDP datagram back.
+   - The robot resends the missing ones from the ring (under their own numbers;
+     the PC's dedup already drops a repeat) and frees what the PC confirmed. New
+     data keeps flowing: a loss never holds anything back (TCP did, 1-6 s stalls
+     while turning, §2 "Measured").
+   - **When the action ends** (the robot standing still, the best moment to send)
+     it resends whatever is still missing until the PC has all of it, or gives up
+     after a few seconds and says so; the next action may start meanwhile.
+   - A datagram still unconfirmed when the ring wraps is lost for good: counted
+     on both sides, in the take's note.
+   *Cost:* 25-50 KB of PicoA's RAM (watch it against the camera's needs; ~200 KB
+   free on 11 Oct), resend logic in `recorder.c` and `recording.ts`, the resends
+   ~5-20 % more WiFi time.
+   *Also measure* (with T7, or before): the CPU time WiFi takes on core 0. Not
+   measured yet; estimated from the SDK's driver: it hands a datagram to the WiFi
+   chip by DMA over PIO SPI (~37 MHz) but **busy-waits** for the DMA
+   (`dma_channel_wait_for_finish_blocking`, `cyw43_bus_pio_spi.c`): ~0.3 ms per
+   1.4 KB datagram, ~0.4-0.5 ms with lwIP and the copy, at 20-25 datagrams/s
+   ~10-12 ms per second: ~1 % of core 0, in a background interrupt, stalling the
+   loop up to ~0.5 ms at a time (the map's frame takes up to 27 ms). To measure:
+   the time spent in the WiFi interrupt per second and its longest stall, under
+   `p`; a scan with `R` on and with `R` off. If it is bigger: stop the busy-wait
+   or move the WiFi to core 1, not PIO.
+   *Check:* host tests (the PC's report, the robot's resend and ring wrap, with a
+   fake lossy link); robot: a drive like 11 Oct's, every take "0 missing".
+   *Considered, not now* (11 Oct): sending only after an action (a scan is
+   ~330-400 KB, a move ~170 KB, a watch ~1.5 MB: no room on PicoA); storing on
+   PicoB (~500 KB free, holds a move or a scan, not a watch; but PicoB has no WiFi,
+   so the data crosses the UART twice and PicoA still sends it all; it would share
+   the 1 Mbaud link with DRIVE and ODOM and their 250 ms timeout); PIO for the
+   link (the UART with DMA already leaves the CPU free). Also free to try: an
+   access point or repeater in the room (the chip is 2.4 GHz only), the Pico W's
+   antenna away from the batteries. For image RAM later: a Pico-footprint RP2350
+   board with WiFi and PSRAM (e.g. Pimoroni Pico Plus 2 W, 8 MB; the PCB's pins
+   not checked) would also hold whole takes.
 
 ## 7. Open (Daniel)
 

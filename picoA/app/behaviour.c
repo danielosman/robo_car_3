@@ -7,6 +7,7 @@
 #include "body.h"
 #include "motion.h"
 #include "pose.h"
+#include "cell_map.h"
 #include "motion_sense.h"
 #include "recorder.h"
 #include "behaviour.h"
@@ -25,6 +26,9 @@
 #define FOLLOW_HISTORY   10
 #define FOLLOW_GAP_US    300000    // no sighting this long, or a jump this big: a new movement
 #define FOLLOW_JUMP_RAD  (15 * RAD_PER_DEG)
+#define STOP_BEFORE_M    0.15f     // a move stops this far before an obstacle on the map...
+#define EDGE_M           0.095f    // ...measured from the front (back) edge, this far from the centre
+#define PATH_HALF_M      (0.235f / 2 + 0.05f) // the robot's half width plus 5 cm: the path a move checks
 // printf takes doubles; the (double) casts below are for printing only.
 
 typedef enum { SCAN, MOVE, TURN, WATCH, RECORD } action_t;
@@ -39,6 +43,7 @@ static float goal;              // MOVE: metres (+ = forward); TURN: radians (+ 
 static odom_report_t start;     // the robot when the action began running
 static absolute_time_t deadline, settle_min_end, run_start;
 static bool following;          // watching: turning towards a movement
+static bool obstacle_stop;      // moving: stopped short, before an obstacle on the map
 // The movement's recent directions in the world (the map's yaw, unwrapped), when seen.
 static float seen_rad[FOLLOW_HISTORY];
 static uint32_t seen_us[FOLLOW_HISTORY];
@@ -73,9 +78,25 @@ void behaviour_scan(void) {
            (double)(SCAN_RAD / MOTION_TURN_RADPS));
 }
 
+// A move along dir (+1 forward, -1 back) from o: how far the edge on that side is from
+// the nearest obstacle on the map in its path (blocked or overhang), looking at most
+// look_m past the stop point; unknown cells count as free.
+static float obstacle_gap_m(const odom_report_t *o, float dir, float look_m) {
+    return cell_map_obstacle_along(o->x_m, o->y_m, dir * cosf(o->yaw_rad), dir * sinf(o->yaw_rad), PATH_HALF_M,
+                                   EDGE_M + STOP_BEFORE_M + look_m) - EDGE_M;
+}
+
 void behaviour_move(float distance_m) {
+    const char *side = distance_m > 0 ? "ahead" : "behind";
+    float gap_m = obstacle_gap_m(body_odom(), distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
+    if (gap_m <= STOP_BEFORE_M + 0.01f) {
+        printf("Move: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
+               (double)(STOP_BEFORE_M * 100));
+        return;
+    }
     begin(MOVE, distance_m);
-    printf("Move: %.0f cm %s\n", (double)fabsf(distance_m * 100), distance_m > 0 ? "forward" : "back");
+    printf("Move: %.0f cm %s%s\n", (double)fabsf(distance_m * 100), distance_m > 0 ? "forward" : "back",
+           distance_m > 0 ? "" : " (the VL53 can't see behind: it stops only for what the map already has there)");
 }
 
 void behaviour_turn(float angle_rad) {
@@ -176,11 +197,17 @@ static void watch(void) {
 
 // What the action did, by odometry, once the robot stands still.
 static void say_done(const odom_report_t *o) {
+    float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
+    if (action == MOVE && obstacle_stop) {
+        float dir = goal < 0 ? -1.0f : 1.0f;
+        printf("Move stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(obstacle_gap_m(o, dir, 0.1f) * 100),
+               dir > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
+        return;
+    }
     if (action == RECORD) {
         printf("Record done: %.1f s\n", (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f));
         return;
     }
-    float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
     float c = cosf(start.yaw_rad), s = sinf(start.yaw_rad);
     printf("%s done: %.1f s; odometry: %+.1f cm forward, %+.1f cm left, turned %+.1f deg\n", action_name[action],
            (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f), (double)((c * dx + s * dy) * 100),
@@ -200,7 +227,11 @@ static bool step(const odom_report_t *o) {
     }
     case MOVE: {
         float dir = goal < 0 ? -1.0f : 1.0f;
+        // Checked every time: the map grows as the robot drives.
         float remaining_m = fabsf(goal) - hypotf(o->x_m - start.x_m, o->y_m - start.y_m);
+        float room_m = obstacle_gap_m(o, dir, fmaxf(remaining_m, 0)) - STOP_BEFORE_M;
+        obstacle_stop = room_m < remaining_m;
+        if (obstacle_stop) remaining_m = room_m;
         if (remaining_m <= 0) return true;
         body_drive(motion_speed(dir * remaining_m), 0);
         return false;
@@ -220,7 +251,7 @@ static void finish(const odom_report_t *o) {
     say_done(o);
     body_motors(false);
     state = IDLE;
-    recorder_take_end(REC_END_DONE);
+    recorder_take_end(action == MOVE && obstacle_stop ? REC_END_OBSTACLE : REC_END_DONE);
 }
 
 void behaviour_update(void) {
@@ -245,6 +276,7 @@ void behaviour_update(void) {
             start = *o;
             run_start = get_absolute_time();
             following = false;
+            obstacle_stop = false;
             seen_n = 0;
             motion_sense_log(action == WATCH); // movement lines only while watching
             state = RUNNING;

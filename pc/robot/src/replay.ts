@@ -16,21 +16,30 @@ const SOURCES = ["tools/replay_map.c", "picoA/app/cell_map.c", "picoA/app/cell_m
   "picoA/app/rangefinder.h"].map(f => path.join(repo, f));
 
 export const isTakeId = (id: string) => /^[0-9a-f]{8}-\d+$/.test(id);
+// A drive: every take of one boot (one power-up, one odometry frame), in order.
+export const isDriveId = (id: string) => /^[0-9a-f]{8}-all$/.test(id);
+export const isViewId = (id: string) => isTakeId(id) || isDriveId(id);
+// The SQL condition picking a take's or a drive's rows (the id checked by isViewId).
+export function takesOf(id: string): string {
+  if (!isViewId(id)) throw new Error(`not a take id: ${id}`);
+  return isDriveId(id) ? `take_id IN (SELECT take_id FROM takes WHERE boot_id = '${id.slice(0, 8)}')` : `take_id = '${id}'`;
+}
 
-// One line per whole frame with a pose: frame number, t (s), x, y, yaw, pitch, then
+// One line per whole frame with a pose (a drive: its takes' frames in order; the frame
+// numbers count on through a boot): frame number, t (s), x, y, yaw, pitch, then
 // per ray (row index × 8 + column index) the closest sure distance in mm (as
 // rangefinder.c's closest_sure_mm: 0 nothing in range, 65535 not sure) and the first
 // target's status.
 export async function exportFrames(store: Store, take: string): Promise<string> {
-  if (!isTakeId(take)) throw new Error(`not a take id: ${take}`);
+  const which = takesOf(take);
   const frames = await store.query(`SELECT frame_no, t_s, x, y, yaw, pitch FROM tof_frames
-    WHERE take_id = '${take}' AND zones = 64 AND x IS NOT NULL ORDER BY frame_no`);
+    WHERE ${which} AND zones = 64 AND x IS NOT NULL ORDER BY frame_no`);
   const zones = await store.query(`SELECT z.frame_no, (z.row - 1) * 8 + (z.col - 1) AS ray, z.targets,
       (SELECT min_by(t.distance_mm, t.target) FROM tof_targets t WHERE t.take_id = z.take_id AND t.frame_no = z.frame_no
          AND t.zone = z.zone AND t.status IN (5, 6, 9) AND t.distance_mm > 0) AS sure_mm,
       (SELECT min_by(t.status, t.target) FROM tof_targets t WHERE t.take_id = z.take_id AND t.frame_no = z.frame_no
          AND t.zone = z.zone) AS first_status
-    FROM tof_zones z WHERE z.take_id = '${take}'`);
+    FROM tof_zones z WHERE z.${which}`);
   const rays = new Map<number, string[]>();
   for (const z of zones) {
     const f = z.frame_no as number;
@@ -63,10 +72,12 @@ export const COLUMN = { UNKNOWN: 0, BLOCKED: 1, OVERHANG: 2, NO_FLOOR: 3, DRIVAB
 
 const cache = new Map<string, Maps>();
 
-// Both variants' maps of a take; kept until the map code changes.
+// Both variants' maps of a take or a drive; kept until the map code changes (or, a
+// drive, until it has more frames).
 export async function replayMaps(store: Store, take: string, margin = 0.9): Promise<Maps> {
   const built = await binary();
-  const key = `${take} ${margin} ${built}`;
+  const [size] = await store.query(`SELECT count(*) AS n, max(frame_no) AS last FROM tof_frames WHERE ${takesOf(take)}`);
+  const key = `${take} ${margin} ${built} ${size.n} ${size.last}`;
   const kept = cache.get(key);
   if (kept) return kept;
   const file = path.join(BUILD, `${take}.frames`);

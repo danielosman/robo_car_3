@@ -56,6 +56,8 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
 
 - **Link** (`common/link.c`, messages in `common/link_msgs.h`): UART0 GP0/GP1 on
   both Picos, 1 Mbaud, COBS frames with CRC-16, protocol v4.
+- **Linters:** `tools/lint.sh`: cppcheck on the C (`brew install cppcheck`), ESLint
+  and tsc on `pc/robot` (`npm run lint`, `npm run typecheck`). Kept clean.
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure: the link, the shared helpers, PicoB's wheel control, odometry and `brain`,
   PicoA's `body`, rangefinder, world map, pose, movement detection (change grid, VL53, camera, tracker), the actions
@@ -85,7 +87,9 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   same on USB and over WiFi.
 - **Actions** (`behaviour.c`), one per key, motors on while it runs and off at its
   end, which it prints (done with what odometry measured, or stopped and why):
-  `s` scan (390° left in place, nothing else), `f` move 50 cm, `t` turn 30°, `a`
+  `s` scan (390° left in place, nothing else), `f` move 50 cm (stopping 15 cm
+  before an obstacle on the map, front or back edge to its cell; not at all if one
+  is within 15 cm), `t` turn 30°, `a`
   watch for 1 minute, `5` record 5 s (standing still, motors off; only with
   recording on). `r` switches the direction: back, `f` moves back and `t` turns
   right. Space stops; a new action replaces the running one.
@@ -99,7 +103,8 @@ rework, [doc/REWORK_CHANGELOG.md](doc/REWORK_CHANGELOG.md); red flags in [REDFLA
   them. Each take also goes into DuckDB (`pc/robot/recordings/robot.duckdb`;
   `npm run import` rebuilds it), listed at http://127.0.0.1:8080/takes and shown
   in 3D at http://127.0.0.1:8080/viewer: the points, the robot's path and rays,
-  the map replayed in both variants, truth boxes and each map's score.
+  the map replayed in both variants, truth boxes and each map's score; a take, or
+  the whole drive (every take since a power-up, replayed into one map).
 - **Watching** (`a`, 1 minute). The VL53
   watches still and while turning (a background per world direction, no learning
   after a stop). The robot turns toward the biggest movement and follows it: its
@@ -203,7 +208,8 @@ header). Re-run it after adding big locals and before core 1 is started.
    TELEMETRY_PLAN, this becomes a recording.)
 3. **Gyro scale:** a mark on the floor in line with the robot's front; `t` 12 times
    (360°). Estimate how far it ended from the mark.
-4. **Encoder distance:** tape measure, robot at 0; `f` four times (2 m). Measure
+4. **Encoder distance:** tape measure, robot at 0, 2.5 m of free floor ahead (a
+   move stops 15 cm before an obstacle on the map); `f` four times (2 m). Measure
    where it really got to and compare with the four "done" lines; `r`, then `f`
    four times back.
 5. **Carpet:** `s`, `f` and `t` on the carpet. Look for false safety stops and a
@@ -344,6 +350,23 @@ Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
    takes, no CRC errors, no "cut off".
 7. Optional: stop the server during a take: the robot prints "take N cut" and
    goes on; restart it, `R` is still on, the next action is recorded.
+
+**Move stops before obstacles, and a drive around the room** (M4 step 1; both Picos,
+WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):
+1. Flash `picoA_app`. Power up near the middle of the room (the map is 6 × 6 m
+   around the power-up point), keep the robot still ~1 s. `R` (recording on).
+2. `s` (scan). Then turn (`t`) until it faces a piece of furniture 40-70 cm away
+   and `f`. Expected: "Move stopped: obstacle N cm ahead (map), moved M cm"; N is
+   to the map's cell, so the real gap from the front edge is 15-25 cm. Measure it.
+3. `f` again: "Move: not moving: obstacle … closer than 15 cm", nothing moves.
+4. `r` (back), `f`: it backs off 50 cm ("the VL53 can't see behind…"). `r` again.
+5. Drive around the room with `t`, `f` and an `s` now and then; keep a finger on
+   space for the first moves (thin legs and things under ~8 cm may be missed).
+   End where you started, facing the same way, and `s`.
+6. In the viewer (http://127.0.0.1:8080/viewer) pick "whole drive" for this boot:
+   the points and the replayed map of every take together, the path on the floor.
+   The two scans at the start point show the odometry's drift (a wall seen twice).
+   Note any move that stopped early or touched something.
 
 ## PicoA bring-up (`picoA_bringup` + `pc/bringup`) — working on the PCB
 

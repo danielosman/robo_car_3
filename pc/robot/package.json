@@ -12,7 +12,9 @@
     "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts src/viewer_api.test.ts",
     "decode": "node src/decode.ts",
     "import": "node src/import.ts",
-    "frames": "node src/frames.ts"
+    "frames": "node src/frames.ts",
+    "typecheck": "tsc -p .",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.6-r.1",
@@ -20,6 +22,11 @@
     "ws": "8.22.0"
   },
   "devDependencies": {
-    "@types/ws": "8.18.2"
+    "@eslint/js": "10.0.1",
+    "@types/ws": "8.18.2",
+    "eslint": "10.12.0",
+    "globals": "17.13.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.1"
   }
 }

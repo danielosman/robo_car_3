@@ -20,6 +20,7 @@ typedef enum {
     REC_END_PICOB_LOST,
     REC_END_NO_START,      // the motors didn't switch on, or the robot didn't stand still
     REC_END_RECORDING_OFF, // R during the take
+    REC_END_OBSTACLE,      // a move stopped before an obstacle on the map
 } rec_end_t;
 
 void recorder_init(void);           // the boot id; starts taking the console's lines

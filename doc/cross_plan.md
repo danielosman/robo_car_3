@@ -4,6 +4,10 @@ Reviewer's decisions. Every plan adopts these names, numbers and the order below
 where a plan says otherwise, it changes. Items marked **(user)** need Daniel's word
 and are repeated at the end.
 
+Status (11 Oct 2026): **the step order (§3, §4, §7) is outdated**; R0 and M-S were
+replaced by TELEMETRY_PLAN.md and the map by MAP_DESIGN.md. The numbers and types
+still apply; REWORK_PLAN.md has the current state.
+
 All four plans were revised to these decisions; where a revised plan is more
 detailed (e.g. T-R in TOF_MOTION_PLAN.md), the plan is the reference. The master
 milestone order also lives in ARCHITECTURE_PLAN.md §8.1.

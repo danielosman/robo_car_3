@@ -142,3 +142,12 @@ and the M2 parts of `debug_console`. No behaviour changed; host tests pass.
 | `viewer_api`, `replay` | (security) | SQL built from strings | **Accepted:** the server listens on 127.0.0.1 only; take, boot and truth ids are checked against strict patterns first, text is quoted; a test feeds an injection |
 | `replay` | Nonobvious code | The server compiles the replay tool with `cc` when the map code is newer than the binary | **Accepted:** the replay must run the robot's current code; replay results are cached per take, margin and build |
 
+### M4 step 1 — `f` stops before obstacles; the whole drive (11 Oct 2026)
+
+| Module | Red flag | What | Resolution |
+|---|---|---|---|
+| `behaviour`, `cell_map` | Information leakage (avoided) | The stop needs the map's cells and the robot's size | **Avoided:** `cell_map` answers "how far along this path is the first obstacle" (`cell_map_obstacle_along()`), knowing nothing of robots; `behaviour` owns the 15 cm, the edges and the path's width |
+| `behaviour` | (constants) | The robot's size (9.5 cm to the edges, 23.5 cm wide) is written in `behaviour.c` as well as in the plans | **Accepted:** the one place on the robot that uses it; move to a shared header when a second module needs it |
+| `cell_map` | (limit) | The nearest corner of a cell counts, so a move stops up to a cell (10 cm) early, more across the grid | **Accepted:** errs on the safe side; the host test allows it |
+| `test_behaviour` | (fragile test) | The watch test's overshoot limit (3°) is met by some random seeds only | **Open:** re-seeded before watching so it tests what it did; noted in REWORK_PLAN |
+| `viewer_api`, `replay` | Repetition (avoided) | A drive could have had its own endpoints | **Avoided:** a drive is one more id form (`<boot>-all`); one `takesOf()` gives the rows of either, the rest is shared |
