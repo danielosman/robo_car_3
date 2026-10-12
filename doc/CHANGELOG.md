@@ -5,6 +5,74 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 12 Oct 2026: first run with the viewer (boot 22a46c41)
+
+Daniel drove the robot around the room for ~20 min, almost only by clicking on the
+map in manual mode, with a scan now and then: 53 snapshots, 16 tiles of the
+whole-house map. Go to arrived within 0-1 cm by odometry every time; one stopped
+before an obstacle as it should. Looked good in general. Found: **the map misses
+thin legs** (snapshot 35: the VL53 saw legs at 54 and 65 cm, the map has those
+columns drivable at full confidence; TODO.md, Next); vision takes ~60 ms a frame,
+not ≤ 25; the server dropped the robot twice for 6 s of silence; a cut pose record
+showed as text after the reconnect.
+
+## 12 Oct 2026: built: snapshots, the viewer that steers, the moving map, modes, go to, camera features
+
+The five steps agreed below, built in one go and tested on the Mac; nothing on the
+robot yet (README: the new robot tests).
+- **Snapshots** (`snapshot.c`): ~31 KB after every action, on `S` and for a new
+  server, over the console's TCP connection in chunks between the text
+  (`wifi_console`), sent again whole after a lost connection; `"\001pose …"` 4 times a
+  second. The colour sensor's driver now hands out readings (the bring-up builds
+  its USB packet itself) and the app reads it; the camera driver gives the last
+  frame to other readers (`camera_last_frame()`). The recorder's ToF and geometry
+  layouts are shared, so the PC parses them with the same code.
+- **The map follows the robot** (`cell_map_follow()`), by 2 m tiles, over the new
+  **whole-house map** (`house_map`, 4-bit columns, 100 tiles); queries outside the
+  window read the whole-house map. Replaying the 11 Oct drive (boot 54564d43)
+  through it, the window scrolled out and back as the robot went 1.7 m to the left
+  and returned. One thing learned on the way: a zone with nothing in range clears
+  only 1 m, so a removed box is erased only where a wall behind it gives rays to
+  pass (the hallway test needed an end wall).
+- **Modes** idle and manual (`mode`); space goes to idle, an action key to manual.
+- **Go to** (`behaviour_goto()`): turn, drive, steer, stop at the point or 15 cm
+  before an obstacle; at most 3 m; host-tested to < 1 cm in the simulated room.
+- **Camera features V1** (`vision`): FAST-9 + Shi-Tomasi, ZNCC coarse to fine,
+  Lucas-Kanade for the sub-pixel part. Three changes from the plan, each found by
+  the synthetic tests: a parabola alone locked moves to whole pixels (0.25-0.4 px
+  RMS at fractional shifts; Lucas-Kanade steps brought it to ~0.06-0.13);
+  refreshing templates every frame let a still scene's features wander (σ 0.2 px
+  over 1000 frames, 74 % kept; keeping a template while it matches: σ 0.06, 85 %);
+  and without the gyro's hint, features moving 6 px a frame or found again after a
+  miss were looked for in the wrong place (the window now sits on each feature's
+  own last move, ±8 px). A best place on the edge of the search window counts as
+  not found (near the image's edge it was often the wrong one). Not met: two of
+  the plan's limits (TODO.md, small). 0.2 ms a frame on the Mac.
+- **The viewer** (`/`): the map at any snapshot (window over tiles, the old dimmed),
+  path, ToF points, the camera picture with features, the ToF grid, colour, pose,
+  console, Idle / Manual / Stop, click to go. Checked in headless Chrome against a
+  fake robot (`npm run fakerobot`) streaming the replayed drive: a click in manual
+  sent `goal -4 -78` and the fake robot drove there; in idle the goal was refused.
+- **Found on the way:** the server dropped the space key (it took only `!`-`~`), so
+  the console page's Stop button and space key never reached the robot over WiFi.
+  Fixed.
+- RAM free 194 → 103 KB (snapshot buffer 38, vision ~30, whole-house map 20); stack
+  6.5 KB of 8.
+
+## 12 Oct 2026: decided: snapshots over TCP, a viewer that steers, a moving map
+
+Daniel wants to see what the robot does before building the modes, so the order is
+now snapshots, mode switching (idle and manual), the moving map with the 4-bit
+whole-house map, drive to a point, then camera features (V1). After each action
+the robot sends a ~30 KB snapshot over TCP (pose, camera frame and features, one
+VL53 frame, the colour reading, the 6 × 6 m window with its anchor and the changed
+column tiles); the full UDP telemetry stays as a switch, off at power-up. The
+window moves by 2 × 2 m tiles and is the truth over the columns wherever it knows
+something; unknown keeps the old column. One PC page shows the map, any past
+snapshot and steers by a click on the map (manual mode, live view only; the robot
+computes the turn and distance itself). Manual steering became mode 7. Details in
+TODO.md.
+
 ## 11 Oct 2026: docs cleaned up; the VOTES map removed
 
 The plans had drifted from the code (status lines saying "nothing implemented",

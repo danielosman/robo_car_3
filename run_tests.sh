@@ -3,7 +3,8 @@
 # statistics); PicoB's wheel control, odometry and
 # brain (PicoA as PicoB sees it); PicoA's rangefinder, world map, pose, the
 # actions end to end, movement detection (change grid, VL53, camera, tracker), body (PicoB as PicoA sees it), the
-# map on recorded scans, the recorder, the WiFi console and the loop timer. The fake clock crosses time_us_32()'s wrap in
+# map on recorded scans (and the window following the robot over the whole-house
+# map), camera features, the recorder, snapshots, the WiFi console and the loop timer. The fake clock crosses time_us_32()'s wrap in
 # every test. Each compiles one module against stubs and fakes and runs it:
 # hardware stubs in picoB/app/test/stubs and common/test/stubs, the fake clock
 # and fake link in common/test/fakes. Stops at the first failure.
@@ -58,6 +59,13 @@ build test_body picoA/app/test/test_body.c $APP
 build/test_body
 build test_recorder picoA/app/test/test_recorder.c -IpicoA/app/test/stubs $APP
 build/test_recorder
+# Camera features (vision) on synthetic frames; its own float/double mixing in the
+# test's statistics is allowed (the firmware build checks vision.c with every warning).
+build test_vision picoA/app/test/test_vision.c -O2 -Wno-double-promotion -IpicoA/app/test/stubs -IpicoA/drivers $APP
+build/test_vision | grep -v '^shift'
+# Snapshots as the PC reads them; build/test_snapshot.snap is for the PC's parser test.
+build test_snapshot picoA/app/test/test_snapshot.c -IpicoA/app/test/stubs -IpicoA/drivers $APP
+build/test_snapshot
 build test_wifi_console picoA/app/test/test_wifi_console.c -IpicoA/app/test/stubs $APP
 build/test_wifi_console > build/test_wifi_console.log || { cat build/test_wifi_console.log; exit 1; }
 grep -v '^WiFi:\|^Server:' build/test_wifi_console.log

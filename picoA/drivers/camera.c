@@ -258,16 +258,26 @@ bool camera_init(void) {
     return setup_capture();
 }
 
+static camera_frame_t handed_out; // what camera_frame() last handed out
+static bool have_handed_out;
+
 bool camera_frame(camera_frame_t *frame) {
     uint32_t irq = save_and_disable_interrupts();
     bool fresh = ready >= 0;
     if (fresh) {
         held_buffer = ready;
         ready = -1;
-        *frame = *(const camera_frame_t *)&ready_frame;
+        handed_out = *(const camera_frame_t *)&ready_frame;
+        have_handed_out = true;
+        *frame = handed_out;
     }
     restore_interrupts(irq);
     return fresh;
+}
+
+bool camera_last_frame(camera_frame_t *frame) {
+    if (have_handed_out) *frame = handed_out;
+    return have_handed_out;
 }
 
 void camera_hold_exposure(bool hold) { held = hold; }

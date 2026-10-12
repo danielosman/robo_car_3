@@ -217,6 +217,67 @@ static void test_recordings_by_udp(void) {
     printf("ok: recordings as UDP datagrams to the announced port (4212 if none), refusals reported\n");
 }
 
+// The server's side of the stream: text, and the snapshot chunks put together.
+static uint8_t snap_got[65536];
+static uint32_t snap_got_len;
+static const char *demux(const char *stream, uint32_t len) {
+    static char text[sizeof fake_sent + 1];
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < len;) {
+        if ((uint8_t)stream[i] == 0x02) {
+            uint32_t chunk = (uint8_t)stream[i + 1] | (uint32_t)(uint8_t)stream[i + 2] << 8;
+            assert(chunk > 0 && chunk <= 1400 && i + 3 + chunk <= len); // whole chunks only
+            memcpy(snap_got + snap_got_len, stream + i + 3, chunk);
+            snap_got_len += chunk;
+            i += 3 + chunk;
+        } else text[n++] = stream[i++];
+    }
+    text[n] = 0;
+    return text;
+}
+
+static void test_snapshot_chunks(void) {
+    static uint8_t shot[40000];
+    for (uint32_t i = 0; i < sizeof shot; i++) shot[i] = (uint8_t)(i * 7 + (i >> 8));
+    received();
+    print("before\n");
+    assert(wifi_console_snapshot_send(shot, sizeof shot));
+    assert(wifi_console_snapshot_busy() && !wifi_console_snapshot_send(shot, 10)); // one at a time
+    // TCP's buffer takes ~11 KB at a time; text printed meanwhile goes first.
+    print("during\n");
+    for (int i = 0; i < 10 && wifi_console_snapshot_busy(); i++) fake_server_acks();
+    assert(!wifi_console_snapshot_busy());
+    snap_got_len = 0;
+    const char *text = demux(fake_sent, fake_sent_len);
+    fake_sent_len = 0;
+    assert(strcmp(text, "before\nduring\n") == 0);
+    assert(snap_got_len == sizeof shot && memcmp(snap_got, shot, sizeof shot) == 0);
+    // A status record: to the server only.
+    wifi_console_record("pose 1 2 3");
+    assert(strcmp(received(), "\001pose 1 2 3\n") == 0);
+
+    // The connection lost half-way: on the next one, the snapshot again from its start.
+    assert(wifi_console_snapshot_send(shot, sizeof shot));
+    assert(wifi_console_snapshot_busy() && fake_sent_len > 0);
+    fake_tcp_fails();
+    run(10);
+    fake_sent_len = 0;
+    fake_sndbuf = FAKE_SNDBUF;
+    assert(wifi_console_snapshot_busy());
+    fake_announce(fake_ip(192, 168, 1, 10), "ROBOCAR-SERVER 4211\n");
+    run(10);
+    fake_server_accepts();
+    run(10);
+    for (int i = 0; i < 10 && wifi_console_snapshot_busy(); i++) fake_server_acks();
+    assert(!wifi_console_snapshot_busy());
+    snap_got_len = 0;
+    demux(fake_sent, fake_sent_len);
+    fake_sent_len = 0;
+    assert(snap_got_len == sizeof shot && memcmp(snap_got, shot, sizeof shot) == 0);
+    assert(fake_lock_depth == 0);
+    printf("ok: snapshots in whole chunks after the text, again from the start after a lost connection\n");
+}
+
 static void test_fallback_ip(void) {
     fake_link = CYW43_LINK_DOWN; // the WiFi goes
     run(10);
@@ -240,6 +301,7 @@ int main(void) {
     test_server_silent();
     test_server_closes_or_fails();
     test_recordings_by_udp();
+    test_snapshot_chunks();
     test_fallback_ip();
     printf("wifi_console: all tests passed\n");
     return 0;

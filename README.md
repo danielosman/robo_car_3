@@ -53,8 +53,11 @@ median; `clock_start.h`: both Picos start their clock 30 s before
 How it works, module by module: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md). In
 short: the robot does nothing by itself; one key, one action (`s` scan, `f` move,
 `t` turn, `a` watch, `5` record, space stop; `h` lists all keys), the same on USB
-and on the WiFi console page. With `R` each action is recorded and can be looked at
-in 3D at http://127.0.0.1:8080/viewer.
+and over WiFi. After every action it sends a snapshot (pose, camera picture and
+features, ToF frame, colour, its map) to the viewer at http://127.0.0.1:8080/,
+which shows any of them back in time and, in manual mode (`M`), sends the robot
+where you click on the map. With `R` each action is also recorded in full and can
+be looked at in 3D at http://127.0.0.1:8080/viewer.
 
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure. The fake clock starts 30 s before `time_us_32()` wraps, so
@@ -64,6 +67,13 @@ in 3D at http://127.0.0.1:8080/viewer.
   and tsc on `pc/robot` (`npm run lint`, `npm run typecheck`). Kept clean.
 - **Replay:** `tools/replay.sh <take id>` runs the robot's map code on a recorded
   take (needs the take in DuckDB: `npm run import` in `pc/robot/`).
+- **The viewer without the robot:** in `pc/robot/`, `npm run snapreplay -- <boot id>`
+  turns a recorded drive into snapshots (the robot's own map and snapshot code);
+  then `ROBOT_PORT=4311 PORT=8091 DATA_PORT=4312 ANNOUNCE_TO=127.0.0.1 npm start` (a
+  server the robot doesn't find) and `ROBOT_PORT=4311 npm run fakerobot --
+  recordings/snapshots/raw/replay-boot-<id>.snap`, and open
+  http://127.0.0.1:8091/. The fake robot answers Manual and clicks by driving its
+  pose (the snapshots it sends are the file's).
 
 ### The map as printed (`m`)
 
@@ -105,8 +115,8 @@ not how thick the object is.
 
 | | Value |
 |---|---|
-| RAM | ~195 KB free of 512 (11 Oct; `p` prints it); everything static, no `malloc` linked |
-| Core-0 stack | ~6 KB worst case: main loop 4.2 KB (`observations()` in `tof_motion.c` 3.2 KB), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
+| RAM | ~103 KB free of 512 (12 Oct, computed from the build; `p` prints it): the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB came on top of 11 Oct's ~195 KB free; everything static, no `malloc` linked |
+| Core-0 stack | ~6.5 KB worst case: main loop 4.8 KB (`observations()` in `tof_motion.c` 3.2 KB), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
 
 `tools/stack_depth.py` recomputes the stack (how to build for it: the script's
 header). Re-run it after adding big locals and before core 1 is started.
@@ -248,7 +258,8 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
 2. Robot on USB, serial monitor open: the robot does nothing at start-up (motors
    off) and tries the WiFi.
 3. `npm ci` then `npm start` in `pc/robot/`; open **http://127.0.0.1:8080/** ("Waiting
-   for robot…"). The first time, allow `node` to accept incoming connections.
+   for robot…"; the console alone is at /console). The first time, allow `node`
+   to accept incoming connections.
 4. Expected ~3 s after power-up: "WiFi: connecting…", "WiFi: connected, IP …",
    "Server: found at …", "Server: connected" (`W` shows how it is connected). The
    page shows "Robot connected" and the keys.
@@ -277,6 +288,65 @@ Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
    takes, no CRC errors, no "cut off".
 7. Optional: stop the server during a take: the robot prints "take N cut" and
    goes on; restart it, `R` is still on, the next action is recorded.
+
+**Snapshots and the viewer** (both Picos, battery on, WiFi, `npm start` in
+`pc/robot/` restarted for the new code). Paste the page's console (or
+`pc/robot/logs/`) and a screenshot of the page:
+1. Flash `picoA_app`. After power-up, `p`: "RAM free" ≥ 40 KB (computed: ~103),
+   "Mode: idle", "Snapshots: 1 sent (the last ~31 KB)…" (one goes when the server
+   connects). No "Colour sensor not working".
+2. The page shows the robot connected and, at once, snapshot #1: the camera
+   picture with its features (small squares; `v` prints the same count), the 8 × 8
+   ToF grid as the robot sees it, the colour swatch and lux (a lamp or a coloured
+   sheet in front of the sensor changes them), the pose.
+3. `s` (scan): "Mode: manual" first (an action switches idle to manual), then after
+   the scan snapshot #2 arrives by itself: the room on the map, the robot in it.
+   The grey pill next to Stop says "manual · (x, y) cm" and follows the robot.
+4. `S`: another snapshot. Drag the timeline back: the map, picture and grid are
+   those of the older snapshot; tick "live" to come back.
+5. Space: "Stopped", "Mode: idle"; the Stop button and the space key on the page
+   both stop the robot (the page's space key didn't reach the robot before 12 Oct).
+6. Unplug the server (stop `npm start`) during a snapshot, start it again: the
+   snapshot comes again whole (the log says "snapshots from boot …").
+
+**Manual mode, go to a point** (both Picos, battery on, the viewer open). Room
+around the robot, a piece of furniture 1-2 m away:
+1. `s`, then click on the map while in idle (press Idle first): a yellow toast "needs
+   Manual mode", the robot doesn't move. On the robot's console after a goal sent
+   in idle: "Goal … ignored: not in manual mode".
+2. Manual, click a free spot ~1 m away: a yellow cross; "Go to: (x, y) cm, N cm away
+   at A deg", the robot turns towards it, drives, "Go to done: … M cm from the
+   goal"; the cross goes, a snapshot follows. Measure where it stopped against the
+   spot (expected within a few cm plus odometry's error).
+3. Click behind the furniture: "Go to stopped: obstacle N cm ahead (map)"; the gap
+   from the front edge 15-25 cm, as for `f`.
+4. Click 4 m away: "the goal is 4.x m away; going 3.0 m towards it" (only where the
+   room allows it; space stops).
+5. Drag the timeline back and click: the toast says it's an old snapshot, nothing
+   moves.
+
+**The map follows the robot** (both Picos, a hallway or two rooms, ≥ 4 m to drive):
+1. `s` at the start, then go-to clicks (or `f`) 3-4 m along the hallway; `s` there.
+   Expected: the dashed window on the page moves with the robot by 2 m steps; the
+   start's walls stay on the map outside it (from the whole-house map); `p`:
+   "… N tiles of the whole-house map".
+2. Drive back to the start: what was mapped there is still there; where the window
+   knows nothing now and a tile does, the column shows dimmed.
+3. `C`: map and whole-house map cleared; the next snapshot's map is empty.
+
+**Camera features** (V1; only PicoA, motors off). Robot facing ~2 m of the room,
+lights on. Paste each `v`:
+1. `v`: "Vision: N frames/s, X ms per frame (max Y), F features (B new, L lost in
+   the last second), jitter Z px", then the regions' feature counts and texture,
+   and their median moves. Expected: N ~8 (every 3rd frame), **X ≤ 25 ms** with F
+   near 96, F 40-96, L near 0, Z < 0.15; `p`'s loop time with it running.
+2. Hold a hand in the left half, still: counts go up in the left regions. Move it
+   slowly: `v` shows the left regions' median move ≠ 0, the others ~0.
+3. Switch the light off/on, wait ~10 s, `v`: F back to roughly what it was, the
+   exposure changed (as `c`).
+4. Cover the lens: F → 0 within ~1 s, texture ~0; uncover: features back within
+   ~0.5 s.
+5. `S` and look at the page: the squares sit on the corners of the picture.
 
 **Move stops before obstacles, and a drive around the room** (M4 step 1; both Picos,
 WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):

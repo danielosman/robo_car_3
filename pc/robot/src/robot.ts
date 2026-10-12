@@ -1,11 +1,13 @@
 // The robot's side of the server (doc/ARCHITECTURE.md, the PC): announces the server on the
 // home network, accepts PicoA's TCP connection, passes its console text on and
-// keys back, and keeps the connection alive with heartbeats. One robot at a time.
+// keys and commands back, takes the snapshots out of the stream, and keeps the
+// connection alive with heartbeats. One robot at a time.
 import dgram from "node:dgram";
 import net from "node:net";
 import os from "node:os";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
+import { SnapshotAssembler } from "./snapshot.ts";
 
 export const ANNOUNCE_PORT = 4210;
 export const ROBOT_PORT = 4211;
@@ -25,24 +27,60 @@ export interface RobotLinkOptions {
   silenceMs?: number;
 }
 
-// Splits the robot's stream into console text and status records
-// ("\x01rssi -55\n"), which can land anywhere, also in the middle of a line.
+export const SNAP_CHUNK = 0x02; // [0x02][length u16][bytes] (picoA/app/wifi_console.c)
+export const COMMAND = "\x02";   // to the robot: "\x02<command>\n" (picoA/app/debug_console.c)
+
+// Splits the robot's stream into console text, status records ("\x01rssi -55\n",
+// "\x01pose ...\n"), which can land anywhere, also in the middle of a line, and
+// snapshot chunks ([0x02][length u16][bytes]), which come between any two bytes of
+// the rest. The chunks' bytes, in order, are the snapshots (snapshot.ts).
 export class RecordSplitter {
   private decoder = new StringDecoder("utf8");
   private record: string | null = null;
+  private chunkHead: number[] | null = null; // a chunk's header bytes so far (after 0x02)
+  private chunkLeft = 0;                     // bytes of the chunk still to come
 
-  push(chunk: Buffer): { text: string; records: string[] } {
+  push(chunk: Buffer): { text: string; records: string[]; snapshotBytes: Buffer[] } {
+    const plain: Buffer[] = [], snapshotBytes: Buffer[] = [];
+    let from = 0;
+    for (let i = 0; i < chunk.length;) {
+      if (this.chunkLeft > 0) {
+        const n = Math.min(this.chunkLeft, chunk.length - i);
+        snapshotBytes.push(chunk.subarray(i, i + n));
+        this.chunkLeft -= n;
+        i += n;
+        from = i;
+      } else if (this.chunkHead) {
+        this.chunkHead.push(chunk[i++]);
+        if (this.chunkHead.length === 2) { this.chunkLeft = this.chunkHead[0] | this.chunkHead[1] << 8; this.chunkHead = null; }
+        from = i;
+      } else if (chunk[i] === SNAP_CHUNK) {
+        plain.push(chunk.subarray(from, i));
+        this.chunkHead = [];
+        from = ++i;
+      } else i++;
+    }
+    if (!this.chunkHead && this.chunkLeft === 0) plain.push(chunk.subarray(from));
     let text = "";
     const records: string[] = [];
-    for (const c of this.decoder.write(chunk)) {
+    for (const c of plain.map(b => this.decoder.write(b)).join("")) {
       if (this.record !== null) {
         if (c === "\n") { records.push(this.record); this.record = null; }
         else this.record += c;
       } else if (c === "\x01") this.record = "";
       else if (c !== "\r") text += c;
     }
-    return { text, records };
+    return { text, records, snapshotBytes };
   }
+}
+
+// Where the robot is now ("\x01pose <x cm> <y cm> <yaw deg> <mode> <action>"), 4 times a second.
+export interface LivePose { x: number; y: number; yaw: number; mode: string; action: string; at: number }
+export function parsePose(record: string): LivePose | null {
+  const m = /^pose (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (\S+) (\S+)$/.exec(record);
+  if (!m) return null;
+  return { x: Number(m[1]) / 100, y: Number(m[2]) / 100, yaw: Number(m[3]) * Math.PI / 180, mode: m[4],
+           action: m[5] === "-" ? "" : m[5], at: Date.now() };
 }
 
 export function broadcastAddresses(): string[] {
@@ -58,7 +96,8 @@ export function broadcastAddresses(): string[] {
 }
 
 // Events: "text" (string), "status" (RobotStatus), "note" (string: what the server saw),
-// "bytes" (number: a piece of the robot's stream arrived).
+// "bytes" (number: a piece of the robot's stream arrived), "snapshot" (Buffer: one
+// whole snapshot, not yet checked), "pose" (LivePose).
 export class RobotLink extends EventEmitter {
   status: RobotStatus = { state: "waiting" };
   private socket: net.Socket | null = null;
@@ -106,6 +145,12 @@ export class RobotLink extends EventEmitter {
     return true;
   }
 
+  // One of the robot's commands ("goal 120 -35", "mode manual").
+  sendCommand(command: string): boolean {
+    if (!/^[\x20-\x7e]{1,40}$/.test(command)) return false;
+    return this.sendKey(`${COMMAND}${command}\n`);
+  }
+
   private setStatus(status: RobotStatus): void {
     this.status = status;
     this.emit("status", status);
@@ -119,7 +164,7 @@ export class RobotLink extends EventEmitter {
     }
     this.socket = socket;
     socket.setNoDelay(true);
-    const splitter = new RecordSplitter();
+    const splitter = new RecordSplitter(), snapshots = new SnapshotAssembler();
     let lastHeard = Date.now();
     const heartbeat = setInterval(() => {
       if (Date.now() - lastHeard > this.opts.silenceMs) {
@@ -133,12 +178,18 @@ export class RobotLink extends EventEmitter {
     socket.on("data", (chunk: Buffer) => {
       lastHeard = Date.now();
       this.emit("bytes", chunk.length);
-      const { text, records } = splitter.push(chunk);
+      const { text, records, snapshotBytes } = splitter.push(chunk);
       for (const r of records) {
         const m = /^rssi (-?\d+)$/.exec(r);
         if (m && this.socket === socket && this.status.state === "connected") {
           this.setStatus({ ...this.status, rssi: Number(m[1]) });
         }
+        const pose = parsePose(r);
+        if (pose && this.socket === socket) this.emit("pose", pose);
+      }
+      for (const b of snapshotBytes) {
+        for (const snap of snapshots.push(b)) this.emit("snapshot", snap);
+        if (snapshots.skipped) { this.emit("note", `snapshot stream: ${snapshots.skipped} bytes skipped (not a snapshot)`); snapshots.skipped = 0; }
       }
       if (text) this.emit("text", text);
     });

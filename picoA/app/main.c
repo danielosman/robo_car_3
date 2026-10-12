@@ -1,6 +1,6 @@
 // PicoA robot firmware, the brain. Talks to PicoB over the link, maps the
-// surroundings with the ToF sensor and watches for movement. It does nothing by
-// itself: a serial monitor on USB or the robot server over WiFi (wifi_console.h),
+// surroundings with the ToF sensor and watches for movement, sends a snapshot of
+// what it knows to the viewer after each action. It does nothing by itself: a serial monitor on USB or the robot server over WiFi (wifi_console.h),
 // with the same keys, starts each action (doc/ARCHITECTURE.md).
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -16,8 +16,12 @@
 #include "motion_sense.h"
 #include "loop_stats.h"
 #include "recorder.h"
+#include "snapshot.h"
+#include "opt4048.h"
+#include "vision.h"
 
 #define USB_CHECK_US 3000000 // after power-up: time for a computer to enumerate the USB
+#define COLOR_US     100000  // the colour sensor is asked this often (a reading comes ~2.5 times a second)
 
 // Connects to WiFi once the USB had time to enumerate, with or without a computer
 // on USB: both consoles take the same keys. Then the robot waits, motors off.
@@ -36,6 +40,8 @@ int main(void) {
     body_init();
     bool tof_ok = surroundings_init(); // ~2 s: uploads the ToF sensor's firmware
     bool camera_ok = camera_init();
+    bool color_ok = opt4048_init();
+    absolute_time_t next_color = get_absolute_time();
     for (;;) {
         loop_stats_begin(time_us_32());
         start_up(usb_check);
@@ -49,8 +55,16 @@ int main(void) {
         stage_done("camera");
         motion_sense_update();
         stage_done("motion_sense");
+        vision_update();
+        stage_done("vision");
         behaviour_update();
         stage_done("behaviour");
+        if (color_ok && time_reached(next_color)) {
+            next_color = make_timeout_time_us(COLOR_US);
+            opt4048_poll();
+        }
+        snapshot_update();
+        stage_done("snapshot");
         wifi_console_update();
         stage_done("wifi");
         debug_console_update();
@@ -60,6 +74,7 @@ int main(void) {
             warned = true;
             if (!tof_ok) printf("ToF sensor not working: no map\n");
             if (!camera_ok) printf("Camera not working\n");
+            if (!color_ok) printf("Colour sensor not working\n");
         }
     }
 }

@@ -35,3 +35,13 @@ void recorder_take_end(rec_end_t reason);
 void recorder_tof(const range_frame_t *frame); // every frame, right after rangefinder_poll()
 void recorder_update(void);         // call every loop iteration: odometry, drive commands
 void recorder_print_status(void);   // one line for the status key
+// The layouts the PC reads, also for snapshots (snapshot.c): the latest ToF frame's
+// zones first .. first + zones - 1 with all their targets (TOF_RAW's payload, at most
+// RECORDER_TOF_MAX bytes for 64 zones), and where the sensor is and how its zones
+// lie (GEOMETRY's). Each returns the bytes written; 0 if there is no raw frame.
+#define RECORDER_TOF_MAX (13 + 64 * (5 + 4 * 8))
+#define RECORDER_GEOMETRY_SIZE (4 * 4 + 2 + RANGEFINDER_RAYS)
+uint32_t recorder_tof_payload(uint8_t *out, const range_frame_t *frame, int first, int zones, uint16_t skipped_before);
+uint32_t recorder_geometry_payload(uint8_t *out);
+uint32_t recorder_boot_id(void);                       // random at power-up
+uint32_t recorder_crc32(const uint8_t *p, uint32_t n); // the records' CRC-32 (zlib's)

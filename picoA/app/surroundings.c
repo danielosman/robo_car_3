@@ -20,6 +20,7 @@ void surroundings_update(void) {
     recorder_tof(&frame);
     pose_t pose;
     if (!pose_at(frame.t_us, &pose)) return; // no odometry for that moment (PicoB not connected)
+    cell_map_follow(pose.x_m, pose.y_m);
     cell_map_add(&frame, &pose);
 }
 

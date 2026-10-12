@@ -13,6 +13,7 @@
 #include <string.h>
 #include "rangefinder.c"
 #include "cell_map.c"
+#include "house_map.c"
 
 #define MAX_FRAMES 4000
 #define MIN_CONFIDENCE 0.1f // compared and printed: cells set by a measurement this confident at least
@@ -61,7 +62,7 @@ static void json_cells(void) {
                 if (st[l] != CELL_STATE_UNKNOWN && c > conf) conf = c;
             }
             if (!known) continue;
-            float x = ((float)ix - GRID / 2.0f + 0.5f) * GRID_M, y = ((float)iy - GRID / 2.0f + 0.5f) * GRID_M;
+            float x = ((float)(ix + org_x) + 0.5f) * GRID_M, y = ((float)(iy + org_y) + 0.5f) * GRID_M;
             printf("%s[%.2f,%.2f,%d,%d,%d,%d,%d]", first ? "" : ",", (double)x, (double)y,
                    column_of(ix, iy, MIN_CONFIDENCE), st[0], st[1], st[2], conf);
             first = false;
@@ -99,7 +100,7 @@ int main(int argc, char **argv) {
         for (int iy = 0; iy < GRID; iy++) {
             column_t c = column_of(ix, iy, MIN_CONFIDENCE);
             if (!solid(c)) continue;
-            float x = ((float)ix - GRID / 2.0f + 0.5f) * GRID_M, y = ((float)iy - GRID / 2.0f + 0.5f) * GRID_M;
+            float x = ((float)(ix + org_x) + 0.5f) * GRID_M, y = ((float)(iy + org_y) + 0.5f) * GRID_M;
             printf("  %+5.2f %+5.2f  %4.0f cm %+4.0f deg: %s\n", (double)x, (double)y, (double)(100 * hypotf(x, y)),
                    (double)(atan2f(y, x) * DEG_PER_RAD), c == COLUMN_BLOCKED ? "BLOCKED" : "overhang");
             solid_n++;

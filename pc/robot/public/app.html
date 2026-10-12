@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoboCar</title>
+<style>
+:root { color-scheme:dark; --bg:#111; --panel:#181818; --line:#2c2c2c; --text:#ddd; --dim:#888; --accent:#7aa7d9;
+  --blocked:#d0453b; --overhang:#e39b3a; --nofloor:#9b59d0; --drivable:#3d7f4f; --open:#2f4a3a; --unknown:#151515; }
+* { box-sizing:border-box; }
+html, body { height:100%; }
+body { margin:0; display:grid; grid-template-rows:auto 1fr auto; font:14px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--text); }
+header { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 14px; border-bottom:1px solid var(--line); }
+h1 { font-size:17px; margin:0 6px 0 0; }
+.pill { padding:3px 10px; border-radius:12px; background:#333; font-size:13px; }
+.pill.connected { background:#1f4d2b; color:#bff5cc; } .pill.lost { background:#5a2a1a; color:#ffd2bf; }
+button, select { background:#222; color:var(--text); border:1px solid #555; border-radius:5px; padding:4px 9px; cursor:pointer; font:inherit; font-size:13px; }
+button:disabled { opacity:.45; cursor:default; }
+button.on { background:#1f3f66; border-color:#4b84c4; color:#fff; }
+button.stop { background:#7a1d1d; border-color:#c33; color:#fff; font-weight:600; }
+button kbd { font:bold 12px ui-monospace,monospace; color:#fff; margin-right:4px; }
+.group { display:flex; gap:4px; align-items:center; }
+.group > span { color:var(--dim); font-size:12px; margin-right:2px; }
+header a { color:var(--accent); font-size:13px; }
+.spacer { flex:1; }
+main { display:grid; grid-template-columns:1fr 360px; min-height:0; }
+#mapwrap { position:relative; min-height:0; border-right:1px solid var(--line); }
+#map { width:100%; height:100%; display:block; cursor:crosshair; }
+#maphud { position:absolute; left:10px; top:8px; font:12px ui-monospace,monospace; color:var(--dim); pointer-events:none; text-shadow:0 0 3px #000; }
+#mapbtns { position:absolute; right:10px; top:8px; display:flex; gap:4px; }
+#legend { position:absolute; left:10px; bottom:8px; display:flex; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--dim); pointer-events:none; }
+#legend i { display:inline-block; width:10px; height:10px; margin-right:4px; vertical-align:-1px; border-radius:2px; }
+#toast { position:absolute; left:50%; top:12px; transform:translateX(-50%); background:#3a2f12; border:1px solid #806a2a; color:#ffe6a8;
+  padding:5px 12px; border-radius:6px; font-size:13px; opacity:0; transition:opacity .3s; pointer-events:none; }
+#side { overflow:auto; padding:10px 12px; display:flex; flex-direction:column; gap:12px; background:var(--panel); }
+section h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); margin:0 0 5px; font-weight:600; }
+#snaphead { font-size:13px; }
+#snaphead b { font-weight:600; }
+.nav { display:flex; gap:6px; align-items:center; margin-top:6px; }
+.nav input[type=range] { flex:1; }
+#camera { width:320px; height:240px; image-rendering:pixelated; background:#000; border-radius:4px; display:block; }
+.camopts { font-size:12px; color:var(--dim); margin-top:4px; display:flex; justify-content:space-between; }
+#tof { border-collapse:collapse; font:11px ui-monospace,monospace; }
+#tof td { width:39px; height:24px; text-align:center; border:1px solid #0d0d0d; color:#fff; text-shadow:0 0 2px #000; }
+#tof td.none { color:#555; background:#1c1c1c; } #tof td.unsure { color:#bbb; background:#262626 !important; font-style:italic; }
+.kv { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; font:12px ui-monospace,monospace; }
+.kv span:nth-child(odd) { color:var(--dim); }
+#swatch { width:44px; height:44px; border-radius:6px; border:1px solid #444; flex:none; }
+.color { display:flex; gap:10px; align-items:center; }
+footer { border-top:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+.keys { display:flex; gap:5px; flex-wrap:wrap; align-items:center; padding:6px 14px; }
+.keys > span { color:var(--dim); font-size:12px; margin-left:6px; }
+#log { height:170px; margin:0; padding:6px 14px; overflow:auto; white-space:pre; font:12px/1.35 ui-monospace,Menlo,monospace; border-top:1px solid var(--line); }
+#log .note { color:var(--accent); }
+footer.hidden #log { display:none; }
+@media (max-width: 900px) { main { grid-template-columns:1fr; grid-template-rows:60vh auto; } #side { overflow:visible; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>RoboCar</h1>
+  <div id="status" class="pill">Server not reachable</div>
+  <div class="group"><span>Mode</span><button id="idle">Idle</button><button id="manual">Manual</button></div>
+  <button id="stop" class="stop" title="space">Stop</button>
+  <div id="live" class="pill"></div>
+  <div class="spacer"></div>
+  <div class="group"><span>Boot</span><select id="boot"></select></div>
+  <a href="/console" target="_blank">Console</a> <a href="/viewer" target="_blank">3D takes</a> <a href="/takes" target="_blank">Takes</a>
+</header>
+<main>
+  <div id="mapwrap">
+    <canvas id="map"></canvas>
+    <div id="maphud"></div>
+    <div id="mapbtns"><label class="pill" title="as the 3D viewer: columns set by a measurement under 10 % confident count as unknown"><input type="checkbox" id="hideweak" checked> hide weak</label><button id="center">Centre on robot</button><button id="zoomin">+</button><button id="zoomout">−</button></div>
+    <div id="legend">
+      <span><i style="background:var(--blocked)"></i>blocked</span><span><i style="background:var(--overhang)"></i>overhang</span>
+      <span><i style="background:var(--nofloor)"></i>no floor</span><span><i style="background:var(--drivable)"></i>drivable</span>
+      <span><i style="background:var(--open)"></i>free, floor not seen</span><span>dimmed: old (the window doesn't know it now)</span>
+    </div>
+    <div id="toast"></div>
+  </div>
+  <div id="side">
+    <section>
+      <h2>Snapshot</h2>
+      <div id="snaphead">No snapshots yet: the robot sends one after each action, and on S.</div>
+      <div class="nav">
+        <button id="prev" title="older">◀</button>
+        <input type="range" id="timeline" min="0" max="0" value="0">
+        <button id="next" title="newer">▶</button>
+        <label title="follow the newest snapshot"><input type="checkbox" id="follow" checked> live</label>
+      </div>
+    </section>
+    <section>
+      <h2>Camera</h2>
+      <canvas id="camera" width="320" height="240"></canvas>
+      <div class="camopts"><span id="caminfo"></span><label><input type="checkbox" id="showfeatures" checked> features</label></div>
+    </section>
+    <section>
+      <h2>ToF (as the robot sees it, cm)</h2>
+      <table id="tof"></table>
+    </section>
+    <section>
+      <h2>Colour</h2>
+      <div class="color"><div id="swatch"></div><div class="kv" id="color"></div></div>
+    </section>
+    <section>
+      <h2>Pose</h2>
+      <div class="kv" id="pose"></div>
+    </section>
+  </div>
+</main>
+<footer id="footer">
+  <div class="keys" id="keys"></div>
+  <pre id="log"></pre>
+</footer>
+<script type="module" src="app.js"></script>
+</body>
+</html>

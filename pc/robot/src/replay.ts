@@ -12,8 +12,8 @@ const run = promisify(execFile);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const BUILD = path.join(repo, "build", "replay");
 const BINARY = path.join(BUILD, "replay_map");
-const SOURCES = ["tools/replay_map.c", "picoA/app/cell_map.c", "picoA/app/cell_map.h", "picoA/app/rangefinder.c",
-  "picoA/app/rangefinder.h"].map(f => path.join(repo, f));
+const SOURCES = ["tools/replay_map.c", "picoA/app/cell_map.c", "picoA/app/cell_map.h", "picoA/app/house_map.c",
+  "picoA/app/house_map.h", "picoA/app/rangefinder.c", "picoA/app/rangefinder.h"].map(f => path.join(repo, f));
 
 export const isTakeId = (id: string) => /^[0-9a-f]{8}-\d+$/.test(id);
 // A drive: every take of one boot (one power-up, one odometry frame), in order.

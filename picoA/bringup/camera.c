@@ -50,6 +50,19 @@ static void read_line(char *buf, unsigned size) {
     buf[n] = 0;
 }
 
+// The newest OPT4048 reading to the viewer: OPT3 | payload length 28 LE | version,
+// overload, ID LE, sequence LE, conversion ms LE, reserved[2], the raw 16-byte
+// big-endian register snapshot (pc/bringup/src/opt4048.ts).
+static void send_opt_packet(void) {
+    opt4048_reading_t r;
+    if (!opt4048_latest(&r)) return;
+    uint8_t packet[36] = {'O','P','T','3',28,0,0,0,1,r.overload ? 1 : 0,
+        0x21,0x08,0,0,0,0,100,0,0,0};
+    for (unsigned i = 0; i < 4; ++i) packet[12+i] = (uint8_t)(r.sequence >> (8*i));
+    memcpy(packet + 20, r.raw, sizeof r.raw);
+    fwrite(packet, 1, sizeof packet, stdout); fflush(stdout);
+}
+
 int main(void) {
     stdio_init_all();
     stdio_set_translate_crlf(&stdio_usb, false);
@@ -65,7 +78,7 @@ int main(void) {
     absolute_time_t next_camera_state = make_timeout_time_ms(CAMERA_STATE_PERIOD_MS);
     while (true) {
         tof_stream_poll();
-        opt4048_poll();
+        if (opt4048_poll()) send_opt_packet();
         if (camera_ready) {
             camera_update();
             if (time_reached(next_camera_state)) {

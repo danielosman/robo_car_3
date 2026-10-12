@@ -47,6 +47,9 @@ void camera_update(void); // call every loop iteration: adjusts the exposure
 // The newest complete frame, if one arrived since the last call; its pixels stay
 // valid until the next call.
 bool camera_frame(camera_frame_t *frame);
+// The frame camera_frame() handed out last (its pixels valid until camera_frame()
+// hands out the next one), without taking a new one; false before the first.
+bool camera_last_frame(camera_frame_t *frame);
 void camera_hold_exposure(bool hold);
 void camera_exposure(camera_exposure_t *exposure);
 uint32_t camera_frames_captured(void);

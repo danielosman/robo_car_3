@@ -14,6 +14,7 @@
 #include <string.h>
 #include "../rangefinder.c"
 #include "../cell_map.c"
+#include "../house_map.c"
 
 #define MAX_FRAMES 400
 
@@ -66,7 +67,7 @@ static int load(const char *take) {
 }
 
 static bool solid_at(float x, float y) {
-    column_t c = column_of(grid_index(x), grid_index(y), 0.1f); // as the viewer and replay compare: ≥ 10 % confident
+    column_t c = column_at(cell_of(x), cell_of(y), 0.1f); // as the viewer and replay compare: ≥ 10 % confident
     return c == COLUMN_BLOCKED || c == COLUMN_OVERHANG;
 }
 

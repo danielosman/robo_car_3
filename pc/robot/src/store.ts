@@ -1,11 +1,15 @@
 // The recordings in DuckDB (doc/ARCHITECTURE.md, the PC): one row per take, ToF
 // frame, zone and target (each target also in world coordinates), odometry report,
-// drive command, mark and WiFi status. Derived from the raw files: a take can be
+// drive command, mark and WiFi status. And the snapshots (snapshot.ts): one row each
+// with its pose, action, camera and colour reading; its ToF targets; its camera
+// features; its map window
+// and whole-house map tiles as BLOBs; the picture is a PNG beside the database. Derived from the raw files: a take can be
 // imported again at any time and replaces its rows; its note and the truth objects
 // (what Daniel enters) stay. The database is opened for each operation and closed
 // after it, so the duckdb command line can use it in between.
-import { DuckDBInstance, type DuckDBConnection } from "@duckdb/node-api";
+import { DuckDBInstance, timestampValue, type DuckDBConnection } from "@duckdb/node-api";
 import type { Geometry, Odom, Parsed, Take } from "./recording.ts";
+import { snapId, type Snapshot } from "./snapshot.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS takes (
@@ -40,11 +44,31 @@ CREATE TABLE IF NOT EXISTS wifi (
 CREATE TABLE IF NOT EXISTS truth (  -- what really stood there (placed in the viewer): a box per object
   boot_id VARCHAR, take_id VARCHAR, name VARCHAR,
   x DOUBLE, y DOUBLE, z DOUBLE, size_x DOUBLE, size_y DOUBLE, size_z DOUBLE, note VARCHAR);
+CREATE TABLE IF NOT EXISTS snapshots (  -- picoA/app/snapshot.c; times: PicoA's clock (t_us), the PC's (arrived_at, local)
+  snap_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, t_us UINTEGER, arrived_at TIMESTAMP,
+  why VARCHAR, action VARCHAR, end_reason VARCHAR, actions_ended INTEGER, running VARCHAR, mode VARCHAR,
+  map_clears INTEGER, build VARCHAR, bytes INTEGER,
+  x DOUBLE, y DOUBLE, yaw DOUBLE, pitch DOUBLE, roll DOUBLE, v DOUBLE, w DOUBLE, stationary BOOLEAN, motors_on BOOLEAN,
+  stop_reason INTEGER,                                      -- NULL: PicoB not connected
+  tof_frame_no INTEGER, tof_x DOUBLE, tof_y DOUBLE, tof_yaw DOUBLE, tof_pitch DOUBLE, -- where the robot was for the ToF frame
+  camera_frame_no INTEGER, exposure_ms DOUBLE, gain DOUBLE, image VARCHAR, -- image: the PNG, relative to recordings/
+  lux DOUBLE, cie_x DOUBLE, cie_y DOUBLE, color_x DOUBLE, color_y DOUBLE, color_z DOUBLE, color_raw BLOB,
+  map_org_cx INTEGER, map_org_cy INTEGER, map_cells_x INTEGER, map_cells_y INTEGER, map_cells BLOB, -- [layer][x][y], one byte a cell
+  tiles INTEGER, file VARCHAR);
+CREATE TABLE IF NOT EXISTS snapshot_targets (  -- the snapshot's ToF frame; row, col 1-8 (README)
+  snap_id VARCHAR, zone INTEGER, row INTEGER, col INTEGER, target INTEGER,
+  distance_mm INTEGER, sigma_mm INTEGER, signal INTEGER, reflectance INTEGER, status INTEGER, x DOUBLE, y DOUBLE, z DOUBLE);
+CREATE TABLE IF NOT EXISTS snapshot_features (  -- the camera features of the snapshot's picture (picoA/app/vision.h);
+  snap_id VARCHAR, id INTEGER, age INTEGER, flags INTEGER,  -- flags: 1 new, 2 missed, 4 lost, 8 left the image
+  x DOUBLE, y DOUBLE, dx DOUBLE, dy DOUBLE, strength DOUBLE, match DOUBLE); -- px, as the robot sees the picture (x right, y down)
+CREATE TABLE IF NOT EXISTS snapshot_tiles (  -- whole-house map tiles as they came: 20 x 20 columns, 4 bits each (house_map.h)
+  snap_id VARCHAR, boot_id VARCHAR, seq INTEGER, map_clears INTEGER, tx INTEGER, ty INTEGER, columns BLOB);
 -- Added later: kept by "IF NOT EXISTS", filled by importing again (npm run import).
 ALTER TABLE takes ADD COLUMN IF NOT EXISTS geometry VARCHAR;   -- GEOMETRY as JSON (the viewer's rays)
 ALTER TABLE truth ADD COLUMN IF NOT EXISTS truth_id VARCHAR;
 `;
 const TAKE_TABLES = ["tof_frames", "tof_zones", "tof_targets", "odom", "drive", "marks", "wifi"];
+const SNAP_TABLES = ["snapshots", "snapshot_targets", "snapshot_tiles", "snapshot_features"];
 const POSE_GAP_S = 0.1; // a frame further than this from any odometry report has no pose
 
 export interface Pose { x: number; y: number; yaw: number; pitch: number }
@@ -104,6 +128,78 @@ export class Store {
 
   async query(sql: string): Promise<Record<string, unknown>[]> {
     return this.use(async c => (await c.runAndReadAll(sql)).getRowObjectsJson() as Record<string, unknown>[]);
+  }
+
+  // Runs fn with a connection (read-only use: the API's queries with BLOBs).
+  async read<T>(fn: (c: DuckDBConnection) => Promise<T>): Promise<T> { return this.use(fn); }
+
+  // Imports a snapshot, replacing what was there for it. image: its PNG, relative to recordings/.
+  async importSnapshot(s: Snapshot, arrivalMs: number, file: string, image: string | null): Promise<{ targets: number; tiles: number }> {
+    const id = snapId(s.bootId, s.seq);
+    const localMs = arrivalMs - new Date(arrivalMs).getTimezoneOffset() * 60000;
+    const p = s.pose, t = s.tof, cam = s.camera, col = s.color, w = s.window;
+    let targets = 0;
+    return this.use(async c => {
+      await c.run("BEGIN TRANSACTION");
+      for (const table of SNAP_TABLES) await c.run(`DELETE FROM ${table} WHERE snap_id = $1`, [id]);
+      const a = await c.createAppender("snapshots");
+      const d = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendDouble(v));
+      const i = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendInteger(v));
+      const t8 = (v: string | null) => (v === null ? a.appendNull() : a.appendVarchar(v));
+      a.appendVarchar(id); a.appendVarchar(s.bootId); a.appendInteger(s.seq); a.appendUInteger(s.tUs);
+      a.appendTimestamp(timestampValue(BigInt(Math.round(localMs * 1000))));
+      t8(s.why); t8(s.action); t8(s.endReason); a.appendInteger(s.actionsEnded); t8(s.running); t8(s.mode);
+      a.appendInteger(s.mapClears); t8(s.build); a.appendInteger(s.length);
+      for (const v of [p?.x, p?.y, p?.yaw, p?.pitch, p?.roll, p?.v, p?.w]) d(v);
+      if (p) { a.appendBoolean(p.stationary); a.appendBoolean(p.motorsOn); a.appendInteger(p.stopReason); }
+      else { a.appendNull(); a.appendNull(); a.appendNull(); }
+      i(t?.raw.frameNo);
+      for (const v of t?.poseOk ? [t.x, t.y, t.yaw, t.pitch] : [null, null, null, null]) d(v);
+      i(cam?.number); d(cam ? cam.exposureUs / 1000 : null); d(cam?.gain); t8(image);
+      d(col?.lux); d(col?.cie?.x); d(col?.cie?.y); d(col?.xyz?.X); d(col?.xyz?.Y); d(col?.xyz?.Z);
+      if (col) a.appendBlob(new Uint8Array(col.raw)); else a.appendNull();
+      i(w?.orgX); i(w?.orgY); i(w?.cellsX); i(w?.cellsY);
+      if (w) a.appendBlob(new Uint8Array(w.cells)); else a.appendNull();
+      a.appendInteger(s.tiles.length); a.appendVarchar(file);
+      a.endRow();
+      a.closeSync();
+      const tg = await c.createAppender("snapshot_targets");
+      if (t && s.geometry) {
+        const g = s.geometry, rayOf = new Map<number, number>();
+        g.zoneOfRay.forEach((zone, ray) => rayOf.set(zone, ray));
+        for (const z of t.raw.zones) {
+          const ray = rayOf.get(z.zone) ?? z.zone, row = Math.floor(ray / g.cols) + 1, colN = (ray % g.cols) + 1;
+          z.targets.forEach((target, k) => {
+            tg.appendVarchar(id); tg.appendInteger(z.zone); tg.appendInteger(row); tg.appendInteger(colN); tg.appendInteger(k);
+            tg.appendInteger(target.distanceMm); tg.appendInteger(target.sigmaMm); tg.appendInteger(target.signalPerSpad);
+            tg.appendInteger(target.reflectance); tg.appendInteger(target.status);
+            if (t.poseOk) {
+              const [x, y, zz] = worldPoint(g, { x: t.x, y: t.y, yaw: t.yaw, pitch: t.pitch }, row, colN, target.distanceMm / 1000);
+              tg.appendDouble(x); tg.appendDouble(y); tg.appendDouble(zz);
+            } else { tg.appendNull(); tg.appendNull(); tg.appendNull(); }
+            tg.endRow();
+            targets++;
+          });
+        }
+      }
+      tg.closeSync();
+      const tl = await c.createAppender("snapshot_tiles");
+      for (const tile of s.tiles) {
+        tl.appendVarchar(id); tl.appendVarchar(s.bootId); tl.appendInteger(s.seq); tl.appendInteger(s.mapClears);
+        tl.appendInteger(tile.tx); tl.appendInteger(tile.ty); tl.appendBlob(new Uint8Array(tile.columns));
+        tl.endRow();
+      }
+      tl.closeSync();
+      const ft = await c.createAppender("snapshot_features");
+      for (const f of s.features?.features ?? []) {
+        ft.appendVarchar(id); ft.appendInteger(f.id); ft.appendInteger(f.age); ft.appendInteger(f.flags);
+        for (const v of [f.x, f.y, f.dx, f.dy, f.strength, f.match]) ft.appendDouble(v);
+        ft.endRow();
+      }
+      ft.closeSync();
+      await c.run("COMMIT");
+      return { targets, tiles: s.tiles.length };
+    });
   }
 
   async setNote(id: string, note: string): Promise<void> {

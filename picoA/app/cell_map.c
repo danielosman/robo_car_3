@@ -2,9 +2,15 @@
 #include <stdio.h>
 #include <string.h>
 #include "cell_map.h"
+#include "house_map.h"
 
 #define GRID_M        0.1f
-#define GRID          60        // grid across: 6 m
+#define GRID          CELL_MAP_GRID // grid across: 6 m, three tiles of the whole-house map
+#define TILE          HOUSE_TILE_COLS
+#define TILE_M        (TILE * GRID_M)
+#define FOLLOW_M      0.5f      // the robot this far out of the window's middle tile: it scrolls by a tile
+#define RESTORED_CONF 1         // cells started from the whole-house map: any measurement overrides them
+_Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define G_BOTTOM_M    (-0.07f)  // the ground layer's bottom; layers are GRID_M tall
 #define NOTHING_M     1.0f      // a zone with nothing in range: free this far
 #define NEAR_M        1.5f      // the ray_closeness sigmoid: 0.5 here...
@@ -32,6 +38,10 @@ static uint16_t hit_sum[CELL_LAYERS][GRID][GRID], pass_sum[CELL_LAYERS][GRID][GR
 // there reaches at least that high.
 static uint8_t hit_z[CELL_LAYERS][GRID][GRID], frame_hit_z[CELL_LAYERS][GRID][GRID];
 static float floor_margin = CELL_MAP_FLOOR_MARGIN;
+// The window: GRID x GRID columns from world cell (org_x, org_y) on (cell (cx, cy)
+// covers cx * 10 cm … (cx + 1) * 10 cm), the middle tile (tile_x, tile_y) of 3 x 3
+// tiles of the whole-house map. At power-up it is centred on the map's origin.
+static int tile_x, tile_y, org_x = -GRID / 2, org_y = -GRID / 2;
 
 void cell_map_set_floor_margin(float margin) { floor_margin = margin; }
 
@@ -40,6 +50,7 @@ void cell_map_clear(void) {
     memset(hit_sum, 0, sizeof hit_sum);
     memset(pass_sum, 0, sizeof pass_sum);
     memset(hit_z, NO_HIT_Z, sizeof hit_z);
+    house_map_clear();
 }
 
 static uint8_t z_code(float z_m) {
@@ -57,8 +68,9 @@ static float pass_limit_m(int layer, int ix, int iy) {
     return z == NO_HIT_Z ? 1e9f : G_BOTTOM_M + (float)z * Z_STEP_M + PASS_BELOW_M;
 }
 
-static int grid_index(float m) { return (int)floorf(m / GRID_M) + GRID / 2; }
-static bool in_grid(int ix, int iy, int layer) {
+static int cell_of(float m) { return (int)floorf(m / GRID_M); } // the world cell
+static bool in_window(int cx, int cy) { return cx >= org_x && cx < org_x + GRID && cy >= org_y && cy < org_y + GRID; }
+static bool in_grid(int ix, int iy, int layer) { // window indexes
     return ix >= 0 && ix < GRID && iy >= 0 && iy < GRID && layer >= 0 && layer < CELL_LAYERS;
 }
 
@@ -96,7 +108,7 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
     for (;;) {
         int axis = t_max[0] < t_max[1] ? (t_max[0] < t_max[2] ? 0 : 2) : (t_max[1] < t_max[2] ? 1 : 2);
         bool last = t_max[axis] >= length_m;
-        int ix = c[0] + GRID / 2, iy = c[1] + GRID / 2, layer = c[2];
+        int ix = c[0] - org_x, iy = c[1] - org_y, layer = c[2];
         if (layer < 0 || (layer >= CELL_LAYERS && d[2] >= 0)) return;
         if (in_grid(ix, iy, layer)) {
             float w = ray_closeness(t) * v;
@@ -142,11 +154,12 @@ static void decide_cell(uint8_t *cell, float h, float p) {
 
 // The robot stands and turns on floor; L2 close to it is never seen by any zone.
 static void around_the_robot(const pose_t *pose) {
-    for (int ix = grid_index(pose->x_m - L2_BLIND_M); ix <= grid_index(pose->x_m + L2_BLIND_M); ix++)
-        for (int iy = grid_index(pose->y_m - L2_BLIND_M); iy <= grid_index(pose->y_m + L2_BLIND_M); iy++) {
-            if (!in_grid(ix, iy, 0)) continue;
-            float dx = ((float)(ix - GRID / 2) + 0.5f) * GRID_M - pose->x_m;
-            float dy = ((float)(iy - GRID / 2) + 0.5f) * GRID_M - pose->y_m;
+    for (int cx = cell_of(pose->x_m - L2_BLIND_M); cx <= cell_of(pose->x_m + L2_BLIND_M); cx++)
+        for (int cy = cell_of(pose->y_m - L2_BLIND_M); cy <= cell_of(pose->y_m + L2_BLIND_M); cy++) {
+            if (!in_window(cx, cy)) continue;
+            int ix = cx - org_x, iy = cy - org_y;
+            float dx = ((float)cx + 0.5f) * GRID_M - pose->x_m;
+            float dy = ((float)cy + 0.5f) * GRID_M - pose->y_m;
             float r = sqrtf(dx * dx + dy * dy);
             if (r <= FOOT_M) {
                 grid[0][ix][iy] = C_PACK(CELL_STATE_OCCUPIED, 0, 15);
@@ -234,8 +247,74 @@ void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
     around_the_robot(pose);
 }
 
+static column_t column_of(int ix, int iy, float min_confidence);
+
+// A column from the whole-house map as cells, so confident they lose to any measurement.
+static void restore(int ix, int iy, column_t c) {
+    uint8_t occupied = C_PACK(CELL_STATE_OCCUPIED, 0, RESTORED_CONF), free = C_PACK(CELL_STATE_FREE, 0, RESTORED_CONF);
+    switch (c) {
+    case COLUMN_BLOCKED: grid[1][ix][iy] = occupied; break;
+    case COLUMN_OVERHANG: grid[1][ix][iy] = free; grid[2][ix][iy] = occupied; break;
+    case COLUMN_NO_FLOOR: grid[0][ix][iy] = free; break;
+    case COLUMN_DRIVABLE: grid[0][ix][iy] = occupied; grid[1][ix][iy] = grid[2][ix][iy] = free; break;
+    case COLUMN_OPEN: grid[1][ix][iy] = grid[2][ix][iy] = free; break;
+    case COLUMN_UNKNOWN: break;
+    }
+}
+
+// Moves a [layer][x][y] array by one tile along x (dx = ±1) or y (dy = ±1): what was
+// at +d tiles comes to 0; what comes in is `empty`.
+static void shift(uint8_t a[CELL_LAYERS][GRID][GRID], int dx, int dy, uint8_t empty) {
+    const int keep = GRID - TILE;
+    for (int l = 0; l < CELL_LAYERS; l++) {
+        if (dx > 0) { memmove(a[l][0], a[l][TILE], (size_t)keep * GRID); memset(a[l][keep], empty, (size_t)TILE * GRID); }
+        if (dx < 0) { memmove(a[l][TILE], a[l][0], (size_t)keep * GRID); memset(a[l][0], empty, (size_t)TILE * GRID); }
+        for (int ix = 0; ix < GRID && dy; ix++) {
+            if (dy > 0) { memmove(&a[l][ix][0], &a[l][ix][TILE], keep); memset(&a[l][ix][keep], empty, TILE); }
+            else { memmove(&a[l][ix][TILE], &a[l][ix][0], keep); memset(&a[l][ix][0], empty, TILE); }
+        }
+    }
+}
+
+// One tile along x or y: the tiles leaving go into the whole-house map, the ones
+// coming in start from it.
+static void scroll(int dx, int dy) {
+    for (int ix = 0; ix < GRID; ix++)
+        for (int iy = 0; iy < GRID; iy++) {
+            bool leaving = (dx > 0 && ix < TILE) || (dx < 0 && ix >= GRID - TILE) ||
+                           (dy > 0 && iy < TILE) || (dy < 0 && iy >= GRID - TILE);
+            if (leaving) house_map_put(org_x + ix, org_y + iy, column_of(ix, iy, 0));
+        }
+    shift(grid, dx, dy, 0);
+    shift(hit_z, dx, dy, NO_HIT_Z);
+    tile_x += dx;
+    tile_y += dy;
+    org_x = tile_x * TILE - GRID / 2;
+    org_y = tile_y * TILE - GRID / 2;
+    for (int ix = 0; ix < GRID; ix++)
+        for (int iy = 0; iy < GRID; iy++) {
+            bool coming = (dx < 0 && ix < TILE) || (dx > 0 && ix >= GRID - TILE) ||
+                          (dy < 0 && iy < TILE) || (dy > 0 && iy >= GRID - TILE);
+            if (coming) restore(ix, iy, house_map_get(org_x + ix, org_y + iy));
+        }
+}
+
+void cell_map_follow(float x_m, float y_m) {
+    // The middle tile covers 2 tile_x ± 1 m.
+    while (x_m >= ((float)tile_x + 0.5f) * TILE_M + FOLLOW_M) scroll(1, 0);
+    while (x_m < ((float)tile_x - 0.5f) * TILE_M - FOLLOW_M) scroll(-1, 0);
+    while (y_m >= ((float)tile_y + 0.5f) * TILE_M + FOLLOW_M) scroll(0, 1);
+    while (y_m < ((float)tile_y - 0.5f) * TILE_M - FOLLOW_M) scroll(0, -1);
+}
+
+const uint8_t *cell_map_window(int *org_cx, int *org_cy) {
+    *org_cx = org_x;
+    *org_cy = org_y;
+    return &grid[0][0][0];
+}
+
 cell_state3_t cell_map_cell(float x_m, float y_m, int layer, float *confidence) {
-    int ix = grid_index(x_m), iy = grid_index(y_m);
+    int ix = cell_of(x_m) - org_x, iy = cell_of(y_m) - org_y;
     uint8_t c = in_grid(ix, iy, layer) ? grid[layer][ix][iy] : 0;
     if (confidence) *confidence = (float)C_CONF(c) / 15;
     return (cell_state3_t)C_STATE(c);
@@ -246,6 +325,7 @@ static int layer_state(int ix, int iy, int layer, float min_confidence) {
     return (float)C_CONF(c) / 15 + 1e-3f < min_confidence ? CELL_STATE_UNKNOWN : C_STATE(c);
 }
 
+// A column of the window (window indexes).
 static column_t column_of(int ix, int iy, float min_confidence) {
     if (!in_grid(ix, iy, 0)) return COLUMN_UNKNOWN;
     int g = layer_state(ix, iy, 0, min_confidence), l1 = layer_state(ix, iy, 1, min_confidence);
@@ -257,28 +337,25 @@ static column_t column_of(int ix, int iy, float min_confidence) {
     return g == CELL_STATE_OCCUPIED ? COLUMN_DRIVABLE : COLUMN_OPEN;
 }
 
-column_t cell_map_column(float x_m, float y_m) { return column_of(grid_index(x_m), grid_index(y_m), 0); }
-
-float cell_map_free_distance(float x_m, float y_m, float dx, float dy, float max_m) {
-    for (float d = 0; d < max_m; d += GRID_M / 2) {
-        column_t c = cell_map_column(x_m + d * dx, y_m + d * dy);
-        if (c != COLUMN_OPEN && c != COLUMN_DRIVABLE) return d;
-    }
-    return max_m;
+// A world column: the window's inside it, the whole-house map's outside.
+static column_t column_at(int cx, int cy, float min_confidence) {
+    return in_window(cx, cy) ? column_of(cx - org_x, cy - org_y, min_confidence) : house_map_get(cx, cy);
 }
+
+column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m), 0); }
 
 float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m) {
     float nearest = max_m;
     float ends_x[2] = {x_m, x_m + max_m * dx}, ends_y[2] = {y_m, y_m + max_m * dy};
     float wx = fabsf(dy) * half_width_m, wy = fabsf(dx) * half_width_m; // the path's half width along x and y
-    for (int ix = grid_index(fminf(ends_x[0], ends_x[1]) - wx); ix <= grid_index(fmaxf(ends_x[0], ends_x[1]) + wx); ix++)
-        for (int iy = grid_index(fminf(ends_y[0], ends_y[1]) - wy); iy <= grid_index(fmaxf(ends_y[0], ends_y[1]) + wy); iy++) {
-            column_t c = column_of(ix, iy, 0);
+    for (int ix = cell_of(fminf(ends_x[0], ends_x[1]) - wx); ix <= cell_of(fmaxf(ends_x[0], ends_x[1]) + wx); ix++)
+        for (int iy = cell_of(fminf(ends_y[0], ends_y[1]) - wy); iy <= cell_of(fmaxf(ends_y[0], ends_y[1]) + wy); iy++) {
+            column_t c = column_at(ix, iy, 0);
             if (c != COLUMN_BLOCKED && c != COLUMN_OVERHANG) continue;
             float along_lo = 1e9f, along_hi = -1e9f, side_lo = 1e9f, side_hi = -1e9f;
             for (int k = 0; k < 4; k++) { // the cell's corners in the path's frame
-                float cx = (float)(ix - GRID / 2 + (k & 1)) * GRID_M - x_m;
-                float cy = (float)(iy - GRID / 2 + (k >> 1)) * GRID_M - y_m;
+                float cx = (float)(ix + (k & 1)) * GRID_M - x_m;
+                float cy = (float)(iy + (k >> 1)) * GRID_M - y_m;
                 float along = cx * dx + cy * dy, side = -cx * dy + cy * dx;
                 along_lo = fminf(along_lo, along); along_hi = fmaxf(along_hi, along);
                 side_lo = fminf(side_lo, side); side_hi = fmaxf(side_hi, side);
@@ -292,8 +369,8 @@ float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float ha
 #define PRINT_GRID 40 // 4 m
 
 void cell_map_print(const pose_t *robot, float min_confidence) {
-    int rx = grid_index(robot->x_m), ry = grid_index(robot->y_m);
-    int ax = grid_index(robot->x_m + 0.3f * cosf(robot->yaw_rad)), ay = grid_index(robot->y_m + 0.3f * sinf(robot->yaw_rad));
+    int rx = cell_of(robot->x_m), ry = cell_of(robot->y_m);
+    int ax = cell_of(robot->x_m + 0.3f * cosf(robot->yaw_rad)), ay = cell_of(robot->y_m + 0.3f * sinf(robot->yaw_rad));
     printf("Map (9 rays per zone), 4 x 4 m around the robot, 10 cm cells, cells under %.0f %% confidence hidden;\n"
            "up = where the robot faced when the scan started. ## blocked (3-13 cm), '' overhang (13-23 cm),\n"
            "? no floor (rays went through its place), . drivable (floor seen, free above), : free, floor not seen,\n"
@@ -308,7 +385,7 @@ void cell_map_print(const pose_t *robot, float min_confidence) {
         for (int iy = ry + PRINT_GRID / 2 - 1; iy >= ry - PRINT_GRID / 2; iy--) {
             static const char *const symbol[] = {"  ", "##", "''", "? ", ". ", ": "};
             const char *s = ix == rx && iy == ry ? "()" : ix == ax && iy == ay ? "**"
-                          : symbol[column_of(ix, iy, min_confidence)];
+                          : symbol[column_at(ix, iy, min_confidence)];
             line[n++] = s[0];
             line[n++] = s[1];
         }

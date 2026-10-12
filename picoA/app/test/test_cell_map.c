@@ -5,6 +5,12 @@
 // stairs down is drivable, a hallway with nothing in range shows no obstacles. A chair
 // leg seen from 30 cm and then moved away is erased seen from 1 m; standing still
 // 10 min 2 m from a box keeps it; someone walking across is gone 3 frames after.
+// The whole-house map: columns in tiles, a known class overwrites, unknown keeps,
+// dirty tiles. The window follows the robot down a 7 m hallway by whole tiles (not
+// before it is 0.5 m out of the middle tile): a box seen at the start is kept in
+// the whole-house map once it scrolls out, one 5.5 m away is mapped; back at the
+// start the box comes back from the whole-house map, and a scan erases it once it
+// is gone.
 // Run from the repo root (run_tests.sh does):
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_cell_map picoA/app/test/test_cell_map.c -lm && build/test_cell_map
 #include <assert.h>
@@ -12,6 +18,7 @@
 #include <stdlib.h>
 #include "../rangefinder.c"
 #include "../cell_map.c"
+#include "../house_map.c"
 
 // --- The scene: the floor (z = 0) with an optional hole, and boxes ---
 typedef struct { float x0, x1, y0, y1, z0, z1; bool on; } box_t;
@@ -240,6 +247,86 @@ int main(void) {
     assert(seen && left >= 1 && left <= 4);
     printf("ok: someone walking through is erased once they're gone\n");
 
-    printf("cell_map: all tests passed\n");
+    // The whole-house map by itself.
+    house_map_clear();
+    assert(house_map_tile_of(-10) == 0 && house_map_tile_of(9) == 0 && house_map_tile_of(10) == 1);
+    assert(house_map_tile_of(-11) == -1 && house_map_tile_of(-30) == -1 && house_map_tile_of(-31) == -2);
+    assert(house_map_get(-55, 3) == COLUMN_UNKNOWN && house_map_tiles() == 0);
+    assert(house_map_put(-55, 3, COLUMN_UNKNOWN) && house_map_tiles() == 0); // unknown: nothing to keep
+    house_map_put(-55, 3, COLUMN_BLOCKED);
+    house_map_put(-54, 3, COLUMN_DRIVABLE);
+    assert(house_map_get(-55, 3) == COLUMN_BLOCKED && house_map_get(-54, 3) == COLUMN_DRIVABLE);
+    house_map_put(-55, 3, COLUMN_UNKNOWN); // keeps
+    assert(house_map_get(-55, 3) == COLUMN_BLOCKED);
+    house_map_put(-55, 3, COLUMN_OPEN);    // a known class overwrites
+    assert(house_map_get(-55, 3) == COLUMN_OPEN && house_map_get(-55, 4) == COLUMN_UNKNOWN);
+    int16_t tx, ty;
+    const uint8_t *cols;
+    assert(house_map_tiles() == 1);
+    house_map_tile(0, &tx, &ty, &cols);
+    assert(tx == -3 && ty == 0); // tile -3 holds columns -70 … -51
+    // Column (-55, 3) is (15, 13) in its tile: byte (15 * 20 + 13) / 2, the high half.
+    assert(cols[(15 * 20 + 13) / 2] >> 4 == COLUMN_OPEN && (cols[(16 * 20 + 13) / 2] >> 4) == COLUMN_DRIVABLE);
+    assert(house_map_next_dirty(0) == 0);
+    house_map_sent(0);
+    assert(house_map_next_dirty(0) == -1);
+    house_map_put(-55, 3, COLUMN_OPEN); // the same: still clean
+    assert(house_map_next_dirty(0) == -1);
+    house_map_put(-55, 3, COLUMN_BLOCKED);
+    assert(house_map_next_dirty(0) == 0);
+    house_map_sent(0);
+    house_map_all_dirty();
+    assert(house_map_next_dirty(0) == 0);
+    uint32_t clears = house_map_clears();
+    cell_map_clear(); // clears the whole-house map too
+    assert(house_map_tiles() == 0 && house_map_clears() == clears + 1);
+    printf("ok: whole-house map: tiles, known overwrites, unknown keeps, dirty tiles\n");
+
+    // The window follows the robot down a hallway (walls 1 m to each side, an end
+    // wall behind the start: rays reading nothing clear only 1 m).
+    reset_scene();
+    add_box(-3, 8, 1.0f, 1.1f, 0, 1);
+    add_box(-3, 8, -1.1f, -1.0f, 0, 1);
+    add_box(-3.1f, -3, -1, 1, 0, 1);
+    int near_box = add_box(-1.8f, -1.6f, -0.1f, 0.1f, 0, 0.1f);
+    add_box(5.4f, 5.6f, -0.1f, 0.1f, 0, 0.1f);
+    scan_at(0, 0);
+    int ox, oy;
+    cell_map_window(&ox, &oy);
+    assert(ox == -30 && oy == -30);
+    assert(cell_map_column(-1.65f, 0.05f) == COLUMN_BLOCKED);
+    cell_map_follow(1.45f, 0);
+    cell_map_window(&ox, &oy);
+    assert(ox == -30); // 0.45 m out of the middle tile: stays
+    for (float x = 0; x <= 4.5f; x += 0.05f) {
+        cell_map_follow(x, 0);
+        frame_at((pose_t){x, 0, 0, 0});
+    }
+    cell_map_window(&ox, &oy);
+    printf("hallway: driven to 4.5 m, the window starts at %.1f m; the box 5.4 m ahead: %d of 2 columns blocked;"
+           " the one behind the start (now outside): %s, %d tiles kept\n", (double)(ox * 0.1f),
+           count(5.4f, 5.5f, -0.1f, 0.1f, COLUMN_BLOCKED),
+           cell_map_column(-1.65f, 0.05f) == COLUMN_BLOCKED ? "blocked" : "lost", house_map_tiles());
+    assert(ox == 10 && oy == -30); // middle tile 2 (3-5 m)
+    assert(count(5.4f, 5.5f, -0.1f, 0.1f, COLUMN_BLOCKED) == 2);
+    assert(cell_map_column(-1.65f, 0.05f) == COLUMN_BLOCKED); // from the whole-house map
+    assert(cell_map_column(0.05f, 1.05f) == COLUMN_BLOCKED);  // the wall at the start
+    // Back at the start (no frames on the way): the box comes back from the
+    // whole-house map, barely confident.
+    cell_map_follow(0, 0);
+    cell_map_window(&ox, &oy);
+    assert(ox == -30);
+    float conf;
+    assert(cell_map_cell(-1.65f, 0.05f, 1, &conf) == CELL_STATE_OCCUPIED && conf < 0.1f);
+    assert(cell_map_column(-1.65f, 0.05f) == COLUMN_BLOCKED && count(5.4f, 5.5f, -0.1f, 0.1f, COLUMN_BLOCKED) == 2);
+    // The box taken away: a scan erases it, and the whole-house map gets that too
+    // once it scrolls out again.
+    boxes[near_box].on = false;
+    scan_at(0, 0);
+    assert(cell_map_column(-1.65f, 0.05f) != COLUMN_BLOCKED);
+    cell_map_follow(4.5f, 0);
+    assert(cell_map_column(-1.65f, 0.05f) != COLUMN_BLOCKED && cell_map_column(-1.65f, 0.05f) != COLUMN_UNKNOWN);
+    printf("ok: the window follows the robot by tiles; what scrolls out is kept, and comes back\n");
+
     return 0;
 }

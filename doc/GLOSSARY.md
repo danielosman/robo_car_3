@@ -13,7 +13,9 @@ plans.
 | **pose** | Where the robot is and which way it faces (x, y, heading), plus pitch; `pose.c` gives it for any moment of the last ~1.3 s |
 | **heading** | The robot's direction in the map, from the gyro. Angles: **+ = left** |
 | **ego-motion** | The robot's own movement (turning, driving), as the gyro and encoders measure it. Everything a sensor sees shifts when the robot moves; that shift is ego-motion, not something moving in the room |
-| **action** | Something the robot does over time on a key: scan, move, turn, watch, record 5 s. One at a time; it ends done, stopped, replaced, or on a safety stop |
+| **action** | Something the robot does over time on a key: scan, move, turn, watch, record 5 s, go to (a click on the map). One at a time; it ends done, stopped, replaced, on an obstacle, or on a safety stop |
+| **mode** | Who chooses the actions: **idle** (nobody; after power-up and stop) or **manual** (the operator, by keys and clicks on the map) |
+| **goal** | A point on the map (its frame) the robot is sent to by a click in manual mode |
 | **safety stop** | PicoB switching the motors off by itself: no drive command for 250 ms, a wheel not following, or tilted beyond 15° |
 
 ## Sensors
@@ -39,6 +41,9 @@ plans.
 | **reading** | A zone's distance in one frame, judged as a whole: **obstacle** (closer than its cone can meet the floor), **floor**, or **unsure** |
 | **q** | One frame's confidence in its verdict on a cell, 0-1: how many full-strength rays agree, out of 9 |
 | **drivable** | A column whose G is floor and whose L1 and L2 are both free |
+| **window** | The 6 × 6 m of cells the robot keeps around itself, 3 × 3 tiles; it scrolls by a tile to keep the robot in its middle tile. Its **anchor** is its corner's world cell |
+| **tile** | 2 × 2 m (20 × 20 columns) of the whole-house map |
+| **whole-house map** | Every column the window has seen, as its class (4 bits), in tiles; the window overwrites it where it knows something |
 
 ## Movement
 
@@ -58,6 +63,8 @@ plans.
 | **boot** | One power-up of PicoA, with a random id; all takes of a boot share one odometry frame |
 | **datagram** | One UDP packet of records (≤ 1400 B), numbered, so the PC sees what was lost |
 | **replay** | Running the robot's own code (the map) on a recorded take on the Mac |
+| **snapshot** | What the robot knows at one moment, sent after every action, on `S` and to a new server: pose, camera picture and features, one ToF frame, colour, map window and changed tiles |
+| **full telemetry** | The recordings (takes), as opposed to snapshots; `R`, off at power-up |
 | **truth box** | Where something really stood, placed by hand in the viewer to score the map |
 
 ## Process
@@ -67,7 +74,7 @@ plans.
 | **host test** | A test that runs on the Mac (`./run_tests.sh`), no robot |
 | **robot test** | Steps Daniel does on the robot, with what to expect and what to paste |
 
-## Planned: camera tracking ([archive/CAMERA_MOTION_PLAN.md](archive/CAMERA_MOTION_PLAN.md))
+## Camera tracking ([archive/CAMERA_MOTION_PLAN.md](archive/CAMERA_MOTION_PLAN.md); features built, V1; the rest planned)
 
 | Term | Meaning |
 |---|---|

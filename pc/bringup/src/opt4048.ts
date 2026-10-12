@@ -15,7 +15,7 @@ export function optCrc(mantissa: number, exponent: number, counter: number) {
 }
 export function decodeOpt(b: Buffer) {
   if (b.length !== 28 || b[0] !== 1 || b.readUInt16LE(2) !== 0x0821) throw new Error('Invalid OPT4048 packet');
-  const channels = [];
+  const channels: {adc: number; exponent: number; counter: number; crcOk: boolean; rangeOk: boolean}[] = [];
   for (let i = 0; i < 4; ++i) {
     const p = 12 + 4*i, exponent = b[p] >> 4;
     const mantissa = ((b[p] & 15) << 16) | (b[p+1] << 8) | b[p+2];

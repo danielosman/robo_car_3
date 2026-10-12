@@ -6,15 +6,48 @@ import assert from "node:assert/strict";
 import dgram from "node:dgram";
 import net from "node:net";
 import { once } from "node:events";
-import { RecordSplitter, RobotLink, type RobotStatus } from "./robot.ts";
+import { RecordSplitter, RobotLink, parsePose, type LivePose, type RobotStatus } from "./robot.ts";
 
 test("status records are taken out of the text, wherever they land", () => {
   const s = new RecordSplitter();
-  assert.deepEqual(s.push(Buffer.from("x +1.0 cm  y \x01rssi -5")), { text: "x +1.0 cm  y ", records: [] });
-  assert.deepEqual(s.push(Buffer.from("5\n+2.0 cm\r\n")), { text: "+2.0 cm\n", records: ["rssi -55"] });
+  assert.deepEqual(s.push(Buffer.from("x +1.0 cm  y \x01rssi -5")), { text: "x +1.0 cm  y ", records: [], snapshotBytes: [] });
+  assert.deepEqual(s.push(Buffer.from("5\n+2.0 cm\r\n")), { text: "+2.0 cm\n", records: ["rssi -55"], snapshotBytes: [] });
   const deg = Buffer.from("90°\n");
   assert.equal(s.push(deg.subarray(0, 3)).text, "90");
   assert.equal(s.push(deg.subarray(3)).text, "°\n");
+});
+
+// [0x02][length u16][bytes], as wifi_console.c sends snapshot bytes.
+const chunk = (bytes: Buffer) => Buffer.concat([Buffer.from([2, bytes.length & 255, bytes.length >> 8]), bytes]);
+
+test("snapshot chunks come out of the stream between any two bytes, also inside a record", () => {
+  const s = new RecordSplitter();
+  const a = Buffer.from("SNAP\x01\x02\n\x01binary"), b = Buffer.alloc(300, 7);
+  const stream = Buffer.concat([Buffer.from("line 1\n\x01rss"), chunk(a), Buffer.from("i -5"), chunk(b), Buffer.from("5\nline 2\n")]);
+  for (const size of [1, 2, 3, 7, 1000]) {
+    let text = "";
+    const records: string[] = [], bytes: Buffer[] = [];
+    for (let at = 0; at < stream.length; at += size) {
+      const out = s.push(stream.subarray(at, at + size));
+      text += out.text;
+      records.push(...out.records);
+      bytes.push(...out.snapshotBytes);
+    }
+    assert.equal(text, "line 1\nline 2\n");
+    assert.deepEqual(records, ["rssi -55"]);
+    assert.deepEqual(Buffer.concat(bytes), Buffer.concat([a, b]));
+  }
+});
+
+test("pose records", () => {
+  const p = parsePose("pose 125.0 -50.0 43.0 manual goto")!;
+  assert.equal(p.x, 1.25);
+  assert.equal(p.y, -0.5);
+  assert.ok(Math.abs(p.yaw - 43 * Math.PI / 180) < 1e-12);
+  assert.equal(p.mode, "manual");
+  assert.equal(p.action, "goto");
+  assert.equal(parsePose("pose 1 2 3 idle -")!.action, "");
+  assert.equal(parsePose("rssi -50"), null);
 });
 
 async function startLink(silenceMs = 3000) {
@@ -60,6 +93,28 @@ test("announces itself, passes text and keys, shows the signal", async () => {
     await until(() => link.status.state === "lost");
     assert.equal(link.sendKey("p"), false);
     assert.deepEqual(statuses.map(s => s.state), ["connected", "connected", "lost"]);
+  } finally { link.stop(); }
+});
+
+test("commands to the robot; snapshots and poses from it", async () => {
+  const { link, port } = await startLink();
+  try {
+    const snaps: Buffer[] = [], poses: LivePose[] = [];
+    link.on("snapshot", b => snaps.push(b));
+    link.on("pose", p => poses.push(p));
+    const r = await robot(port);
+    await until(() => link.status.state === "connected");
+    assert.ok(link.sendCommand("goal 120 -35"));
+    assert.ok(!link.sendCommand("goal\n1 2")); // one line of printable text only
+    await until(() => r.received.join("").replace(/\0/g, "") === "\x02goal 120 -35\n");
+    const snap = Buffer.alloc(40);
+    snap.write("SNAP", 0, "latin1");
+    snap.writeUInt32LE(40, 5);
+    r.socket.write(Buffer.concat([chunk(snap.subarray(0, 25)), Buffer.from("\x01pose 1 2 3 idle -\n"), chunk(snap.subarray(25))]));
+    await until(() => snaps.length === 1 && poses.length === 1);
+    assert.deepEqual(snaps[0], snap);
+    assert.equal(poses[0].y, 0.02);
+    r.socket.destroy();
   } finally { link.stop(); }
 });
 

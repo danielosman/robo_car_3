@@ -119,6 +119,9 @@ typedef struct __attribute__((packed)) {
 #define TOF_HALF_MAX (sizeof(rec_tof_head_t) + HALF_ZONES * (sizeof(rec_zone_t) + \
                       VL53L8CX_NB_TARGET_PER_ZONE * sizeof(rec_target_t)))
 #define ODOM_REC REC_MAX(sizeof(rec_odom_t))
+_Static_assert(sizeof(rec_tof_head_t) + 64 * (sizeof(rec_zone_t) + VL53L8CX_NB_TARGET_PER_ZONE * sizeof(rec_target_t))
+               <= RECORDER_TOF_MAX, "RECORDER_TOF_MAX");
+_Static_assert(sizeof(rec_geometry_t) == RECORDER_GEOMETRY_SIZE, "RECORDER_GEOMETRY_SIZE");
 
 static bool enabled, in_take, cut;
 static uint32_t boot_id, connection; // connection: the console connection the take goes with
@@ -138,7 +141,7 @@ static int n_odoms, n_last_odoms;
 static bool dgram_has_frame_half; // for counting frames_failed
 static uint32_t datagrams_total, datagrams_failed_total;
 
-static uint32_t crc32(const uint8_t *p, uint32_t n) {
+uint32_t recorder_crc32(const uint8_t *p, uint32_t n) {
     static const uint32_t nibble[16] = {
         0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac, 0x76dc4190, 0x6b6b51f4, 0x4db26158, 0x5005713c,
         0xedb88320, 0xf00f9344, 0xd6d6a3e8, 0xcb61b38c, 0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c,
@@ -190,7 +193,7 @@ static bool put(uint8_t *rec, uint8_t type, uint32_t len) {
     rec[0] = type;
     rec[1] = (uint8_t)len;
     rec[2] = (uint8_t)(len >> 8);
-    uint32_t crc = crc32(rec, REC_HEAD + len), n = REC_HEAD + len + REC_CRC;
+    uint32_t crc = recorder_crc32(rec, REC_HEAD + len), n = REC_HEAD + len + REC_CRC;
     memcpy(rec + REC_HEAD + len, &crc, REC_CRC);
     if (dgram_len + n > DGRAM_MAX) flush(1);
     if (dgram_records == 0) dgram_since_us = time_us_32();
@@ -260,15 +263,15 @@ static void put_wifi(void) {
 
 static uint16_t cap16(uint32_t v) { return v > 0xffffu ? 0xffffu : (uint16_t)v; }
 
-// Zones first .. first + HALF_ZONES - 1 of the latest frame.
-static void put_tof_half(const range_frame_t *frame, const VL53L8CX_ResultsData *r, int first) {
-    static uint8_t rec[REC_MAX(TOF_HALF_MAX)];
-    uint8_t *p = rec + REC_HEAD;
-    rec_tof_head_t h = {.frame_no = frame->number, .t_us = frame->t_us, .skipped = skipped,
-                        .temp_c = r->silicon_temp_degc, .first_zone = (uint8_t)first, .zones = HALF_ZONES};
+uint32_t recorder_tof_payload(uint8_t *out, const range_frame_t *frame, int first, int zones, uint16_t skipped_before) {
+    const VL53L8CX_ResultsData *r = rangefinder_raw();
+    if (!r) return 0;
+    uint8_t *p = out;
+    rec_tof_head_t h = {.frame_no = frame->number, .t_us = frame->t_us, .skipped = skipped_before,
+                        .temp_c = r->silicon_temp_degc, .first_zone = (uint8_t)first, .zones = (uint8_t)zones};
     memcpy(p, &h, sizeof h);
     p += sizeof h;
-    for (int z = first; z < first + HALF_ZONES; z++) {
+    for (int z = first; z < first + zones; z++) {
         int n = r->nb_target_detected[z];
         if (n > (int)VL53L8CX_NB_TARGET_PER_ZONE) n = VL53L8CX_NB_TARGET_PER_ZONE;
         rec_zone_t zone = {.targets = (uint8_t)n, .ambient_per_spad = cap16(r->ambient_per_spad[z]),
@@ -284,7 +287,23 @@ static void put_tof_half(const range_frame_t *frame, const VL53L8CX_ResultsData 
             p += sizeof target;
         }
     }
-    uint32_t len = (uint32_t)(p - (rec + REC_HEAD));
+    return (uint32_t)(p - out);
+}
+
+uint32_t recorder_geometry_payload(uint8_t *out) {
+    float origin[3];
+    rangefinder_origin(origin);
+    rec_geometry_t g = {.sensor_m = {origin[0], origin[1], origin[2]}, .zone_rad = rangefinder_zone_rad(),
+                        .rows = RANGEFINDER_ROWS, .cols = RANGEFINDER_COLS};
+    for (int i = 0; i < RANGEFINDER_RAYS; i++) g.zone_of_ray[i] = (uint8_t)rangefinder_zone(i);
+    memcpy(out, &g, sizeof g);
+    return sizeof g;
+}
+
+// Zones first .. first + HALF_ZONES - 1 of the latest frame.
+static void put_tof_half(const range_frame_t *frame, int first) {
+    static uint8_t rec[REC_MAX(TOF_HALF_MAX)];
+    uint32_t len = recorder_tof_payload(rec + REC_HEAD, frame, first, HALF_ZONES, skipped);
     if (dgram_len + REC_MAX(len) > DGRAM_MAX) flush(1); // each half starts a datagram: a lost one costs one half
     if (put(rec, REC_TOF_RAW, len)) dgram_has_frame_half = true;
 }
@@ -301,6 +320,8 @@ void recorder_set(bool on) {
 }
 
 bool recorder_on(void) { return enabled; }
+
+uint32_t recorder_boot_id(void) { return boot_id; }
 
 bool recorder_ready(void) { return enabled && wifi_console_data_connection() != 0; }
 
@@ -332,11 +353,8 @@ void recorder_take_start(const char *action, float param) {
     snprintf(s.action, sizeof s.action, "%s", action);
     snprintf(s.build, sizeof s.build, "%s", __DATE__ " " __TIME__);
     put_small(REC_TAKE_START, &s, sizeof s);
-    float origin[3];
-    rangefinder_origin(origin);
-    rec_geometry_t g = {.sensor_m = {origin[0], origin[1], origin[2]}, .zone_rad = rangefinder_zone_rad(),
-                        .rows = RANGEFINDER_ROWS, .cols = RANGEFINDER_COLS};
-    for (int i = 0; i < RANGEFINDER_RAYS; i++) g.zone_of_ray[i] = (uint8_t)rangefinder_zone(i);
+    rec_geometry_t g;
+    recorder_geometry_payload((uint8_t *)&g);
     put_small(REC_GEOMETRY, &g, sizeof g);
     odom_taken = body_odom_count();
     put_odom(odom_taken); // the pose before the first frame
@@ -366,11 +384,10 @@ void recorder_take_end(rec_end_t reason) {
 }
 
 void recorder_tof(const range_frame_t *frame) {
-    const VL53L8CX_ResultsData *r = rangefinder_raw();
-    if (!in_take || !r) return;
+    if (!in_take || !rangefinder_raw()) return;
     uint32_t failed = counts.frames_failed;
-    put_tof_half(frame, r, 0);
-    if (in_take) put_tof_half(frame, r, HALF_ZONES);
+    put_tof_half(frame, 0);
+    if (in_take) put_tof_half(frame, HALF_ZONES);
     if (!in_take) return;
     flush(1); // whole halves go at once; the next records start a new datagram
     if (counts.frames_failed == failed) { counts.frames++; skipped = 0; }

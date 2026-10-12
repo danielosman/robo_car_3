@@ -11,7 +11,8 @@
 // them and stops facing them; one walking faster than it turns gets away and it
 // stops; watching ends after a minute. Each action is one take for the recorder,
 // ended with the right reason; record 5 s stands still with the motors off, only
-// with recording ready.
+// with recording ready. Go to a point turns towards it and drives there (or stops
+// before an obstacle, or short of it where asked).
 // The test provides body.h's and recorder.h's functions. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_behaviour picoA/app/test/test_behaviour.c -lm && build/test_behaviour
 #include <assert.h>
@@ -20,6 +21,7 @@
 #include "../pose.c"
 #include "../rangefinder.c"
 #include "../cell_map.c"
+#include "../house_map.c"
 #include "../surroundings.c"
 #include "../behaviour.c"
 
@@ -377,6 +379,7 @@ int main(void) {
     chair_there = false;
     printf("OK: a move stops 15 cm before an obstacle on the map, ahead or behind, or doesn't start\n");
 
+
     // Stop ends a scan at once; a new action replaces the running one (the motors
     // stay on in between) and runs whole.
     yaw = sim.yaw_rad;
@@ -498,5 +501,40 @@ int main(void) {
     printf("watching ended by itself after %.1f s\n", (double)watched_s);
     assert(watched_s > 59.5f && watched_s < 61 && !movement_log);
     printf("OK: watching, the robot turns towards movement and stops facing it; it ends after a minute\n");
+
+    // Go to a point: turn towards it, drive there, motors off; each one a take and an
+    // ending. Back to the middle first, then 1 m ahead-right; then towards a point
+    // beyond the front wall: stops 15 cm (front edge) before it.
+    const float goals[2][2] = {{0, 0}, {1.0f, -0.3f}};
+    for (int k = 0; k < 2; k++) {
+        uint32_t endings_before = behaviour_endings(NULL, NULL);
+        behaviour_goto(goals[k][0], goals[k][1], 0);
+        assert(take_running && strcmp(take_action, "goto") == 0);
+        float took = run_action(30);
+        const char *ended_name;
+        rec_end_t ended_why;
+        assert(behaviour_endings(&ended_name, &ended_why) == endings_before + 1);
+        assert(strcmp(ended_name, "goto") == 0 && ended_why == REC_END_DONE && take_end == REC_END_DONE);
+        float off_cm = hypotf(sim.x_m - goals[k][0], sim.y_m - goals[k][1]) * 100;
+        printf("go to (%+.0f, %+.0f) cm: there in %.1f s, %.1f cm off\n", (double)(goals[k][0] * 100),
+               (double)(goals[k][1] * 100), (double)took, (double)off_cm);
+        assert(off_cm < 3);
+    }
+    behaviour_goto(3.0f, -0.3f, 0);
+    run_action(30);
+    gap_cm = (WALL_FRONT - sim.x_m - EDGE_M) * 100;
+    printf("go to a point 1.4 m beyond the front wall: stopped with the front edge %.1f cm from it\n", (double)gap_cm);
+    assert(take_end == REC_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
+    // Already there: nothing starts.
+    takes_before = takes;
+    behaviour_goto(sim.x_m + 0.02f, sim.y_m, 0);
+    assert(!behaviour_busy() && takes == takes_before);
+    // Stopping before it: 50 cm short of the middle, measured along the way.
+    behaviour_goto(0, -0.3f, 0.5f);
+    run_action(30);
+    float short_cm = hypotf(sim.x_m, sim.y_m + 0.3f) * 100;
+    printf("go to the middle, stopping 50 cm before it: stopped %.1f cm from it\n", (double)short_cm);
+    assert(fabsf(short_cm - 50) < 3);
+    printf("OK: go to a point turns, drives there, stops before obstacles and where asked\n");
     return 0;
 }

@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
 #include "units.h"
@@ -15,15 +16,22 @@
 #include "camera_motion.h"
 #include "motion_sense.h"
 #include "loop_stats.h"
+#include "mode.h"
+#include "snapshot.h"
+#include "vision.h"
 #include "debug_console.h"
 
 #define GREETING_DELAY_US 1000000  // the Mac drops what arrives the moment the port opens
 #define MOVE_M            0.5f
 #define TURN_RAD          (30 * RAD_PER_DEG)
+#define COMMAND_START     0x02 // the server's commands: "\002<command>\n" (pc/robot/src/robot.ts)
+#define COMMAND_MAX       48
 // printf takes doubles; the (double) casts below are for printing only.
 
 // The same keys on USB and over WiFi (both are stdio). One key, one operation
-// (doc/ARCHITECTURE.md, console); the robot does nothing by itself.
+// (doc/ARCHITECTURE.md, console); the robot does nothing by itself. The viewer's
+// commands come the same way, as "\002<command>\n": "goal <x cm> <y cm>" (a point
+// on the map, taken only in manual mode), "mode idle" / "mode manual".
 static bool usb_was_connected, wifi_was_connected, greeted;
 static absolute_time_t greeting_time;
 static bool backwards; // the direction setting: f moves back, t turns right
@@ -33,16 +41,18 @@ static const char *direction(void) {
 }
 
 static void help(void) {
-    printf("Keys: space = stop (motors off), p = status, h = help; the robot does nothing by itself\n"
-           "Actions (motors on while one runs): s = scan (390 deg left), f = move %.0f cm, t = turn %.0f deg,\n"
-           "       a = watch movement for 1 min, 5 = record 5 s standing still (motors off)\n"
+    printf("Keys: space = stop (motors off, mode idle), p = status, h = help; the robot does nothing by itself\n"
+           "Actions (motors on while one runs; in idle they switch to manual): s = scan (390 deg left),\n"
+           "       f = move %.0f cm, t = turn %.0f deg, a = watch movement for 1 min, 5 = record 5 s standing still\n"
+           "Mode: M = manual / idle (now %s); in manual, a click on the viewer's map sends the robot there\n"
+           "Snapshot: S = send one to the viewer now (one goes after every action anyway)\n"
            "Settings: r = direction forward / back (now %s), R = recording on / off (now %s)\n"
            "Map: C = clear the map, m = print the map, z = one ToF frame\n"
-           "Camera: c = one frame as 20 x 15 blocks, with its exposure\n"
+           "Camera: c = one frame as 20 x 15 blocks, with its exposure; v = its features (vision)\n"
            "Movement backgrounds now: o = each ToF zone, k = each camera block\n"
            "WiFi: W = connect (or show how it is connected)\n",
-           (double)(MOVE_M * 100), (double)(TURN_RAD * DEG_PER_RAD), backwards ? "back" : "forward",
-           recorder_on() ? "on" : "off");
+           (double)(MOVE_M * 100), (double)(TURN_RAD * DEG_PER_RAD), mode_name(mode_get()),
+           backwards ? "back" : "forward", recorder_on() ? "on" : "off");
 }
 
 static void greet(void) {
@@ -190,6 +200,47 @@ static void print_ram(void) {
     printf("RAM free %lu KB\n", (unsigned long)((uintptr_t)&__HeapLimit - (uintptr_t)&__end__) / 1024);
 }
 
+// An action asked for by the operator: in idle, the robot is now steered by hand.
+static void manual(void) { if (mode_get() == MODE_IDLE) mode_set(MODE_MANUAL); }
+
+static void stop(void) {
+    behaviour_stop();
+    body_motors(false);
+    printf("Stopped, motors off\n");
+    mode_set(MODE_IDLE);
+}
+
+// One of the server's commands (without "\002" and "\n").
+static void command(const char *text) {
+    int x_cm, y_cm;
+    char name[12];
+    if (sscanf(text, "goal %d %d", &x_cm, &y_cm) == 2) {
+        if (mode_get() != MODE_MANUAL) { printf("Goal (%+d, %+d) cm ignored: not in manual mode (M)\n", x_cm, y_cm); return; }
+        behaviour_goto((float)x_cm / 100, (float)y_cm / 100, 0);
+    } else if (sscanf(text, "mode %11s", name) == 1 && (!strcmp(name, "idle") || !strcmp(name, "manual"))) {
+        if (!strcmp(name, "idle")) stop();
+        else mode_set(MODE_MANUAL);
+    } else {
+        printf("Unknown command \"%s\"\n", text);
+    }
+}
+
+// Collects a command's characters (they may come over several loop iterations);
+// true while one is being read.
+static bool command_char(int c) {
+    static char text[COMMAND_MAX + 1];
+    static int n = -1; // -1: not in a command
+    if (c == COMMAND_START) { n = 0; return true; }
+    if (n < 0) return false;
+    if (c == '\n') {
+        text[n] = 0;
+        n = -1;
+        recorder_key('!'); // a mark in the recording
+        command(text);
+    } else if (n < COMMAND_MAX) text[n++] = (char)c;
+    return true;
+}
+
 void debug_console_update(void) {
     bool usb = stdio_usb_connected(), wifi = wifi_console_connected();
     if ((usb && !usb_was_connected) || (wifi && !wifi_was_connected)) {
@@ -208,15 +259,20 @@ void debug_console_update(void) {
     }
 
     int key = getchar_timeout_us(0);
-    if (key == PICO_ERROR_TIMEOUT) return;
+    if (key == PICO_ERROR_TIMEOUT || command_char(key)) return;
     recorder_key((char)key);
     switch (key) {
-    case ' ': behaviour_stop(); body_motors(false); printf("Stopped, motors off\n"); break;
-    case 's': behaviour_scan(); break;
-    case 'f': behaviour_move(backwards ? -MOVE_M : MOVE_M); break;
-    case 't': behaviour_turn(backwards ? -TURN_RAD : TURN_RAD); break;
-    case 'a': behaviour_watch(); break;
-    case '5': behaviour_record(); break;
+    case ' ': stop(); break;
+    case 's': manual(); behaviour_scan(); break;
+    case 'f': manual(); behaviour_move(backwards ? -MOVE_M : MOVE_M); break;
+    case 't': manual(); behaviour_turn(backwards ? -TURN_RAD : TURN_RAD); break;
+    case 'a': manual(); behaviour_watch(); break;
+    case '5': manual(); behaviour_record(); break;
+    case 'M':
+        if (mode_get() == MODE_MANUAL) stop();
+        else mode_set(MODE_MANUAL);
+        break;
+    case 'S': snapshot_request(SNAP_KEY); printf("Snapshot: asked for\n"); break;
     case 'R':
         recorder_set(!recorder_on());
         if (!recorder_on()) printf("Recording: off\n");
@@ -228,6 +284,7 @@ void debug_console_update(void) {
     case 'm': print_map(); break;
     case 'z': print_frame(); break;
     case 'c': print_camera(); break;
+    case 'v': vision_print_status(); break;
     case 'o': print_tof_motion(); break;
     case 'k': print_camera_motion(); break;
     case 'p':
@@ -236,6 +293,8 @@ void debug_console_update(void) {
         wifi_console_print_status();
         loop_stats_print();
         print_ram();
+        printf("Mode: %s\n", mode_name(mode_get()));
+        snapshot_print_status();
         recorder_print_status();
         printf("Direction: %s\n", direction());
         break;

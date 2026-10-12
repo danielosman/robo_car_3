@@ -1,10 +1,16 @@
 // RoboCar robot server (doc/ARCHITECTURE.md, the PC): PicoA connects over WiFi, the browser at
-// http://127.0.0.1:8080/ shows its console and sends keys. Every run writes a log
-// file in logs/. PicoA's recordings arrive on a second connection and are saved in
+// http://127.0.0.1:8080/ shows the robot's map, its snapshots (camera, ToF, colour,
+// pose; any one of them back in time), its console, and steers it: keys, the mode,
+// and in manual mode a click on the map sends it there. The console alone is at
+// /console. Every run writes a log file in logs/. Snapshots arrive between the
+// console's text and are saved in recordings/snapshots/ (snapshot.ts) and stored in
+// DuckDB (store.ts, snapshots_api.ts). PicoA's recordings arrive on a second connection and are saved in
 // recordings/ (recording.ts); each take goes into DuckDB as it
 // ends (store.ts), listed at http://127.0.0.1:8080/takes and shown in 3D at /viewer
 // (viewer_api.ts). Ports: PORT (HTTP 8080),
-// ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one.
+// ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one;
+// ANNOUNCE_TO (comma-separated addresses, default every network's broadcast): a test
+// server announcing only to 127.0.0.1 isn't found by the robot.
 import http from "node:http";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -16,6 +22,9 @@ import { DATA_PORT, RecordingServer } from "./recording.ts";
 import { Store } from "./store.ts";
 import { DB_PATH } from "./import.ts";
 import { handleViewerApi } from "./viewer_api.ts";
+import { handleSnapshotApi } from "./snapshots_api.ts";
+import { SnapshotSaver, imagePath, type Snapshot } from "./snapshot.ts";
+import type { LivePose } from "./robot.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HTTP_PORT = Number(process.env.PORT ?? 8080);
@@ -55,17 +64,32 @@ async function main(): Promise<void> {
       .then(n => note(`${take.name} stored: ${n.frames} frames, ${n.targets} targets, ${n.odom} odometry reports`))
       .catch(err => note(`${take.name} NOT stored: ${(err as Error).message}`));
   });
+  const recordingsDir = path.join(root, "recordings");
+  const snapshots = new SnapshotSaver(path.join(recordingsDir, "snapshots"));
+  snapshots.on("note", note);
+  snapshots.on("snapshot", (s: Snapshot, ms: number, file: string) => {
+    const image = s.camera ? path.relative(recordingsDir, imagePath(path.join(recordingsDir, "snapshots"), s.bootId, s.seq)) : null;
+    store.importSnapshot(s, ms, file, image)
+      .then(() => broadcast({ type: "snapshot", boot: s.bootId, seq: s.seq }))
+      .catch(err => note(`snapshot ${s.seq} NOT stored: ${(err as Error).message}`));
+  });
+  let lastPose: LivePose | null = null;
   const dataPort = await recordings.start();
-  const robot = new RobotLink({ dataPort, robotPort: Number(process.env.ROBOT_PORT ?? ROBOT_PORT) });
+  const announceTo = process.env.ANNOUNCE_TO ? process.env.ANNOUNCE_TO.split(",") : [];
+  const robot = new RobotLink({ dataPort, robotPort: Number(process.env.ROBOT_PORT ?? ROBOT_PORT), announceTo });
   robot.on("text", (text: string) => { logFile.write(text); process.stdout.write(text); add({ kind: "text", text }); });
   robot.on("note", note);
   robot.on("bytes", (n: number) => recordings.consoleArrived(n));
   robot.on("status", status => broadcast({ type: "status", status }));
+  robot.on("snapshot", (b: Buffer) => snapshots.arrived(b));
+  robot.on("pose", (p: LivePose) => { lastPose = p; broadcast({ type: "pose", pose: p }); });
   await robot.start();
-  note(`server started; announcing on ${broadcastAddresses().join(", ") || "no network"}; log ${path.relative(root, logPath)}`);
+  note(`server started; announcing on ${(announceTo.length ? announceTo : broadcastAddresses()).join(", ") || "no network"}; log ${path.relative(root, logPath)}`);
 
   const files: Record<string, [string, string]> = {
-    "/": ["index.html", "text/html"],
+    "/": ["app.html", "text/html"],
+    "/app.js": ["app.js", "text/javascript"],
+    "/console": ["index.html", "text/html"],
     "/console.js": ["console.js", "text/javascript"],
     "/takes": ["takes.html", "text/html"],
     "/takes.js": ["takes.js", "text/javascript"],
@@ -78,6 +102,7 @@ async function main(): Promise<void> {
   };
   const server = http.createServer(async (req, res) => {
     if (await handleViewerApi(req, res, store)) return;
+    if (await handleSnapshotApi(req, res, store, recordingsDir)) return;
     if (req.url === "/api/takes" && req.method === "GET") {
       try {
         json(res, 200, await store.query(`SELECT take_id, boot_id, take_no, strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started,
@@ -119,13 +144,23 @@ async function main(): Promise<void> {
     clients.add(ws);
     send(ws, { type: "backlog", items: backlog });
     send(ws, { type: "status", status: robot.status });
+    if (lastPose) send(ws, { type: "pose", pose: lastPose });
     ws.on("close", () => clients.delete(ws));
     ws.on("error", () => clients.delete(ws));
     ws.on("message", data => {
-      let msg: { type?: string; key?: string };
+      let msg: { type?: string; key?: string; x?: number; y?: number; mode?: string };
       try { msg = JSON.parse(String(data)); } catch { return; }
-      // One printable character: the serial monitor's keys.
-      if (msg.type !== "key" || typeof msg.key !== "string" || !/^[\x21-\x7e]$/.test(msg.key)) return;
+      // A goal on the map (m, map frame), the mode, or one printable character: the serial monitor's keys.
+      if (msg.type === "goal" && Number.isFinite(msg.x) && Number.isFinite(msg.y) && Math.abs(msg.x!) < 300 && Math.abs(msg.y!) < 300) {
+        const command = `goal ${Math.round(msg.x! * 100)} ${Math.round(msg.y! * 100)}`;
+        if (!robot.sendCommand(command)) note(`${command} not sent: robot not connected`);
+        return;
+      }
+      if (msg.type === "mode" && (msg.mode === "idle" || msg.mode === "manual")) {
+        if (!robot.sendCommand(`mode ${msg.mode}`)) note(`mode ${msg.mode} not sent: robot not connected`);
+        return;
+      }
+      if (msg.type !== "key" || typeof msg.key !== "string" || !/^[\x20-\x7e]$/.test(msg.key)) return;
       if (!robot.sendKey(msg.key)) note(`key ${msg.key} not sent: robot not connected`);
     });
   });

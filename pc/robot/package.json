@@ -9,10 +9,12 @@
   },
   "scripts": {
     "start": "node src/main.ts",
-    "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts src/viewer_api.test.ts",
+    "test": "node --test src/robot.test.ts src/recording.test.ts src/store.test.ts src/viewer_api.test.ts src/snapshot.test.ts",
     "decode": "node src/decode.ts",
     "import": "node src/import.ts",
     "frames": "node src/frames.ts",
+    "snapreplay": "node src/snapreplay.ts",
+    "fakerobot": "node src/fakerobot.ts",
     "typecheck": "tsc -p .",
     "lint": "eslint ."
   },

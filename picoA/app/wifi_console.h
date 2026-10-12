@@ -5,6 +5,9 @@
 // announcements and keeps reconnecting by itself; prints each step ("WiFi: ...",
 // "Server: ..."). Output while no server listens is kept (the last 16 KB) and sent
 // when one does. Losing the connection doesn't stop the robot.
+// Snapshots (snapshot.c) go on the console's connection, between its text, in
+// chunks [0x02][length u16][bytes] (text never holds 0x02), so TCP resends what the
+// air loses. Status records ("\001<text>\n") go to the server only.
 // Recordings (recorder.c) go to the server as UDP datagrams,
 // beside the console: a lost one is lost, and nothing waits behind it.
 #include <stdbool.h>
@@ -19,6 +22,14 @@ void wifi_console_update(void);       // call every loop iteration
 // is none: recordings go to that server. A different number means it was lost in
 // between.
 uint32_t wifi_console_data_connection(void);
+// Hands a snapshot to the console's connection; false if one is still being sent.
+// buf must stay unchanged until wifi_console_snapshot_busy() is false. The text
+// printed meanwhile goes first. If the connection is lost, the snapshot is sent
+// again from its start on the next one.
+bool wifi_console_snapshot_send(const uint8_t *buf, uint32_t len);
+bool wifi_console_snapshot_busy(void);
+// "\001<text>\n" to the server only (not on USB); nothing while no server listens.
+void wifi_console_record(const char *text);
 // One datagram to the server's recording port; false if lwIP or the WiFi chip
 // refused it (out of buffers) or there is no server.
 bool wifi_console_data_send(const void *buf, uint32_t len);

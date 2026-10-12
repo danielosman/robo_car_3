@@ -40,6 +40,8 @@
 #define OUT_SIZE           16384
 #define LWIP_SLOW_MS       500      // lwIP's rto ticks (TCP_SLOW_INTERVAL)
 #define IN_SIZE            64
+#define SNAP_CHUNK         1400     // snapshot bytes per chunk: [0x02][length u16][bytes]
+#define SNAP_MARK          0x02
 
 typedef enum {
     WIFI_OFF, WIFI_UNAVAILABLE, WIFI_JOINING, WIFI_JOIN_FAILED,
@@ -76,6 +78,9 @@ static uint16_t announced_port, announced_data_port;
 static absolute_time_t last_heard;
 static char in[IN_SIZE];                  // keys from the server
 static uint32_t in_start, in_len;
+// The snapshot being sent (wifi_console_snapshot_send): handed to TCP up to snap_at.
+static const uint8_t *snap;
+static uint32_t snap_len, snap_at;
 
 // --- lwIP side (lock held) ---
 
@@ -100,6 +105,21 @@ static void send_out(conn_t *c) {
         c->len -= n;
         sent = true;
     }
+    // The snapshot only once the text is out, in whole chunks.
+    while (c == &console && c->len == 0 && snap && snap_at < snap_len) {
+        uint32_t n = snap_len - snap_at;
+        if (n > SNAP_CHUNK) n = SNAP_CHUNK;
+        if (tcp_sndbuf(c->pcb) < n + 3) break;
+        static uint8_t chunk[SNAP_CHUNK + 3]; // static: this also runs in lwIP's interrupt
+        chunk[0] = SNAP_MARK;
+        chunk[1] = (uint8_t)n;
+        chunk[2] = (uint8_t)(n >> 8);
+        memcpy(chunk + 3, snap + snap_at, n);
+        if (tcp_write(c->pcb, chunk, (u16_t)(n + 3), TCP_WRITE_FLAG_COPY) != ERR_OK) { c->write_errors++; break; }
+        snap_at += n;
+        sent = true;
+    }
+    if (snap && snap_at == snap_len) snap = NULL; // all handed to TCP, which keeps a copy
     if (sent && tcp_output(c->pcb) != ERR_OK) c->output_errors++;
 }
 
@@ -123,6 +143,7 @@ static err_t on_connected(void *arg, struct tcp_pcb *pcb, err_t err) {
     (void)pcb; (void)err;
     conn_t *c = arg;
     c->up = true;
+    snap_at = 0; // a snapshot cut on the last connection: again from its start
     last_heard = get_absolute_time();
     send_out(c);
     return ERR_OK;
@@ -366,6 +387,36 @@ void wifi_console_print_status(void) {
     else if (state != WIFI_CONNECTED) printf("server %s:%u connecting...\n", ipaddr_ntoa(&server_ip), (unsigned)server_port);
     else printf("server %s:%u connected, recordings to UDP port %u\n", ipaddr_ntoa(&server_ip),
                 (unsigned)server_port, (unsigned)data_port);
+}
+
+bool wifi_console_snapshot_send(const uint8_t *buf, uint32_t len) {
+    cyw43_arch_lwip_begin();
+    bool free = snap == NULL;
+    if (free && len) {
+        snap = buf;
+        snap_len = len;
+        snap_at = 0;
+        send_out(&console);
+    }
+    cyw43_arch_lwip_end();
+    return free;
+}
+
+bool wifi_console_snapshot_busy(void) {
+    cyw43_arch_lwip_begin();
+    bool busy = snap != NULL;
+    cyw43_arch_lwip_end();
+    return busy;
+}
+
+void wifi_console_record(const char *text) {
+    if (state != WIFI_CONNECTED) return;
+    cyw43_arch_lwip_begin();
+    keep_out(&console, "\001", 1);
+    keep_out(&console, text, (uint32_t)strlen(text));
+    keep_out(&console, "\n", 1);
+    send_out(&console);
+    cyw43_arch_lwip_end();
 }
 
 uint32_t wifi_console_data_connection(void) { return state == WIFI_CONNECTED ? console_connections : 0; }

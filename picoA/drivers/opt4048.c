@@ -8,7 +8,8 @@
 #include "opt4048.h"
 #define ADDRESS 0x44
 #define CONFIG 0x3238
-static bool ready, have_counter;
+static bool ready, have_counter, have_reading;
+static opt4048_reading_t latest;
 static uint8_t last_counter;
 static unsigned failures;
 static uint32_t sequence;
@@ -26,7 +27,7 @@ static bool write16(uint8_t reg, uint16_t value) {
     uint8_t b[] = {reg, value >> 8, value & 255};
     return i2c_write_timeout_us(i2c0, ADDRESS, b, 3, false, 10000) == 3;
 }
-void opt4048_init(void) {
+bool opt4048_init(void) {
     ready = false; have_counter = false; failures = 0;
     // Set ADDR before any I2C activity (sampled on every transaction).
     gpio_init(2); gpio_put(2, 0); gpio_set_dir(2, GPIO_OUT);
@@ -40,19 +41,20 @@ void opt4048_init(void) {
     uint16_t id = 0, config = 0, control = 0;
     if (!read16(0x11, &id) || id != 0x0821) {
         printf("OPT4048 not detected: ID=0x%04x (expected 0821). Check power, GP2 ADDR and I2C0 GP4/5.\n", id);
-        return;
+        return false;
     }
     if (!write16(0x0a, 0x3208) || !write16(0x0b, 0x8011) || !write16(0x0a, CONFIG) ||
         !read16(0x0a, &config) || !read16(0x0b, &control) || config != CONFIG || control != 0x8011) {
         printf("OPT4048 configuration failed (config=%04x control=%04x)\n", config, control);
-        return;
+        return false;
     }
     ready = true;
     last_frame = get_absolute_time(); next_poll = make_timeout_time_ms(450);
     printf("OPT4048 ready: I2C0 0x44, 400kHz, auto-range, 100ms/channel (~2.5 complete cycles/s)\n");
+    return true;
 }
-void opt4048_poll(void) {
-    if (!ready || !time_reached(next_poll)) return;
+bool opt4048_poll(void) {
+    if (!ready || !time_reached(next_poll)) return false;
     next_poll = make_timeout_time_ms(25);
     uint8_t raw[16], again[16]; uint16_t flags;
     if (!read_bytes(0, raw, sizeof raw) || !read_bytes(0, again, sizeof again) || !read16(0x0c, &flags)) {
@@ -60,7 +62,7 @@ void opt4048_poll(void) {
             ready = false;
             printf("OPT4048 repeated I2C failures; check wiring/power and use Reinitialize\n");
         }
-        return;
+        return false;
     }
     failures = 0;
     if (absolute_time_diff_us(last_frame, get_absolute_time()) > 3000000) {
@@ -69,17 +71,19 @@ void opt4048_poll(void) {
     }
     // Channels convert sequentially, not simultaneously. Only publish stable
     // register snapshots with equal channel counters (one complete cycle).
-    if (memcmp(raw, again, sizeof raw)) return;
+    if (memcmp(raw, again, sizeof raw)) return false;
     uint8_t counter = raw[3] >> 4;
-    for (unsigned c = 1; c < 4; ++c) if ((raw[4*c + 3] >> 4) != counter) return;
-    if (have_counter && counter == last_counter) return;
+    for (unsigned c = 1; c < 4; ++c) if ((raw[4*c + 3] >> 4) != counter) return false;
+    if (have_counter && counter == last_counter) return false;
     have_counter = true; last_counter = counter; last_frame = get_absolute_time();
-    // OPT3 | payload length 28 LE | version, overload, ID LE, sequence LE,
-    // conversion ms LE, reserved[2], raw 16-byte big-endian register snapshot.
-    uint8_t packet[36] = {'O','P','T','3',28,0,0,0,1,(flags & 8) ? 1 : 0,
-        0x21,0x08,0,0,0,0,100,0,0,0};
-    for (unsigned i = 0; i < 4; ++i) packet[12+i] = sequence >> (8*i);
-    ++sequence;
-    memcpy(packet + 20, raw, sizeof raw);
-    fwrite(packet, 1, sizeof packet, stdout); fflush(stdout);
+    memcpy(latest.raw, raw, sizeof raw);
+    latest.overload = (flags & 8) != 0;
+    latest.sequence = sequence++;
+    latest.t_us = time_us_32();
+    have_reading = true;
+    return true;
+}
+bool opt4048_latest(opt4048_reading_t *reading) {
+    if (have_reading) *reading = latest;
+    return have_reading;
 }

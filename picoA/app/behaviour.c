@@ -29,11 +29,15 @@
 #define STOP_BEFORE_M    0.15f     // a move stops this far before an obstacle on the map...
 #define EDGE_M           0.095f    // ...measured from the front (back) edge, this far from the centre
 #define PATH_HALF_M      (0.235f / 2 + 0.05f) // the robot's half width plus 5 cm: the path a move checks
+#define GOTO_MAX_M       3.0f      // a goal farther away: the robot goes this far towards it
+#define GOTO_AIM_RAD     (1.5f * RAD_PER_DEG) // turned to within this of the goal's bearing: drive
+#define GOTO_STEER       2.0f      // while driving: turn rate per heading error (1/s)...
+#define GOTO_STEER_RADPS 0.3f      // ...at most this
 // printf takes doubles; the (double) casts below are for printing only.
 
-typedef enum { SCAN, MOVE, TURN, WATCH, RECORD } action_t;
-static const char *const action_name[] = {"Scan", "Move", "Turn", "Watch", "Record"};
-static const char *const take_name[] = {"scan", "move", "turn", "watch", "record"}; // in recordings
+typedef enum { SCAN, MOVE, TURN, WATCH, RECORD, GOTO } action_t;
+static const char *const action_name[] = {"Scan", "Move", "Turn", "Watch", "Record", "Go to"};
+static const char *const take_name[] = {"scan", "move", "turn", "watch", "record", "goto"}; // in recordings and snapshots
 
 // STARTING: the motors switching on; RUNNING: the action; SETTLING: done, standing
 // still before the motors go off.
@@ -44,11 +48,25 @@ static odom_report_t start;     // the robot when the action began running
 static absolute_time_t deadline, settle_min_end, run_start;
 static bool following;          // watching: turning towards a movement
 static bool obstacle_stop;      // moving: stopped short, before an obstacle on the map
+static float goal_x, goal_y;    // GOTO: the point (map frame) and how far before it to stop
+static float goal_stop_m;
+static bool goal_driving;       // GOTO: turned towards it, now driving
+// The actions that ended, the last one's name and how it ended (for snapshots).
+static uint32_t endings;
+static action_t ended_action;
+static rec_end_t ended_reason;
 // The movement's recent directions in the world (the map's yaw, unwrapped), when seen.
 static float seen_rad[FOLLOW_HISTORY];
 static uint32_t seen_us[FOLLOW_HISTORY];
 static int seen_n;
 static uint32_t last_seen_us;
+
+static void ended(rec_end_t reason) {
+    endings++;
+    ended_action = action;
+    ended_reason = reason;
+    recorder_take_end(reason);
+}
 
 // Ends the action early, saying why; the motors go off unless another action follows.
 static void end_early(rec_end_t reason, const char *why, bool motors_off) {
@@ -58,7 +76,7 @@ static void end_early(rec_end_t reason, const char *why, bool motors_off) {
     motion_sense_log(false);
     printf("%s stopped: %s\n", action_name[action], why);
     state = IDLE;
-    recorder_take_end(reason);
+    ended(reason);
 }
 
 static void begin(action_t a, float g) {
@@ -71,6 +89,14 @@ static void begin(action_t a, float g) {
     deadline = make_timeout_time_us(START_TIMEOUT_US);
     recorder_take_start(take_name[a], a == WATCH ? WATCH_US * 1e-6f : g);
 }
+
+uint32_t behaviour_endings(const char **action_out, rec_end_t *reason) {
+    if (action_out) *action_out = take_name[ended_action];
+    if (reason) *reason = ended_reason;
+    return endings;
+}
+
+const char *behaviour_action(void) { return state == IDLE ? "" : take_name[action]; }
 
 void behaviour_scan(void) {
     begin(SCAN, SCAN_RAD);
@@ -102,6 +128,26 @@ void behaviour_move(float distance_m) {
 void behaviour_turn(float angle_rad) {
     begin(TURN, angle_rad);
     printf("Turn: %.0f deg %s\n", (double)fabsf(angle_rad * DEG_PER_RAD), angle_rad > 0 ? "left" : "right");
+}
+
+void behaviour_goto(float x_m, float y_m, float stop_m) {
+    const odom_report_t *o = body_odom();
+    float dx = x_m - o->x_m, dy = y_m - o->y_m, d = hypotf(dx, dy);
+    if (d - stop_m < 0.05f) { printf("Go to: already there (%.0f cm away)\n", (double)(d * 100)); return; }
+    if (d - stop_m > GOTO_MAX_M) { // only so far towards it
+        float k = (GOTO_MAX_M + stop_m) / d;
+        printf("Go to: the goal is %.1f m away; going %.1f m towards it\n", (double)d, (double)GOTO_MAX_M);
+        x_m = o->x_m + k * dx;
+        y_m = o->y_m + k * dy;
+        d = GOTO_MAX_M + stop_m;
+    }
+    goal_x = x_m;
+    goal_y = y_m;
+    goal_stop_m = stop_m;
+    goal_driving = false;
+    begin(GOTO, d);
+    printf("Go to: (%+.0f, %+.0f) cm, %.0f cm away at %+.0f deg (map frame)%s\n", (double)(x_m * 100), (double)(y_m * 100),
+           (double)(d * 100), (double)(atan2f(dy, dx) * DEG_PER_RAD), stop_m > 0 ? ", stopping before it" : "");
 }
 
 void behaviour_watch(void) {
@@ -208,10 +254,41 @@ static void say_done(const odom_report_t *o) {
         printf("Record done: %.1f s\n", (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f));
         return;
     }
+    if (action == GOTO) {
+        float off = hypotf(goal_x - o->x_m, goal_y - o->y_m);
+        if (obstacle_stop)
+            printf("Go to stopped: obstacle %.0f cm ahead (map), %.0f cm from the goal\n",
+                   (double)(obstacle_gap_m(o, 1.0f, 0.1f) * 100), (double)(off * 100));
+        else printf("Go to done: %.1f s; at (%+.0f, %+.0f) cm, %.0f cm from the goal\n",
+                    (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f), (double)(o->x_m * 100),
+                    (double)(o->y_m * 100), (double)(off * 100));
+        return;
+    }
     float c = cosf(start.yaw_rad), s = sinf(start.yaw_rad);
     printf("%s done: %.1f s; odometry: %+.1f cm forward, %+.1f cm left, turned %+.1f deg\n", action_name[action],
            (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f), (double)((c * dx + s * dy) * 100),
            (double)((-s * dx + c * dy) * 100), (double)((o->yaw_rad - start.yaw_rad) * DEG_PER_RAD));
+}
+
+// Going to a point: turn in place towards it, then drive, steering a little to
+// keep it ahead, and stop goal_stop_m before it (measured along the way) or 15 cm
+// before an obstacle on the map. Returns true when done.
+static bool go_to(const odom_report_t *o) {
+    float dx = goal_x - o->x_m, dy = goal_y - o->y_m;
+    float error_rad = wrap_pi(atan2f(dy, dx) - o->yaw_rad);
+    if (!goal_driving) {
+        if (fabsf(error_rad) > GOTO_AIM_RAD) { body_drive(0, motion_turn_rate(error_rad)); return false; }
+        goal_driving = true;
+    }
+    float c = cosf(o->yaw_rad), s = sinf(o->yaw_rad);
+    float remaining_m = c * dx + s * dy - goal_stop_m; // along the way: never circles around it
+    float room_m = obstacle_gap_m(o, 1.0f, fmaxf(remaining_m, 0)) - STOP_BEFORE_M;
+    obstacle_stop = room_m < remaining_m;
+    if (obstacle_stop) remaining_m = room_m;
+    if (remaining_m <= 0) return true;
+    float w = fmaxf(-GOTO_STEER_RADPS, fminf(GOTO_STEER_RADPS, GOTO_STEER * error_rad));
+    body_drive(motion_speed(remaining_m), w);
+    return false;
 }
 
 // Runs the action; returns true when it is done.
@@ -242,6 +319,8 @@ static bool step(const odom_report_t *o) {
         return false;
     case RECORD:
         return absolute_time_diff_us(run_start, get_absolute_time()) >= RECORD_US;
+    case GOTO:
+        return go_to(o);
     }
     return true;
 }
@@ -251,7 +330,7 @@ static void finish(const odom_report_t *o) {
     say_done(o);
     body_motors(false);
     state = IDLE;
-    recorder_take_end(action == MOVE && obstacle_stop ? REC_END_OBSTACLE : REC_END_DONE);
+    ended((action == MOVE || action == GOTO) && obstacle_stop ? REC_END_OBSTACLE : REC_END_DONE);
 }
 
 void behaviour_update(void) {
@@ -267,7 +346,7 @@ void behaviour_update(void) {
         body_drive(0, 0);
         motion_sense_log(false);
         state = IDLE;
-        recorder_take_end(REC_END_SAFETY_STOP);
+        ended(REC_END_SAFETY_STOP);
         return;
     }
     switch (state) {
