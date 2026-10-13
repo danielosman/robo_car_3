@@ -390,12 +390,15 @@ function append(text, kind) {
 
 function showStatus() {
   const el = $("status"), s = robotStatus;
-  el.className = `pill ${s.state}`;
-  el.textContent = s.state === "waiting" ? "Waiting for robot…" : s.state === "connected"
-    ? `Robot ${s.ip}${s.rssi !== null ? `, ${s.rssi} dBm` : ""}` : `Robot lost at ${new Date(s.at).toLocaleTimeString()}`;
+  const quiet = s.state === "connected" && s.quietSince; // the connection open, nothing arriving
+  el.className = `pill ${quiet ? "quiet" : s.state}`;
+  el.textContent = s.state === "waiting" ? "Waiting for robot…"
+    : quiet ? `Robot ${s.ip}: nothing from it for ${Math.round((Date.now() - s.quietSince) / 1000)} s`
+    : s.state === "connected" ? `Robot ${s.ip}${s.rssi !== null ? `, ${s.rssi} dBm` : ""}` : `Robot lost at ${new Date(s.at).toLocaleTimeString()}`;
   for (const b of buttons) b.disabled = s.state !== "connected";
   showLive();
 }
+setInterval(() => { if (robotStatus.state === "connected" && robotStatus.quietSince) showStatus(); }, 1000);
 function showLive() {
   const p = livePose, el = $("live");
   const fresh = p && robotStatus.state === "connected" && poseFresh > 0;

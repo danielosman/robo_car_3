@@ -1,7 +1,8 @@
 // Host test for picoA/app/wifi_console.c: joining (and failing to join) the WiFi,
 // finding the server by its announcements, the console text and keys over TCP,
-// output kept while no server listens, heartbeats, losing the server or the
-// WiFi, and recordings as UDP datagrams (to the announced port, refusals
+// output kept while no server listens, the signal for the pose record, a slow
+// server kept for 30 s, snapshots paced (a record never waits behind more than two
+// chunks), losing the server or the WiFi, and recordings as UDP datagrams (to the announced port, refusals
 // reported), against a fake
 // WiFi chip and lwIP with the test playing the server. Run
 // from the repo root:
@@ -99,7 +100,8 @@ static void test_finds_server_and_talks(void) {
     assert(wifi_console_settled());
     const char *got = received();
     assert(strstr(got, "WiFi: before the server\n") == got);
-    assert(strstr(got, "\001rssi -55\n")); // first heartbeat right away
+    assert(!strstr(got, "\001rssi")); // no heartbeat record: the pose records say the robot is there
+    assert(wifi_console_signal_dbm() == -55); // asked at once
 
     print("x +1.0 cm\n");
     assert(strcmp(received(), "x +1.0 cm\n") == 0);
@@ -111,14 +113,10 @@ static void test_finds_server_and_talks(void) {
     assert(read_keys(keys, sizeof keys) == 2 && keys[0] == 'p' && keys[1] == 'm');
     assert(fake_recved == 3);
 
-    // Heartbeats every 2 s, while the server keeps talking.
+    // The server's '\0' every 2 s; nothing is sent back for it.
     for (int i = 0; i < 5; i++) { run(1000); fake_server_sends("\0", 1); }
-    got = received();
-    int beats = 0;
-    for (const char *s = got; (s = strstr(s, "\001rssi")); s++) beats++;
-    assert(beats == 2 || beats == 3);
-    assert(wifi_console_connected());
-    printf("ok: announcement, connect, kept output sent, keys, heartbeats\n");
+    assert(received()[0] == 0 && wifi_console_connected());
+    printf("ok: announcement, connect, kept output sent, keys, the signal\n");
 }
 
 static void test_full_send_buffer(void) {
@@ -131,7 +129,9 @@ static void test_full_send_buffer(void) {
 }
 
 static void test_server_silent(void) {
-    run(6100); // the server says nothing
+    run(6100); // the server says nothing: a slow link, or it's gone
+    assert(wifi_console_connected());
+    run(24000);
     assert(state == WIFI_LOOKING && !fake_tcp.open);
     assert(!wifi_console_connected());
     // While no server listens, the newest 16 KB are kept.
@@ -146,7 +146,7 @@ static void test_server_silent(void) {
     const char *got = received();
     assert(strlen(got) >= OUT_SIZE);
     assert(strchr(got, 'T') && !strchr(got, 'A') && !strchr(got, 'D')); // oldest dropped
-    printf("ok: silent server dropped after 6 s; the newest 16 KB kept\n");
+    printf("ok: silent server kept 30 s, then dropped; the newest 16 KB kept\n");
 }
 
 static void test_server_closes_or_fails(void) {
@@ -243,9 +243,12 @@ static void test_snapshot_chunks(void) {
     print("before\n");
     assert(wifi_console_snapshot_send(shot, sizeof shot));
     assert(wifi_console_snapshot_busy() && !wifi_console_snapshot_send(shot, 10)); // one at a time
-    // TCP's buffer takes ~11 KB at a time; text printed meanwhile goes first.
+    // At most two chunks unacknowledged at a time: a record written meanwhile waits
+    // behind no more than that.
+    assert(fake_sent_len <= 7 + SNAP_IN_FLIGHT);
     print("during\n");
-    for (int i = 0; i < 10 && wifi_console_snapshot_busy(); i++) fake_server_acks();
+    assert(fake_sent_len <= 7 + SNAP_IN_FLIGHT + 7);
+    for (int i = 0; i < 40 && wifi_console_snapshot_busy(); i++) fake_server_acks();
     assert(!wifi_console_snapshot_busy());
     snap_got_len = 0;
     const char *text = demux(fake_sent, fake_sent_len);
@@ -268,7 +271,7 @@ static void test_snapshot_chunks(void) {
     run(10);
     fake_server_accepts();
     run(10);
-    for (int i = 0; i < 10 && wifi_console_snapshot_busy(); i++) fake_server_acks();
+    for (int i = 0; i < 40 && wifi_console_snapshot_busy(); i++) fake_server_acks();
     assert(!wifi_console_snapshot_busy());
     snap_got_len = 0;
     demux(fake_sent, fake_sent_len);

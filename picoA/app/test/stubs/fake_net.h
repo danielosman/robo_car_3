@@ -161,7 +161,8 @@ struct tcp_pcb {
     tcp_connected_fn connected; tcp_recv_fn recv; tcp_sent_fn sent; tcp_err_fn err;
 };
 #define TCP_WRITE_FLAG_COPY 1
-#define FAKE_SNDBUF 11680
+#define TCP_SND_BUF 11680 // as lwipopts.h
+#define FAKE_SNDBUF TCP_SND_BUF
 static struct tcp_pcb fake_tcp;
 static int fake_tcp_aborts, fake_tcp_connects, fake_outputs, fake_recved;
 static uint32_t fake_sndbuf = FAKE_SNDBUF;  // what tcp_sndbuf() reports, used up by writes

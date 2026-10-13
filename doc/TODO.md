@@ -18,7 +18,7 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
 
 1. **Robot tests** of the new work, in the README's order: "Snapshots and the
    viewer", "Manual mode, go to a point", "The map follows the robot", "Thin legs
-   on the map", "Camera features" (its frames/s and ms per frame decide whether
+   on the map", "A slow link", "Camera features" (its frames/s and ms per frame decide whether
    V3, core 1, comes soon). Until they pass, these stay here:
    - Snapshots and the viewer (with the colour sensor now read by the app)
    - Modes idle and manual (the start of Mode switching)
@@ -26,8 +26,10 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
    - Drive to a point (go to, click on the map)
    - Camera features V1 (on core 0, every 3rd frame)
    - Thin legs on the map (13 Oct: detections marked whole, passes can't erase
-     them in the same frame, the second target; checked on snapshot 35's frame
-     and in host tests only)
+     them in the same frame, the second target. First drive the same evening,
+     boot 31bcd26e: "the map looks a lot more solid, small obstacles detected";
+     the replay old code against new on that drive is still to do)
+   - A slow link (13 Oct: the server closes only after 30 s, snapshots paced)
 2. Then Daniel picks the next task from the list below.
 
 ## Goals: what the robot is for
@@ -380,6 +382,13 @@ speed, so that a blip causes only a small twitch. (Not answered.)
 - Under a table top, false blocked columns; a small hole gets floor hits; far
   walls weak (ARCHITECTURE.md §4, known limits).
 - `cell_map_free_distance()` is no longer used: remove it.
+- "No floor" from floor reflections (13 Oct replay: 7 of 109 cells under the
+  robot's path end as "no floor"): readings "beyond the floor" in rows 6-8 count
+  fully since each target has its own status. An idea: a cell the robot stood on
+  can't become "no floor".
+- Second targets paint bands up to ~8 cells deep behind walls, where no ray ever
+  clears them (Daniel: fine for now). If it matters: keep only second targets
+  within some distance of the first, or let them mark unknown cells only weakly.
 
 **Movement and watching**
 - The watch test's 25°/s walker overshoots 1-4° depending on the seed and on where
@@ -390,12 +399,14 @@ speed, so that a blip causes only a small twitch. (Not answered.)
 - ToF settings to compare: 15 or 10 Hz; heading bins of 1.4° or 2.8° (half the RAM).
 
 **Robot and console**
-- The server dropped the robot twice during go-to ("robot silent for 6 s", 19:38
-  and 19:44, signal ~-63 dBm); it reconnected by itself and the robot drove on.
-  Find out why (WiFi, or the main loop stalling while vision and a snapshot run).
-- After such a reconnect, the rest of a cut pose record shows as text ("manual -",
+- After a reconnect, the rest of a cut pose record shows as text ("manual -",
   "se -110.3 …"): the robot should drop a half-sent record when the connection
-  changes, or the server ignore text up to the first newline.
+  changes, or the server ignore text up to the first newline. Rarer since 13 Oct
+  (the server closes only after 30 s), not gone.
+- The robot's uplink loses packets in places (13 Oct near (166, 61) cm: 11 KB
+  unacknowledged for ~2 s, the congestion window halved, the server's `\0` still
+  arriving). Watch the "nothing from the robot" notes and `p` there; a recording
+  (`R`) of such a stretch has the TCP state every 0.5 s.
 - RAM free is ~103 KB (12 Oct) after the snapshot buffer, vision and the
   whole-house map: watch it with V3's stacks and ring.
 - `p` right after a power-up, to confirm the link's "lost" messages come from the

@@ -79,6 +79,7 @@ static char records[4096];
 uint32_t wifi_console_data_connection(void) { return conn; }
 bool wifi_console_data_send(const void *b, uint32_t n) { (void)b; (void)n; return false; }
 void wifi_console_link_status(wifi_link_status_t *s) { memset(s, 0, sizeof *s); }
+int8_t wifi_console_signal_dbm(void) { return -61; }
 bool wifi_console_snapshot_busy(void) { return busy; }
 bool wifi_console_snapshot_send(const uint8_t *b, uint32_t n) {
     assert(!busy && conn && n <= SNAP_MAX && sent_len + n <= sizeof sent);
@@ -242,8 +243,8 @@ int main(void) {
     run(1000);
     int poses = 0;
     for (const char *r = records; (r = strstr(r, "pose ")); r++) poses++;
-    assert(poses == 4 && strstr(records, "pose 125.0 -50.0 43.0 manual goto\n"));
-    printf("ok: pose records every 0.25 s\n");
+    assert(poses == 4 && strstr(records, "pose 125.0 -50.0 43.0 manual goto -61\n"));
+    printf("ok: pose records every 0.25 s, with the WiFi signal\n");
 
     FILE *f = fopen("build/test_snapshot.snap", "wb");
     assert(f);

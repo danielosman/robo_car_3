@@ -279,9 +279,10 @@ void snapshot_update(void) {
         last_pose_us = time_us_32();
         const odom_report_t *o = body_odom();
         const char *action = behaviour_action();
-        char text[64];
-        snprintf(text, sizeof text, "pose %.1f %.1f %.1f %s %s", (double)(o->x_m * 100), (double)(o->y_m * 100),
-                 (double)(o->yaw_rad * DEG_PER_RAD), mode_name(mode_get()), *action ? action : "-");
+        char text[72];
+        snprintf(text, sizeof text, "pose %.1f %.1f %.1f %s %s %d", (double)(o->x_m * 100), (double)(o->y_m * 100),
+                 (double)(o->yaw_rad * DEG_PER_RAD), mode_name(mode_get()), *action ? action : "-",
+                 wifi_console_signal_dbm());
         wifi_console_record(text);
     }
 }

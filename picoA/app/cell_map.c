@@ -20,6 +20,7 @@ _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define FOOT_M        0.15f     // the robot stands and turns here: floor, L1 free
 #define L2_BLIND_M    0.25f     // no zone sees L2 this close to the robot
 #define WEIGHT_ONE    64        // weight 1 in the per-frame hit_w, pass_w
+#define FULL_FLOOR_RAYS 9.0f    // the ground layer: rays' worth of agreement for full confidence
 #define G_TOP_M       (G_BOTTOM_M + GRID_M) // 3 cm: above this an end point is no floor
 #define Z_STEP_M      0.002f    // hit heights kept in 2 mm steps above G_BOTTOM_M
 #define NO_HIT_Z      255
@@ -32,8 +33,9 @@ _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define C_PACK(state, doubt, conf) ((uint8_t)((state) | (doubt) << 2 | (conf) << 4))
 
 static uint8_t grid[CELL_LAYERS][GRID][GRID];
-// This frame: the strongest hit and pass in each cell (a reading's weight, × WEIGHT_ONE).
-static uint8_t hit_w[CELL_LAYERS][GRID][GRID], pass_w[CELL_LAYERS][GRID][GRID];
+// This frame, × WEIGHT_ONE: in L1 and L2 the strongest hit and pass in each cell (a
+// reading's weight); in the ground layer the rays' weights added up.
+static uint16_t hit_w[CELL_LAYERS][GRID][GRID], pass_w[CELL_LAYERS][GRID][GRID];
 // The highest point a detection found in a cell (kept while it is occupied, or until
 // a pass below it finds nothing), and in this frame (NO_HIT_Z: no detection marked
 // it): what stands there reaches at least that high.
@@ -77,8 +79,12 @@ static bool in_grid(int ix, int iy, int layer) { // window indexes
 
 static float ray_closeness(float d_m) { return 1.0f / (1.0f + expf((d_m - NEAR_M) / NEAR_SLOPE_M)); }
 
-static uint8_t weight_code(float w) { return (uint8_t)(w * WEIGHT_ONE + 0.5f); }
-static void keep_max(uint8_t *kept, float w) { if (weight_code(w) > *kept) *kept = weight_code(w); }
+static uint16_t weight_code(float w) { return (uint16_t)(w * WEIGHT_ONE + 0.5f); }
+static void keep_max(uint16_t *kept, float w) { if (weight_code(w) > *kept) *kept = weight_code(w); }
+static void add_weight(uint16_t *sum, float w) {
+    uint32_t v = *sum + weight_code(w);
+    *sum = v > 0xFFFF ? 0xFFFF : (uint16_t)v;
+}
 
 // What a ray's end cell gets: a hit, a pass (nothing in range: it went on), or
 // nothing (an unsure reading's ray above the floor, or an obstacle: detect() marks it).
@@ -113,13 +119,20 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
             // The ground layer is passed only by going through it: a ray crossing its
             // top (air above whatever is there) tells nothing about it.
             bool through = layer > 0 || (!last && axis == 2 && step[2] < 0);
-            if (last && end == END_HIT) keep_max(&hit_w[layer][ix][iy], ray_closeness(length_m) * v);
+            // The floor is a surface that fills a zone: its rays add up, so that the few
+            // steep rays of a reading that end a little below the floor (one length for
+            // all 9) don't outweigh the ones that hit it (taking the strongest ray,
+            // floor the robot had stood on turned "no floor" later, 13 Oct).
+            if (last && end == END_HIT && layer == 0) add_weight(&hit_w[0][ix][iy], ray_closeness(t) * v);
+            else if (last && end == END_HIT) keep_max(&hit_w[layer][ix][iy], ray_closeness(length_m) * v);
             else if (last) {}
             else if (through && frame_hit_z[layer][ix][iy] == NO_HIT_Z) {
                 float t_out = t_max[axis];
                 float low_m = fminf(o[2] + t * d[2], o[2] + t_out * d[2]); // the ray's lowest point in the cell
                 // As sure as a reading from where the ray leaves the cell: it is free that far.
-                if (low_m <= pass_limit_m(layer, ix, iy)) keep_max(&pass_w[layer][ix][iy], ray_closeness(t_out) * v);
+                if (low_m > pass_limit_m(layer, ix, iy)) {}
+                else if (layer == 0) add_weight(&pass_w[0][ix][iy], ray_closeness(t) * v);
+                else keep_max(&pass_w[layer][ix][iy], ray_closeness(t_out) * v);
             }
         }
         if (last) return;
@@ -130,10 +143,12 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
 }
 
 // One frame's verdict on a cell, against what it keeps (doc/ARCHITECTURE.md, the map).
-static void decide_cell(uint8_t *cell, float h, float p) {
+// `full`: the agreement that gives full confidence (one reading in L1 and L2, 9 rays
+// in the ground layer).
+static void decide_cell(uint8_t *cell, float h, float p, float full) {
     if (h == p) return;
     int verdict = h > p ? CELL_STATE_OCCUPIED : CELL_STATE_FREE;
-    float q = fabsf(h - p) / fmaxf(h + p, 1.0f);
+    float q = fabsf(h - p) / fmaxf(h + p, full);
     int qc = (int)(q * 15 + 0.5f);
     uint8_t c = *cell;
     if (C_STATE(c) == CELL_STATE_UNKNOWN || (float)C_CONF(c) / 15 < q) *cell = C_PACK(verdict, 0, qc);
@@ -205,6 +220,7 @@ static void detect(const float o[3], const float d[9][3], float length_m, float 
         cell[j].z = higher(cell[j].z, z_code(z));
     }
     float w = ray_closeness(length_m) * v;
+    if (weight_code(w) == 0) return; // too far to mark anything (beyond ~2.7 m): nor to keep passes out
     for (int j = 0; j < n; j++) {
         int l = cell[j].layer, ix = cell[j].ix, iy = cell[j].iy;
         keep_max(&hit_w[l][ix][iy], w); // the surest detection there
@@ -266,7 +282,7 @@ void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
             for (int iy = 0; iy < GRID; iy++)
                 if (hit_w[l][ix][iy] || pass_w[l][ix][iy]) {
                     decide_cell(&grid[l][ix][iy], (float)hit_w[l][ix][iy] / WEIGHT_ONE,
-                                (float)pass_w[l][ix][iy] / WEIGHT_ONE);
+                                (float)pass_w[l][ix][iy] / WEIGHT_ONE, l == 0 ? FULL_FLOOR_RAYS : 1.0f);
                     // A cell keeps the highest point a detection found in it, also while
                     // still free (doubted): rays passing over it don't count. A pass at or
                     // below it that found nothing forgets it, unless the cell stays occupied.

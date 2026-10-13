@@ -1,6 +1,6 @@
 // Tests for robot.ts: splitting the robot's status records out of its text, and
 // the link end to end with a fake robot on localhost (announcement, text, signal,
-// keys, silence, a second robot replacing the first). Run with `npm test`.
+// keys, a robot heard from nothing reported and later closed, a second robot replacing the first). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import dgram from "node:dgram";
@@ -47,15 +47,18 @@ test("pose records", () => {
   assert.equal(p.mode, "manual");
   assert.equal(p.action, "goto");
   assert.equal(parsePose("pose 1 2 3 idle -")!.action, "");
+  assert.equal(p.rssi, null); // older firmware: no signal
+  assert.equal(parsePose("pose 125.0 -50.0 43.0 manual goto -61")!.rssi, -61);
+  assert.equal(parsePose("pose 1 2 3 idle - 0")!.rssi, null); // not connected to the server when written
   assert.equal(parsePose("rssi -50"), null);
 });
 
-async function startLink(silenceMs = 3000) {
+async function startLink(quietMs = 3000, dropMs = 6000) {
   const listener = dgram.createSocket("udp4");
   await new Promise<void>(r => listener.bind(0, "127.0.0.1", () => r()));
   const link = new RobotLink({
     robotPort: 0, dataPort: 4999, announcePort: listener.address().port, announceTo: ["127.0.0.1"],
-    announceEveryMs: 50, heartbeatEveryMs: 50, silenceMs,
+    announceEveryMs: 50, heartbeatEveryMs: 50, quietMs, dropMs,
   });
   const statuses: RobotStatus[] = [];
   link.on("status", s => statuses.push(s));
@@ -118,18 +121,28 @@ test("commands to the robot; snapshots and poses from it", async () => {
   } finally { link.stop(); }
 });
 
-test("a silent robot is dropped; a new robot replaces the old one", async () => {
-  const { link, port } = await startLink(300);
+test("nothing from the robot: reported, then closed; a new robot replaces the old one", async () => {
+  const { link, port } = await startLink(200, 600);
   try {
+    const notes: string[] = [];
+    link.on("note", n => notes.push(n));
     const a = await robot(port);
     await until(() => link.status.state === "connected");
     const b = await robot(port);
     await once(a.socket, "close");
     assert.equal(link.status.state, "connected");
-    b.socket.write("\x01rssi -50\n");
-    await new Promise(r => setTimeout(r, 200));
-    assert.equal(link.status.state, "connected"); // heard 200 ms ago
-    await once(b.socket, "close");                // then silent for 300 ms
+    b.socket.write("\x01pose 1 2 3 idle - -58\n");
+    await until(() => link.status.state === "connected" && link.status.rssi === -58); // the signal from the pose record
+    // Nothing for 200 ms: said so, the connection kept.
+    await until(() => link.status.state === "connected" && link.status.quietSince !== null);
+    assert.ok(notes.some(n => /^nothing from the robot for \d+ s; the connection is open/.test(n)));
+    assert.ok(!b.socket.destroyed);
+    b.socket.write("late\n");
+    await until(() => link.status.state === "connected" && link.status.quietSince === null);
+    assert.ok(notes.some(n => /^data from the robot again, after \d+ s$/.test(n)));
+    // Nothing for 600 ms: closed.
+    await once(b.socket, "close");
     await until(() => link.status.state === "lost");
+    assert.ok(notes.some(n => /^nothing from the robot for \d+ s: closing the connection/.test(n)));
   } finally { link.stop(); }
 });

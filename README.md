@@ -346,6 +346,17 @@ or table with thin legs (2-4 cm) and a wall ~1 m behind them:
 4. Take the chair away, drive past where it stood: its cells clear within a few
    frames.
 
+**A slow link** (13 Oct; both Picos, the viewer open):
+1. Drive around as usual for a few minutes: no "nothing from the robot" notes where
+   the signal is good; the status pill shows the signal (now from the pose record).
+2. Carry or drive the robot where the signal is weak (another room): if bytes stop
+   arriving, the pill turns amber, "nothing from it for N s", the log says
+   "nothing from the robot for 6 s; the connection is open", and "data from the
+   robot again, after N s" when they come. No "closing" unless it lasts 30 s, and
+   the snapshot arrives late but whole.
+3. Switch PicoA off: after 30 s "nothing from the robot for 30 s: closing the
+   connection"; on again, it connects by itself.
+
 **Camera features** (V1; only PicoA, motors off). Robot facing ~2 m of the room,
 lights on. Paste each `v`:
 1. `v`: "Vision: N frames/s, X ms per frame (max Y), F features (B new, L lost in

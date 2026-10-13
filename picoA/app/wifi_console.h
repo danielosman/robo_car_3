@@ -22,6 +22,9 @@ void wifi_console_update(void);       // call every loop iteration
 // is none: recordings go to that server. A different number means it was lost in
 // between.
 uint32_t wifi_console_data_connection(void);
+// The WiFi signal, dBm, asked every 2 s while connected to the server (0 otherwise):
+// it goes to the server in the pose record.
+int8_t wifi_console_signal_dbm(void);
 // Hands a snapshot to the console's connection; false if one is still being sent.
 // buf must stay unchanged until wifi_console_snapshot_busy() is false. The text
 // printed meanwhile goes first. If the connection is lost, the snapshot is sent

@@ -15,7 +15,8 @@
 // then a CRC-32 (as the recordings') of everything before it. The sections are the
 // snap_*_t structs in snapshot.c; a section is left out when there is nothing for it.
 // Every 0.25 s while a server listens, "\001pose <x cm> <y cm> <yaw deg> <mode>
-// <action>\n" says where the robot is now.
+// <action> <WiFi signal dBm>\n" says where the robot is now; it is also what tells
+// the server the robot is there.
 #include <stdint.h>
 
 typedef enum {

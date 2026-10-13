@@ -35,12 +35,13 @@
 #define JOIN_RETRY_US      30000000
 #define FIND_SERVER_US     5000000  // then wifi_console_settled(), and WIFI_SERVER_IP is tried
 #define CONNECT_TIMEOUT_US 5000000
-#define HEARTBEAT_US       2000000  // "\001rssi N\n" to the server; it sends '\0'
-#define SILENCE_US         6000000  // nothing from the server for this long: it's gone
+#define SIGNAL_US          2000000  // the signal asked from the chip this often (~1 ms), for the pose record
+#define SILENCE_US         30000000 // nothing from the server (it sends '\0' every 2 s) for this long: it's gone
 #define OUT_SIZE           16384
 #define LWIP_SLOW_MS       500      // lwIP's rto ticks (TCP_SLOW_INTERVAL)
 #define IN_SIZE            64
 #define SNAP_CHUNK         1400     // snapshot bytes per chunk: [0x02][length u16][bytes]
+#define SNAP_IN_FLIGHT     (2 * (SNAP_CHUNK + 3)) // at most this much unacknowledged when a chunk is added
 #define SNAP_MARK          0x02
 
 typedef enum {
@@ -52,7 +53,8 @@ typedef enum {
 static wifi_state_t state;
 static const char *unavailable_why;
 static absolute_time_t deadline; // what it means depends on the state
-static absolute_time_t next_heartbeat;
+static absolute_time_t next_signal;
+static int8_t signal_now_dbm;           // asked every SIGNAL_US while connected
 static bool settled;
 static ip_addr_t server_ip;
 static uint16_t server_port, data_port;
@@ -105,11 +107,14 @@ static void send_out(conn_t *c) {
         c->len -= n;
         sent = true;
     }
-    // The snapshot only once the text is out, in whole chunks.
+    // The snapshot only once the text is out, in whole chunks, and only a little of
+    // it unacknowledged at a time: a TCP stream is one queue, and a pose record
+    // written now waits behind everything handed to TCP before it (on a slow link
+    // 11 KB took seconds, and the server heard nothing meanwhile, 13 Oct).
     while (c == &console && c->len == 0 && snap && snap_at < snap_len) {
         uint32_t n = snap_len - snap_at;
         if (n > SNAP_CHUNK) n = SNAP_CHUNK;
-        if (tcp_sndbuf(c->pcb) < n + 3) break;
+        if (tcp_sndbuf(c->pcb) < n + 3 || TCP_SND_BUF - tcp_sndbuf(c->pcb) + n + 3 > SNAP_IN_FLIGHT) break;
         static uint8_t chunk[SNAP_CHUNK + 3]; // static: this also runs in lwIP's interrupt
         chunk[0] = SNAP_MARK;
         chunk[1] = (uint8_t)n;
@@ -319,7 +324,7 @@ static void update_server(void) {
         else if (up) {
             state = WIFI_CONNECTED;
             settled = true;
-            next_heartbeat = get_absolute_time();
+            next_signal = get_absolute_time();
             console_connections++;
             printf("Server: connected\n");
         } else if (time_reached(deadline)) { printf("Server: no answer, looking again...\n"); look_for_server(); }
@@ -327,15 +332,10 @@ static void update_server(void) {
         if (lost) { look_for_server(); printf("Server: lost (connection closed), looking again...\n"); }
         else if (silent_us > SILENCE_US) {
             look_for_server();
-            printf("Server: lost (no answer for %d s), looking again...\n", SILENCE_US / 1000000);
-        } else if (time_reached(next_heartbeat)) {
-            next_heartbeat = make_timeout_time_us(HEARTBEAT_US);
-            char beat[24];
-            int n = snprintf(beat, sizeof beat, "\001rssi %ld\n", (long)signal_dbm());
-            cyw43_arch_lwip_begin();
-            keep_out(&console, beat, (uint32_t)n);
-            send_out(&console);
-            cyw43_arch_lwip_end();
+            printf("Server: nothing from it for %d s: closing, looking again...\n", SILENCE_US / 1000000);
+        } else if (time_reached(next_signal)) {
+            next_signal = make_timeout_time_us(SIGNAL_US);
+            signal_now_dbm = (int8_t)signal_dbm();
         }
     }
 }
@@ -420,6 +420,8 @@ void wifi_console_record(const char *text) {
 }
 
 uint32_t wifi_console_data_connection(void) { return state == WIFI_CONNECTED ? console_connections : 0; }
+
+int8_t wifi_console_signal_dbm(void) { return state == WIFI_CONNECTED ? signal_now_dbm : 0; }
 
 bool wifi_console_data_send(const void *buf, uint32_t len) {
     if (state != WIFI_CONNECTED || len > 0xffff) return false;

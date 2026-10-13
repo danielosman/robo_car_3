@@ -5,6 +5,73 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 13 Oct 2026: second drive (boot 5b0d72ab)
+
+With the floor fix and the connection changes: "the ground feels more solid now
+and the legs are still detected well"; no "nothing from the robot" notes, no
+dropped connection (30 takes, 0-6 % datagrams lost). Found: the scan at snapshot
+25 cleared a diagonal wall at (-7, 262)-(28, 288) cm. Every take measures that
+wall's surface at the same place (no drift); scan 24 saw it at ~19°, and its rays
+slid along it through the free corners of the wall's cells, ending further along:
+22-25 frames passed those cells, 0-2 hit them, and 3 in a row clear a cell. The
+old code does the same (7 → 1 columns in a replay of that scan).
+
+## 13 Oct 2026: the floor layer adds up its rays again
+
+Daniel saw on the 3D map that the robot had driven over ground not marked as
+floor, while on the 2D page it always drove through green cells. Both were right:
+of the 128 cells the go-tos drove over, 9 were "no floor" in the snapshot before
+the drive and none right after, but 49 by the last snapshot. Frames from
+elsewhere overturned floor the robot had stood on. The cause was the morning's map
+change: the ground layer took the strongest ray too, so the few steep rays of a
+reading that end a little below the floor (one length for all 9 rays) outweighed
+the rays that hit it. The ground layer adds up its rays again, as before (q over 9
+rays' worth). Replay of the drive (boot 31bcd26e): "no floor" columns 810 → 408
+(old code 275); of the 109 cells under the robot's path 7 end as "no floor" (41
+before, 0 with the old code). The rest of the difference is the per-target status:
+floor zones reading "beyond the floor" (glossy floor reflections) count fully now.
+Walls, objects and legs unchanged (443 blocked, 83 overhang; snapshot 35: `f`
+stops at 43 cm). Also: a detection too far to weigh anything (beyond ~2.7 m) no
+longer keeps that frame's passes out of its cells. The per-frame arrays are 16-bit
+again (the RAM saving of the morning is gone).
+
+Also from the replay: blocked or overhang columns ≥ 1 m from where the robot drove
+are 276 (old code 16), mostly the second targets: 38 % of readings have one,
+mostly 0.5-1.5 m behind the first, and behind a wall nothing ever clears them
+(bands up to ~8 cells deep). Daniel keeps them: the thick walls don't bother him.
+
+## 13 Oct 2026: a drive with the new map; the server stops dropping a slow robot
+
+Daniel's drive (boot 31bcd26e, recording on, 27 takes: 7 scans and 20 go-to clicks,
+three of them stopped by an obstacle): "the map looks a lot more solid now, small
+obstacles are detected". The room was rearranged and the route different from 12
+Oct: no 1-to-1 comparison with that drive; the replay of this one, old map code
+against new, is still to do.
+
+The one problem: from 8:42:41 to 8:43:44 the server dropped the robot 7 times
+("robot silent for 6 s"), each new connection lasting 6-8 s; then it worked again.
+The recording shows why. The signal was fine (-48…-74 dBm) and the robot heard the
+server's `\0` at least every 2 s, but at the start of take 7 (the first after the
+drops) 11.4 KB sat unacknowledged for ~2 s with the congestion window halved and
+the server's window wide open: packets from the robot were being lost, not a busy
+server. TCP then waits longer between tries, and nothing arrived for 6 s. Each
+drop made it worse: on the new connection the robot first sent its kept text and
+the whole snapshot again (31-40 KB), the pose records queued behind it on the
+same stream, and 6 s later it was dropped again. The cut pose records ("ual -",
+"775.0 manual -") came from those drops. Daniel: a slow link isn't a silent robot,
+so say what is true, and why a separate heartbeat? Changed:
+- **The server** says after 6 s "nothing from the robot for N s; the connection is
+  open (a slow link, or the robot is gone)" (log, and an amber status pill counting
+  up), and "data from the robot again, after N s"; it closes only after 30 s.
+- **The robot** closes only after 30 s without the server's `\0` too, and sends no
+  heartbeat: the pose record (4 a second) carries the signal and says it's there.
+- **Snapshots are paced:** at most two chunks (2.8 KB) unacknowledged when the next
+  is added, so a pose record waits behind no more than that (before: up to 11 KB,
+  lwIP's whole send buffer).
+Host tests: a quiet server kept 30 s, then dropped; at most two chunks in flight;
+the signal in the pose record; on the server, nothing for a while reported, data
+again, then closed. Robot test: README "A slow link".
+
 ## 13 Oct 2026: the map: thin legs (snapshot 35)
 
 Snapshot 35 of 12 Oct carries the VL53 frame, its pose and the map, so the robot's

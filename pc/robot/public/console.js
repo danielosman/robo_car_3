@@ -51,14 +51,20 @@ function append(text, kind) {
 }
 
 const time = ms => new Date(ms).toLocaleTimeString();
+let status = null;
 function showStatus(s) {
-  statusEl.className = s.state;
+  status = s;
+  const quiet = s.state === "connected" && s.quietSince;
+  statusEl.className = quiet ? "quiet" : s.state;
   if (s.state === "waiting") statusEl.textContent = "Waiting for robot…";
+  else if (quiet) // the connection is open, nothing arrives: a slow link, or the robot gone
+    statusEl.textContent = `Robot connected: ${s.ip}; nothing from it for ${Math.round((Date.now() - s.quietSince) / 1000)} s`;
   else if (s.state === "connected")
     statusEl.textContent = `Robot connected: ${s.ip}${s.rssi !== null ? `, signal ${s.rssi} dBm` : ""}, since ${time(s.since)}`;
   else statusEl.textContent = `Robot lost at ${time(s.at)} (${s.ip}); waiting for it…`;
   for (const b of buttons) b.disabled = s.state !== "connected";
 }
+setInterval(() => { if (status?.state === "connected" && status.quietSince) showStatus(status); }, 1000);
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/`);

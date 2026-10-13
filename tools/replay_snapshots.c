@@ -52,6 +52,7 @@ static double arrival_ms = 1.7e12;
 uint32_t wifi_console_data_connection(void) { return 1; }
 bool wifi_console_data_send(const void *b, uint32_t n) { (void)b; (void)n; return false; }
 void wifi_console_link_status(wifi_link_status_t *s) { memset(s, 0, sizeof *s); }
+int8_t wifi_console_signal_dbm(void) { return 0; }
 bool wifi_console_snapshot_busy(void) { return false; }
 bool wifi_console_snapshot_send(const uint8_t *b, uint32_t n) {
     fwrite(&arrival_ms, 8, 1, out);

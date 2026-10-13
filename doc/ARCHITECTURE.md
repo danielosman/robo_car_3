@@ -139,11 +139,16 @@ the frame was measured. Nothing is learned first; `C` clears the map.
   "drivable, 15/15", and go-to drove into them).
 - **Weights:** a reading counts `c(d) × v`: closeness, a sigmoid that is ≈1 up to
   0.5 m, 0.5 at 1.5 m and ≈0 at 3 m; and the VL53's confidence of the target used,
-  1 for status 5, 0.5 for 6 or 9. A hit's d is the reading's length; a pass's d is
-  where the ray leaves the cell (it shows the cell free only that far).
-- **One frame's verdict on a cell:** H = the strongest hit in it, P = the strongest
-  pass; rays are not added up. Occupied if H > P, else free, with confidence
-  q = |H − P| / max(H + P, 1): one sure, close reading gives q = 1.
+  1 for status 5, 0.5 for 6 or 9. In L1 and L2 a hit's d is the reading's length,
+  a pass's d where the ray leaves the cell (it shows the cell free only that far);
+  in G both are where the ray enters the cell.
+- **One frame's verdict on a cell:** in L1 and L2, H = the strongest hit in it, P =
+  the strongest pass (rays are not added up: a thin leg's few rays count as its
+  whole reading). Occupied if H > P, else free, with confidence
+  q = |H − P| / max(H + P, 1): one sure, close reading gives q = 1. In G the rays
+  are added up and q = |H − P| / max(H + P, 9): the floor fills a zone, and the few
+  steep rays of a reading that end a little below it (one length for all 9) must
+  not outweigh the ones that hit it.
 - **A cell keeps its best measurement:** the same verdict raises its confidence;
   a different verdict replaces it at once if more confident, or after 3 frames in a
   row with q ≥ 0.3 (a status-5 reading from within ~1.7 m, a status-9 one within
@@ -321,10 +326,16 @@ The same keys on USB and over WiFi; nothing is printed by itself.
 `WIFI_SERVER_IP`), sends everything printed over TCP (port 4211) and takes keys;
 it keeps the last 16 KB while no server listens and reconnects by itself. Losing
 it doesn't stop the robot. Snapshots go on the same connection, between the text,
-in chunks `[0x02][length u16][bytes]` (the text goes first); a snapshot cut by a
-lost connection is sent again from its start on the next. Status records
-(`"\001rssi -55\n"`, `"\001pose ...\n"`) go to the server only. lwIP runs in the background interrupt
-(`lwipopts.h`).
+in chunks `[0x02][length u16][bytes]` (the text goes first), at most two chunks
+unacknowledged at a time: a TCP stream is one queue, so whatever is written later
+waits behind them. A snapshot cut by a lost connection is sent again from its
+start on the next. The pose record (`"\001pose <x> <y> <yaw> <mode> <action>
+<signal dBm>\n"`, 4 a second) goes to the server only, and is what tells it the
+robot is there; there is no separate heartbeat. The server writes `'\0'` every
+2 s. Either side closes the connection only after 30 s with nothing from the
+other; after 6 s the server says "nothing from the robot for N s; the connection
+is open" (in the log and the status pill), and "data again" when bytes come. lwIP
+runs in the background interrupt (`lwipopts.h`).
 
 ### Recording (`recorder`)
 
@@ -343,8 +354,7 @@ are the `rec_*_t` structs in `recorder.c` (format version 3); the PC reads them 
 ### Budgets
 
 - **RAM:** everything is static, no `malloc`. ~103 KB free of 512 (`p` prints it;
-  12 Oct, after the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB;
-  ~21 KB more since 13 Oct: the map's per-frame hit and pass arrays are 8-bit).
+  12 Oct, after the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB).
 - **Loop:** mean ~60 µs, worst ~29 ms (a map frame); a ToF frame every 66 ms, DRIVE
   every 50 ms (PicoB stops after 250 ms), 16 odometry reports kept (320 ms).
 - **Stack:** core 0 ~6.5 KB worst case of the 8 KB it can use (both scratch banks;
