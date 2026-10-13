@@ -28,26 +28,33 @@ export function takesOf(id: string): string {
 // One line per whole frame with a pose (a drive: its takes' frames in order; the frame
 // numbers count on through a boot): frame number, t (s), x, y, yaw, pitch, then
 // per ray (row index × 8 + column index) the closest sure distance in mm (as
-// rangefinder.c's closest_sure_mm: 0 nothing in range, 65535 not sure) and the first
-// target's status.
+// rangefinder.c: 0 nothing in range, 65535 not sure) and its status (if not sure, the
+// first target's); then per ray the next sure target behind it and its status (0 0:
+// none).
 export async function exportFrames(store: Store, take: string): Promise<string> {
   const which = takesOf(take);
   const frames = await store.query(`SELECT frame_no, t_s, x, y, yaw, pitch FROM tof_frames
     WHERE ${which} AND zones = 64 AND x IS NOT NULL ORDER BY frame_no`);
+  const sure = (what: string, n: number) => `(SELECT list(t.${what} ORDER BY t.target) FROM tof_targets t
+      WHERE t.take_id = z.take_id AND t.frame_no = z.frame_no AND t.zone = z.zone AND t.status IN (5, 6, 9) AND t.distance_mm > 0)[${n}]`;
   const zones = await store.query(`SELECT z.frame_no, (z.row - 1) * 8 + (z.col - 1) AS ray, z.targets,
-      (SELECT min_by(t.distance_mm, t.target) FROM tof_targets t WHERE t.take_id = z.take_id AND t.frame_no = z.frame_no
-         AND t.zone = z.zone AND t.status IN (5, 6, 9) AND t.distance_mm > 0) AS sure_mm,
+      ${sure("distance_mm", 1)} AS sure_mm, ${sure("status", 1)} AS sure_status,
+      ${sure("distance_mm", 2)} AS sure2_mm, ${sure("status", 2)} AS sure2_status,
       (SELECT min_by(t.status, t.target) FROM tof_targets t WHERE t.take_id = z.take_id AND t.frame_no = z.frame_no
          AND t.zone = z.zone) AS first_status
     FROM tof_zones z WHERE z.${which}`);
-  const rays = new Map<number, string[]>();
+  const rays = new Map<number, { first: string[]; second: string[] }>();
   for (const z of zones) {
     const f = z.frame_no as number;
-    if (!rays.has(f)) rays.set(f, Array(64).fill("65535 0"));
-    rays.get(f)![z.ray as number] = z.targets === 0 ? "0 0" : z.sure_mm === null ? `65535 ${z.first_status}` : `${z.sure_mm} ${z.first_status}`;
+    if (!rays.has(f)) rays.set(f, { first: Array(64).fill("65535 0"), second: Array(64).fill("0 0") });
+    const r = rays.get(f)!, ray = z.ray as number;
+    r.first[ray] = z.targets === 0 ? "0 0" : z.sure_mm === null ? `65535 ${z.first_status}` : `${z.sure_mm} ${z.sure_status}`;
+    if (z.sure2_mm !== null) r.second[ray] = `${z.sure2_mm} ${z.sure2_status}`;
   }
-  return frames.filter(f => rays.has(f.frame_no as number))
-    .map(f => `${f.frame_no} ${f.t_s} ${f.x} ${f.y} ${f.yaw} ${f.pitch} ${rays.get(f.frame_no as number)!.join(" ")}\n`).join("");
+  return frames.filter(f => rays.has(f.frame_no as number)).map(f => {
+    const r = rays.get(f.frame_no as number)!;
+    return `${f.frame_no} ${f.t_s} ${f.x} ${f.y} ${f.yaw} ${f.pitch} ${r.first.join(" ")} ${r.second.join(" ")}\n`;
+  }).join("");
 }
 
 const newest = (files: string[]) => Math.max(...files.map(f => statSync(f).mtimeMs));

@@ -42,6 +42,13 @@ static void load(const char *path) {
             fr->f.range_mm[i] = (uint16_t)mm;
             fr->f.status[i] = (uint8_t)st;
         }
+        // Optional: the second sure target of each ray (0 0: none).
+        unsigned mm2, st2;
+        for (int i = 0, used2; i < RANGEFINDER_RAYS && sscanf(s, "%u %u%n", &mm2, &st2, &used2) == 2; i++) {
+            s += used2;
+            fr->f.range2_mm[i] = (uint16_t)mm2;
+            fr->f.status2[i] = (uint8_t)st2;
+        }
         n_frames++;
     }
     fclose(in);

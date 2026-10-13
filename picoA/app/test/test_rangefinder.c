@@ -1,5 +1,5 @@
 // Host test for picoA/app/rangefinder.c: the zone order, the frame's time, unsure
-// and missing targets, the floor limit of the floor rows, against a fake VL53L8CX.
+// and missing targets, the second sure target behind the first, the floor limit of the floor rows, against a fake VL53L8CX.
 // Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_rangefinder picoA/app/test/test_rangefinder.c -lm && build/test_rangefinder
 #include <assert.h>
@@ -42,7 +42,17 @@ int main(void) {
     fake_tof.target_status[1] = 5;
     fake_tof_fresh = true;
     rangefinder_poll(&f);
-    assert(f.range_mm[0 * 8 + 7] == 555);
+    assert(f.range_mm[0 * 8 + 7] == 555 && f.status[0 * 8 + 7] == 5 && f.range2_mm[0 * 8 + 7] == RANGE_NO_TARGET);
+    // A leg in front of a wall, the sensor's echo first: the two sure targets, each
+    // with its own status.
+    fake_tof.nb_target_detected[0] = 3;
+    fake_tof.distance_mm[0] = 290, fake_tof.target_status[0] = 14;
+    fake_tof.distance_mm[1] = 537, fake_tof.target_status[1] = 9;
+    fake_tof.distance_mm[2] = 1456, fake_tof.target_status[2] = 5;
+    fake_tof_fresh = true;
+    rangefinder_poll(&f);
+    assert(f.range_mm[0 * 8 + 7] == 537 && f.status[0 * 8 + 7] == 9);
+    assert(f.range2_mm[0 * 8 + 7] == 1456 && f.status2[0 * 8 + 7] == 5);
 
     // The floor rows' limit: beyond where a zone's upper edge meets a flat floor 7 cm
     // below the sensor (+15 %), a reading is a reflection; the rows above have none.

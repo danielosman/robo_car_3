@@ -223,9 +223,8 @@ function clicked(x, y) {
 function showSnapshot() {
   const s = detail?.snapshot;
   if (!s) return;
-  const ended = s.action ? `${s.action} ${s.end_reason === "done" ? "done" : `ended: ${s.end_reason}`}` : "";
-  $("snaphead").innerHTML = `<b>#${s.seq}</b> of boot ${s.boot_id} · ${s.arrived} · ${s.why}` +
-    (ended ? `<br>last action: ${ended}` : "") + (s.running ? `<br>running: ${s.running}` : "") + `<br>mode ${s.mode}`;
+  // One line on top; the rest (the boot and date are in the Boot dropdown) at the bottom.
+  $("snapno").textContent = `Snapshot #${s.seq}`;
   // The camera picture, twice its size, and the features on it.
   const cam = $("camera"), c = cam.getContext("2d");
   c.imageSmoothingEnabled = false;
@@ -269,6 +268,10 @@ function showSnapshot() {
     ["x, y", `${(s.x * 100).toFixed(1)}, ${(s.y * 100).toFixed(1)} cm`], ["yaw", `${deg(s.yaw)}°`],
     ["pitch, roll", `${deg(s.pitch)}°, ${deg(s.roll)}°`], ["", `${s.stationary ? "still" : "moving"}, motors ${s.motors_on ? "on" : "off"}`],
     ["map window", `from (${s.map_org_cx * 10}, ${s.map_org_cy * 10}) cm`], ["tiles sent", s.tiles],
+  ]);
+  const ended = s.action ? `${s.action} ${s.end_reason === "done" ? "done" : `ended: ${s.end_reason}`}` : "";
+  $("snapinfo").innerHTML = kv([
+    ["why", s.why], ["last action", ended || "none"], ["mode", s.mode], ["running", s.running || "nothing"], ["arrived", s.arrived],
   ]);
 }
 

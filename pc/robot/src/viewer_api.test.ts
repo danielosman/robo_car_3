@@ -51,7 +51,7 @@ test("truth boxes per boot; the view and the replayed map of a take", { skip: !e
 
     const frames = await exportFrames(store, "7f3a5c01-1");
     assert.equal(frames.split("\n").length - 1, 2);
-    assert.equal(frames.split("\n")[0].split(" ").length, 6 + 2 * 64);
+    assert.equal(frames.split("\n")[0].split(" ").length, 6 + 2 * 64 + 2 * 64); // the nearest sure target, the one behind
     const map = await replayMap(store, "7f3a5c01-1");
     assert.ok(map.frames === 2 && map.cells.length > 0);
     assert.ok(map.cells.every(c => c.length === 7 && c[6] >= 0 && c[6] <= 100));

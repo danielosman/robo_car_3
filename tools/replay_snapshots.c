@@ -4,7 +4,7 @@
 // (picoA/app/snapshot.c): one snapshot at the end of each take, as the robot sends
 // them, written as a raw snapshot file the server imports (npm run import -- <file>).
 // There are no camera pictures or colour readings in recordings: those sections are
-// left out; each frame's ToF zones have their nearest sure target only. Built and run
+// left out; each frame's ToF zones have their two nearest sure targets only. Built and run
 // by pc/robot/src/snapreplay.ts:
 //   replay_snapshots <out.snap> <boot id hex> <start, ms since 1970> <action>=<frames file> ...
 #include <assert.h>
@@ -60,7 +60,8 @@ bool wifi_console_snapshot_send(const uint8_t *b, uint32_t n) {
 }
 void wifi_console_record(const char *text) { (void)text; }
 
-// The frame as the sensor's raw output: the nearest sure target per zone.
+// The frame as the sensor's raw output: the nearest sure target per zone and the
+// next one behind it.
 static void raw_of(const range_frame_t *f) {
     memset(&fake_tof, 0, sizeof fake_tof);
     for (int ray = 0; ray < RANGEFINDER_RAYS; ray++) {
@@ -68,7 +69,11 @@ static void raw_of(const range_frame_t *f) {
         if (f->range_mm[ray] == RANGE_NO_TARGET) continue;
         fake_tof.nb_target_detected[z] = 1;
         fake_tof.distance_mm[i] = f->range_mm[ray] == RANGE_INVALID ? 0 : (int16_t)f->range_mm[ray];
-        fake_tof.target_status[i] = f->range_mm[ray] == RANGE_INVALID ? f->status[ray] : 5;
+        fake_tof.target_status[i] = f->status[ray];
+        if (f->range2_mm[ray] == RANGE_NO_TARGET || f->range_mm[ray] == RANGE_INVALID) continue;
+        fake_tof.nb_target_detected[z] = 2;
+        fake_tof.distance_mm[i + 1] = (int16_t)f->range2_mm[ray];
+        fake_tof.target_status[i + 1] = f->status2[ray];
     }
     fake_tof_fresh = true;
     range_frame_t ignored;
@@ -94,6 +99,13 @@ static bool replay(const char *path, float *t0) {
             s += n;
             f.range_mm[i] = (uint16_t)mm;
             f.status[i] = (uint8_t)st;
+        }
+        // Optional: the second sure target of each ray (0 0: none).
+        unsigned mm2, st2;
+        for (int i = 0, used2; i < RANGEFINDER_RAYS && sscanf(s, "%u %u%n", &mm2, &st2, &used2) == 2; i++) {
+            s += used2;
+            f.range2_mm[i] = (uint16_t)mm2;
+            f.status2[i] = (uint8_t)st2;
         }
         *t0 += 1.0f / 15;
         f.t_us = (uint32_t)(*t0 * 1e6f);

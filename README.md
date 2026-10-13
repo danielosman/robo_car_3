@@ -334,6 +334,18 @@ around the robot, a piece of furniture 1-2 m away:
    knows nothing now and a tile does, the column shows dimmed.
 3. `C`: map and whole-house map cleared; the next snapshot's map is empty.
 
+**Thin legs on the map** (13 Oct; both Picos, the viewer open, manual mode). A chair
+or table with thin legs (2-4 cm) and a wall ~1 m behind them:
+1. Start 2 m from a leg, facing it, and `f` (or click just beyond the leg). Expected:
+   "Move stopped: obstacle N cm ahead (map)" with the front edge 15-25 cm from the
+   leg; the leg's column blocked (or an overhang) on the page.
+2. The same with the leg ~10 cm left or right of the robot's middle line: it still
+   stops.
+3. Back off 1 m and `S`: the leg stays on the map; walls look no thicker than before
+   driving close.
+4. Take the chair away, drive past where it stood: its cells clear within a few
+   frames.
+
 **Camera features** (V1; only PicoA, motors off). Robot facing ~2 m of the room,
 lights on. Paste each `v`:
 1. `v`: "Vision: N frames/s, X ms per frame (max Y), F features (B new, L lost in

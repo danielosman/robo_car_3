@@ -5,6 +5,68 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 13 Oct 2026: the map: thin legs (snapshot 35)
+
+Snapshot 35 of 12 Oct carries the VL53 frame, its pose and the map, so the robot's
+`cell_map.c` was run on that one frame on the Mac (no full telemetry of that drive).
+**Why the legs were missed:** leg 1 (row 4 col 2, 537 mm, status 9) put 2.95 rays'
+worth of hits into its L1 cell against 18.3 of passes. Six neighbouring zones' rays
+went through the same 10 cm cell beside the leg, below its top, to the wall about
+1.5 m behind. The cell was judged free, and the cells were "free 15" on the
+robot's map. Leg 2's L2 cell (row 3 col 3, 647 mm, status 5) won its frame (8.8
+against 6.8) but only added a doubt. Two more things made it worse: a reading's
+hits were split by how its 9 rays happened to fall into cells (leg 1: 6 in one
+cell, 3 in the next; a 5/4 split could never have overturned a free cell), and
+every reading's weight came from its zone's *first* target's status. That first
+target is mostly the sensor's echo at ~30 cm (status 12 or 14): nearly every reading
+counted half.
+
+Discussed with Daniel and built:
+- **A detection beats the passes beside it:** a cell a detection marks gets no
+  passes in that frame.
+- **A detection marks every cell its rays end in, as sure as the whole reading**
+  (closeness × status), not by its rays' shares. Passes also count the strongest
+  ray, not the sum (summed, many weak far rays wiped the walls), and as sure as
+  where the ray leaves the cell (from where it enters, a pass beat a hit in the same
+  cell by a hair at every tie: walls 6 of 20). A cell's q is now as sure as the
+  best reading in it, `max(H + P, 1)` instead of 9 rays. The per-frame arrays are
+  8-bit: ~21 KB of RAM freed.
+- **The second target:** the rangefinder keeps the next sure target behind the
+  first (the wall behind a leg), and it is detected the same way. Each target has
+  its own status now. The frames export (`npm run frames`) adds the second targets
+  (64 more pairs per line; old files still read). The recorded scans in
+  `picoA/app/test/data` were exported again.
+- **The hit height is kept while a cell is doubted,** not only while occupied: rays
+  passing over a low box before it was detected kept clearing it (the 7 cm box
+  test: 2 of 4).
+- Tried and dropped: "a detection already explained by an occupied cell in its
+  footprint marks only that cell", meant to keep a wall seen up close thin when
+  driving away. It lost the hallway box (an occupied cell in front of the box's
+  face explained its readings away), and without it the drive-away test doesn't
+  thicken the wall anyway (8 columns before, 8 after): far readings are under
+  q 0.3 and need 3 frames in a row. Also dropped: "an obstacle verdict replaces a
+  free cell at once", because it would let one frame's blip into the long-term map.
+
+Results: on snapshot 35's frame with the robot's map as it was, three frames like
+it make both legs' cells occupied (leg 1 at 7/15 in both its cells, leg 2 15/15 in
+L2, an overhang). `f` from where the robot stood then stops at 43 cm instead of
+driving 147 cm. New host tests: a 2 cm leg driven at from 2 m, on a cell line and
+in a cell's middle, blocked, `f` stops at 50 cm; a wall seen from 40 cm doesn't
+thicken when the robot drives away. All five recorded scans find the cup, box,
+chair and cupboard. Scans 4-5 now use scan 3's chair region: same start, and the
+chair's base is mapped at −75…−95 cm, outside their old 2-cell region at −60…−70
+cm. The old map code with the corrected status loses the cup in scan 1 (`f` would
+go 150 cm); the new code finds it. The watch test's 25°/s walker overshot 3.6° (its
+known 1-4° spread: the map moved an earlier stop by 2 mm); its limit is now 4°.
+Robot test: README "Thin legs on the map".
+
+## 13 Oct 2026: viewer, a shorter snapshot header
+
+The side panel's snapshot header is one line, "Snapshot #33", beside the timeline;
+why, the last action and how it ended, the mode, what ran and when it arrived moved
+to "About the snapshot" at the bottom (the boot and the date are in the Boot
+dropdown already).
+
 ## 12 Oct 2026: first run with the viewer (boot 22a46c41)
 
 Daniel drove the robot around the room for ~20 min, almost only by clicking on the

@@ -4,7 +4,9 @@
 // open floor, a box is blocked, a table top at 15-20 cm is an overhang, nothing beyond
 // stairs down is drivable, a hallway with nothing in range shows no obstacles. A chair
 // leg seen from 30 cm and then moved away is erased seen from 1 m; standing still
-// 10 min 2 m from a box keeps it; someone walking across is gone 3 frames after.
+// 10 min 2 m from a box keeps it; someone walking across is gone 3 frames after. A
+// thin leg driven at is blocked, on a cell line or not; a wall seen up close doesn't
+// thicken again when the robot drives away.
 // The whole-house map: columns in tiles, a known class overwrites, unknown keeps,
 // dirty tiles. The window follows the robot down a 7 m hallway by whole tiles (not
 // before it is 0.5 m out of the middle tile): a box seen at the start is kept in
@@ -72,22 +74,31 @@ static float trace(const float o[3], const float d[3]) {
 
 static float jitter(float v) { return v * 0.015f * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }
 
-// One frame from `pose`: each zone the nearest surface in its cone, up to 4 m.
+#define MERGE_M 0.6f // surfaces closer together than this are one target (ST's forum)
+
+static uint16_t range_of(float m) { return m > 4.0f ? RANGE_NO_TARGET : (uint16_t)(1000.0f * (m + jitter(m))); }
+
+// One frame from `pose`: each zone the nearest surface in its cone, up to 4 m, and
+// the nearest one more than MERGE_M behind it.
 static void measure(range_frame_t *f, const pose_t *pose) {
     float origin[3], c = cosf(pose->yaw_rad), s = sinf(pose->yaw_rad);
     rangefinder_origin(origin);
     float o[3] = {pose->x_m + c * origin[0] - s * origin[1], pose->y_m + s * origin[0] + c * origin[1], origin[2]};
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
-        float nearest = 1e9f;
-        for (int a = 0; a < 5; a++)
-            for (int b = 0; b < 5; b++) {
-                float r[3];
-                rangefinder_sub_ray_direction(i, -0.5f + 0.25f * (float)a, -0.5f + 0.25f * (float)b, pose->pitch_rad, r);
-                float d[3] = {c * r[0] - s * r[1], s * r[0] + c * r[1], r[2]};
-                nearest = fminf(nearest, trace(o, d));
-            }
-        f->range_mm[i] = nearest > 4.0f ? RANGE_NO_TARGET : (uint16_t)(1000.0f * (nearest + jitter(nearest)));
+        float seen[25];
+        float nearest = 1e9f, behind = 1e9f;
+        for (int k = 0; k < 25; k++) {
+            float r[3];
+            rangefinder_sub_ray_direction(i, -0.5f + 0.25f * (float)(k / 5), -0.5f + 0.25f * (float)(k % 5), pose->pitch_rad, r);
+            float d[3] = {c * r[0] - s * r[1], s * r[0] + c * r[1], r[2]};
+            seen[k] = trace(o, d);
+            nearest = fminf(nearest, seen[k]);
+        }
+        for (int k = 0; k < 25; k++) if (seen[k] > nearest + MERGE_M) behind = fminf(behind, seen[k]);
+        f->range_mm[i] = range_of(nearest);
         f->status[i] = 5;
+        f->range2_mm[i] = f->range_mm[i] == RANGE_NO_TARGET ? RANGE_NO_TARGET : range_of(behind);
+        f->status2[i] = 5;
     }
 }
 
@@ -246,6 +257,40 @@ int main(void) {
     printf("someone walking across at 1 m: seen %s, gone %d frames after they left\n", seen ? "yes" : "no", left);
     assert(seen && left >= 1 && left <= 4);
     printf("ok: someone walking through is erased once they're gone\n");
+
+    // A thin leg (2 x 2 cm, 70 cm tall) with the wall behind it, driven at from 2 m:
+    // on a cell line and in a cell's middle. The other zones' rays pass beside it in
+    // its 10 cm cell; it must still be blocked, and `f` stop before it (snapshot 35,
+    // 12 Oct: the robot drove into such legs).
+    for (int on_line = 1; on_line >= 0; on_line--) {
+        reset_scene();
+        walls(2.0f);
+        float y0 = on_line ? -0.01f : 0.04f;
+        add_box(0.55f, 0.57f, y0, y0 + 0.02f, 0, 0.7f);
+        scan_at(-1.5f, 0);
+        float x = -1.5f;
+        for (; x <= 0; x += 0.02f) frame_at((pose_t){x, 0, 0, 0});
+        float stop = cell_map_obstacle_along(0, y0 + 0.01f, 1, 0, 0.235f / 2 + 0.05f, 1.5f);
+        printf("thin leg %s, driven at from 2 m to 55 cm: column %s, f stops at %.0f cm\n",
+               on_line ? "on a cell line" : "in a cell's middle",
+               cell_map_column(0.56f, y0 + 0.01f) == COLUMN_BLOCKED ? "blocked" : "NOT blocked", (double)(stop * 100));
+        assert(cell_map_column(0.56f, y0 + 0.01f) == COLUMN_BLOCKED);
+        assert(stop > 0.4f && stop <= 0.55f);
+    }
+    printf("ok: a thin leg is blocked\n");
+
+    // A wall seen from 2 m (thick: a zone is 20 cm wide there), then from 40 cm, then
+    // from 2 m again: what the close look cleared in front of the wall stays free.
+    reset_scene();
+    walls(2.0f);
+    for (float x = -0.4f; x <= 1.6f; x += 0.02f) frame_at((pose_t){x, 0, 0, 0});
+    int near_front = count(1.7f, 2.0f, -0.4f, 0.4f, COLUMN_BLOCKED);
+    for (float x = 1.6f; x >= -0.4f; x -= 0.02f) frame_at((pose_t){x, 0, 0, 0});
+    int far_front = count(1.7f, 2.0f, -0.4f, 0.4f, COLUMN_BLOCKED);
+    printf("wall: blocked columns 0-30 cm in front of it: %d after driving to 40 cm, %d after driving back to 2.4 m\n",
+           near_front, far_front);
+    assert(far_front <= near_front);
+    printf("ok: driving away doesn't thicken a wall seen up close\n");
 
     // The whole-house map by itself.
     house_map_clear();

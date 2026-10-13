@@ -15,12 +15,11 @@ _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define NOTHING_M     1.0f      // a zone with nothing in range: free this far
 #define NEAR_M        1.5f      // the ray_closeness sigmoid: 0.5 here...
 #define NEAR_SLOPE_M  0.25f     // ...falling over about this much
-#define FULL_RAYS     9.0f      // rays' worth of agreement for full confidence
 #define ERASE_Q       0.3f      // a frame this confident may overwrite, given...
 #define DOUBT_FRAMES  3         // ...this many in a row
 #define FOOT_M        0.15f     // the robot stands and turns here: floor, L1 free
 #define L2_BLIND_M    0.25f     // no zone sees L2 this close to the robot
-#define WEIGHT_ONE    64        // a ray of weight 1 in the per-frame sums
+#define WEIGHT_ONE    64        // weight 1 in the per-frame hit_w, pass_w
 #define G_TOP_M       (G_BOTTOM_M + GRID_M) // 3 cm: above this an end point is no floor
 #define Z_STEP_M      0.002f    // hit heights kept in 2 mm steps above G_BOTTOM_M
 #define NO_HIT_Z      255
@@ -33,9 +32,11 @@ _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define C_PACK(state, doubt, conf) ((uint8_t)((state) | (doubt) << 2 | (conf) << 4))
 
 static uint8_t grid[CELL_LAYERS][GRID][GRID];
-static uint16_t hit_sum[CELL_LAYERS][GRID][GRID], pass_sum[CELL_LAYERS][GRID][GRID]; // this frame
-// The highest point hit in an occupied cell (kept), and in this frame: what stands
-// there reaches at least that high.
+// This frame: the strongest hit and pass in each cell (a reading's weight, × WEIGHT_ONE).
+static uint8_t hit_w[CELL_LAYERS][GRID][GRID], pass_w[CELL_LAYERS][GRID][GRID];
+// The highest point a detection found in a cell (kept while it is occupied, or until
+// a pass below it finds nothing), and in this frame (NO_HIT_Z: no detection marked
+// it): what stands there reaches at least that high.
 static uint8_t hit_z[CELL_LAYERS][GRID][GRID], frame_hit_z[CELL_LAYERS][GRID][GRID];
 static float floor_margin = CELL_MAP_FLOOR_MARGIN;
 // The window: GRID x GRID columns from world cell (org_x, org_y) on (cell (cx, cy)
@@ -47,8 +48,8 @@ void cell_map_set_floor_margin(float margin) { floor_margin = margin; }
 
 void cell_map_clear(void) {
     memset(grid, 0, sizeof grid);
-    memset(hit_sum, 0, sizeof hit_sum);
-    memset(pass_sum, 0, sizeof pass_sum);
+    memset(hit_w, 0, sizeof hit_w);
+    memset(pass_w, 0, sizeof pass_w);
     memset(hit_z, NO_HIT_Z, sizeof hit_z);
     house_map_clear();
 }
@@ -64,7 +65,7 @@ static uint8_t higher(uint8_t a, uint8_t b) { return a == NO_HIT_Z ? b : b == NO
 // A pass at or below this height in the cell counts against it (it would
 // have hit what stands there); any pass if nothing was hit there.
 static float pass_limit_m(int layer, int ix, int iy) {
-    uint8_t z = higher(frame_hit_z[layer][ix][iy], hit_z[layer][ix][iy]);
+    uint8_t z = hit_z[layer][ix][iy];
     return z == NO_HIT_Z ? 1e9f : G_BOTTOM_M + (float)z * Z_STEP_M + PASS_BELOW_M;
 }
 
@@ -76,23 +77,21 @@ static bool in_grid(int ix, int iy, int layer) { // window indexes
 
 static float ray_closeness(float d_m) { return 1.0f / (1.0f + expf((d_m - NEAR_M) / NEAR_SLOPE_M)); }
 
-static void add_weight(uint16_t *sum, float w) {
-    uint32_t v = *sum + (uint32_t)(w * WEIGHT_ONE + 0.5f);
-    *sum = v > 0xFFFF ? 0xFFFF : (uint16_t)v;
-}
+static uint8_t weight_code(float w) { return (uint8_t)(w * WEIGHT_ONE + 0.5f); }
+static void keep_max(uint8_t *kept, float w) { if (weight_code(w) > *kept) *kept = weight_code(w); }
 
 // What a ray's end cell gets: a hit, a pass (nothing in range: it went on), or
-// nothing (an unsure reading, or an obstacle's hit placed before); LIFTED (an
-// obstacle): a hit, in L1 if the ray ends in the ground layer, and its
-// height noted for this frame's passes.
-typedef enum { END_HIT, END_PASS, END_NONE, END_LIFTED } ray_end_t;
+// nothing (an unsure reading's ray above the floor, or an obstacle: detect() marks it).
+typedef enum { END_HIT, END_PASS, END_NONE } ray_end_t;
 
 // Walks one ray (3D DDA over the grid): every cell it passes gets a pass, the cell
 // it ends in what `end` says. A ground cell gets a pass only from a ray leaving it
 // through its bottom. Below the ground layer it stops (it went through the floor's
 // place: a hole, or noise); above L2 going up it stops too. A pass above
-// the highest point hit in a cell doesn't count there (it wouldn't have hit it).
-static void walk_ray(const float o[3], const float d[3], float length_m, ray_end_t end, float v, bool passes) {
+// the highest point hit in a cell doesn't count there (it wouldn't have hit it), and
+// none counts in a cell a detection marked this frame: the other zones' rays pass
+// beside a thin leg in the same 10 cm cell.
+static void walk_ray(const float o[3], const float d[3], float length_m, ray_end_t end, float v) {
     float p[3] = {o[0] / GRID_M, o[1] / GRID_M, (o[2] - G_BOTTOM_M) / GRID_M};
     int c[3], step[3];
     float t_max[3], t_delta[3];
@@ -111,23 +110,16 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
         int ix = c[0] - org_x, iy = c[1] - org_y, layer = c[2];
         if (layer < 0 || (layer >= CELL_LAYERS && d[2] >= 0)) return;
         if (in_grid(ix, iy, layer)) {
-            float w = ray_closeness(t) * v;
             // The ground layer is passed only by going through it: a ray crossing its
             // top (air above whatever is there) tells nothing about it.
             bool through = layer > 0 || (!last && axis == 2 && step[2] < 0);
-            if (last && end == END_HIT) add_weight(&hit_sum[layer][ix][iy], w);
-            else if (last && end == END_LIFTED) {
-                int to = layer < 1 ? 1 : layer;
-                float z = fmaxf(o[2] + length_m * d[2], G_TOP_M + 0.001f);
-                if (to < CELL_LAYERS) {
-                    add_weight(&hit_sum[to][ix][iy], w);
-                    frame_hit_z[to][ix][iy] = higher(frame_hit_z[to][ix][iy], z_code(z));
-                }
-            } else if (last || !passes) {}
-            else if (through) {
-                float t_out = last ? length_m : t_max[axis];
+            if (last && end == END_HIT) keep_max(&hit_w[layer][ix][iy], ray_closeness(length_m) * v);
+            else if (last) {}
+            else if (through && frame_hit_z[layer][ix][iy] == NO_HIT_Z) {
+                float t_out = t_max[axis];
                 float low_m = fminf(o[2] + t * d[2], o[2] + t_out * d[2]); // the ray's lowest point in the cell
-                if (low_m <= pass_limit_m(layer, ix, iy)) add_weight(&pass_sum[layer][ix][iy], w);
+                // As sure as a reading from where the ray leaves the cell: it is free that far.
+                if (low_m <= pass_limit_m(layer, ix, iy)) keep_max(&pass_w[layer][ix][iy], ray_closeness(t_out) * v);
             }
         }
         if (last) return;
@@ -141,7 +133,7 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
 static void decide_cell(uint8_t *cell, float h, float p) {
     if (h == p) return;
     int verdict = h > p ? CELL_STATE_OCCUPIED : CELL_STATE_FREE;
-    float q = fabsf(h - p) / fmaxf(h + p, FULL_RAYS);
+    float q = fabsf(h - p) / fmaxf(h + p, 1.0f);
     int qc = (int)(q * 15 + 0.5f);
     uint8_t c = *cell;
     if (C_STATE(c) == CELL_STATE_UNKNOWN || (float)C_CONF(c) / 15 < q) *cell = C_PACK(verdict, 0, qc);
@@ -191,31 +183,66 @@ static reading_t judge(int zone, float length_m, float sensor_z_m, float pitch_r
     return READ_FLOOR;
 }
 
+// A detection: a zone's sure target judged an obstacle, `length_m` along rays `d`
+// (its 9, in the world) from `o`. Which of the cells they end in holds it isn't
+// known, so all of them are marked (in L1 if they end in G), each as sure as the
+// whole reading: closeness × v, so that a far detection is weak and can't overturn
+// what was seen from closer (q < 0.3 beyond ~1.7 m).
+typedef struct { uint8_t layer, ix, iy, z; } footprint_t; // a cell (window indexes), the highest point in it
+
+static void detect(const float o[3], const float d[9][3], float length_m, float v) {
+    footprint_t cell[9];
+    int n = 0;
+    for (int k = 0; k < 9; k++) {
+        float z = o[2] + length_m * d[k][2];
+        int ix = cell_of(o[0] + length_m * d[k][0]) - org_x, iy = cell_of(o[1] + length_m * d[k][1]) - org_y;
+        int layer = (int)floorf((z - G_BOTTOM_M) / GRID_M);
+        if (layer < 1) { layer = 1; z = G_TOP_M + 0.001f; }
+        if (!in_grid(ix, iy, layer)) continue;
+        int j = 0;
+        while (j < n && !(cell[j].layer == layer && cell[j].ix == ix && cell[j].iy == iy)) j++;
+        if (j == n) cell[n++] = (footprint_t){(uint8_t)layer, (uint8_t)ix, (uint8_t)iy, NO_HIT_Z};
+        cell[j].z = higher(cell[j].z, z_code(z));
+    }
+    float w = ray_closeness(length_m) * v;
+    for (int j = 0; j < n; j++) {
+        int l = cell[j].layer, ix = cell[j].ix, iy = cell[j].iy;
+        keep_max(&hit_w[l][ix][iy], w); // the surest detection there
+        frame_hit_z[l][ix][iy] = higher(frame_hit_z[l][ix][iy], cell[j].z);
+    }
+}
+
 void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
-    memset(hit_sum, 0, sizeof hit_sum);
-    memset(pass_sum, 0, sizeof pass_sum);
+    memset(hit_w, 0, sizeof hit_w);
+    memset(pass_w, 0, sizeof pass_w);
     memset(frame_hit_z, NO_HIT_Z, sizeof frame_hit_z);
     float origin[3], c = cosf(pose->yaw_rad), s = sinf(pose->yaw_rad);
     rangefinder_origin(origin);
     float o[3] = {pose->x_m + c * origin[0] - s * origin[1], pose->y_m + s * origin[0] + c * origin[1], origin[2]};
     static const float frac[3] = {-1.0f / 3, 0, 1.0f / 3}; // 1/6, 1/2, 5/6 of the zone
     reading_t judged_as[RANGEFINDER_RAYS];
-    // First every reading's judgement and the obstacles' hits, so that this frame's
-    // passes already know where things were hit.
+    // First every reading's judgement and the detections (the zone's nearest sure
+    // target, and the next one behind it: the wall behind a leg), so that this frame's
+    // passes already know where things were detected.
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         uint16_t mm = frame->range_mm[i];
         judged_as[i] = READ_FLOOR;
         if (mm == RANGE_INVALID || mm == RANGE_NO_TARGET) continue;
-        float length_m = (float)mm / 1000.0f, v = frame->status[i] == 5 ? 1.0f : 0.5f;
+        float d[9][3];
+        for (int k = 0; k < 9; k++) {
+            float r[3];
+            rangefinder_sub_ray_direction(i, frac[k / 3], frac[k % 3], pose->pitch_rad, r);
+            d[k][0] = c * r[0] - s * r[1];
+            d[k][1] = s * r[0] + c * r[1];
+            d[k][2] = r[2];
+        }
+        float length_m = (float)mm / 1000.0f;
         judged_as[i] = judge(i, length_m, origin[2], pose->pitch_rad, frac);
-        if (judged_as[i] != READ_OBSTACLE) continue;
-        for (int a = 0; a < 3; a++)
-            for (int b = 0; b < 3; b++) {
-                float r[3];
-                rangefinder_sub_ray_direction(i, frac[a], frac[b], pose->pitch_rad, r);
-                float d[3] = {c * r[0] - s * r[1], s * r[0] + c * r[1], r[2]};
-                walk_ray(o, d, length_m, END_LIFTED, v, false); // its hit only: the whole reading is the obstacle
-            }
+        if (judged_as[i] == READ_OBSTACLE) detect(o, d, length_m, frame->status[i] == 5 ? 1.0f : 0.5f);
+        if (frame->range2_mm[i] == RANGE_NO_TARGET) continue;
+        float length2_m = (float)frame->range2_mm[i] / 1000.0f;
+        if (judge(i, length2_m, origin[2], pose->pitch_rad, frac) == READ_OBSTACLE)
+            detect(o, d, length2_m, frame->status2[i] == 5 ? 1.0f : 0.5f);
     }
     for (int i = 0; i < RANGEFINDER_RAYS; i++) {
         uint16_t mm = frame->range_mm[i];
@@ -229,20 +256,22 @@ void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
                 rangefinder_sub_ray_direction(i, frac[a], frac[b], pose->pitch_rad, r);
                 float d[3] = {c * r[0] - s * r[1], s * r[0] + c * r[1], r[2]};
                 ray_end_t end = !ends ? END_PASS : judged_as[i] == READ_FLOOR ? END_HIT
-                              : judged_as[i] == READ_OBSTACLE ? END_NONE // its hit placed above
+                              : judged_as[i] == READ_OBSTACLE ? END_NONE // detected above
                               : o[2] + length_m * d[2] < G_TOP_M ? END_HIT : END_NONE; // unsure
-                walk_ray(o, d, length_m, end, v, true);
+                walk_ray(o, d, length_m, end, v);
             }
     }
     for (int l = 0; l < CELL_LAYERS; l++)
         for (int ix = 0; ix < GRID; ix++)
             for (int iy = 0; iy < GRID; iy++)
-                if (hit_sum[l][ix][iy] || pass_sum[l][ix][iy]) {
-                    decide_cell(&grid[l][ix][iy], (float)hit_sum[l][ix][iy] / WEIGHT_ONE,
-                                (float)pass_sum[l][ix][iy] / WEIGHT_ONE);
-                    // An occupied cell keeps the highest point hit in it; a freed one forgets it.
-                    if (C_STATE(grid[l][ix][iy]) != CELL_STATE_OCCUPIED) hit_z[l][ix][iy] = NO_HIT_Z;
-                    else hit_z[l][ix][iy] = higher(hit_z[l][ix][iy], frame_hit_z[l][ix][iy]);
+                if (hit_w[l][ix][iy] || pass_w[l][ix][iy]) {
+                    decide_cell(&grid[l][ix][iy], (float)hit_w[l][ix][iy] / WEIGHT_ONE,
+                                (float)pass_w[l][ix][iy] / WEIGHT_ONE);
+                    // A cell keeps the highest point a detection found in it, also while
+                    // still free (doubted): rays passing over it don't count. A pass at or
+                    // below it that found nothing forgets it, unless the cell stays occupied.
+                    if (frame_hit_z[l][ix][iy] != NO_HIT_Z) hit_z[l][ix][iy] = higher(hit_z[l][ix][iy], frame_hit_z[l][ix][iy]);
+                    else if (C_STATE(grid[l][ix][iy]) != CELL_STATE_OCCUPIED) hit_z[l][ix][iy] = NO_HIT_Z;
                 }
     around_the_robot(pose);
 }

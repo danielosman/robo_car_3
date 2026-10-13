@@ -94,7 +94,9 @@ viewer's commands). `loop_stats` times every stage. Core 1 is not used.
 - **`rangefinder`**: the VL53L8CX as 64 rays (8 × 8 zones, 5.625° each, 15 Hz). It
   hides the zone order and the mounting: turned 90° on the PCB, 2.5 cm ahead of
   the centre, 3 cm right, 7 cm above the floor. Per zone it keeps the nearest sure
-  target (status 5, 6 or 9), or "nothing in range", or "unsure". It gives each
+  target (status 5, 6 or 9), or "nothing in range", or "unsure"; and the next sure
+  target behind it (the wall behind a leg). Each with its own status (the sensor's
+  echo at ~30 cm often comes first, with status 12 or 14: it is skipped). It gives each
   ray's direction, also for points inside a zone and with the robot's pitch.
 - **Drivers:** `tof` (the ST ULD over SPI0, all four targets per zone), `camera`
   (HM0360, 160 × 120 monochrome, captured by PIO and DMA in the background, its
@@ -119,23 +121,34 @@ the frame was measured. Nothing is learned first; `C` clears the map.
   drop). A zone with nothing in range passes cells up to 1 m.
 - **A reading is judged as a whole** by where its zone's cone first meets the
   floor (row 8 ~18 cm, row 7 ~24, row 6 ~34, row 5 ~63-71 cm, rows 1-4 never):
-  - closer than 0.9 × that: an **obstacle**. All 9 rays hit, in L1 or above (rays
-    ending below 3 cm are lifted to L1);
+  - closer than 0.9 × that: an **obstacle**, a **detection**. Which of the cells its
+    9 rays end in holds it isn't known, so all of them are marked occupied (in L1
+    or above: rays ending below 3 cm are lifted to L1), each as sure as the whole
+    reading, however its rays happen to split between cells. The zone's second
+    target is judged and marked the same way;
   - otherwise all rays ending below 3 cm: **floor** (they hit G);
   - otherwise **unsure** (grazing the floor, or a low thing on it): only its rays
     at floor height hit.
 - **A ray clears only what it would have hit:** a pass counts against a cell only
   if the ray went through it at or below the highest point hit there + 1 cm. So
-  rays passing over a low thing don't erase it.
-- **Weights:** each ray counts `c(d) × v`: closeness, a sigmoid that is ≈1 up to
-  0.5 m, 0.5 at 1.5 m and ≈0 at 3 m; and the VL53's confidence, 1 for status 5,
-  0.5 for 6 or 9.
-- **One frame's verdict on a cell:** H = the weights of the rays hitting it, P = of
-  those passing it. Occupied if H > P, else free, with confidence
-  q = |H − P| / max(H + P, 9): nine sure, close rays that agree give q = 1.
+  rays passing over a low thing don't erase it. The cell keeps that height while it
+  is occupied, or doubted, until a pass below it finds nothing.
+- **A detection beats the passes beside it:** a cell marked by a detection gets no
+  passes in that frame. A thin leg fills 2 cm of a 10 cm cell, and the other zones'
+  rays pass it on their way to the wall behind (snapshot 35, 12 Oct: the legs were
+  "drivable, 15/15", and go-to drove into them).
+- **Weights:** a reading counts `c(d) × v`: closeness, a sigmoid that is ≈1 up to
+  0.5 m, 0.5 at 1.5 m and ≈0 at 3 m; and the VL53's confidence of the target used,
+  1 for status 5, 0.5 for 6 or 9. A hit's d is the reading's length; a pass's d is
+  where the ray leaves the cell (it shows the cell free only that far).
+- **One frame's verdict on a cell:** H = the strongest hit in it, P = the strongest
+  pass; rays are not added up. Occupied if H > P, else free, with confidence
+  q = |H − P| / max(H + P, 1): one sure, close reading gives q = 1.
 - **A cell keeps its best measurement:** the same verdict raises its confidence;
   a different verdict replaces it at once if more confident, or after 3 frames in a
-  row with q ≥ 0.3 (roughly rays from within 1.3 m); weaker frames are ignored.
+  row with q ≥ 0.3 (a status-5 reading from within ~1.7 m, a status-9 one within
+  ~1.4 m); weaker frames are ignored, so a far, wide footprint can't thicken again
+  what was seen from closer.
   Frames are not added up, so standing still doesn't wear away what was seen from
   closer, and a moved chair or a walker clears within a few frames.
 - **Around the robot:** G within 15 cm of the centre is floor and L1 free (it
@@ -330,7 +343,8 @@ are the `rec_*_t` structs in `recorder.c` (format version 3); the PC reads them 
 ### Budgets
 
 - **RAM:** everything is static, no `malloc`. ~103 KB free of 512 (`p` prints it;
-  12 Oct, after the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB).
+  12 Oct, after the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB;
+  ~21 KB more since 13 Oct: the map's per-frame hit and pass arrays are 8-bit).
 - **Loop:** mean ~60 µs, worst ~29 ms (a map frame); a ToF frame every 66 ms, DRIVE
   every 50 ms (PicoB stops after 250 ms), 16 odometry reports kept (320 ms).
 - **Stack:** core 0 ~6.5 KB worst case of the 8 KB it can use (both scratch banks;
@@ -413,8 +427,9 @@ Rules the code follows; change them only with Daniel's word.
   Everything above is an obstacle. **No floor learning.**
 - Drivable = floor seen in the ground cell, 3-13 cm and 13-23 cm free. L2 cells
   within 25 cm of the robot, never seen by any zone, count as free.
-- The map: 9 rays per zone, the best measurement wins; a reading judged as a whole.
-  Not: adding up evidence over frames, one ray per zone.
+- The map: 9 rays per zone, the best measurement wins; a reading judged as a whole,
+  and a detection marks every cell its rays end in, as sure as the whole reading.
+  Not: adding up evidence over frames or over rays, one ray per zone.
 - No climbing worries for now: the robot drives slowly in controlled rooms.
 
 **Commands:**

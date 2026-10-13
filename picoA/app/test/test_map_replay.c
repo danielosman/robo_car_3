@@ -21,7 +21,8 @@
 typedef struct { const char *name; float x0, x1, y0, y1; } region_t;
 typedef struct { const char *take; region_t objects[4]; } scan_t;
 
-// Regions in each scan's own frame (x forward at power-up, y left), m.
+// Regions in each scan's own frame (x forward at power-up, y left), m. Scans 3-5 have
+// the same start, so the same chair region (its base, seen at -0.75 … -0.95 m).
 static const scan_t scans[] = {
     {"8f3159b3-2", {{"cup", 0.4f, 0.6f, 0.1f, 0.2f}, {"box", -0.1f, 0.2f, 0.5f, 0.6f},
                     {"chair", -0.3f, 0.3f, -0.8f, -0.5f}, {"cupboard", -0.5f, -0.4f, -0.3f, 0.1f}}},
@@ -29,9 +30,9 @@ static const scan_t scans[] = {
     {"123eef20-2", {{"cup", 0.4f, 0.5f, -0.3f, -0.2f}, {"box", 0.0f, 0.2f, 0.3f, 0.5f},
                     {"chair", -0.4f, 0.3f, -1.0f, -0.5f}, {"cupboard", -0.7f, -0.4f, -0.6f, -0.1f}}},
     {"0558a0ee-2", {{"cup", 0.4f, 0.5f, -0.3f, -0.2f}, {"box", 0.0f, 0.2f, 0.3f, 0.5f},
-                    {"chair", -0.1f, 0.1f, -0.7f, -0.6f}, {"cupboard", -0.7f, -0.4f, -0.6f, -0.1f}}},
+                    {"chair", -0.4f, 0.3f, -1.0f, -0.5f}, {"cupboard", -0.7f, -0.4f, -0.6f, -0.1f}}},
     {"0b9377b7-1", {{"cup", 0.4f, 0.5f, -0.3f, -0.2f}, {"box", 0.0f, 0.2f, 0.3f, 0.5f},
-                    {"chair", -0.1f, 0.1f, -0.7f, -0.6f}, {"cupboard", -0.7f, -0.4f, -0.6f, -0.1f}}},
+                    {"chair", -0.4f, 0.3f, -1.0f, -0.5f}, {"cupboard", -0.7f, -0.4f, -0.6f, -0.1f}}},
 };
 
 typedef struct { range_frame_t f; pose_t p; } frame_t;
@@ -59,6 +60,13 @@ static int load(const char *take) {
             s += used;
             fr->f.range_mm[i] = (uint16_t)mm;
             fr->f.status[i] = (uint8_t)st;
+        }
+        // Optional: the second sure target of each ray (0 0: none).
+        unsigned mm2, st2;
+        for (int i = 0, used2; i < RANGEFINDER_RAYS && sscanf(s, "%u %u%n", &mm2, &st2, &used2) == 2; i++) {
+            s += used2;
+            fr->f.range2_mm[i] = (uint16_t)mm2;
+            fr->f.status2[i] = (uint8_t)st2;
         }
         n++;
     }

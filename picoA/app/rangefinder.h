@@ -20,7 +20,11 @@ typedef struct {
     uint32_t number;                    // counts every frame the sensor gave since power-up, from 1
     uint32_t t_us;                      // PicoA's clock (time_us_32()), middle of the measurement
     uint16_t range_mm[RANGEFINDER_RAYS]; // closest sure target along each ray, or RANGE_NO_TARGET / RANGE_INVALID
-    uint8_t status[RANGEFINDER_RAYS];   // VL53 status of the first target, for printing why a zone is unsure
+    uint8_t status[RANGEFINDER_RAYS];   // VL53 status of that target; if not sure, of the first (why it is unsure)
+    // The next sure target behind range_mm's (a leg in front of a wall: the wall), or
+    // RANGE_NO_TARGET; and its status.
+    uint16_t range2_mm[RANGEFINDER_RAYS];
+    uint8_t status2[RANGEFINDER_RAYS];
 } range_frame_t;
 
 bool rangefinder_init(void);                 // starts the sensor (~2 s); false if it doesn't answer

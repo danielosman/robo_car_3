@@ -46,17 +46,16 @@ bool rangefinder_init(void) {
 // Statuses the ULD marks as a valid range (5) or valid with lower confidence (6, 9).
 static bool valid_status(uint8_t status) { return status == 5 || status == 6 || status == 9; }
 
-// The closest sure target of a zone (targets come closest first).
-static uint16_t closest_sure_mm(const VL53L8CX_ResultsData *r, int zone) {
+// The closest sure target of a zone after target `from` (targets come closest
+// first): its index, or -1.
+static int sure_target(const VL53L8CX_ResultsData *r, int zone, int from) {
     int n = r->nb_target_detected[zone];
-    if (n == 0) return RANGE_NO_TARGET;
     if (n > (int)VL53L8CX_NB_TARGET_PER_ZONE) n = VL53L8CX_NB_TARGET_PER_ZONE;
-    for (int t = 0; t < n; t++) {
+    for (int t = from; t < n; t++) {
         int i = zone * (int)VL53L8CX_NB_TARGET_PER_ZONE + t;
-        if (valid_status(r->target_status[i]) && r->distance_mm[i] > 0)
-            return (uint16_t)r->distance_mm[i]; // int16: at most 32767, never RANGE_INVALID
+        if (valid_status(r->target_status[i]) && r->distance_mm[i] > 0) return t;
     }
-    return RANGE_INVALID;
+    return -1;
 }
 
 // The sensor is turned 90° on the PCB (same as the bring-up viewer's rotation).
@@ -81,8 +80,14 @@ bool rangefinder_poll(range_frame_t *frame) {
     for (int row = 0; row < RANGEFINDER_ROWS; row++)
         for (int col = 0; col < RANGEFINDER_COLS; col++) {
             int i = row * RANGEFINDER_COLS + col, zone = rangefinder_zone(i);
-            frame->range_mm[i] = closest_sure_mm(r, zone);
-            frame->status[i] = r->target_status[zone * VL53L8CX_NB_TARGET_PER_ZONE];
+            const int first = zone * (int)VL53L8CX_NB_TARGET_PER_ZONE;
+            int t1 = sure_target(r, zone, 0), t2 = t1 < 0 ? -1 : sure_target(r, zone, t1 + 1);
+            // int16 distances: at most 32767, never RANGE_INVALID
+            frame->range_mm[i] = r->nb_target_detected[zone] == 0 ? RANGE_NO_TARGET
+                               : t1 < 0 ? RANGE_INVALID : (uint16_t)r->distance_mm[first + t1];
+            frame->status[i] = r->target_status[first + (t1 < 0 ? 0 : t1)];
+            frame->range2_mm[i] = t2 < 0 ? RANGE_NO_TARGET : (uint16_t)r->distance_mm[first + t2];
+            frame->status2[i] = t2 < 0 ? 0 : r->target_status[first + t2];
         }
     return true;
 }
