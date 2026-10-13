@@ -35,6 +35,10 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
      weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
+**Planned, waiting for Daniel's go:** the command API and the CLI, so an AI agent
+can steer the robot (fewer commands with numbers, one queue, short answers, data
+for the agent): [CLI_API_PLAN.md](CLI_API_PLAN.md), worked out on 13 Oct.
+
 ## Goals: what the robot is for
 
 Modes 1-3 are Daniel's; 4-6 were proposed and agreed on 11 Oct; 7 on 12 Oct.
