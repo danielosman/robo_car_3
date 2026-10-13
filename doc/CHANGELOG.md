@@ -15,6 +15,17 @@ wall's surface at the same place (no drift); scan 24 saw it at ~19°, and its ra
 slid along it through the free corners of the wall's cells, ending further along:
 22-25 frames passed those cells, 0-2 hit them, and 3 in a row clear a cell. The
 old code does the same (7 → 1 columns in a replay of that scan).
+Tried and dropped: a pass clears an occupied cell only within 3 cm of its middle.
+The wall then kept 7 of its 9 steps of 10 cm through that scan (instead of 3-5), but
+someone walking past a standing robot stayed on the map for good (no ray from there
+went through the middle of one of their cells). At the wall's (28, 288) end the scan's
+rays went through the cells' middles and 24 readings ended ~15 cm behind the wall, at
+about (36, 304) cm, a spot no other position saw: the wall may end earlier there, or
+that scan's heading was a few degrees off (not settled).
+Also: when the robot connected, the page kept showing the previous drive's map
+until an action: it switched to a new boot only while "live" was ticked, and
+browsing the old drive had unticked it. Now a new boot's first snapshot always
+takes over the page and ticks "live" again.
 
 ## 13 Oct 2026: the floor layer adds up its rays again
 

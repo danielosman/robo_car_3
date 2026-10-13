@@ -423,7 +423,9 @@ function connect() {
       if (follow && showingLive()) centre();
       if (showingLive()) draw();
     } else if (msg.type === "snapshot") {
-      if (msg.boot !== boot) { if ($("follow").checked || !boot) loadBoots(msg.boot); }
+      // A new boot (the robot started again) always takes over the page: its first
+      // snapshot comes when it connects, and the old drive's map must not stay up.
+      if (msg.boot !== boot) { $("follow").checked = true; follow = true; loadBoots(msg.boot); }
       else if ($("follow").checked) loadSnapshots(boot);
       else getJson(`/api/snapshots?boot=${boot}`).then(list => { snaps = list.map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) })); $("timeline").max = snaps.length - 1; draw(); });
     }

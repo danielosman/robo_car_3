@@ -26,10 +26,13 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
    - Drive to a point (go to, click on the map)
    - Camera features V1 (on core 0, every 3rd frame)
    - Thin legs on the map (13 Oct: detections marked whole, passes can't erase
-     them in the same frame, the second target. First drive the same evening,
-     boot 31bcd26e: "the map looks a lot more solid, small obstacles detected";
-     the replay old code against new on that drive is still to do)
-   - A slow link (13 Oct: the server closes only after 30 s, snapshots paced)
+     them in the same frame, the second target). Two drives the same evening
+     (boots 31bcd26e, 5b0d72ab): small obstacles and legs found, the ground solid
+     after the floor fix. Left of the README test: steps 1-2 (`f` at a single leg,
+     on and off the middle line) and step 4 (the chair taken away).
+   - A slow link (13 Oct: the server closes only after 30 s, snapshots paced).
+     Drive 5b0d72ab had no drops and no "nothing from the robot" notes; the
+     weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
 ## Goals: what the robot is for
@@ -386,6 +389,14 @@ speed, so that a blip causes only a small twitch. (Not answered.)
   robot's path end as "no floor"): readings "beyond the floor" in rows 6-8 count
   fully since each target has its own status. An idea: a cell the robot stood on
   can't become "no floor".
+- **A wall seen at a shallow angle is cleared by a scan** (13 Oct, boot 5b0d72ab,
+  snapshot 25: the diagonal (-7, 262)-(28, 288) cm, seen at ~19°): rays slide
+  through the free corners of the wall's cells and end on the wall further along,
+  so the cells get passes, almost no hits, and 3 frames in a row clear them (the
+  old code too). "Only through a cell's middle" was tried and dropped (it keeps a
+  walker on the map). Next idea: a reading that meets its surface at under ~30°
+  (from the neighbouring zone's reading) can't clear occupied cells. Also open:
+  what is at (36, 304) cm, behind the wall's end, that only that scan saw.
 - Second targets paint bands up to ~8 cells deep behind walls, where no ray ever
   clears them (Daniel: fine for now). If it matters: keep only second targets
   within some distance of the first, or let them mark unknown cells only weakly.

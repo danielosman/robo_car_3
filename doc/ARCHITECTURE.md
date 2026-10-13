@@ -376,7 +376,8 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
   and a tile knows the column, dimmed; "hide weak" hides columns under 10 %
   confident, as the 3D viewer), the path of the snapshots, the snapshot's ToF
   targets, the robot then and now; a timeline of the boot's snapshots ("live"
-  follows the newest); the camera picture with its features, the 8 × 8 ToF grid, the
+  follows the newest; a new boot's first snapshot, sent when the robot connects,
+  always takes over the page and ticks "live"); the camera picture with its features, the 8 × 8 ToF grid, the
   colour reading as a swatch, the pose; the console and keys; Idle / Manual and
   Stop. In manual mode, on the live view, a click on the map sends the robot there.
   The console alone: `/console` (`public/console.js`).
