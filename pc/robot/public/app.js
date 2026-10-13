@@ -192,7 +192,8 @@ function centre() {
   if (p && p.x !== null && p.x !== undefined) { view.cx = Number(p.x); view.cy = Number(p.y); }
 }
 
-const showingLive = () => $("follow").checked && index === snaps.length - 1;
+// Live: the newest snapshot of the newest boot (boots come newest first).
+const showingLive = () => boot === boots[0]?.boot_id && index === snaps.length - 1;
 const canSteer = () => robotStatus.state === "connected" && livePose?.mode === "manual" && showingLive();
 
 function toast(text) {
@@ -213,9 +214,9 @@ function clicked(x, y) {
   // Not steering: pick the nearest snapshot within 15 px.
   let best = -1, bestD = 15 / view.scale;
   snaps.forEach((s, i) => { if (s.x === null) return; const d = Math.hypot(s.x - x, s.y - y); if (d < bestD) { bestD = d; best = i; } });
-  if (best >= 0) { select(best, false); return; }
+  if (best >= 0) { select(best); return; }
   if (robotStatus.state !== "connected") toast("The robot isn't connected");
-  else if (!showingLive()) toast("Showing an old snapshot: tick live to steer");
+  else if (!showingLive()) toast("Showing an old snapshot: go to the newest (▶) to steer");
   else toast("Steering by clicking needs Manual mode");
 }
 
@@ -311,20 +312,19 @@ async function loadBoots(prefer) {
   const want = prefer ?? boot ?? boots[0]?.boot_id;
   if (want) { $("boot").value = want; await loadSnapshots(want); }
 }
-$("boot").onchange = () => { $("follow").checked = false; loadSnapshots($("boot").value); };
+$("boot").onchange = () => loadSnapshots($("boot").value);
 
 async function loadSnapshots(b) {
   boot = b;
   snaps = (await getJson(`/api/snapshots?boot=${b}`)).map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) }));
   $("timeline").max = Math.max(0, snaps.length - 1);
-  await select($("follow").checked || index < 0 || index >= snaps.length ? snaps.length - 1 : index, false);
+  await select(snaps.length - 1);
 }
 
 let loading = 0;
-async function select(i, keepFollow = true) {
+async function select(i) {
   if (!snaps.length) return;
   index = Math.max(0, Math.min(snaps.length - 1, i));
-  if (!keepFollow) $("follow").checked = index === snaps.length - 1 && $("follow").checked;
   $("timeline").value = index;
   const s = snaps[index], mine = ++loading;
   const [d, m] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.seq}`), getJson(`/api/snapshots/${boot}/${s.seq}/map`)]);
@@ -335,10 +335,9 @@ async function select(i, keepFollow = true) {
   showSnapshot();
   draw();
 }
-$("timeline").oninput = () => { $("follow").checked = false; select(Number($("timeline").value), true); };
-$("prev").onclick = () => { $("follow").checked = false; select(index - 1, true); };
-$("next").onclick = () => select(index + 1, true);
-$("follow").onchange = () => { if ($("follow").checked) { follow = true; select(snaps.length - 1); } else draw(); };
+$("timeline").oninput = () => select(Number($("timeline").value));
+$("prev").onclick = () => select(index - 1);
+$("next").onclick = () => select(index + 1);
 
 // --- the robot: status, live pose, mode, keys, console ---
 function send(msg) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
@@ -425,8 +424,10 @@ function connect() {
     } else if (msg.type === "snapshot") {
       // A new boot (the robot started again) always takes over the page: its first
       // snapshot comes when it connects, and the old drive's map must not stay up.
-      if (msg.boot !== boot) { $("follow").checked = true; follow = true; loadBoots(msg.boot); }
-      else if ($("follow").checked) loadSnapshots(boot);
+      // Showing the newest snapshot (live), the page moves on to the one that came.
+      if (!boots.some(b => b.boot_id === msg.boot)) { follow = true; loadBoots(msg.boot); }
+      else if (msg.boot !== boot) return;
+      else if (showingLive()) loadSnapshots(boot);
       else getJson(`/api/snapshots?boot=${boot}`).then(list => { snaps = list.map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) })); $("timeline").max = snaps.length - 1; draw(); });
     }
   };

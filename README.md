@@ -584,5 +584,6 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 
 ## Git conventions
 
+- Commit to the `main` branch, always: no feature branches.
 - Do not add Claude (or any AI assistant) as a co-author: no `Co-Authored-By:`
   trailer in commit messages.

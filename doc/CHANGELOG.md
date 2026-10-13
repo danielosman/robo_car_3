@@ -25,7 +25,10 @@ that scan's heading was a few degrees off (not settled).
 Also: when the robot connected, the page kept showing the previous drive's map
 until an action: it switched to a new boot only while "live" was ticked, and
 browsing the old drive had unticked it. Now a new boot's first snapshot always
-takes over the page and ticks "live" again.
+takes over the page and ticks "live" again. Later the "live" checkbox went: the page
+is live on the newest snapshot of the newest boot, and the snapshot row keeps its
+title and slider in place (1/3 and 2/3 of the panel, so the slider doesn't shift as
+the number changes; the checkbox had made the panel scroll sideways).
 
 ## 13 Oct 2026: the floor layer adds up its rays again
 
