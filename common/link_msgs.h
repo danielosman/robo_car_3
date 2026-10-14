@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define LINK_PROTOCOL_VERSION 4
+#define LINK_PROTOCOL_VERSION 5
 
 // Timing both sides rely on.
 #define LINK_HELLO_PERIOD_US   1000000 // HELLO repeats until answered
@@ -71,6 +71,9 @@ typedef struct __attribute__((packed)) {
     uint8_t stop_reason;     // STOP_*: why PicoB switched the motors off by itself
     uint8_t motors_request;  // the last MOTORS request PicoB acted on (0 = none since it started)
     bool imu_error;          // no IMU: odometry is frozen and the motors stay off
+    // The largest since the report before (safety numbers, to set bump and tilt stops from):
+    float jolt_g[3];         // acceleration along x, y, z with gravity taken out, absolute
+    float tilt_rad;          // pitch or roll, absolute
 } odom_report_t;
 
 // PicoB's internals, for calibration and diagnosis.

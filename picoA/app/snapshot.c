@@ -96,7 +96,9 @@ static uint8_t buf[SNAP_MAX];
 static uint32_t len;
 static bool pending;
 static snapshot_why_t pending_why;
-static uint32_t seq, sent_bytes, last_len, tiles_sent, connection, endings_seen;
+static uint32_t pending_command;  // the command asking for the pending snapshot, 0 if none
+static snapshot_sent_t going;     // the snapshot going out, if a command asked for it (command 0: none)
+static uint32_t seq, sent_bytes, last_len, tiles_sent, connection;
 static uint32_t last_pose_us, wait_since_us;
 static bool waiting;
 
@@ -216,10 +218,9 @@ static void build(snapshot_why_t why) {
     len = 9; // "SNAP", version, length
     snap_head_t h = {.boot_id = recorder_boot_id(), .seq = ++seq, .t_us = time_us_32(), .why = (uint8_t)why,
                      .end_reason = NO_REASON, .mode = (uint8_t)mode_get(), .map_clears = house_map_clears()};
-    const char *ended;
-    rec_end_t reason;
-    h.actions_ended = behaviour_endings(&ended, &reason);
-    if (h.actions_ended) { snprintf(h.action, sizeof h.action, "%s", ended); h.end_reason = (uint8_t)reason; }
+    behaviour_end_t last;
+    h.actions_ended = behaviour_endings(&last);
+    if (h.actions_ended) { snprintf(h.action, sizeof h.action, "%s", last.action); h.end_reason = (uint8_t)last.reason; }
     snprintf(h.running, sizeof h.running, "%s", behaviour_action());
     snprintf(h.build, sizeof h.build, "%s", __DATE__ " " __TIME__);
     add(SEC_HEAD, &h, sizeof h);
@@ -254,23 +255,35 @@ static void build(snapshot_why_t why) {
     len = total;
 }
 
-void snapshot_request(snapshot_why_t why) {
+void snapshot_request(snapshot_why_t why, uint32_t command) {
     pending = true;
     pending_why = why;
+    if (command) pending_command = command;
+}
+
+bool snapshot_sent(snapshot_sent_t *s) {
+    if (!going.command || wifi_console_snapshot_busy()) return false;
+    *s = going;
+    going.command = 0;
+    return true;
 }
 
 void snapshot_update(void) {
     uint32_t now = wifi_console_data_connection();
     if (now != connection) { // a new server: it has none of the tiles
         connection = now;
-        if (now) { house_map_all_dirty(); snapshot_request(SNAP_SERVER); }
+        if (now) { house_map_all_dirty(); snapshot_request(SNAP_SERVER, 0); }
     }
-    uint32_t endings = behaviour_endings(NULL, NULL);
-    if (endings != endings_seen) { endings_seen = endings; snapshot_request(SNAP_ACTION_END); }
     if (!now) return;
-    if (pending && !wifi_console_snapshot_busy() && !features_behind()) {
+    if (pending && !going.command && !wifi_console_snapshot_busy() && !features_behind()) {
         pending = false;
         build(pending_why);
+        if (pending_command) {
+            const odom_report_t *o = body_odom();
+            going = (snapshot_sent_t){.command = pending_command, .seq = seq, .x_m = o->x_m, .y_m = o->y_m,
+                                      .yaw_rad = o->yaw_rad};
+            pending_command = 0;
+        }
         wifi_console_snapshot_send(buf, len);
         sent_bytes += len;
         last_len = len;
@@ -279,10 +292,13 @@ void snapshot_update(void) {
         last_pose_us = time_us_32();
         const odom_report_t *o = body_odom();
         const char *action = behaviour_action();
-        char text[72];
-        snprintf(text, sizeof text, "pose %.1f %.1f %.1f %s %s %d", (double)(o->x_m * 100), (double)(o->y_m * 100),
-                 (double)(o->yaw_rad * DEG_PER_RAD), mode_name(mode_get()), *action ? action : "-",
-                 wifi_console_signal_dbm());
+        body_peaks_t peaks;
+        body_peaks_take(&peaks);
+        char text[112];
+        snprintf(text, sizeof text, "pose %.1f %.1f %.1f %s %s %d %d %.2f %.2f %.2f %.1f", (double)(o->x_m * 100),
+                 (double)(o->y_m * 100), (double)(o->yaw_rad * DEG_PER_RAD), mode_name(mode_get()),
+                 *action ? action : "-", wifi_console_signal_dbm(), recorder_on() ? 1 : 0, (double)peaks.jolt_g[0],
+                 (double)peaks.jolt_g[1], (double)peaks.jolt_g[2], (double)(peaks.tilt_rad * DEG_PER_RAD));
         wifi_console_record(text);
     }
 }

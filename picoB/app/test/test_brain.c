@@ -18,6 +18,11 @@ bool drive_enabled(void) { return drive_on; }
 void drive_set(float v_mps, float w_radps) { drive_v = v_mps; drive_w = w_radps; }
 drive_fault_t drive_fault(void) { return fault_now; }
 const odom_t *odom_get(void) { return &odom; }
+static float peak_jolt_g[3] = {0.1f, 0.2f, 0.3f}, peak_tilt_rad = 0.05f;
+void odom_peaks_take(float jolt_g[3], float *tilt_rad) {
+    for (int i = 0; i < 3; i++) jolt_g[i] = peak_jolt_g[i];
+    *tilt_rad = peak_tilt_rad;
+}
 
 // What PicoB sent since the last reset.
 static int sent[16];

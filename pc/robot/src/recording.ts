@@ -83,6 +83,7 @@ export interface Odom {
   kind: "ODOM"; tUs: number; picoBUs: number; x: number; y: number; yaw: number; v: number; w: number; pitch: number; roll: number;
   wheelLeft: number; wheelRight: number; stationary: boolean; motorsOn: boolean; stopReason: number; motorsRequest: number;
   imuError: boolean; gyroBias: number;
+  jolt?: number[]; tilt?: number; // g along x, y, z and rad, the largest since the report before; from link version 5
 }
 export interface Drive { kind: "DRIVE"; tUs: number; v: number; w: number }
 export interface Mark { kind: "MARK"; tUs: number; text: string }
@@ -158,11 +159,14 @@ export function parseRecord(r: RawRecord, version = 3): Parsed {
     case REC.TOF_RAW:
       return tofRaw(p, version);
     case REC.ODOM: {
-      const f = (i: number) => p.readFloatLE(8 + 4 * i); // odom_report_t (common/link_msgs.h) from byte 4
+      // odom_report_t (common/link_msgs.h) from byte 4, then the gyro bias. Since link
+      // version 5 (14 Oct) the report ends with the largest jolt (x, y, z) and tilt.
+      const f = (i: number) => p.readFloatLE(8 + 4 * i);
+      const peaks = p.length >= 69 ? { jolt: [p.readFloatLE(49), p.readFloatLE(53), p.readFloatLE(57)], tilt: p.readFloatLE(61) } : {};
       return {
         kind: "ODOM", tUs: p.readUInt32LE(0), picoBUs: p.readUInt32LE(4), x: f(0), y: f(1), yaw: f(2), v: f(3), w: f(4),
         pitch: f(5), roll: f(6), wheelLeft: f(7), wheelRight: f(8), stationary: p[44] !== 0, motorsOn: p[45] !== 0,
-        stopReason: p[46], motorsRequest: p[47], imuError: p[48] !== 0, gyroBias: p.readFloatLE(49),
+        stopReason: p[46], motorsRequest: p[47], imuError: p[48] !== 0, gyroBias: p.readFloatLE(p.length - 4), ...peaks,
       };
     }
     case REC.DRIVE:

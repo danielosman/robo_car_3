@@ -1,14 +1,15 @@
 // Host test for picoA/app/snapshot.c: nothing is built without a server; a server
-// connecting gets one at once; then one after every action (with its name and how
-// it ended) and on S; one asked for while the last is going out comes after it.
+// connecting gets one at once; then one when a command asks (with the last action's
+// name and how it ended), its command told once it has wholly gone out; one asked
+// for while the last is going out comes after it.
 // Each is read back here as the PC reads it: "SNAP", version, length, the sections
 // (the head, the pose, the sensor geometry, the ToF frame with every target and the
 // pose it was measured at, the camera frame, the colour reading, the map window
 // with its anchor, the dirty tiles of the whole-house map), the CRC. Tiles go once
 // each, then only when changed, all again for a new server; more than fit go with
 // the next snapshot. The camera features of the frame in the snapshot: it waits for
-// vision to process that frame (asking it to), at most 0.3 s. "\001pose ..." records
-// every 0.25 s. The test plays body.h,
+// vision to process that frame (asking it to), at most 0.3 s. The pose line every
+// 0.25 s, with recording and PicoB's largest jolt and tilt. The test plays body.h,
 // pose_at(), the camera, the colour sensor, behaviour and the network; the
 // snapshots go to build/test_snapshot.snap for the PC's parser test. Run from the
 // repo root:
@@ -33,6 +34,7 @@ uint32_t body_odom_count(void) { return 0; }
 bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) { (void)n; (void)r; (void)t_us; return false; }
 const status_report_t *body_status(void) { return &status; }
 uint32_t body_drive_sent(float *v, float *w, uint32_t *t_us) { *v = *w = 0; *t_us = 0; return 0; }
+void body_peaks_take(body_peaks_t *p) { *p = (body_peaks_t){.jolt_g = {0.25f, 0.5f, 1.25f}, .tilt_rad = 0.1f}; }
 bool pose_at(uint32_t t_us, pose_t *p) { (void)t_us; *p = (pose_t){1.2f, -0.45f, 0.7f, -0.02f}; return true; }
 
 // --- the sensors ---
@@ -62,10 +64,9 @@ void vision_request(void) { vision_requests++; }
 
 // --- behaviour ---
 static uint32_t endings;
-static const char *ended_name = "scan", *running = "";
-uint32_t behaviour_endings(const char **action, rec_end_t *reason) {
-    if (action) *action = ended_name;
-    if (reason) *reason = REC_END_OBSTACLE;
+static const char *running = "";
+uint32_t behaviour_endings(behaviour_end_t *last) {
+    if (last) *last = (behaviour_end_t){.action = "move", .reason = REC_END_OBSTACLE};
     return endings;
 }
 const char *behaviour_action(void) { return running; }
@@ -145,7 +146,7 @@ int main(void) {
     house_map_put(50, 50, COLUMN_DRIVABLE);
 
     // Nothing without a server, even when asked.
-    snapshot_request(SNAP_KEY);
+    snapshot_request(SNAP_COMMAND, 0);
     run(1000);
     assert(n_sent == 0 && records[0] == 0);
 
@@ -156,7 +157,7 @@ int main(void) {
     parsed_t p = nth(0);
     snap_head_t h;
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
-    assert(h.boot_id == recorder_boot_id() && h.seq == 1 && h.why == SNAP_SERVER && h.mode == MODE_IDLE);
+    assert(h.boot_id == recorder_boot_id() && h.seq == 1 && h.why == SNAP_SERVER && h.mode == MODE_MANUAL);
     assert(h.actions_ended == 0 && h.action[0] == 0 && h.end_reason == NO_REASON && h.running[0] == 0);
     snap_pose_t pose;
     memcpy(&pose, p.at[SEC_POSE], sizeof pose);
@@ -196,30 +197,39 @@ int main(void) {
     assert((tile.columns[(5 * 20 + 10) / 2] & 15) == COLUMN_BLOCKED);
     printf("ok: a server gets a snapshot at once: %lu bytes, every section as written\n", (unsigned long)p.total);
 
-    // While it goes out, nothing else; asked for meanwhile: built when it has gone.
+    // An action ending asks for nothing. While one goes out, nothing else; asked for
+    // meanwhile: built when it has gone; its command told only once it has wholly gone.
+    snapshot_sent_t told;
     endings = 1; // an action ended
     running = "";
     run(100);
     assert(n_sent == 1);
+    snapshot_request(SNAP_COMMAND, 17);
+    run(100);
+    assert(n_sent == 1 && !snapshot_sent(&told));
     busy = false;
     run(1);
-    assert(n_sent == 2);
+    assert(n_sent == 2 && !snapshot_sent(&told));
     p = nth(1);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
-    assert(h.seq == 2 && h.why == SNAP_ACTION_END && strcmp(h.action, "scan") == 0 && h.end_reason == REC_END_OBSTACLE);
+    assert(h.seq == 2 && h.why == SNAP_COMMAND && strcmp(h.action, "move") == 0 && h.end_reason == REC_END_OBSTACLE);
     assert(tiles_in(&p) == 0); // all sent already
-    // S, with a tile changed and the robot driving now.
     busy = false;
+    assert(snapshot_sent(&told) && told.command == 17 && told.seq == 2 && told.x_m == 1.25f && told.yaw_rad == 0.75f);
+    assert(!snapshot_sent(&told));
+    // Asked again, with a tile changed and the robot driving now.
     house_map_put(-45, 0, COLUMN_OPEN);
     running = "goto";
-    mode_set(MODE_MANUAL);
-    snapshot_request(SNAP_KEY);
+    mode_set(MODE_IDLE);
+    snapshot_request(SNAP_COMMAND, 18);
     run(1);
     p = nth(2);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
-    assert(n_sent == 3 && h.why == SNAP_KEY && strcmp(h.running, "goto") == 0 && h.mode == MODE_MANUAL);
+    assert(n_sent == 3 && h.why == SNAP_COMMAND && strcmp(h.running, "goto") == 0 && h.mode == MODE_IDLE);
     assert(tiles_in(&p) == 1);
-    printf("ok: after an action, on S, one at a time; a changed tile goes again\n");
+    busy = false;
+    assert(snapshot_sent(&told) && told.command == 18 && told.seq == 3);
+    printf("ok: on a command, one at a time, the command told once it has gone; a changed tile goes again\n");
 
     // A new server: all the tiles again. More dirty tiles than fit: the rest next time.
     busy = false;
@@ -230,7 +240,7 @@ int main(void) {
     int first = tiles_in(&p);
     assert(n_sent == 4 && first < house_map_tiles() && p.total <= SNAP_MAX);
     busy = false;
-    snapshot_request(SNAP_KEY);
+    snapshot_request(SNAP_COMMAND, 0);
     run(1);
     p = nth(4);
     printf("a new server, %d tiles: %d in the first snapshot (%lu bytes), %d in the next\n", house_map_tiles(), first,
@@ -243,8 +253,8 @@ int main(void) {
     run(1000);
     int poses = 0;
     for (const char *r = records; (r = strstr(r, "pose ")); r++) poses++;
-    assert(poses == 4 && strstr(records, "pose 125.0 -50.0 43.0 manual goto -61\n"));
-    printf("ok: pose records every 0.25 s, with the WiFi signal\n");
+    assert(poses == 4 && strstr(records, "pose 125.0 -50.0 43.0 idle goto -61 0 0.25 0.50 1.25 5.7\n"));
+    printf("ok: the pose line every 0.25 s, with the WiFi signal, recording, jolt and tilt\n");
 
     FILE *f = fopen("build/test_snapshot.snap", "wb");
     assert(f);
@@ -256,7 +266,7 @@ int main(void) {
     uint32_t before = n_sent;
     busy = false;
     vis.camera_number = 76;
-    snapshot_request(SNAP_KEY);
+    snapshot_request(SNAP_COMMAND, 0);
     run(100);
     assert(n_sent == before && vision_requests > 0);
     vis.camera_number = 77;
@@ -264,7 +274,7 @@ int main(void) {
     assert(n_sent == before + 1);
     busy = false;
     vis.camera_number = 70;
-    snapshot_request(SNAP_KEY);
+    snapshot_request(SNAP_COMMAND, 0);
     run(250);
     assert(n_sent == before + 1);
     run(100);

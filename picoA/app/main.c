@@ -1,7 +1,8 @@
 // PicoA robot firmware, the brain. Talks to PicoB over the link, maps the
-// surroundings with the ToF sensor and watches for movement, sends a snapshot of
-// what it knows to the viewer after each action. It does nothing by itself: a serial monitor on USB or the robot server over WiFi (wifi_console.h),
-// with the same keys, starts each action (doc/ARCHITECTURE.md).
+// surroundings with the ToF sensor and watches for movement, sends snapshots of what
+// it knows to the robot server. It does nothing by itself: the server's commands
+// over WiFi (wifi_console.h), or the same typed on USB, start each action
+// (commands.h, doc/ARCHITECTURE.md).
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "clock_start.h"
@@ -10,7 +11,7 @@
 #include "pose.h"
 #include "surroundings.h"
 #include "behaviour.h"
-#include "debug_console.h"
+#include "commands.h"
 #include "wifi_console.h"
 #include "camera.h"
 #include "motion_sense.h"
@@ -24,7 +25,7 @@
 #define COLOR_US     100000  // the colour sensor is asked this often (a reading comes ~2.5 times a second)
 
 // Connects to WiFi once the USB had time to enumerate, with or without a computer
-// on USB: both consoles take the same keys. Then the robot waits, motors off.
+// on USB: both take the same commands. Then the robot waits, motors off.
 static void start_up(absolute_time_t usb_check) {
     static bool started;
     if (!started && time_reached(usb_check)) { started = true; wifi_console_start(); }
@@ -67,8 +68,8 @@ int main(void) {
         stage_done("snapshot");
         wifi_console_update();
         stage_done("wifi");
-        debug_console_update();
-        stage_done("console");
+        commands_update();
+        stage_done("commands");
         static bool warned;
         if (!warned && (stdio_usb_connected() || wifi_console_connected())) {
             warned = true;

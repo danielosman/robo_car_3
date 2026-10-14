@@ -31,6 +31,7 @@ uint32_t body_odom_count(void) { return 0; }
 bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) { (void)n; (void)r; (void)t_us; return false; }
 const status_report_t *body_status(void) { return &status; }
 uint32_t body_drive_sent(float *v, float *w, uint32_t *t_us) { *v = *w = 0; *t_us = 0; return 0; }
+void body_peaks_take(body_peaks_t *p) { *p = (body_peaks_t){0}; }
 bool pose_at(uint32_t t_us, pose_t *p) { (void)t_us; *p = pose; return have_frame; }
 const range_frame_t *surroundings_last_frame(void) { return have_frame ? &frame : NULL; }
 bool camera_last_frame(camera_frame_t *f) { (void)f; return false; }
@@ -39,9 +40,8 @@ const vision_frame_t *vision_latest(void) { return NULL; }
 void vision_request(void) {}
 static uint32_t endings;
 static const char *ended = "";
-uint32_t behaviour_endings(const char **action, rec_end_t *reason) {
-    if (action) *action = ended;
-    if (reason) *reason = REC_END_DONE;
+uint32_t behaviour_endings(behaviour_end_t *last) {
+    if (last) *last = (behaviour_end_t){.action = ended, .reason = REC_END_DONE};
     return endings;
 }
 const char *behaviour_action(void) { return ""; }
@@ -142,6 +142,7 @@ int main(int argc, char **argv) {
         if (!replay(eq + 1, &t)) return 1;
         ended = argv[a];
         endings++;
+        snapshot_request(SNAP_COMMAND, 0); // as the server's API asks after each move
         snapshot_update();
         int ox, oy;
         cell_map_window(&ox, &oy);

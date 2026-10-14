@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,6 +28,7 @@ static odom_report_t odom;
 static struct { odom_report_t report; uint32_t t_us; } kept[BODY_ODOM_KEPT]; // report n at n % BODY_ODOM_KEPT
 static uint32_t odom_count;
 static status_report_t status;
+static body_peaks_t peaks; // since body_peaks_take()
 static absolute_time_t last_report, next_drive, next_motors, next_hello;
 static uint32_t block_min[OFFSET_BLOCKS], block_start_us, offset_us;
 static int blocks_full;    // completed blocks in block_min, up to OFFSET_BLOCKS
@@ -90,6 +92,8 @@ static void on_message(const link_msg_t *m) {
     case MSG_ODOM:
         if (m->len == sizeof odom) {
             memcpy(&odom, m->body, sizeof odom);
+            for (int i = 0; i < 3; i++) peaks.jolt_g[i] = fmaxf(peaks.jolt_g[i], odom.jolt_g[i]);
+            peaks.tilt_rad = fmaxf(peaks.tilt_rad, odom.tilt_rad);
             last_report = get_absolute_time();
             track_clock(time_us_32() - odom.t_us, time_us_32());
             odom_count++;
@@ -170,6 +174,11 @@ uint32_t body_drive_sent(float *v_mps, float *w_radps, uint32_t *t_us) {
     *w_radps = drive_sent.w_radps;
     *t_us = drive_sent_us;
     return drives_sent;
+}
+
+void body_peaks_take(body_peaks_t *p) {
+    *p = peaks;
+    peaks = (body_peaks_t){0};
 }
 
 void body_motors(bool on) {

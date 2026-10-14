@@ -26,6 +26,13 @@ uint32_t body_odom_time_us(void);
 uint32_t body_odom_count(void);
 bool body_odom_get(uint32_t n, odom_report_t *report, uint32_t *t_us);
 const status_report_t *body_status(void); // latest status (2 Hz); all zero until the first one
+// The largest jolt (along x, y, z: g, gravity taken out) and tilt PicoB reported
+// since the last call; the next call starts from zero. For the pose line.
+typedef struct {
+    float jolt_g[3];
+    float tilt_rad;
+} body_peaks_t;
+void body_peaks_take(body_peaks_t *peaks);
 void body_motors(bool on);     // on also clears PicoB's safety stop
 void body_drive(float v_mps, float w_radps); // + = forward / turn left; held until changed
 // The DRIVE commands sent to PicoB so far (repeated every 50 ms), and the latest:

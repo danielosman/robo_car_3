@@ -1,3 +1,4 @@
+#include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -109,6 +110,10 @@ static void send_odom(void) {
         .motors_request = motors_request,
         .imu_error = !imu_ok,
     };
+    float jolt_g[3], tilt_rad; // packed fields: copied, not pointed at
+    odom_peaks_take(jolt_g, &tilt_rad);
+    memcpy(r.jolt_g, jolt_g, sizeof jolt_g);
+    r.tilt_rad = tilt_rad;
     link_send(MSG_ODOM, &r, sizeof r);
 }
 

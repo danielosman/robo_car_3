@@ -17,6 +17,7 @@
 #define BIAS_TAU_S        5.0f   // gyro bias tracking while stationary
 
 static odom_t o;
+static float peak_jolt_g[3], peak_tilt_rad; // since odom_peaks_take()
 static bool imu_ok, have_tilt;
 static float yaw_bias_dps;       // on top of the power-up calibration in imu.c
 static float still_s;
@@ -100,6 +101,15 @@ static void update_tilt(const float accel_g[3], const float gyro_dps[3], float d
     o.roll_rad = (1 - w) * (o.roll_rad + gyro_dps[0] * RAD_PER_DEG * dt) + w * accel_roll;
 }
 
+// The largest jolt and tilt: the acceleration less gravity (where pitch and roll put
+// it: the accelerometer reads +1 g up), and the larger of pitch and roll.
+static void update_peaks(const float accel_g[3]) {
+    float cp = cosf(o.pitch_rad);
+    float gravity[3] = {sinf(o.pitch_rad), cp * sinf(o.roll_rad), cp * cosf(o.roll_rad)};
+    for (int i = 0; i < 3; i++) peak_jolt_g[i] = fmaxf(peak_jolt_g[i], fabsf(accel_g[i] - gravity[i]));
+    peak_tilt_rad = fmaxf(peak_tilt_rad, fmaxf(fabsf(o.pitch_rad), fabsf(o.roll_rad)));
+}
+
 void odom_update(void) {
     imu_sample_t s;
     if (!imu_ok || !imu_read(&s)) return;
@@ -114,6 +124,13 @@ void odom_update(void) {
     update_heading(gyro_dps[2], dt); // first: the wheel step uses this step's turn
     update_wheels(dt);
     update_tilt(accel_g, gyro_dps, dt);
+    update_peaks(accel_g);
 }
 
 const odom_t *odom_get(void) { return &o; }
+
+void odom_peaks_take(float jolt_g[3], float *tilt_rad) {
+    for (int i = 0; i < 3; i++) { jolt_g[i] = peak_jolt_g[i]; peak_jolt_g[i] = 0; }
+    *tilt_rad = peak_tilt_rad;
+    peak_tilt_rad = 0;
+}

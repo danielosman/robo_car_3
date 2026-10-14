@@ -12,9 +12,6 @@
 #include "recorder.h"
 #include "behaviour.h"
 
-#define SCAN_RAD         (390 * RAD_PER_DEG) // a full turn plus 30° of overlap (§5.4)
-#define WATCH_US         60000000  // watching ends after a minute
-#define RECORD_US        5000000   // record 5 s
 #define START_TIMEOUT_US 3000000   // the motors switching on and the robot standing still
 #define SETTLE_MIN_US    300000    // done: standing still this long at least...
 #define SETTLE_MAX_US    3000000   // ...and at most this long, before the motors go off
@@ -26,35 +23,33 @@
 #define FOLLOW_HISTORY   10
 #define FOLLOW_GAP_US    300000    // no sighting this long, or a jump this big: a new movement
 #define FOLLOW_JUMP_RAD  (15 * RAD_PER_DEG)
-#define STOP_BEFORE_M    0.15f     // a move stops this far before an obstacle on the map...
-#define EDGE_M           0.095f    // ...measured from the front (back) edge, this far from the centre
-#define PATH_HALF_M      (0.235f / 2 + 0.05f) // the robot's half width plus 5 cm: the path a move checks
-#define GOTO_MAX_M       3.0f      // a goal farther away: the robot goes this far towards it
 #define GOTO_AIM_RAD     (1.5f * RAD_PER_DEG) // turned to within this of the goal's bearing: drive
 #define GOTO_STEER       2.0f      // while driving: turn rate per heading error (1/s)...
 #define GOTO_STEER_RADPS 0.3f      // ...at most this
 // printf takes doubles; the (double) casts below are for printing only.
 
-typedef enum { SCAN, MOVE, TURN, WATCH, RECORD, GOTO } action_t;
-static const char *const action_name[] = {"Scan", "Move", "Turn", "Watch", "Record", "Go to"};
-static const char *const take_name[] = {"scan", "move", "turn", "watch", "record", "goto"}; // in recordings and snapshots
+typedef enum { MOVE, TURN, WATCH, GOTO } action_t;
+static const char *const action_name[] = {"Move", "Turn", "Watch", "Go to"};
+static const char *const take_name[] = {"move", "turn", "watch", "goto"}; // in recordings, snapshots and done records
 
 // STARTING: the motors switching on; RUNNING: the action; SETTLING: done, standing
 // still before the motors go off.
 static enum { IDLE, STARTING, RUNNING, SETTLING } state;
 static action_t action;
-static float goal;              // MOVE: metres (+ = forward); TURN: radians (+ = left)
+static uint32_t command;        // the number of the command that started it
+static float goal;              // MOVE: metres (+ = forward); TURN: radians (+ = left); WATCH: seconds
+static float goal_m;            // GOTO: how far the point was when it started
 static odom_report_t start;     // the robot when the action began running
+static bool started;            // it began running (start is set)
 static absolute_time_t deadline, settle_min_end, run_start;
 static bool following;          // watching: turning towards a movement
 static bool obstacle_stop;      // moving: stopped short, before an obstacle on the map
 static float goal_x, goal_y;    // GOTO: the point (map frame) and how far before it to stop
 static float goal_stop_m;
 static bool goal_driving;       // GOTO: turned towards it, now driving
-// The actions that ended, the last one's name and how it ended (for snapshots).
+// The actions that ended, and how the last one ended.
 static uint32_t endings;
-static action_t ended_action;
-static rec_end_t ended_reason;
+static behaviour_end_t last_end;
 // The movement's recent directions in the world (the map's yaw, unwrapped), when seen.
 static float seen_rad[FOLLOW_HISTORY];
 static uint32_t seen_us[FOLLOW_HISTORY];
@@ -62,10 +57,26 @@ static int seen_n;
 static uint32_t last_seen_us;
 
 static void ended(rec_end_t reason) {
+    const odom_report_t *o = body_odom();
     endings++;
-    ended_action = action;
-    ended_reason = reason;
+    last_end = (behaviour_end_t){
+        .command = command, .action = take_name[action], .reason = reason,
+        .stop_reason = reason == REC_END_SAFETY_STOP ? o->stop_reason : STOP_NONE,
+        .moved_m = started ? hypotf(o->x_m - start.x_m, o->y_m - start.y_m) : 0,
+        .goal_m = action == GOTO ? goal_m : 0,
+    };
     recorder_take_end(reason);
+}
+
+// An action that ends before it starts (nothing to do, or blocked): it still ends
+// once, so its command is answered; no take.
+static void ended_at_once(action_t a, uint32_t number, rec_end_t reason) {
+    action = a;
+    command = number;
+    started = false;
+    endings++;
+    last_end = (behaviour_end_t){.command = number, .action = take_name[a], .reason = reason,
+                                 .goal_m = a == GOTO ? goal_m : 0};
 }
 
 // Ends the action early, saying why; the motors go off unless another action follows.
@@ -79,30 +90,25 @@ static void end_early(rec_end_t reason, const char *why, bool motors_off) {
     ended(reason);
 }
 
-static void begin(action_t a, float g) {
+static void begin(action_t a, float g, uint32_t number) {
     end_early(REC_END_REPLACED, "another action started", false);
     action = a;
+    command = number;
     goal = g;
+    started = false;
     body_drive(0, 0);
     body_motors(true);
     state = STARTING;
     deadline = make_timeout_time_us(START_TIMEOUT_US);
-    recorder_take_start(take_name[a], a == WATCH ? WATCH_US * 1e-6f : g);
+    recorder_take_start(take_name[a], g);
 }
 
-uint32_t behaviour_endings(const char **action_out, rec_end_t *reason) {
-    if (action_out) *action_out = take_name[ended_action];
-    if (reason) *reason = ended_reason;
+uint32_t behaviour_endings(behaviour_end_t *last) {
+    if (last) *last = last_end;
     return endings;
 }
 
 const char *behaviour_action(void) { return state == IDLE ? "" : take_name[action]; }
-
-void behaviour_scan(void) {
-    begin(SCAN, SCAN_RAD);
-    printf("Scan: turning %.0f deg left in place (~%.0f s)\n", (double)(SCAN_RAD * DEG_PER_RAD),
-           (double)(SCAN_RAD / MOTION_TURN_RADPS));
-}
 
 // A move along dir (+1 forward, -1 back) from o: how far the edge on that side is from
 // the nearest obstacle on the map in its path (blocked or overhang), looking at most
@@ -112,28 +118,34 @@ static float obstacle_gap_m(const odom_report_t *o, float dir, float look_m) {
                                    EDGE_M + STOP_BEFORE_M + look_m) - EDGE_M;
 }
 
-void behaviour_move(float distance_m) {
+void behaviour_move(float distance_m, uint32_t number) {
     const char *side = distance_m > 0 ? "ahead" : "behind";
     float gap_m = obstacle_gap_m(body_odom(), distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
     if (gap_m <= STOP_BEFORE_M + 0.01f) {
         printf("Move: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
                (double)(STOP_BEFORE_M * 100));
+        ended_at_once(MOVE, number, REC_END_OBSTACLE);
         return;
     }
-    begin(MOVE, distance_m);
+    begin(MOVE, distance_m, number);
     printf("Move: %.0f cm %s%s\n", (double)fabsf(distance_m * 100), distance_m > 0 ? "forward" : "back",
            distance_m > 0 ? "" : " (the VL53 can't see behind: it stops only for what the map already has there)");
 }
 
-void behaviour_turn(float angle_rad) {
-    begin(TURN, angle_rad);
+void behaviour_turn(float angle_rad, uint32_t number) {
+    begin(TURN, angle_rad, number);
     printf("Turn: %.0f deg %s\n", (double)fabsf(angle_rad * DEG_PER_RAD), angle_rad > 0 ? "left" : "right");
 }
 
-void behaviour_goto(float x_m, float y_m, float stop_m) {
+void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t number) {
     const odom_report_t *o = body_odom();
     float dx = x_m - o->x_m, dy = y_m - o->y_m, d = hypotf(dx, dy);
-    if (d - stop_m < 0.05f) { printf("Go to: already there (%.0f cm away)\n", (double)(d * 100)); return; }
+    goal_m = d;
+    if (d - stop_m < 0.05f) {
+        printf("Go to: already there (%.0f cm away)\n", (double)(d * 100));
+        ended_at_once(GOTO, number, REC_END_DONE);
+        return;
+    }
     if (d - stop_m > GOTO_MAX_M) { // only so far towards it
         float k = (GOTO_MAX_M + stop_m) / d;
         printf("Go to: the goal is %.1f m away; going %.1f m towards it\n", (double)d, (double)GOTO_MAX_M);
@@ -145,29 +157,14 @@ void behaviour_goto(float x_m, float y_m, float stop_m) {
     goal_y = y_m;
     goal_stop_m = stop_m;
     goal_driving = false;
-    begin(GOTO, d);
+    begin(GOTO, d, number);
     printf("Go to: (%+.0f, %+.0f) cm, %.0f cm away at %+.0f deg (map frame)%s\n", (double)(x_m * 100), (double)(y_m * 100),
            (double)(d * 100), (double)(atan2f(dy, dx) * DEG_PER_RAD), stop_m > 0 ? ", stopping before it" : "");
 }
 
-void behaviour_watch(void) {
-    begin(WATCH, 0);
-    printf("Watch: for %d s the robot turns towards the biggest movement (space stops)\n", WATCH_US / 1000000);
-}
-
-// Recording only: the robot stands still with the motors off, and nothing is
-// checked (it runs without PicoB too).
-void behaviour_record(void) {
-    if (!recorder_on()) { printf("Record: recording is off (R switches it on)\n"); return; }
-    if (!recorder_ready()) { printf("Record: not recorded: no recording connection\n"); return; }
-    end_early(REC_END_REPLACED, "another action started", true);
-    action = RECORD;
-    goal = 0;
-    start = *body_odom();
-    run_start = get_absolute_time();
-    state = RUNNING;
-    recorder_take_start(take_name[RECORD], RECORD_US * 1e-6f);
-    printf("Record: %d s, the robot stands still\n", RECORD_US / 1000000);
+void behaviour_watch(float seconds, uint32_t number) {
+    begin(WATCH, seconds, number);
+    printf("Watch: for %.0f s the robot turns towards the biggest movement\n", (double)seconds);
 }
 
 void behaviour_stop(void) { end_early(REC_END_STOPPED, "by command", true); }
@@ -250,10 +247,6 @@ static void say_done(const odom_report_t *o) {
                dir > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
         return;
     }
-    if (action == RECORD) {
-        printf("Record done: %.1f s\n", (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f));
-        return;
-    }
     if (action == GOTO) {
         float off = hypotf(goal_x - o->x_m, goal_y - o->y_m);
         if (obstacle_stop)
@@ -294,7 +287,6 @@ static bool go_to(const odom_report_t *o) {
 // Runs the action; returns true when it is done.
 static bool step(const odom_report_t *o) {
     switch (action) {
-    case SCAN:
     case TURN: {
         float dir = goal < 0 ? -1.0f : 1.0f;
         float remaining_rad = fabsf(goal) - dir * (o->yaw_rad - start.yaw_rad);
@@ -314,11 +306,9 @@ static bool step(const odom_report_t *o) {
         return false;
     }
     case WATCH:
-        if (absolute_time_diff_us(run_start, get_absolute_time()) >= WATCH_US) return true;
+        if (absolute_time_diff_us(run_start, get_absolute_time()) >= (int64_t)(goal * 1e6f)) return true;
         watch();
         return false;
-    case RECORD:
-        return absolute_time_diff_us(run_start, get_absolute_time()) >= RECORD_US;
     case GOTO:
         return go_to(o);
     }
@@ -336,10 +326,6 @@ static void finish(const odom_report_t *o) {
 void behaviour_update(void) {
     if (state == IDLE) return;
     const odom_report_t *o = body_odom();
-    if (action == RECORD) {
-        if (step(o)) finish(o);
-        return;
-    }
     if (!body_connected()) { end_early(REC_END_PICOB_LOST, "PicoB not connected", true); return; }
     if (state != STARTING && !o->motors_on) {
         printf("%s stopped: PicoB switched the motors off (%s)\n", action_name[action], stop_reason_text(o->stop_reason));
@@ -353,6 +339,7 @@ void behaviour_update(void) {
     case STARTING:
         if (o->motors_on && o->stationary) {
             start = *o;
+            started = true;
             run_start = get_absolute_time();
             following = false;
             obstacle_stop = false;

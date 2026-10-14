@@ -26,7 +26,7 @@ pico_add_extra_outputs(picoA_bringup)
 
 # Robot firmware, the brain (doc/ARCHITECTURE.md): link to PicoB, map from the ToF
 # sensor, movement detection, the actions, console (USB and WiFi), recording.
-add_executable(picoA_app app/main.c app/body.c app/pose.c app/rangefinder.c app/surroundings.c app/behaviour.c app/debug_console.c app/wifi_console.c
+add_executable(picoA_app app/main.c app/body.c app/pose.c app/rangefinder.c app/surroundings.c app/behaviour.c app/commands.c app/wifi_console.c
     app/change_grid.c app/tof_motion.c app/camera_motion.c app/tracker.c app/motion_sense.c app/loop_stats.c app/cell_map.c
     app/house_map.c app/recorder.c app/mode.c app/snapshot.c app/vision.c)
 pico_set_program_name(picoA_app "picoA_app")

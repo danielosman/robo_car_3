@@ -26,3 +26,6 @@ bool odom_init(void);
 // returns at once when there's no new one.
 void odom_update(void);
 const odom_t *odom_get(void);
+// The largest jolt (acceleration with gravity taken out, along x, y, z: g, absolute)
+// and tilt (pitch or roll, absolute) since the last call; the next starts from zero.
+void odom_peaks_take(float jolt_g[3], float *tilt_rad);
