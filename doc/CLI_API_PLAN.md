@@ -253,6 +253,12 @@ through the queue.
   the camera's field of view isn't measured or in the code yet.
 - Safety step 2: the bump stop and the 10° tilt stop, once the measured numbers
   show what normal looks like.
+- **Look at snapshots 130 and 131 of boot `7a587226`** (Daniel, 14 Oct):
+  - The robot drove onto a bump in the doorway and tilted 9°.
+  - The back wheel couldn't get over the bump; the wheels skidded.
+  - The robot still answered that everything was fine.
+  - Check what the jolt and tilt peaks (and the poses around them) showed, to
+    see if a skid can be told apart from normal driving.
 
 ## Decided (13-14 Oct)
 
