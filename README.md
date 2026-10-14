@@ -629,6 +629,9 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 - **After a step:** update ARCHITECTURE.md (what changed), TODO.md (what is done or
   new), README (how to use or test it), and the CHANGELOG (what happened, including
   any red flags found in a review pass).
+- **Say which Picos to flash** at the end of every step: PicoA, PicoB, both or
+  none, with the file (`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`)
+  and why (e.g. the link version went up: both).
 - **Commit only when Daniel asks.**
 
 ## Conventions

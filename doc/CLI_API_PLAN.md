@@ -3,6 +3,23 @@
 Worked out with Daniel on 13-14 Oct 2026, built on 14 Oct. The decisions are at
 the end; the design of the API server is under "The API server, module by module".
 
+## Status (14 Oct, end of the session)
+
+- **Built and committed**: everything under "Decided" below (commits e83be77,
+  9b338ac, 43aa575 on `main`). Host tests, `npm test` (36), lint and both
+  firmware builds pass; tried end to end with the fake robot and the CLI.
+- **Not yet on the robot.** First flash **both Picos**: PicoA
+  `build/picoA/picoA_app.uf2` (commands, done records, pose line, `rotated`) and
+  PicoB `build/picoB/picoB_app.uf2` (jolt and tilt peaks). The link version went
+  up to 5: a Pico with old firmware keeps the motors off. Then restart the server
+  (`npm start` in `pc/robot/`).
+- **Next:** the README test "Steering through the API" (`./robot` in `pc/robot/`).
+  Its step 8 gives the first jolt numbers for the bump stop.
+- **Open, to discuss:** the text map's readability and the whole-map PNG with cm
+  labels ("To do, to be discussed" below).
+- Camera pictures moved to `pc/robot/recordings/camera/` and the database paths
+  were updated; nothing else in `recordings/` changed.
+
 ## What and why
 
 **Until now:** the robot was steered with single keys, the same over the USB serial
