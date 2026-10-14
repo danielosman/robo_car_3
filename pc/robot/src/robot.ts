@@ -1,6 +1,7 @@
 // The robot's side of the server (doc/ARCHITECTURE.md, the PC): announces the server on the
 // home network, accepts PicoA's TCP connection, passes its console text on and
-// keys and commands back, and takes the snapshots out of the stream. It writes '\0'
+// command lines back, and takes the snapshots, pose lines and done records out of
+// the stream. It writes '\0'
 // every 2 s, which the robot watches; the robot's pose records (4 a second) are what
 // says it is there. Nothing for 6 s is reported as it is (the connection open,
 // nothing arriving: a slow link, or the robot gone); only after 30 s is it closed
@@ -33,7 +34,6 @@ export interface RobotLinkOptions {
 }
 
 export const SNAP_CHUNK = 0x02; // [0x02][length u16][bytes] (picoA/app/wifi_console.c)
-export const COMMAND = "\x02";   // to the robot: "\x02<command>\n" (picoA/app/debug_console.c)
 
 // Splits the robot's stream into console text, status records ("\x01pose ...\n";
 // "\x01rssi -55\n" from older firmware), which can land anywhere, also in the middle of a line, and
@@ -79,14 +79,42 @@ export class RecordSplitter {
   }
 }
 
-// Where the robot is now ("\x01pose <x cm> <y cm> <yaw deg> <mode> <action> <signal dBm>"),
-// 4 times a second; older firmware sends no signal.
-export interface LivePose { x: number; y: number; yaw: number; mode: string; action: string; rssi: number | null; at: number }
+// Where the robot is: x, y (m) and yaw (rad, not wrapped: a full left turn adds 2π)
+// in the map frame (x forward at power-up, y left).
+export interface Pose { x: number; y: number; yaw: number }
+
+// The pose line, 4 times a second (picoA/app/snapshot.h): "\x01pose <x cm> <y cm> <yaw deg>
+// <mode> <action> <signal dBm> <recording 0/1> <jolt x> <jolt y> <jolt z> <tilt deg>";
+// older firmware sends fewer fields. jolt: g, the largest since the line before
+// (gravity taken out), tilt: rad, likewise.
+export interface LivePose extends Pose {
+  mode: string; action: string; rssi: number | null; recording: boolean | null;
+  jolt: [number, number, number] | null; tilt: number | null; at: number;
+}
 export function parsePose(record: string): LivePose | null {
-  const m = /^pose (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (\S+) (\S+)(?: (-?\d+))?$/.exec(record);
+  const m = /^pose (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (\S+) (\S+)(?: (-?\d+))?(?: ([01]) ([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+))?$/.exec(record);
   if (!m) return null;
+  const safety = m[7] !== undefined;
   return { x: Number(m[1]) / 100, y: Number(m[2]) / 100, yaw: Number(m[3]) * Math.PI / 180, mode: m[4],
-           action: m[5] === "-" ? "" : m[5], rssi: m[6] === undefined || m[6] === "0" ? null : Number(m[6]), at: Date.now() };
+           action: m[5] === "-" ? "" : m[5], rssi: m[6] === undefined || m[6] === "0" ? null : Number(m[6]),
+           recording: safety ? m[7] === "1" : null,
+           jolt: safety ? [Number(m[8]), Number(m[9]), Number(m[10])] : null,
+           tilt: safety ? Number(m[11]) * Math.PI / 180 : null, at: Date.now() };
+}
+
+// How command n ended (picoA/app/commands.h): "\x01done n=17 end=obstacle x=43.0
+// y=-4.0 yaw=30.0 moved=31 goal=420 snapshot=41" (cm, degrees); moved, goal and
+// snapshot only where they apply.
+export interface DoneRecord { n: number; end: string; pose: Pose | null; movedM: number | null; goalM: number | null; snapshot: number | null }
+export function parseDone(record: string): DoneRecord | null {
+  if (!record.startsWith("done ")) return null;
+  const f = Object.fromEntries(record.slice(5).split(" ").map(kv => kv.split("=")));
+  const num = (k: string) => (f[k] === undefined || !Number.isFinite(Number(f[k])) ? null : Number(f[k]));
+  const n = num("n"), x = num("x"), y = num("y"), yaw = num("yaw");
+  if (n === null || !f.end) return null;
+  const cm = (k: string) => { const v = num(k); return v === null ? null : v / 100; };
+  return { n, end: f.end, pose: x === null || y === null || yaw === null ? null : { x: x / 100, y: y / 100, yaw: yaw * Math.PI / 180 },
+           movedM: cm("moved"), goalM: cm("goal"), snapshot: num("snapshot") };
 }
 
 export function broadcastAddresses(): string[] {
@@ -103,7 +131,7 @@ export function broadcastAddresses(): string[] {
 
 // Events: "text" (string), "status" (RobotStatus), "note" (string: what the server saw),
 // "bytes" (number: a piece of the robot's stream arrived), "snapshot" (Buffer: one
-// whole snapshot, not yet checked), "pose" (LivePose).
+// whole snapshot, not yet checked), "pose" (LivePose), "done" (DoneRecord).
 export class RobotLink extends EventEmitter {
   status: RobotStatus = { state: "waiting" };
   private socket: net.Socket | null = null;
@@ -145,16 +173,12 @@ export class RobotLink extends EventEmitter {
     this.udp.close();
   }
 
-  sendKey(key: string): boolean {
+  // One command line ("drive 50 #17"); false if the robot isn't connected.
+  sendLine(line: string): boolean {
+    if (!/^[\x20-\x7e]{1,46}$/.test(line)) throw new Error(`not a command line: ${JSON.stringify(line)}`);
     if (!this.socket || this.status.state !== "connected") return false;
-    this.socket.write(key);
+    this.socket.write(`${line}\n`);
     return true;
-  }
-
-  // One of the robot's commands ("goal 120 -35", "mode manual").
-  sendCommand(command: string): boolean {
-    if (!/^[\x20-\x7e]{1,40}$/.test(command)) return false;
-    return this.sendKey(`${COMMAND}${command}\n`);
   }
 
   private setStatus(status: RobotStatus): void {
@@ -207,6 +231,8 @@ export class RobotLink extends EventEmitter {
         }
         const pose = parsePose(r);
         if (pose && this.socket === socket) this.emit("pose", pose);
+        const done = parseDone(r);
+        if (done && this.socket === socket) this.emit("done", done);
         if (pose && pose.rssi !== null && current() && this.status.state === "connected" && this.status.rssi !== pose.rssi) {
           this.setStatus({ ...this.status, rssi: pose.rssi });
         }

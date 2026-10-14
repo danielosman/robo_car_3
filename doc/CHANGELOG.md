@@ -5,6 +5,31 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 14 Oct 2026: the command API and the `robot` CLI
+
+Built from [CLI_API_PLAN.md](CLI_API_PLAN.md), so an AI agent can steer the robot
+and read what it saw. The keys went: PicoA takes one command per line (drive,
+rotate, goto, watch, snapshot, clear_map, recording, mode, stop, status), numbered
+by the server, and answers each with a done record when it has ended; every action
+ends exactly once, also when it can't start. Snapshots come only when a command
+asks (the API asks after every move) and when a server connects; the robot starts
+in manual. The scan (now `r390`), record 5 s, the direction switch, WiFi, help and
+the text prints are gone. PicoB measures the largest jolt (gravity taken out) and
+tilt between reports (link version 5); the pose line carries them, with recording
+on/off, and the server stores every pose line: the path driven, on the map.
+
+The server's API (`pc/robot/src/api/`, Hono, under `/api/robot/`) has one queue for
+the page and the CLI; anything that doesn't end ok empties it. The page steers
+through it (boxes for drive, rotate and watch; the map click is a goto), and its
+WebSocket only brings the log, which shows everyone's commands and answers. Reads:
+status, snap, light, features, tof, camera, map (60 × 60 characters, or a PNG),
+log, queue; `--check` says what d, r and g would do on the newest map, with the
+robot's own obstacle check in TypeScript, tested against the C one on the same map.
+Found on the way: done in floats, "nothing in the way" can come out a hair short of
+the distance asked (16 % of the steps of a simulated drive), so the check asks
+whether anything was found instead of comparing the two. The robot's own flag is
+set at the end of a move, when what is left is already ≤ 0, so it isn't hit.
+
 ## 13 Oct 2026: second drive (boot 5b0d72ab)
 
 With the floor fix and the connection changes: "the ground feels more solid now

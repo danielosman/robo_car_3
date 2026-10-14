@@ -1,0 +1,5 @@
+#!/bin/sh
+# The robot command line (src/cli.ts): `robot --help`. Link it into your PATH, e.g.
+#   ln -s "$PWD/robot" /usr/local/bin/robot
+here=$(dirname "$(realpath "$0")")
+exec node --no-warnings "$here/src/cli.ts" "$@"

@@ -14,24 +14,26 @@ history goes here (that goes in the CHANGELOG), and no plans (they go in TODO.md
 
 - **PicoA** (Pico 2 W, the brain): the VL53L8CX ToF sensor, the HM0360 camera,
   the OPT4048 colour sensor, WiFi. It keeps the map, detects movement, finds and
-  follows camera features, runs the actions the keys (or the viewer) ask for,
-  prints its console on USB and over WiFi, and sends a snapshot of what it knows
-  after every action.
+  follows camera features, runs the commands the server's API sends (one line
+  each, answered when it has ended), prints its console on USB and over WiFi, and
+  sends a snapshot of what it knows when a command asks.
 - **PicoB** (Pico 2, the body): four wheels with encoders and the IMU. It drives at
   the speeds PicoA commands, reports odometry and tilt, and stops the motors by
   itself when something is wrong.
-- **The PC** (`pc/robot`, Node): the viewer and steering page (the robot's map at
-  any snapshot, its camera picture with features, ToF, colour, pose; the console;
-  keys, the mode and click-to-go), the snapshots and recordings in DuckDB, and the
-  3D viewer of recorded takes, which replays the robot's map code on them.
+- **The PC** (`pc/robot`, Node): the command API with its one queue, which the
+  `robot` CLI (an agent's or a person's) and the viewer and steering page both
+  use; the page (the robot's map at any snapshot with the path driven, its camera
+  picture with features, ToF, colour, pose; the log; steering); the snapshots, pose
+  lines and recordings in DuckDB; and the 3D viewer of recorded takes, which
+  replays the robot's map code on them.
 
 The two Picos talk over a UART link (1 Mbaud). PicoA talks to the PC over WiFi: a
 TCP connection for the console and the snapshots, UDP datagrams for recordings.
 
-**The robot does nothing by itself.** After power-up it is idle with the motors
-off, joins the WiFi and waits for a key. Each key does one thing. A mode says who
-chooses the actions: idle (nobody) or manual (the operator, by keys and by clicks
-on the viewer's map).
+**The robot does nothing by itself.** After power-up it is in manual mode with the
+motors off, joins the WiFi and waits for a command. Each command does one thing. A
+mode says who chooses the actions: idle (nobody) or manual (the operator, by
+commands: from the CLI, or the page's buttons and clicks on its map).
 
 ### PicoA's main loop (`picoA/app/main.c`)
 
@@ -40,8 +42,8 @@ runs, in order: `body` (the link to PicoB), `pose`, `recorder` (odometry and dri
 commands), `surroundings` (a new ToF frame into the map), `camera`,
 `motion_sense` (movement detection; it takes the camera's frames), `vision` (camera
 features, every 3rd frame), `behaviour` (the running action), the colour sensor
-(asked every 0.1 s), `snapshot`, `wifi_console`, `debug_console` (keys and the
-viewer's commands). `loop_stats` times every stage. Core 1 is not used.
+(asked every 0.1 s), `snapshot`, `wifi_console`, `commands` (the server's command
+lines, and their answers). `loop_stats` times every stage. Core 1 is not used.
 
 ### Frames and conventions
 
@@ -64,10 +66,12 @@ viewer's commands). `loop_stats` times every stage. Core 1 is not used.
 - **`odometry`**: heading from the gyro, distance from the encoders (each side the
   mean of front and rear), tilt from a complementary filter (gyro short-term,
   gravity long-term). Detects standing still; while still the heading is frozen
-  and the gyro bias is measured again, so standing costs no drift.
+  and the gyro bias is measured again, so standing costs no drift. Keeps the
+  largest jolt (acceleration with gravity taken out, along x, y, z) and tilt since
+  the last report, for setting bump and tilt stops from measurements later.
 - **`brain`**: PicoA as PicoB sees it. Answers PicoA's greeting, keeps the motors
   off until the protocol versions match, applies MOTORS and DRIVE, sends ODOM
-  (50 Hz) and status (2 Hz). **Safety stops:** no DRIVE for 250 ms, or a fault from
+  (50 Hz, with the jolt and tilt peaks) and status (2 Hz). **Safety stops:** no DRIVE for 250 ms, or a fault from
   `drive`, switch the motors off until PicoA asks for them again.
 - **Drivers:** `imu` (ISM330DHCX on SPI0, 416 Hz), `motor` (two TB6612FNG, 20 kHz
   PWM), `encoder` (quadrature counted by PIO, 8344 counts per wheel turn).
@@ -163,9 +167,10 @@ the frame was measured. Nothing is learned first; `C` clears the map.
   free: a hole or a drop), drivable (floor seen, L1 and L2 free), open (L1 and L2
   free, G unknown), unknown.
 - **Queries:** `cell_map_column()`, `cell_map_obstacle_along()` (the nearest blocked
-  or overhang column on a path of a given width: what `f` and go-to stop at),
-  `cell_map_print()` (the `m` key: 4 × 4 m as text). Outside the window they answer
-  from the whole-house map's columns.
+  or overhang column on a path of a given width: what drive and go-to stop at; the
+  PC's `--check` has a copy, tested against it), `cell_map_print()` (4 × 4 m as
+  text, for the tests and `tools/replay.sh`). Outside the window they answer from
+  the whole-house map's columns.
 - **The window follows the robot** (`cell_map_follow()`, before every frame): it is
   3 × 3 tiles of 2 × 2 m of the whole-house map, the robot in the middle tile; when
   the robot is more than 0.5 m out of the middle tile (within ~1.5 m of the
@@ -250,17 +255,15 @@ reads it yet but snapshots and `v`.
 
 ### Modes (`mode`)
 
-Who chooses the robot's actions. **Idle** (after power-up and after space): nobody,
-the robot stands with the motors off. **Manual**: the operator, by keys and by
-goals clicked on the viewer's map. An action key in idle switches to manual; a goal
-is taken only in manual (a click is easy to make by accident). `M` switches
-between them; the viewer has buttons. Later modes (sentry, explore) will choose
-actions themselves.
+Who chooses the robot's actions. **Manual** (after power-up): the operator, by
+commands. **Idle** (after a stop): nobody, the robot stands with the motors off; a
+move in idle switches to manual. `mode idle|manual` sets it. The mode changes
+nothing else yet; later modes (sentry, explore) will choose actions themselves.
 
 ### Snapshots (`snapshot`)
 
-What the robot knows at one moment, sent to the server at the end of every action
-(done or not), on `S`, and when a server connects: the pose, the action that ended
+What the robot knows at one moment, sent to the server when a command asks (the
+API asks after every move) and when a server connects: the pose, the action that ended
 and how, the running action, the mode, the last ToF frame with all its targets and
 where the robot was for it, the sensor's geometry, the last camera frame (160 × 120)
 and its features, the colour sensor's last reading, the map window (all three
@@ -268,33 +271,36 @@ layers, one byte a cell) with its corner, and the whole-house map's dirty tiles.
 KB without tiles. Built into one static 38 KB buffer; one asked for while the last
 is going out is built when it has gone; without a server none is built. A snapshot
 waits up to 0.3 s for `vision` to process the frame it shows, so the features are
-that picture's. Every 0.25 s while a server listens, `"\001pose x y yaw mode
-action"` says where the robot is now. The layout is the `snap_*_t` structs in
+that picture's. A command's snapshot is answered once it has wholly gone to the
+connection, so it comes before its answer in the stream. Every 0.25 s while a
+server listens, the pose line, `"\001pose x y yaw mode action wifi recording jx jy
+jz tilt"`, says where the robot is now, with the largest jolt and tilt PicoB
+measured since the line before. The layout is the `snap_*_t` structs in
 `snapshot.c` (sections, CRC-32), read by `pc/robot/src/snapshot.ts`.
 
 ### Actions (`behaviour`)
 
-One action at a time, started by a key; a new one replaces the running one, space
-stops it. Each switches the motors on at its start and off at its end, and prints
-how it ended: done (after standing still, with what odometry measured), stopped,
-replaced, safety stop on PicoB, PicoB lost, or obstacle.
+One action at a time, started by a command; a new one replaces the running one,
+stop stops it. Each switches the motors on at its start and off at its end, prints
+how it ended, and ends exactly once, carrying its command's number, also when it
+can't start (a move blocked from the start, a goal already reached): done (after
+standing still, with what odometry measured), stopped, replaced, safety stop on
+PicoB, PicoB lost, didn't start, or obstacle.
 
-- **Scan** (`s`): turn 390° left in place (~14 s). Only that: the map is fed from
-  every frame anyway.
-- **Move** (`f`): 50 cm forward, or back with the direction set to back (`r`), at
-  ≤ 10 cm/s, slowing near the end. **Stops 15 cm before an obstacle on the map:**
+- **Move** (`drive <cm>`): straight, negative = back, at ≤ 10 cm/s, slowing near
+  the end. **Stops 15 cm before an obstacle on the map:**
   from the front (back) edge to the nearest blocked or overhang cell on its path
   (the robot's 23.5 cm plus 5 cm each side), checked every loop while driving,
   slowing near the stop point; unknown cells count as free. Within 15 cm it doesn't
   start. Backwards only what the map already has stops it (the VL53 looks forward).
-- **Turn** (`t`): 30° in place, left (right with direction back).
-- **Watch** (`a`, 1 minute): turns towards the biggest VL53 movement and follows
+- **Turn** (`rotate <deg>`): in place, + = left. A scan is `rotate 390` (the map is
+  fed from every frame anyway).
+- **Watch** (`watch <s>`): turns towards the biggest VL53 movement and follows
   it: its angular speed (a line through the last 0.5 s) plus 2 × the angle still
   to go, at most ~29°/s; starts when it is 8° off, stops within 3° once it is
   about still, never turns past where it was last seen. A one-zone movement at the
   edge of the view is inspected too.
-- **Record** (`5`): 5 s standing still, motors off, only for a recording.
-- **Go to** (a click on the viewer's map, manual mode): turn in place towards the
+- **Go to** (`goto <x> <y>`, or a click on the page's map): turn in place towards the
   point, then drive straight to it at ≤ 10 cm/s, steering a little to keep it
   ahead, stopping where it is (measured along the way) or 15 cm before an obstacle
   on the map, as Move. At most 3 m at once (a farther goal is gone towards). The
@@ -302,36 +308,33 @@ replaced, safety stop on PicoB, PicoB lost, or obstacle.
   from its own pose.
 
 Speeds come from `motion.h`. The decision "one owner of the wheels" isn't built
-yet: `behaviour` drives, and `debug_console` switches the motors off on space.
+yet: `behaviour` drives, and `commands` switches the motors off on stop.
 
-### Console (`debug_console`, `wifi_console`)
+### Commands (`commands`) and the console (`wifi_console`)
 
-The same keys on USB and over WiFi; nothing is printed by itself.
-
-- Actions: space stop (and mode idle), `s` scan, `f` move, `t` turn, `a` watch, `5`
-  record 5 s; in idle each switches to manual.
-- Mode: `M` manual / idle. Snapshot: `S` one now.
-- Settings: `r` direction forward/back, `R` recording (full telemetry) on/off, off
-  at power-up.
-- `C` clear the map, `W` connect to WiFi (or show how it is connected).
-- Prints: `p` status (pose, PicoB link, WiFi, loop time over 10 s, RAM free, mode,
-  snapshots, recording, direction), `m` the map, `z` one ToF frame, `c` one camera
-  frame as blocks, `v` the camera features, `o` / `k` the ToF / camera movement
-  backgrounds, `h` help.
-- The viewer's commands arrive like keys, as `"\002<command>\n"`: `goal <x cm> <y cm>`
-  (map frame; only in manual), `mode idle`, `mode manual`.
+One command per line, `"<command> [#<n>]"`, the same over WiFi (from the server's
+API, which numbers them) and typed on USB (for debugging); nothing is done or
+printed by itself. `drive <cm>`, `rotate <deg>`, `goto <x cm> <y cm>`, `watch <s>`,
+`snapshot`, `clear_map`, `recording on|off` (full telemetry, off at power-up),
+`mode idle|manual`, `stop` (motors off, mode idle), `status` (pose, PicoB link,
+WiFi, loop time over 10 s, RAM free, mode, snapshots, recording: printed). The
+limits are in `commands.h` (the API reads them); a command out of range is refused.
+Each is answered when it has ended, by a done record to the server: `"\001done
+n=<n> end=<ok|obstacle|stopped|tilt|wheels|…|refused> x=<cm> y=<cm> yaw=<deg>"`,
+for a move also `moved=<cm>` (and `goal=<cm>` for a go to), for a snapshot
+`snapshot=<its number>`.
 
 `wifi_console` joins the network in `wifi_config.h` (git-ignored; copy
 `wifi_config.example.h`), finds the server by its UDP announcements (or
-`WIFI_SERVER_IP`), sends everything printed over TCP (port 4211) and takes keys;
+`WIFI_SERVER_IP`), sends everything printed over TCP (port 4211) and takes commands;
 it keeps the last 16 KB while no server listens and reconnects by itself. Losing
 it doesn't stop the robot. Snapshots go on the same connection, between the text,
 in chunks `[0x02][length u16][bytes]` (the text goes first), at most two chunks
 unacknowledged at a time: a TCP stream is one queue, so whatever is written later
 waits behind them. A snapshot cut by a lost connection is sent again from its
-start on the next. The pose record (`"\001pose <x> <y> <yaw> <mode> <action>
-<signal dBm>\n"`, 4 a second) goes to the server only, and is what tells it the
-robot is there; there is no separate heartbeat. The server writes `'\0'` every
+start on the next. The pose line and the done records (`"\001…\n"`) go to the
+server only; the pose line (4 a second) is what tells it the robot is there;
+there is no separate heartbeat. The server writes `'\0'` every
 2 s. Either side closes the connection only after 30 s with nothing from the
 other; after 6 s the server says "nothing from the robot for N s; the connection
 is open" (in the log and the status pill), and "data again" when bytes come. lwIP
@@ -339,12 +342,12 @@ runs in the background interrupt (`lwipopts.h`).
 
 ### Recording (`recorder`)
 
-With recording on (`R`), **each action is a take**: from its start to its end the
+With recording on (`recording on`), **each action is a take**: from its start to its end the
 raw data goes to the PC as UDP datagrams (port 4212, ≤ 1400 B each, numbered):
 `TAKE_START`, `GEOMETRY` (the sensor mounting, so the PC hard-codes nothing),
 every ToF frame with all of the sensor's outputs (`TOF_RAW`, in two halves),
-every odometry report, every drive command, the console's lines and keys
-(`MARK`), the WiFi state every 0.5 s, and `TAKE_END` (how it ended, what was sent
+every odometry report (since link version 5 with PicoB's jolt and tilt peaks; the
+PC tells the two sizes apart), every drive command, the console's lines (`MARK`), the WiFi state every 0.5 s, and `TAKE_END` (how it ended, what was sent
 and refused). Idle, nothing is sent. A lost datagram is lost: nothing waits behind
 it, the PC counts the gaps by number; each datagram repeats the previous one's
 odometry, and the first and last datagrams go more than once. The record layouts
@@ -367,20 +370,37 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
 
 - **`main.ts`, `robot.ts`**: the server. Announces itself on the network (or only to
   `ANNOUNCE_TO`, for a test server), accepts PicoA's console connection, takes the
-  snapshot chunks and status records out of its stream, passes text, poses and
-  new snapshots to the pages and keys and commands back (WebSocket), writes a log
-  per run in `logs/`.
+  snapshot chunks, pose lines and done records out of its stream, sends command
+  lines back, and passes the log, the robot's status, poses and new snapshots to
+  the pages (WebSocket, one way).
+- **`api/`, `cli.ts`, `robot`**: the command API under `/api/robot/` (Hono) and the
+  `robot` CLI that calls it ([CLI_API_PLAN.md](CLI_API_PLAN.md): the commands,
+  answers and the design, module by module). One queue (`api/queue.ts`) for the
+  page's and the CLI's commands, one at a time; anything that doesn't end ok
+  empties it. `api/runner.ts` numbers each command, sends it and waits for its
+  done record; `api/commands.ts` is the steering language (`robot steer r30d50`);
+  `api/reads.ts` the reads (status, snap, light, features, tof, camera, map, log,
+  queue) as text or JSON; `api/check.ts` `--check` on the newest snapshot's map;
+  `api/firmware.ts` reads the limits and the move rules from the firmware's headers.
+- **`log.ts`, `live.ts`**: the one log everyone sees (the robot's text, the server's
+  notes, every answer with who sent it), kept for new pages and `robot log` and
+  written to a file per run in `logs/`; the robot now (status, pose, the boot, the
+  largest jolt and tilt since power-up), and each pose line into DuckDB (`poses`)
+  with its boot: the path driven.
 - **`public/app.html`, `app.js`**: the viewer and steering page at
-  http://127.0.0.1:8080/. A 2D map (x up, y left, as `m`): the snapshot's window
+  http://127.0.0.1:8080/. A 2D map (x up, y left, as `robot map`): the snapshot's window
   over the whole-house map's tiles as they were then (where the window is unknown
   and a tile knows the column, dimmed; "hide weak" hides columns under 10 %
-  confident, as the 3D viewer), the path of the snapshots, the snapshot's ToF
+  confident, as the 3D viewer), the path driven up to the snapshot (from the pose
+  lines) and where each snapshot was taken, the snapshot's ToF
   targets, the robot then and now; a timeline of the boot's snapshots ("live"
   follows the newest; a new boot's first snapshot, sent when the robot connects,
   always takes over the page and ticks "live"); the camera picture with its features, the 8 × 8 ToF grid, the
-  colour reading as a swatch, the pose; the console and keys; Idle / Manual and
-  Stop. In manual mode, on the live view, a click on the map sends the robot there.
-  The console alone: `/console` (`public/console.js`).
+  colour reading as a swatch, the pose; the log; steering through the API: Idle /
+  Manual, Stop (and space), drive, rotate and watch with a box for the number,
+  snapshot, clear map, recording, status. On the live view a click on the map
+  sends the robot there (`g<x>,<y>`). The old console page, `/console`, still sends
+  keys nothing takes (CLI_API_PLAN.md, gaps).
 - **`snapshot.ts`, `snapshots_api.ts`**: each boot's snapshots as they arrive in
   `recordings/snapshots/raw/<time>-boot-<id>.snap` (the truth), each picture as
   `recordings/snapshots/<boot>/<seq>.png`, and in DuckDB: `snapshots` (one row each),
@@ -408,8 +428,9 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
 - **Trying the viewer without the robot:** `npm run snapreplay -- <boot>` replays a
   recorded drive's ToF frames through the robot's own map and snapshot code
   (`tools/replay_snapshots.c`) into snapshots (no pictures); `npm run fakerobot --
-  <file.snap>` connects to the server as the robot does, sends those snapshots and
-  its pose, and answers modes and goals by driving its pose.
+  <file.snap>` connects to the server as the robot does, answers every command
+  with a done record, drives its pose at the robot's speeds, and sends the file's
+  snapshots one after another when asked for one.
 - `recordings/` is git-ignored.
 
 `pc/bringup/` is the bring-up viewer (camera, ToF, colour sensor over USB) for the
@@ -422,8 +443,10 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
   map on five recorded scans (`test_map_replay`: the cup, box, chair and cupboard
   must be found; data in `picoA/app/test/data/`), the window following the robot down
   a simulated hallway, camera features on synthetic frames (`test_vision`), and the
-  snapshots as the PC reads them (`test_snapshot`, whose file the PC's test reads).
-- `npm test` and `npm run typecheck` in `pc/robot/`.
+  snapshots as the PC reads them (`test_snapshot`, whose file the PC's test reads,
+  and the map's obstacle check on it, which the PC's copy must match).
+- `npm test` and `npm run typecheck` in `pc/robot/`: also the API (the steering
+  language, the queue and runner, `--check`, the reads and the routes end to end).
 - `tools/lint.sh`: cppcheck, ESLint, tsc.
 - `tools/stack_depth.py`: worst-case stack from GCC's call graph.
 
@@ -444,14 +467,15 @@ Rules the code follows; change them only with Daniel's word.
 - No climbing worries for now: the robot drives slowly in controlled rooms.
 
 **Commands:**
-- **The robot does nothing by itself:** idle with the motors off after power-up
+- **The robot does nothing by itself:** manual with the motors off after power-up
   and after a reset, no start-up scan.
-- Modes: idle and manual; a click on the map steers only in manual mode and only
-  on the live view.
-- One key, one operation; no repeat counts; no test-only actions.
-- Motors off at the end of every action; space stops.
-- USB and WiFi behave the same.
-- `f` stops 15 cm before an obstacle on the map (blocked and overhang cells),
+- Modes: idle and manual; set, not switched. A click on the map steers only on the
+  live view.
+- The commands and decisions of 14 Oct: [CLI_API_PLAN.md](CLI_API_PLAN.md). One
+  command, one operation, each with its number required; no test-only actions.
+- Motors off at the end of every action; stop stops (and empties the queue).
+- Commands come only from the API (USB typing is for debugging).
+- drive stops 15 cm before an obstacle on the map (blocked and overhang cells),
   unknown cells count as free. Its braking and brief speed-up when a closer reading
   moves the stop point back are fine as they are.
 
@@ -463,7 +487,7 @@ Rules the code follows; change them only with Daniel's word.
 - Movement at the edge of the view is inspected (a one-zone blob turns the robot).
 
 **Data:**
-- After every action a snapshot goes to the PC over TCP (12 Oct): pose, camera
+- After every move the API asks for a snapshot, which goes to the PC over TCP (14 Oct): pose, camera
   picture and features, one full VL53 frame, the colour reading, the map window
   with its anchor and the changed tiles. The full telemetry (raw sensor data and
   the pose while an action runs, one take per action, UDP) is a separate switch,

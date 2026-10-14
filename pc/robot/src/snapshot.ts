@@ -1,5 +1,5 @@
 // Snapshots from the robot (doc/ARCHITECTURE.md, snapshots; picoA/app/snapshot.c): what it
-// knows after each action, sent between its console text (robot.ts takes the bytes
+// knows when a command asks (after every move), sent between its console text (robot.ts takes the bytes
 // out). Each boot's snapshots are saved as they arrive, never changed, in
 // recordings/snapshots/<time>-boot-<id>.snap (the truth); the database rows and
 // the PNG pictures are derived from them (store.ts, npm run import).
@@ -18,7 +18,7 @@ export const SNAP_FILE_MAGIC = "RCSNAP01"; // a file of snapshots: then [arrival
 const SEC = { HEAD: 1, POSE: 2, GEOMETRY: 3, TOF: 4, CAMERA: 5, COLOR: 6, WINDOW: 7, TILES: 8, FEATURES: 9 } as const;
 // vision_feature_t.flags (picoA/app/vision.h)
 export const FEATURE = { NEW: 1, MISSED: 2, LOST: 4, LEFT_IMAGE: 8 } as const;
-export const WHY = ["action ended", "key S", "server connected"];
+export const WHY = ["action ended", "command", "server connected"]; // snapshot_why_t; 0 until 14 Oct, 1 was key S
 export const MODES = ["idle", "manual"];
 export const TILE_COLS = 20; // picoA/app/house_map.h
 export const TILE_BYTES = TILE_COLS * TILE_COLS / 2;
@@ -194,8 +194,8 @@ export function tileColumns(t: SnapTile): number[] {
   return out;
 }
 
-// An 8-bit grey PNG.
-export function grayPng(width: number, height: number, pixels: Buffer): Buffer {
+// An 8-bit PNG: grey (1 byte a pixel) or RGB (3), rows top first.
+function png(width: number, height: number, pixels: Buffer, channels: 1 | 3): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const head = Buffer.alloc(8);
     head.writeUInt32BE(data.length, 0);
@@ -208,12 +208,14 @@ export function grayPng(width: number, height: number, pixels: Buffer): Buffer {
   ihdr.writeUInt32BE(width, 0);
   ihdr.writeUInt32BE(height, 4);
   ihdr[8] = 8; // bits
-  ihdr[9] = 0; // grey
-  const rows = Buffer.alloc(height * (width + 1));
-  for (let y = 0; y < height; y++) pixels.copy(rows, y * (width + 1) + 1, y * width, (y + 1) * width);
+  ihdr[9] = channels === 1 ? 0 : 2; // grey, RGB
+  const row = width * channels, rows = Buffer.alloc(height * (row + 1));
+  for (let y = 0; y < height; y++) pixels.copy(rows, y * (row + 1) + 1, y * row, (y + 1) * row);
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr),
                         chunk("IDAT", zlib.deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
 }
+export const grayPng = (width: number, height: number, pixels: Buffer) => png(width, height, pixels, 1);
+export const rgbPng = (width: number, height: number, pixels: Buffer) => png(width, height, pixels, 3);
 
 export const snapId = (bootId: string, seq: number) => `${bootId}-${seq}`;
 export const imagePath = (dir: string, bootId: string, seq: number) => path.join(dir, bootId, `${seq}.png`);

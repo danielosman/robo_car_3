@@ -1,6 +1,6 @@
 # RoboCar — what is left to do
 
-Open work only (12 Oct 2026, evening). What is built is in [ARCHITECTURE.md](ARCHITECTURE.md);
+Open work only (14 Oct 2026). What is built is in [ARCHITECTURE.md](ARCHITECTURE.md);
 the old plans with the details are in [archive/](archive/). An idea needs Daniel's
 yes before it is built. When something is done, it leaves this file and goes into
 the [CHANGELOG](CHANGELOG.md).
@@ -35,9 +35,16 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
      weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
-**Planned, waiting for Daniel's go:** the command API and the CLI, so an AI agent
-can steer the robot (fewer commands with numbers, one queue, short answers, data
-for the agent): [CLI_API_PLAN.md](CLI_API_PLAN.md), worked out on 13 Oct.
+**Built 14 Oct, waiting for its robot test:** the command API and the `robot` CLI
+([CLI_API_PLAN.md](CLI_API_PLAN.md)). Flash both Picos (the link version went up),
+then the README's "Steering through the API" test. Left of the plan:
+   - The camera features' direction in degrees (`robot features` gives pixels): the
+     camera's field of view isn't measured or in the code yet.
+   - Safety step 2: the bump stop and the 10° tilt stop, from the jolt and tilt
+     numbers the pose lines now store (`poses` in DuckDB) once a few drives show
+     what normal looks like.
+   - The old console page (`/console`) sends keys nothing takes: it goes, or moves
+     to the API.
 
 ## Goals: what the robot is for
 

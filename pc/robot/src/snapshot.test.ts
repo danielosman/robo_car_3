@@ -31,9 +31,9 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.ok(a.skipped >= 14);
   const s = whole.map(parseSnapshot);
   assert.deepEqual(s.map(x => x.seq), [1, 2, 3, 4, 5]);
-  assert.deepEqual(s.map(x => x.why), ["server connected", "action ended", "key S", "server connected", "key S"]);
+  assert.deepEqual(s.map(x => x.why), ["server connected", "command", "command", "server connected", "command"]);
   const first = s[0];
-  assert.equal(first.mode, "idle");
+  assert.equal(first.mode, "manual");
   assert.equal(first.endReason, null);
   assert.equal(first.pose!.x, 1.25);
   assert.equal(first.pose!.tUs, 4242);
@@ -50,10 +50,10 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(first.features!.cameraNumber, 77);
   assert.deepEqual(first.features!.features[0], { id: 9, age: 3, flags: 0, x: 12.5, y: 100.25, dx: -0.5, dy: 0.75, strength: 128 / 255, match: 230 / 255 });
   assert.equal(first.features!.features[1].flags, 1);
-  assert.equal(s[1].action, "scan");
+  assert.equal(s[1].action, "move");
   assert.equal(s[1].endReason, "obstacle");
   assert.equal(s[2].running, "goto");
-  assert.equal(s[2].mode, "manual");
+  assert.equal(s[2].mode, "idle");
   assert.equal(s[3].tiles.length + s[4].tiles.length, 42);
   // Damaged: refused.
   const bad = Buffer.from(whole[0]);
@@ -119,7 +119,7 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     assert.equal(Number(boots[0].snapshots), 5);
     const list = await listSnapshots(store, boot);
     assert.deepEqual(list.map(r => Number(r.seq)), [1, 2, 3, 4, 5]);
-    assert.equal(list[1].action, "scan");
+    assert.equal(list[1].action, "move");
     assert.equal(list[0].has_image, true);
 
     const one = (await snapshotDetail(store, boot, 1))!;

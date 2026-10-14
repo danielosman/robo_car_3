@@ -197,6 +197,24 @@ int main(void) {
     assert((tile.columns[(5 * 20 + 10) / 2] & 15) == COLUMN_BLOCKED);
     printf("ok: a server gets a snapshot at once: %lu bytes, every section as written\n", (unsigned long)p.total);
 
+    // The map's obstacle check on this snapshot's map, for the PC's copy of it
+    // (pc/robot/src/api/check.test.ts): x y dx dy half_width max -> distance, m.
+    {
+        static const float rays[][6] = {
+            {-1.0f, 0.15f, 1, 0, 0.1675f, 3}, {0.05f, -1.0f, 0, 1, 0.1675f, 3}, {-0.5f, -0.4f, 0.70710678f, 0.70710678f, 0.1675f, 3},
+            {-1.0f, 0.5f, 1, 0, 0.1675f, 3}, {-1.0f, 0.32f, 1, 0, 0.1675f, 3}, {-3.5f, 0.05f, -1, 0, 0.1675f, 3},
+            {0.5f, 0.15f, -1, 0, 0.1675f, 3}, {0.3f, 0.6f, -0.6f, -0.8f, 0.095f, 2},
+        };
+        FILE *checks = fopen("build/test_snapshot_checks.txt", "w");
+        assert(checks);
+        for (unsigned i = 0; i < sizeof rays / sizeof rays[0]; i++) {
+            const float *r = rays[i];
+            fprintf(checks, "%.6f %.6f %.6f %.6f %.6f %.6f %.6f\n", (double)r[0], (double)r[1], (double)r[2], (double)r[3],
+                    (double)r[4], (double)r[5], (double)cell_map_obstacle_along(r[0], r[1], r[2], r[3], r[4], r[5]));
+        }
+        fclose(checks);
+    }
+
     // An action ending asks for nothing. While one goes out, nothing else; asked for
     // meanwhile: built when it has gone; its command told only once it has wholly gone.
     snapshot_sent_t told;

@@ -1,7 +1,7 @@
 # RoboCar — the command API and the CLI (plan)
 
-Worked out with Daniel on 13-14 Oct 2026. The decisions are at the end; the
-design of the API server is under "The API server, module by module".
+Worked out with Daniel on 13-14 Oct 2026, built on 14 Oct. The decisions are at
+the end; the design of the API server is under "The API server, module by module".
 
 ## What and why
 
@@ -75,7 +75,9 @@ are optional; long names work too (`robot steer rotate 30 drive 50`).
 - **Anything that isn't `ok` empties the queue:** an error, a move that ended
   early (obstacle, safety stop, PicoB lost, didn't start), or `stop`. The commands
   still waiting are answered `dropped: <command>`, so the agent looks at where it
-  ended up before it goes on.
+  ended up before it goes on. A move's own snapshot still runs first (built 14
+  Oct: without it the newest snapshot would show the robot before the move); `stop`
+  drops everything.
 - **The robot not connected** when a command's turn comes: `error: <command> robot
   not connected`, and the queue is emptied.
 - **No answer in time:** each command may take its expected time twice over plus
@@ -224,7 +226,7 @@ thing everywhere:
 CLI ──HTTP──┐                                  ┌─> RobotLink ──TCP──> PicoA
 page ─HTTP──┴─> routes ─> CommandQueue ─> CommandRunner
                   │                            └─< done records, StoredSnapshots
-                  ├─> reads ─> Store (DuckDB), LiveRobot
+                  ├─> reads ─> Store (DuckDB), LiveRobot, Log
                   └─> check ─> RobotMap
 ```
 
@@ -232,15 +234,17 @@ page ─HTTP──┴─> routes ─> CommandQueue ─> CommandRunner
 |---|---|---|
 | `api/commands.ts` | `parseSteer(text)`, `shortText(cmd)`, `robotLine(cmd, n)`, `timeLimitMs(cmd)`, `withSnapshots(cmds)` | the grammar (letters, long names, spaces), limits, the robot's wording |
 | `api/firmware.ts` | `LIMITS`, `MOVE`, `SPEED` | reading the numbers from the C headers |
-| `api/runner.ts` | `run(cmd): Promise<Outcome>` (never rejects) | numbering, sending, matching done records, time limits, waiting for a snapshot to be stored |
+| `api/runner.ts` | `run(cmd): Promise<Outcome>` (never rejects); `StoredSnapshots` | numbering, sending, matching done records, time limits, waiting for a snapshot to be stored |
 | `api/queue.ts` | `submit(cmds, sender, onAnswer): Promise<void>`, `stop(sender, onAnswer)`, `state()` | order, emptying on anything not `ok`, dropped answers |
-| `api/answers.ts` | `describe(cmd, done)`, `answerLine(answer)` | how an end reads in words |
-| `api/reads.ts` | a table: name → `{ help, load(arg) → data, text(data) }` | queries, units, rendering |
+| `api/answers.ts` | `describe(cmd, done)`, `answerLine(answer)`, `poseText(pose)` | how an end reads in words |
+| `api/reads.ts` | a table: name → `{ usage, help, run(ctx, arg, flags) → { data, text } }` | queries, units, rendering |
 | `api/check.ts` | `checkSteer(cmds, map, pose)` | the move simulation |
-| `robot_map.ts` | `RobotMap.column(cx, cy)`, `obstacleAlong(...)`, `text(...)`, `png(...)` | the window over the whole-house tiles |
+| `api/map.ts` | `RobotMap.column(cx, cy)`, `obstacleAlong(...)`, `text()`, `png()` | the window over the whole-house tiles |
+| `api/colour.ts` | `colourName(x, y, lux)` | white by colour temperature, else a hue |
 | `api/help.ts` | `help(name?)` | the text an agent steers from |
-| `api/routes.ts` | `createApi(deps): Hono` | HTTP: paths, streaming, flags |
-| `log.ts` | `text()`, `note()`, `answer()`, `tail(n)`, `subscribe()` | the backlog, the file, the WebSocket fan-out |
+| `api/routes.ts` | `createApi(ctx): Hono` | HTTP: paths, streaming, flags |
+| `log.ts` | `text()`, `note()`, `answer()`, `tail(n)`, `backlog()`, event `item` | the backlog, the file, the fan-out to pages |
+| `live.ts` | `LiveRobot`: `status`, `pose`, `boot`, `peaks`; `flush()` | the live feed; the pose lines into DuckDB |
 
 The routes are generic: `POST /api/robot/steer` (the commands as the body;
 `?check`, `?nowait`, `?from=page`), and `GET /api/robot/<read>[/<arg>]` (`?json`,
@@ -253,6 +257,8 @@ ends with an outcome, never an exception through the queue.
   nothing takes any more. Either it goes, or it moves to the API.
 - The movement backgrounds (the old `o` and `k`) are in no snapshot: nothing
   shows them any more.
+- `robot features` gives each feature's place in pixels, not the direction in
+  degrees: the camera's field of view isn't measured or in the code yet.
 - Safety step 2: the bump stop and the 10° tilt stop, once the measured numbers
   show what normal looks like.
 
@@ -265,7 +271,7 @@ ends with an outcome, never an exception through the queue.
 5. One parser in the API reads the steering text for both the CLI and the page.
 6. One CLI call is either one steer or one read, never a mix.
 7. Commands run one at a time in the order they arrived, whoever sent them; `stop` skips the queue, and `status` is a read.
-8. Any end that isn't `ok` empties the queue, and the waiting commands are answered `dropped: <command>`.
+8. Any end that isn't `ok` empties the queue, and the waiting commands are answered `dropped: <command>`; a move's own snapshot still runs first, so the newest snapshot shows where the robot ended up (found while building, 14 Oct).
 9. The robot takes commands only from the API (the USB is for debugging), so a command replaced by another needs no handling.
 10. The API numbers each command; the robot's done record carries the number, how it ended, how far it drove and its pose, and a number nothing waits for is ignored.
 11. The robot answers clear_map, recording, mode, stop and snapshot too (a snapshot with its number); the API answers status itself.

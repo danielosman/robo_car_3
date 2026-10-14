@@ -1,8 +1,10 @@
 // The robot's viewer and steering page (doc/ARCHITECTURE.md, the PC): the map as the robot
-// had it at any snapshot (its window over the whole-house map's tiles), where it was
-// and what it saw then (camera with features, ToF, colour, pose), the console, and
-// steering: keys, the mode, and in manual mode a click on the live map sends the
-// robot there (it turns and drives; the robot works out the way from its own pose).
+// had it at any snapshot (its window over the whole-house map's tiles, the path it
+// drove), where it was and what it saw then (camera with features, ToF, colour, pose),
+// the log, and steering: buttons, boxes for drive, rotate and watch, and a click on
+// the live map sends the robot there. Every steering command goes to the command API
+// (POST /api/robot/steer, doc/CLI_API_PLAN.md), into the queue the CLI's go into;
+// the answers come back in the log, which shows everyone's.
 // Map frame: x forward at power-up, y left; drawn with x up and y to the left, as
 // the robot's `m` prints it.
 
@@ -11,11 +13,13 @@ const CELL = 0.1, TILE = 20;
 const COLORS = { 1: "--blocked", 2: "--overhang", 3: "--nofloor", 4: "--drivable", 5: "--open" };
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const columnColor = Object.fromEntries(Object.entries(COLORS).map(([k, v]) => [k, css(v)]));
-const KEYS = [
-  ["Actions", [["s", "scan"], ["f", "move 50 cm"], ["t", "turn 30°"], ["a", "watch 1 min"], ["r", "direction"]]],
-  ["Robot", [["p", "status"], ["S", "snapshot"], ["C", "clear map"], ["R", "recording"], ["W", "WiFi"], ["h", "help"]]],
-  ["Print", [["m", "map"], ["z", "ToF"], ["c", "camera"], ["o", "ToF backgr."], ["k", "camera backgr."]]],
+// The steering buttons: what they send (robot steer --help), and a box for the number
+// of those that take one.
+const STEER = [
+  ["d", "drive", "cm", "50"], ["r", "rotate", "°", "30"], ["w", "watch", "s", "60"],
+  ["s", "snapshot"], ["c", "clear map"],
 ];
+const GOTO_MAX_CM = 300; // goto's limit on each axis (picoA/app/commands.h)
 const WEAK = 2; // of 15: columns set less confidently count as unknown when "hide weak" is ticked (~10 %, as replay)
 const FOOT = { front: 0.095, back: -0.095, half: 0.1175 }; // the robot's footprint, m
 
@@ -122,14 +126,14 @@ function draw() {
   ctx.strokeStyle = "#666";
   ctx.beginPath(); ctx.arc(ox, oy, 4 * dpr, 0, 2 * Math.PI); ctx.stroke();
 
-  // The path: where each snapshot was taken, up to the one shown.
-  const upto = snaps.slice(0, index + 1).filter(s => s.x !== null);
+  // The path driven up to the snapshot shown (since the map was last cleared), and
+  // where each snapshot was taken (a click on one shows it).
   ctx.strokeStyle = "#7aa7d988";
   ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath();
-  for (const s of upto) { const [px, py] = toScreen(s.x, s.y); ctx.lineTo(px, py); }
+  for (const p of mapView?.path ?? []) { const [px, py] = toScreen(p.x, p.y); ctx.lineTo(px, py); }
   ctx.stroke();
-  for (const s of upto) {
+  for (const s of snaps.slice(0, index + 1).filter(s => s.x !== null)) {
     const [px, py] = toScreen(s.x, s.y);
     ctx.fillStyle = "#7aa7d9";
     ctx.beginPath(); ctx.arc(px, py, 2.5 * dpr, 0, 2 * Math.PI); ctx.fill();
@@ -194,7 +198,7 @@ function centre() {
 
 // Live: the newest snapshot of the newest boot (boots come newest first).
 const showingLive = () => boot === boots[0]?.boot_id && index === snaps.length - 1;
-const canSteer = () => robotStatus.state === "connected" && livePose?.mode === "manual" && showingLive();
+const canSteer = () => robotStatus.state === "connected" && showingLive();
 
 function toast(text) {
   const t = $("toast");
@@ -206,8 +210,10 @@ function toast(text) {
 
 function clicked(x, y) {
   if (canSteer()) {
-    goal = { x, y };
-    send({ type: "goal", x, y });
+    const cx = Math.round(x * 100), cy = Math.round(y * 100);
+    if (Math.abs(cx) > GOTO_MAX_CM || Math.abs(cy) > GOTO_MAX_CM) { toast(`A goal is at most ${GOTO_MAX_CM} cm from the start on each axis`); return; }
+    goal = { x, y, command: `g${cx},${cy}` };
+    steer(goal.command);
     draw();
     return;
   }
@@ -216,8 +222,7 @@ function clicked(x, y) {
   snaps.forEach((s, i) => { if (s.x === null) return; const d = Math.hypot(s.x - x, s.y - y); if (d < bestD) { bestD = d; best = i; } });
   if (best >= 0) { select(best); return; }
   if (robotStatus.state !== "connected") toast("The robot isn't connected");
-  else if (!showingLive()) toast("Showing an old snapshot: go to the newest (▶) to steer");
-  else toast("Steering by clicking needs Manual mode");
+  else toast("Showing an old snapshot: go to the newest (▶) to steer");
 }
 
 // --- the side panels ---
@@ -339,52 +344,66 @@ $("timeline").oninput = () => select(Number($("timeline").value));
 $("prev").onclick = () => select(index - 1);
 $("next").onclick = () => select(index + 1);
 
-// --- the robot: status, live pose, mode, keys, console ---
-function send(msg) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
-const sendKey = key => send({ type: "key", key });
+// --- the robot: status, live pose, steering, the log ---
+// One steer, as the CLI sends it; its answers come in the log.
+async function steer(text) {
+  try {
+    const r = await fetch("/api/robot/steer?from=page&nowait", { method: "POST", body: text });
+    if (!r.ok) toast((await r.text()).trim());
+  } catch (err) { toast(`Not sent: ${err.message}`); }
+}
 
-$("stop").onclick = () => { sendKey(" "); goal = null; draw(); };
-$("idle").onclick = () => { send({ type: "mode", mode: "idle" }); goal = null; draw(); };
-$("manual").onclick = () => send({ type: "mode", mode: "manual" });
+$("stop").onclick = () => { steer("x"); goal = null; draw(); };
+$("idle").onclick = () => steer("m0");
+$("manual").onclick = () => steer("m1");
 
 const buttons = [$("stop"), $("idle"), $("manual")];
-for (const [group, keys] of KEYS) {
-  const label = document.createElement("span");
-  label.textContent = group;
-  $("keys").append(label);
-  for (const [key, what] of keys) {
-    const b = document.createElement("button");
-    b.innerHTML = `<kbd>${key}</kbd>`;
-    b.append(what);
-    b.onclick = () => sendKey(key);
-    buttons.push(b);
-    $("keys").append(b);
-  }
+function button(label, onclick) {
+  const b = document.createElement("button");
+  b.textContent = label;
+  b.onclick = onclick;
+  buttons.push(b);
+  $("keys").append(b);
+  return b;
 }
+for (const [letter, what, unit, start] of STEER) {
+  if (!unit) { button(what, () => steer(letter)); continue; }
+  // A text box, not a number box: those don't take a lone "-" everywhere.
+  const box = Object.assign(document.createElement("input"), { type: "text", value: start, size: 4, title: `${what}, ${unit}` });
+  box.className = "num";
+  button(`${what} (${unit})`, () => {
+    const v = box.value.trim();
+    if (!/^-?\d+$/.test(v)) { toast(`${what}: a whole number of ${unit}, a minus allowed`); return; }
+    steer(`${letter}${v}`);
+  });
+  $("keys").append(box);
+}
+const recording = button("recording", () => steer(livePose?.recording ? "R0" : "R1"));
+button("status", async () => {
+  try { append(`${(await (await fetch("/api/robot/status")).text())}`, "note"); } catch (err) { toast(err.message); }
+});
 const logToggle = document.createElement("button");
-logToggle.textContent = "console ▾";
-logToggle.onclick = () => { $("footer").classList.toggle("hidden"); logToggle.textContent = $("footer").classList.contains("hidden") ? "console ▸" : "console ▾"; resize(); };
+logToggle.textContent = "log ▾";
+logToggle.onclick = () => { $("footer").classList.toggle("hidden"); logToggle.textContent = $("footer").classList.contains("hidden") ? "log ▸" : "log ▾"; resize(); };
 $("keys").append(logToggle);
-const known = new Set([" ", "M", ...KEYS.flatMap(([, keys]) => keys.map(([k]) => k))]);
+// Space stops, as the Stop button does (not while typing in a box).
 document.addEventListener("keydown", e => {
-  if (e.metaKey || e.ctrlKey || e.altKey || ["INPUT", "SELECT"].includes(e.target.tagName)) return;
-  if (!known.has(e.key)) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || ["INPUT", "SELECT"].includes(e.target.tagName) || e.key !== " ") return;
   e.preventDefault();
-  if (e.key === " ") { goal = null; draw(); }
-  sendKey(e.key);
+  $("stop").click();
 });
 
 const MAX_CHARS = 512 * 1024;
 let chars = 0;
-function append(text, kind) {
+function append(text, kind, command) {
   const log = $("log"), atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
-  const node = kind === "note" ? Object.assign(document.createElement("span"), { className: "note", textContent: text }) : document.createTextNode(text);
+  const node = kind === "text" ? document.createTextNode(text) : Object.assign(document.createElement("span"), { className: kind, textContent: text });
   log.append(node);
   chars += text.length;
   while (chars > MAX_CHARS && log.firstChild) { chars -= log.firstChild.textContent.length; log.firstChild.remove(); }
   if (atBottom) log.scrollTop = log.scrollHeight;
-  // An action that ended: its goal is done.
-  if (goal && /^(Go to (done|stopped)|Stopped|Go to: already there|Goal .* ignored)/m.test(text)) { goal = null; draw(); }
+  // The goal's command answered (done, dropped or an error): it is gone.
+  if (goal && kind === "answer" && command === goal.command && !/\] queued:/.test(text)) { goal = null; draw(); }
 }
 
 function showStatus() {
@@ -405,6 +424,7 @@ function showLive() {
   el.style.display = fresh ? "" : "none";
   $("manual").classList.toggle("on", !!fresh && p.mode === "manual");
   $("idle").classList.toggle("on", !!fresh && p.mode === "idle");
+  recording.classList.toggle("on", !!fresh && !!p.recording);
 }
 setInterval(() => { if (poseFresh > 0) poseFresh--; showLive(); }, 1000); // stale after ~3 s without a pose
 
@@ -412,8 +432,8 @@ function connect() {
   ws = new WebSocket(`ws://${location.host}/`);
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
-    if (msg.type === "backlog") { $("log").textContent = ""; chars = 0; for (const it of msg.items) append(it.text, it.kind); }
-    else if (msg.type === "text" || msg.type === "note") append(msg.text, msg.type);
+    if (msg.type === "backlog") { $("log").textContent = ""; chars = 0; for (const it of msg.items) append(it.text, it.kind, it.command); }
+    else if (msg.type === "text" || msg.type === "note" || msg.type === "answer") append(msg.text, msg.type, msg.command);
     else if (msg.type === "status") { robotStatus = msg.status; showStatus(); }
     else if (msg.type === "pose") {
       livePose = msg.pose;

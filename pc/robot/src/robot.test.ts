@@ -1,12 +1,13 @@
-// Tests for robot.ts: splitting the robot's status records out of its text, and
-// the link end to end with a fake robot on localhost (announcement, text, signal,
-// keys, a robot heard from nothing reported and later closed, a second robot replacing the first). Run with `npm test`.
+// Tests for robot.ts: splitting the robot's status records out of its text, the pose
+// line and the done record, and the link end to end with a fake robot on localhost
+// (announcement, text, signal, command lines, a robot heard from nothing reported and
+// later closed, a second robot replacing the first). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import dgram from "node:dgram";
 import net from "node:net";
 import { once } from "node:events";
-import { RecordSplitter, RobotLink, parsePose, type LivePose, type RobotStatus } from "./robot.ts";
+import { RecordSplitter, RobotLink, parseDone, parsePose, type DoneRecord, type LivePose, type RobotStatus } from "./robot.ts";
 
 test("status records are taken out of the text, wherever they land", () => {
   const s = new RecordSplitter();
@@ -51,6 +52,26 @@ test("pose records", () => {
   assert.equal(parsePose("pose 125.0 -50.0 43.0 manual goto -61")!.rssi, -61);
   assert.equal(parsePose("pose 1 2 3 idle - 0")!.rssi, null); // not connected to the server when written
   assert.equal(parsePose("rssi -50"), null);
+  assert.equal(p.recording, null); // older firmware: no recording, jolt, tilt
+  const q = parsePose("pose 1 2 3 manual - -61 1 0.25 0.50 1.25 5.7")!;
+  assert.equal(q.recording, true);
+  assert.deepEqual(q.jolt, [0.25, 0.5, 1.25]);
+  assert.ok(Math.abs(q.tilt! - 5.7 * Math.PI / 180) < 1e-12);
+});
+
+test("done records", () => {
+  const d = parseDone("done n=17 end=obstacle x=43.0 y=-4.0 yaw=30.0 moved=31")!;
+  assert.equal(d.n, 17);
+  assert.equal(d.end, "obstacle");
+  assert.deepEqual([d.pose!.x, d.pose!.y], [0.43, -0.04]);
+  assert.ok(Math.abs(d.pose!.yaw - Math.PI / 6) < 1e-12);
+  assert.equal(d.movedM, 0.31);
+  assert.equal(d.goalM, null);
+  assert.equal(d.snapshot, null);
+  assert.equal(parseDone("done n=3 end=ok x=1 y=2 yaw=3 moved=0 goal=420")!.goalM, 4.2);
+  assert.equal(parseDone("done n=4 end=ok x=1 y=2 yaw=3 snapshot=41")!.snapshot, 41);
+  assert.equal(parseDone("done end=ok"), null); // no number
+  assert.equal(parseDone("pose 1 2 3 idle -"), null);
 });
 
 async function startLink(quietMs = 3000, dropMs = 6000) {
@@ -78,7 +99,7 @@ async function robot(port: number) {
 
 const until = async (ok: () => boolean) => { for (let i = 0; i < 200 && !ok(); i++) await new Promise(r => setTimeout(r, 10)); assert.ok(ok()); };
 
-test("announces itself, passes text and keys, shows the signal", async () => {
+test("announces itself, passes text and command lines, shows the signal", async () => {
   const { link, port, announcement, statuses } = await startLink();
   try {
     assert.equal(announcement, `ROBOCAR-SERVER ${port} 4999\n`);
@@ -89,27 +110,30 @@ test("announces itself, passes text and keys, shows the signal", async () => {
     r.socket.write("WiFi: connected\n\x01rssi -60\nKeys: g\n");
     await until(() => text.join("") === "WiFi: connected\nKeys: g\n");
     await until(() => link.status.state === "connected" && link.status.rssi === -60);
-    assert.ok(link.sendKey("p"));
-    await until(() => r.received.join("").replace(/\0/g, "") === "p");
+    assert.ok(link.sendLine("status #1"));
+    await until(() => r.received.join("").replace(/\0/g, "") === "status #1\n");
     await until(() => r.received.join("").includes("\0")); // heartbeats
     r.socket.destroy();
     await until(() => link.status.state === "lost");
-    assert.equal(link.sendKey("p"), false);
+    assert.equal(link.sendLine("status #2"), false);
     assert.deepEqual(statuses.map(s => s.state), ["connected", "connected", "lost"]);
   } finally { link.stop(); }
 });
 
-test("commands to the robot; snapshots and poses from it", async () => {
+test("commands to the robot; snapshots, poses and done records from it", async () => {
   const { link, port } = await startLink();
   try {
-    const snaps: Buffer[] = [], poses: LivePose[] = [];
+    const snaps: Buffer[] = [], poses: LivePose[] = [], dones: DoneRecord[] = [];
     link.on("snapshot", b => snaps.push(b));
     link.on("pose", p => poses.push(p));
+    link.on("done", d => dones.push(d));
     const r = await robot(port);
     await until(() => link.status.state === "connected");
-    assert.ok(link.sendCommand("goal 120 -35"));
-    assert.ok(!link.sendCommand("goal\n1 2")); // one line of printable text only
-    await until(() => r.received.join("").replace(/\0/g, "") === "\x02goal 120 -35\n");
+    assert.ok(link.sendLine("goto 120 -35 #4"));
+    assert.throws(() => link.sendLine("goto\n1 2")); // one line of printable text only
+    await until(() => r.received.join("").replace(/\0/g, "") === "goto 120 -35 #4\n");
+    r.socket.write("Go to: ...\n\x01done n=4 end=ok x=120.0 y=-35.0 yaw=-16.3 moved=125\n");
+    await until(() => dones.length === 1 && dones[0].n === 4 && dones[0].movedM === 1.25);
     const snap = Buffer.alloc(40);
     snap.write("SNAP", 0, "latin1");
     snap.writeUInt32LE(40, 5);

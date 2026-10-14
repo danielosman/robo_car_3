@@ -5,19 +5,34 @@
 //                                          the camera features
 //   GET /api/snapshots/<boot>/<seq>/map    the robot's map then: the window's columns over the whole-house
 //                                          map's tiles as they were (the newest of each tile up to this
-//                                          snapshot since the map was last cleared)
+//                                          snapshot since the map was last cleared), where the robot was,
+//                                          and the path it drove since the map was last cleared
 //   GET /snapshots/<boot>/<seq>.png        the camera picture
 import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
-import { tileColumns, windowColumns } from "./snapshot.ts";
+import type { Pose } from "./robot.ts";
+import { tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
 
 const BOOT = /^[0-9a-f]{8}$/;
 
 export interface MapView {
   window: { orgX: number; orgY: number; cellsX: number; cellsY: number; columns: number[]; confidence: number[] } | null;
   tiles: { tx: number; ty: number; seq: number; columns: number[] }[];
+  robot: Pose | null;          // the snapshot's pose
+  path: { x: number; y: number }[];
+}
+
+// The map of one snapshot on its own (its window, the tiles it brought), without a path.
+export function mapViewOf(s: Snapshot): MapView {
+  const w = s.window;
+  return {
+    window: w && { orgX: w.orgX, orgY: w.orgY, cellsX: w.cellsX, cellsY: w.cellsY, ...windowColumns(w) },
+    tiles: s.tiles.map(t => ({ tx: t.tx, ty: t.ty, seq: s.seq, columns: tileColumns(t) })),
+    robot: s.pose && { x: s.pose.x, y: s.pose.y, yaw: s.pose.yaw },
+    path: [],
+  };
 }
 
 const bytes = (v: unknown): Buffer => Buffer.from((v as { bytes: Uint8Array }).bytes);
@@ -58,8 +73,9 @@ export async function snapshotDetail(store: Store, boot: string, seq: number) {
 
 export async function snapshotMap(store: Store, boot: string, seq: number): Promise<MapView | null> {
   if (!BOOT.test(boot) || !Number.isInteger(seq)) throw new Error("not a snapshot");
+  const path = await store.path(boot, seq);
   return store.read(async c => {
-    const head = (await c.runAndReadAll(`SELECT map_clears, map_org_cx, map_org_cy, map_cells_x, map_cells_y, map_cells
+    const head = (await c.runAndReadAll(`SELECT map_clears, map_org_cx, map_org_cy, map_cells_x, map_cells_y, map_cells, x, y, yaw
       FROM snapshots WHERE boot_id = $1 AND seq = $2`, [boot, seq])).getRowObjects();
     if (!head.length) return null;
     const h = head[0];
@@ -74,6 +90,8 @@ export async function snapshotMap(store: Store, boot: string, seq: number): Prom
       window,
       tiles: tiles.map(t => ({ tx: Number(t.tx), ty: Number(t.ty), seq: Number(t.seq),
                                columns: tileColumns({ tx: 0, ty: 0, columns: bytes(t.columns) }) })),
+      robot: h.x === null ? null : { x: Number(h.x), y: Number(h.y), yaw: Number(h.yaw) },
+      path,
     };
   });
 }

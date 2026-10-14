@@ -29,7 +29,8 @@
 // (pc/robot/src/api/firmware.ts): plain numbers only.
 #define STOP_BEFORE_M    0.15f     // a move stops this far before an obstacle on the map...
 #define EDGE_M           0.095f    // ...measured from the front (back) edge, this far from the centre
-#define PATH_HALF_M      0.1675f   // the robot's half width (11.75 cm) plus 5 cm: the path a move checks
+#define HALF_WIDTH_M     0.1175f   // the robot's half width
+#define PATH_HALF_M      0.1675f   // HALF_WIDTH_M plus 5 cm: the path a move checks
 #define GOTO_MAX_M       3.0f      // a goal farther away: the robot goes this far towards it
 
 void behaviour_move(float distance_m, uint32_t command);

@@ -51,13 +51,26 @@ median; `clock_start.h`: both Picos start their clock 30 s before
 ## Robot firmware (`picoA_app`, `picoB_app`)
 
 How it works, module by module: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md). In
-short: the robot does nothing by itself; one key, one action (`s` scan, `f` move,
-`t` turn, `a` watch, `5` record, space stop; `h` lists all keys), the same on USB
-and over WiFi. After every action it sends a snapshot (pose, camera picture and
-features, ToF frame, colour, its map) to the viewer at http://127.0.0.1:8080/,
-which shows any of them back in time and, in manual mode (`M`), sends the robot
-where you click on the map. With `R` each action is also recorded in full and can
-be looked at in 3D at http://127.0.0.1:8080/viewer.
+short: the robot does nothing by itself; it is steered through the robot server's
+command API ([doc/CLI_API_PLAN.md](doc/CLI_API_PLAN.md)), from the `robot` CLI
+(`pc/robot/robot`; for an agent or a person) or the page at
+http://127.0.0.1:8080/, which share one queue and one log:
+
+```sh
+ln -s "$PWD/pc/robot/robot" /usr/local/bin/robot   # once
+robot --help                  # everything: the commands, the answers, the reads
+robot steer r30d50            # rotate 30° left, then drive 50 cm (a snapshot after each move)
+robot steer g120,40 --check   # what going to (120, 40) cm would do on the map; nothing moves
+robot snap; robot map; robot camera; robot status
+robot steer x                 # stop
+```
+
+After every move a snapshot (pose, camera picture and features, ToF frame,
+colour, its map) is stored; the page shows any of them back in time, with the path
+driven, and sends the robot where you click on the map. With `robot steer R1` each
+action is also recorded in full and can be looked at in 3D at
+http://127.0.0.1:8080/viewer. Typed on PicoA's USB serial monitor, the same
+commands work for debugging (`drive 50`, `status`).
 
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure. The fake clock starts 30 s before `time_us_32()` wraps, so
@@ -72,28 +85,29 @@ be looked at in 3D at http://127.0.0.1:8080/viewer.
   then `ROBOT_PORT=4311 PORT=8091 DATA_PORT=4312 ANNOUNCE_TO=127.0.0.1 npm start` (a
   server the robot doesn't find) and `ROBOT_PORT=4311 npm run fakerobot --
   recordings/snapshots/raw/replay-boot-<id>.snap`, and open
-  http://127.0.0.1:8091/. The fake robot answers Manual and clicks by driving its
-  pose (the snapshots it sends are the file's).
+  http://127.0.0.1:8091/, or `ROBOT_API=http://127.0.0.1:8091 robot …`. The fake
+  robot answers every command, driving its pose at the robot's speeds (the
+  snapshots it sends are the file's).
 
-### The map as printed (`m`)
+### The map as text (`robot map`)
 
-Only on `m` (the scan doesn't print it). 4 × 4 m around the robot, 10 cm columns, up
-= where the robot faced when the scan started; one symbol per column (two characters):
+The 6 × 6 m window around the robot, 10 cm columns, x up (forward at power-up), y
+to the left; one character per column, x and y in cm along the edges:
 
 | Symbol | Meaning |
 |---|---|
 | `.` | drivable: floor seen (a ray ended in the ground layer), 3-23 cm free |
 | `:` | free 3-23 cm, floor not seen (between the rings where rays end on the floor, or far) |
-| `##` | blocked: something 3-13 cm high |
-| `''` | overhang: something 13-23 cm high, nothing below it |
+| `#` | blocked: something 3-13 cm high |
+| `'` | overhang: something 13-23 cm high, nothing below it |
 | `?` | no floor: rays went through the ground layer (a drop, a dark floor) |
 | blank | unknown |
-| `()`, `**` | the robot, and the point 30 cm ahead of it |
+| `R`, `*`, `o` | the robot, the point 30 cm ahead of it, the path driven since the map was last cleared |
 
 Standing still, the floor is seen in rings at each zone row's distance (~20, 30, 45,
 70 cm); driving fills the rest.
 
-A flat face often fills two cells (`####`): the map marks where the face was seen,
+A flat face often fills two cells (`##`): the map marks where the face was seen,
 not how thick the object is.
 
 ### Measured on the robot (waxed wood)
@@ -122,6 +136,45 @@ not how thick the object is.
 header). Re-run it after adding big locals and before core 1 is started.
 
 ### Robot tests (repeat after changes)
+
+Since 14 Oct the robot takes commands, not keys. The older tests below are written
+in the keys; read them as: `f` → `robot steer d50` (`r`, `f` → `d-50`), `t` →
+`r30`, `s` (scan) → `r390`, `a` → `w60`, `S` → `s`, `C` → `c`, `R` → `R1` / `R0`,
+`M` → `m1` / `m0`, space → `robot steer x`, `p` → `robot status` (or `status` typed
+on USB for PicoA's diagnostics: link, loop time, RAM), `m` → `robot map`, `z` →
+`robot tof`, `v` → `robot features`, `5` (record 5 s) → `w5` with nothing moving.
+The prints `c` (camera blocks) and `o` / `k` (movement backgrounds) are gone:
+`robot camera` gives the picture; the backgrounds can't be seen any more. On USB,
+type the long form (`drive 50`).
+
+**Steering through the API** (14 Oct; both Picos flashed: the link version went up;
+battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open). Paste the
+terminal and the page's log:
+1. `robot status`: "robot connected (…)", the pose, "mode manual, recording off",
+   "running: nothing", and the safety line (jolt near 0 g on x and y, ~0 on z;
+   tilt a few degrees at most).
+2. `robot steer r390`: "queued: r390 s", then after ~14 s "done: r390 ok, at (…),
+   yaw +30°" and "done: s snapshot N, …". The page's log shows both lines with
+   `[cli]`, and the new snapshot.
+3. `robot map`: the room around `R`, the walls where they are. `robot map --png`
+   prints a file path; open it. `robot snap`, `robot tof`, `robot camera` (open the
+   file), `robot light`, `robot features`.
+4. Facing a piece of furniture 40-70 cm away: `robot steer d100 --check` says
+   "blocked: obstacle after N cm"; `robot steer d100 r30`: "done: d100 obstacle
+   after M cm" (M within a few cm of N), "done: s snapshot …" (where it stopped),
+   "dropped: r30", "dropped: s". The front edge is 15-25 cm from the furniture.
+5. `robot steer w60`, and in another terminal `robot queue` and, after a few
+   seconds, `robot steer x`: "done: w60 stopped", "done: x ok"; `robot status` says
+   "mode idle".
+6. On the page: `drive` with 30 in its box, `rotate` with -30, a click on the map
+   (the yellow cross goes when its answer comes), Stop. The terminal's
+   `robot log` shows them with `[page]`. A box with "abc" says what it wants.
+7. Out of range or no number: `robot steer d400`, `robot steer d` answer
+   "error: …", nothing moves. `robot steer R1 d20`, then `robot steer R0`: one take
+   (the take list), recording shown on the page's button.
+8. Bump the robot lightly by hand while it drives (`robot steer d50`): `robot
+   status` shows a larger jolt on x afterwards. Paste it: this is the measurement
+   the bump stop will be set from.
 
 **M0** (after changes to `drive`, `odometry` or the link):
 1. Flash `picoB_app` onto PicoB and `picoA_app` onto PicoA. Keep the robot still
@@ -290,38 +343,37 @@ Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
    goes on; restart it, `R` is still on, the next action is recorded.
 
 **Snapshots and the viewer** (both Picos, battery on, WiFi, `npm start` in
-`pc/robot/` restarted for the new code). Paste the page's console (or
+`pc/robot/` restarted for the new code). Paste the page's log (or
 `pc/robot/logs/`) and a screenshot of the page:
-1. Flash `picoA_app`. After power-up, `p`: "RAM free" ≥ 40 KB (computed: ~103),
-   "Mode: idle", "Snapshots: 1 sent (the last ~31 KB)…" (one goes when the server
-   connects). No "Colour sensor not working".
+1. Flash `picoA_app`. After power-up, `status` typed on USB: "RAM free" ≥ 40 KB
+   (computed: ~103), "Mode: manual", "Snapshots: 1 sent (the last ~31 KB)…" (one
+   goes when the server connects). No "Colour sensor not working".
 2. The page shows the robot connected and, at once, snapshot #1: the camera
-   picture with its features (small squares; `v` prints the same count), the 8 × 8
-   ToF grid as the robot sees it, the colour swatch and lux (a lamp or a coloured
-   sheet in front of the sensor changes them), the pose.
-3. `s` (scan): "Mode: manual" first (an action switches idle to manual), then after
-   the scan snapshot #2 arrives by itself: the room on the map, the robot in it.
-   The grey pill next to Stop says "manual · (x, y) cm" and follows the robot.
-4. `S`: another snapshot. Drag the timeline back: the map, picture and grid are
-   those of the older snapshot; tick "live" to come back.
-5. Space: "Stopped", "Mode: idle"; the Stop button and the space key on the page
-   both stop the robot (the page's space key didn't reach the robot before 12 Oct).
+   picture with its features (small squares; `robot features` lists the same), the
+   8 × 8 ToF grid as the robot sees it, the colour swatch and lux (a lamp or a
+   coloured sheet in front of the sensor changes them), the pose.
+3. `robot steer r390` (a scan): after the turn snapshot #2 comes: the room on the
+   map, the robot in it. The grey pill next to Stop says "manual · (x, y) cm" and
+   follows the robot.
+4. `robot steer s`: another snapshot. Drag the timeline back: the map, picture and
+   grid are those of the older snapshot; ▶ to the newest to come back.
+5. The page's Stop and the space key: "Stopped", "Mode: idle", "[page] done: x ok".
 6. Unplug the server (stop `npm start`) during a snapshot, start it again: the
    snapshot comes again whole (the log says "snapshots from boot …").
 
-**Manual mode, go to a point** (both Picos, battery on, the viewer open). Room
-around the robot, a piece of furniture 1-2 m away:
-1. `s`, then click on the map while in idle (press Idle first): a yellow toast "needs
-   Manual mode", the robot doesn't move. On the robot's console after a goal sent
-   in idle: "Goal … ignored: not in manual mode".
-2. Manual, click a free spot ~1 m away: a yellow cross; "Go to: (x, y) cm, N cm away
-   at A deg", the robot turns towards it, drives, "Go to done: … M cm from the
-   goal"; the cross goes, a snapshot follows. Measure where it stopped against the
-   spot (expected within a few cm plus odometry's error).
-3. Click behind the furniture: "Go to stopped: obstacle N cm ahead (map)"; the gap
-   from the front edge 15-25 cm, as for `f`.
-4. Click 4 m away: "the goal is 4.x m away; going 3.0 m towards it" (only where the
-   room allows it; space stops).
+**Go to a point** (both Picos, battery on, the viewer open). Room around the robot,
+a piece of furniture 1-2 m away:
+1. `robot steer r390`, then press Idle and click on the map: the robot switches to
+   manual and goes (a go to works in idle too, as every move does).
+2. Click a free spot ~1 m away: a yellow cross; "Go to: (x, y) cm, N cm away at A
+   deg", the robot turns towards it, drives, "[page] done: g… ok, at (…)"; the
+   cross goes, a snapshot follows. Measure where it stopped against the spot
+   (expected within a few cm plus odometry's error).
+3. Click behind the furniture: "done: g… obstacle after N cm"; the gap from the
+   front edge 15-25 cm, as for a drive.
+4. `robot steer g400,0` is refused (out of range); from near the start, a click
+   ~3 m away and then `robot steer g300,300`: "ok, 3 m towards it (goal 4.x m
+   away)" (only where the room allows it; `robot steer x` stops).
 5. Drag the timeline back and click: the toast says it's an old snapshot, nothing
    moves.
 

@@ -1,6 +1,7 @@
 // The recordings in DuckDB (doc/ARCHITECTURE.md, the PC): one row per take, ToF
 // frame, zone and target (each target also in world coordinates), odometry report,
-// drive command, mark and WiFi status. And the snapshots (snapshot.ts): one row each
+// drive command, mark and WiFi status. The pose lines (live.ts): the path driven and
+// PicoB's jolt and tilt. And the snapshots (snapshot.ts): one row each
 // with its pose, action, camera and colour reading; its ToF targets; its camera
 // features; its map window
 // and whole-house map tiles as BLOBs; the picture is a PNG beside the database. Derived from the raw files: a take can be
@@ -10,6 +11,7 @@
 import { DuckDBInstance, timestampValue, type DuckDBConnection } from "@duckdb/node-api";
 import type { Geometry, Odom, Parsed, Take } from "./recording.ts";
 import { snapId, type Snapshot } from "./snapshot.ts";
+import type { LivePose } from "./robot.ts";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS takes (
@@ -63,6 +65,10 @@ CREATE TABLE IF NOT EXISTS snapshot_features (  -- the camera features of the sn
   x DOUBLE, y DOUBLE, dx DOUBLE, dy DOUBLE, strength DOUBLE, match DOUBLE); -- px, as the robot sees the picture (x right, y down)
 CREATE TABLE IF NOT EXISTS snapshot_tiles (  -- whole-house map tiles as they came: 20 x 20 columns, 4 bits each (house_map.h)
   snap_id VARCHAR, boot_id VARCHAR, seq INTEGER, map_clears INTEGER, tx INTEGER, ty INTEGER, columns BLOB);
+CREATE TABLE IF NOT EXISTS poses (  -- the pose lines (4 a second while the robot is connected): the path driven, and
+  boot_id VARCHAR, arrived_at TIMESTAMP, -- PicoB's safety numbers; the PC's local time, as snapshots.arrived_at
+  x DOUBLE, y DOUBLE, yaw DOUBLE, mode VARCHAR, action VARCHAR, rssi INTEGER, recording BOOLEAN,
+  jolt_x DOUBLE, jolt_y DOUBLE, jolt_z DOUBLE, tilt DOUBLE);  -- g and rad, the largest since the line before; NULL from older firmware
 -- Added later: kept by "IF NOT EXISTS", filled by importing again (npm run import).
 ALTER TABLE takes ADD COLUMN IF NOT EXISTS geometry VARCHAR;   -- GEOMETRY as JSON (the viewer's rays)
 ALTER TABLE truth ADD COLUMN IF NOT EXISTS truth_id VARCHAR;
@@ -103,6 +109,9 @@ export function worldPoint(g: Geometry, pose: Pose, row: number, col: number, di
 
 export const takeId = (t: Take) => `${t.start.bootId}-${t.start.takeNo}`;
 
+// A timestamp in the PC's local time (as the database keeps them), in µs.
+const localUs = (ms: number) => BigInt(Math.round((ms - new Date(ms).getTimezoneOffset() * 60000) * 1000));
+
 // Runs fn with a connection to the database at dbPath, one operation at a time.
 export class Store {
   private queue: Promise<unknown> = Promise.resolve();
@@ -136,7 +145,6 @@ export class Store {
   // Imports a snapshot, replacing what was there for it. image: its PNG, relative to recordings/.
   async importSnapshot(s: Snapshot, arrivalMs: number, file: string, image: string | null): Promise<{ targets: number; tiles: number }> {
     const id = snapId(s.bootId, s.seq);
-    const localMs = arrivalMs - new Date(arrivalMs).getTimezoneOffset() * 60000;
     const p = s.pose, t = s.tof, cam = s.camera, col = s.color, w = s.window;
     let targets = 0;
     return this.use(async c => {
@@ -147,7 +155,7 @@ export class Store {
       const i = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendInteger(v));
       const t8 = (v: string | null) => (v === null ? a.appendNull() : a.appendVarchar(v));
       a.appendVarchar(id); a.appendVarchar(s.bootId); a.appendInteger(s.seq); a.appendUInteger(s.tUs);
-      a.appendTimestamp(timestampValue(BigInt(Math.round(localMs * 1000))));
+      a.appendTimestamp(timestampValue(localUs(arrivalMs)));
       t8(s.why); t8(s.action); t8(s.endReason); a.appendInteger(s.actionsEnded); t8(s.running); t8(s.mode);
       a.appendInteger(s.mapClears); t8(s.build); a.appendInteger(s.length);
       for (const v of [p?.x, p?.y, p?.yaw, p?.pitch, p?.roll, p?.v, p?.w]) d(v);
@@ -199,6 +207,36 @@ export class Store {
       ft.closeSync();
       await c.run("COMMIT");
       return { targets, tiles: s.tiles.length };
+    });
+  }
+
+  // Appends pose lines, each with the boot it belongs to.
+  async appendPoses(rows: { boot: string; pose: LivePose }[]): Promise<void> {
+    if (!rows.length) return;
+    await this.use(async c => {
+      const a = await c.createAppender("poses");
+      for (const { boot, pose: p } of rows) {
+        a.appendVarchar(boot); a.appendTimestamp(timestampValue(localUs(p.at)));
+        a.appendDouble(p.x); a.appendDouble(p.y); a.appendDouble(p.yaw); a.appendVarchar(p.mode); a.appendVarchar(p.action);
+        if (p.rssi === null) a.appendNull(); else a.appendInteger(p.rssi);
+        if (p.recording === null) a.appendNull(); else a.appendBoolean(p.recording);
+        for (const v of [...(p.jolt ?? [null, null, null]), p.tilt]) { if (v === null) a.appendNull(); else a.appendDouble(v); }
+        a.endRow();
+      }
+      a.closeSync();
+    });
+  }
+
+  // The path driven up to snapshot seq of a boot, since the map was last cleared before
+  // it: the pose lines' x, y (m), oldest first.
+  async path(boot: string, seq: number): Promise<{ x: number; y: number }[]> {
+    return this.use(async c => {
+      const rows = (await c.runAndReadAll(`
+        WITH s AS (SELECT arrived_at, map_clears FROM snapshots WHERE boot_id = $1 AND seq = $2),
+             cleared AS (SELECT max(arrived_at) AS t FROM snapshots WHERE boot_id = $1 AND map_clears < (SELECT map_clears FROM s))
+        SELECT x, y FROM poses WHERE boot_id = $1 AND arrived_at <= (SELECT arrived_at FROM s)
+          AND arrived_at >= coalesce((SELECT t FROM cleared), '-infinity'::TIMESTAMP) ORDER BY arrived_at`, [boot, seq])).getRowObjects();
+      return rows.map(r => ({ x: Number(r.x), y: Number(r.y) }));
     });
   }
 
