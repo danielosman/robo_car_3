@@ -1,106 +1,109 @@
-// The steering language (doc/CLI_API_PLAN.md): what `robot steer` takes, and how a
-// command is written in answers (short: "d50") and to the robot (long, numbered:
-// "drive 50 #17"). A command is a name and its values: numbers, or a word's index
-// (recording off/on = 0/1, mode idle/manual = 0/1).
+// The commands that go into the queue (doc/CLI_API_PLAN.md): the moves, given to
+// `robot steer` ("d50 r30 g120,40 w60"), and the other actions, each its own
+// command (snap, stop, clear_map, recording on|off, mode idle|manual). A command is
+// a name and its values: numbers, or a word's index (recording off/on = 0/1, mode
+// idle/manual = 0/1). Written in answers as typed ("steer d50", "recording on"),
+// and to the robot long and numbered ("drive 50 #17").
 //
-// Grammar: commands one after another, spaces optional. Each is a long name or its
-// letter (the longest that matches; letters are case-sensitive), then its values:
-// whole numbers (a minus allowed), two of them separated by a comma or spaces;
-// words, or 0/1 for them. "r30d50", "g120,40 s", "rotate 30 drive 50", "R1", "mode idle".
+// steer's grammar: moves one after another, spaces optional; each a letter (d, r, g,
+// w) or its long name, then whole numbers (a minus allowed), goto's two separated by
+// a comma or spaces. "r30d50", "g120,40 w60", "rotate 30 drive 50".
 import { LIMITS, SPEED } from "./firmware.ts";
 
-export type CommandName = "drive" | "rotate" | "goto" | "watch" | "snapshot" | "clear_map" | "recording" | "mode" | "stop";
-// afterMove: a snapshot the API added after a move (withSnapshots).
-export interface Command { name: CommandName; values: number[]; afterMove?: boolean }
+export type MoveName = "drive" | "rotate" | "goto" | "watch";
+export type CommandName = MoveName | "snap" | "stop" | "clear_map" | "recording" | "mode";
+// auto: a snap the API added after a move (auto_snap).
+export interface Command { name: CommandName; values: number[]; auto?: boolean }
 
-type Value = { kind: "number"; unit: string; min: number; max: number } | { kind: "word"; words: readonly string[] };
-export interface CommandSpec {
-  name: CommandName; letter: string; values: Value[];
-  moves: boolean;  // a snapshot follows it
-  does: string;    // for the help
-}
+interface Range { min: number; max: number; unit: string }
+export interface MoveSpec { name: MoveName; letter: string; values: Range[]; does: string }
 
-const number = (unit: string, max: number, min = -max): Value => ({ kind: "number", unit, min, max });
-const word = (...words: string[]): Value => ({ kind: "word", words });
+const range = (unit: string, max: number, min = -max): Range => ({ min, max, unit });
 
-export const COMMANDS: readonly CommandSpec[] = [
-  { name: "drive", letter: "d", values: [number("cm", LIMITS.driveCm)], moves: true,
-    does: "drive straight; negative = backwards; stops before obstacles on the map" },
-  { name: "rotate", letter: "r", values: [number("°", LIMITS.rotateDeg)], moves: true,
-    does: "turn on the spot; + = left, - = right" },
-  { name: "goto", letter: "g", values: [number("cm", LIMITS.gotoCm), number("cm", LIMITS.gotoCm)], moves: true,
-    does: "go to a point on the map: turn towards it, drive there (at most 3 m towards it), stop before obstacles" },
-  { name: "watch", letter: "w", values: [number("s", LIMITS.watchMaxS, LIMITS.watchMinS)], moves: true,
-    does: "for that many seconds, turn towards anything that moves" },
-  { name: "snapshot", letter: "s", values: [], moves: false, does: "a snapshot (camera, ToF, light, map), saved" },
-  { name: "clear_map", letter: "c", values: [], moves: false, does: "clear the map" },
-  { name: "recording", letter: "R", values: [word("off", "on")], moves: false, does: "recording off or on (R0, R1)" },
-  { name: "mode", letter: "m", values: [word("idle", "manual")], moves: false, does: "mode idle or manual (m0, m1)" },
-  { name: "stop", letter: "x", values: [], moves: false,
-    does: "motors off, mode idle, the queue emptied; skips the queue, and stands alone" },
+export const MOVES: readonly MoveSpec[] = [
+  { name: "drive", letter: "d", values: [range("cm", LIMITS.driveCm)],
+    does: "Drive straight. Negative drives backwards. Stops before an obstacle on the map." },
+  { name: "rotate", letter: "r", values: [range("degrees", LIMITS.rotateDeg)],
+    does: "Turn on the spot. Positive turns left, negative right." },
+  { name: "goto", letter: "g", values: [range("cm", LIMITS.gotoCm), range("cm", LIMITS.gotoCm)],
+    does: "Go to a point on the map: turn towards it, then drive there. At most 3 m; stops before obstacles." },
+  { name: "watch", letter: "w", values: [range("s", LIMITS.watchMaxS, LIMITS.watchMinS)],
+    does: "For that many seconds, turn towards anything that moves." },
 ];
+// The other actions: their words, if they take one.
+export const ACTIONS: Record<Exclude<CommandName, MoveName>, readonly string[] | null> = {
+  snap: null, stop: null, clear_map: null, recording: ["off", "on"], mode: ["idle", "manual"],
+};
+// The robot's word for each (picoA/app/commands.h).
+const ROBOT_NAME: Record<CommandName, string> = {
+  drive: "drive", rotate: "rotate", goto: "goto", watch: "watch",
+  snap: "snapshot", stop: "stop", clear_map: "clear_map", recording: "recording", mode: "mode",
+};
 
-const SPEC = new Map(COMMANDS.map(s => [s.name, s]));
-const spec = (name: CommandName) => SPEC.get(name)!;
-// Every way to name a command, longest first: the scanner takes the first that matches.
-const NAMES = COMMANDS.flatMap(s => [[s.name, s] as const, [s.letter, s] as const]).sort((a, b) => b[0].length - a[0].length);
+const MOVE = new Map(MOVES.map(m => [m.name, m]));
+const isMoveName = (n: CommandName): n is MoveName => MOVE.has(n as MoveName);
+// Every way to name a move, longest first: the scanner takes the first that matches.
+const NAMES = MOVES.flatMap(m => [[m.name, m] as const, [m.letter, m] as const]).sort((a, b) => b[0].length - a[0].length);
 
 export type Parsed = { commands: Command[] } | { error: string };
 
+// The moves of `robot steer`.
 export function parseSteer(text: string): Parsed {
   const commands: Command[] = [];
   let at = 0;
   const space = () => { while (at < text.length && /\s/.test(text[at])) at++; };
   for (space(); at < text.length; space()) {
     const found = NAMES.find(([name]) => text.startsWith(name, at));
-    if (!found) return { error: `${text.slice(at).split(/\s/)[0]}: not a command (robot steer --help lists them)` };
-    const [written, s] = found;
+    if (!found) return { error: `${text.slice(at).split(/\s/)[0]} is not a move (robot steer --help)` };
+    const [written, m] = found;
     const start = at;
     at += written.length;
     const values: number[] = [];
-    for (const [k, v] of s.values.entries()) {
+    for (const k of m.values.keys()) {
       const sep = (k > 0 ? /^\s*,\s*|^\s+/ : /^\s*/).exec(text.slice(at));
       if (sep) at += sep[0].length;
-      const rest = text.slice(at);
-      if (v.kind === "number") {
-        const m = /^-?\d+/.exec(rest);
-        if (!m) return { error: `${written} needs ${s.values.length > 1 ? `${s.values.length} numbers` : "a number"} (${v.unit})` };
-        at += m[0].length;
-        values.push(Number(m[0]));
-      } else {
-        const m = /^[01](?!\d)|^[a-z]+/.exec(rest);
-        const index = !m ? -1 : /^[01]$/.test(m[0]) ? Number(m[0]) : v.words.indexOf(m[0]);
-        if (index < 0) return { error: `${written} needs ${v.words.join(" or ")} (or 0/1)` };
-        at += m![0].length;
-        values.push(index);
-      }
+      const n = /^-?\d+/.exec(text.slice(at));
+      if (!n) return { error: `${written} needs ${m.values.length > 1 ? `${m.values.length} numbers` : "a number"}` };
+      at += n[0].length;
+      values.push(Number(n[0]));
     }
-    const out = s.values.findIndex((v, i) => v.kind === "number" && (values[i] < v.min || values[i] > v.max));
-    if (out >= 0) {
-      const v = s.values[out] as Extract<Value, { kind: "number" }>;
-      return { error: `${text.slice(start, at)} out of range: ${s.name} takes ${v.min} to ${v.max} ${v.unit}` };
-    }
-    commands.push({ name: s.name, values });
+    const out = m.values.findIndex((v, i) => values[i] < v.min || values[i] > v.max);
+    if (out >= 0) return { error: `${text.slice(start, at)}: ${m.letter} takes ${m.values[out].min} to ${m.values[out].max}` };
+    commands.push({ name: m.name, values });
   }
-  if (!commands.length) return { error: "no commands (robot steer --help lists them)" };
-  if (commands.length > 1 && commands.some(c => c.name === "stop")) return { error: "x stands alone: it stops everything at once" };
+  if (!commands.length) return { error: "no moves (robot steer --help)" };
   return { commands };
 }
 
-// "d50", "g120,40", "R1".
-export function shortText(c: Command): string { return spec(c.name).letter + c.values.join(","); }
-
-// "drive 50 #17", "goto 120 40 #18", "recording on #19".
-export function robotLine(c: Command, n: number): string {
-  const values = spec(c.name).values.map((v, i) => (v.kind === "word" ? v.words[c.values[i]] : String(c.values[i])));
-  return [c.name, ...values, `#${n}`].join(" ");
+// One of the other actions with its argument ("on", "idle", or 0/1); null if name
+// isn't one.
+export function parseAction(name: string, arg: string): Parsed | null {
+  if (!Object.hasOwn(ACTIONS, name)) return null;
+  const n = name as keyof typeof ACTIONS, words = ACTIONS[n], a = arg.trim();
+  if (!words) return a ? { error: `${name} takes nothing` } : { commands: [{ name: n, values: [] }] };
+  const index = /^[01]$/.test(a) ? Number(a) : words.indexOf(a);
+  return index < 0 ? { error: `${name} takes ${words.join(" or ")}` } : { commands: [{ name: n, values: [index] }] };
 }
 
-export const isMove = (c: Command) => spec(c.name).moves;
+// As typed: "steer d50", "steer g120,40", "snap", "recording on".
+export function commandText(c: Command): string {
+  if (isMoveName(c.name)) return `steer ${MOVE.get(c.name)!.letter}${c.values.join(",")}`;
+  const words = ACTIONS[c.name];
+  return words ? `${c.name} ${words[c.values[0]]}` : c.name;
+}
 
-// The commands with a snapshot after each move.
-export function withSnapshots(commands: Command[]): Command[] {
-  return commands.flatMap(c => (isMove(c) ? [c, { name: "snapshot" as const, values: [], afterMove: true }] : [c]));
+// To the robot: "drive 50 #17", "goto 120 40 #18", "recording on #19", "snapshot #20".
+export function robotLine(c: Command, n: number): string {
+  const words = isMoveName(c.name) ? null : ACTIONS[c.name];
+  const values = words ? [words[c.values[0]]] : c.values.map(String);
+  return [ROBOT_NAME[c.name], ...values, `#${n}`].join(" ");
+}
+
+export const isMove = (c: Command) => isMoveName(c.name);
+
+// The commands with a snap after each move, when autoSnap is on.
+export function withSnaps(commands: Command[], autoSnap: boolean): Command[] {
+  return autoSnap ? commands.flatMap(c => (isMove(c) ? [c, { name: "snap" as const, values: [], auto: true }] : [c])) : commands;
 }
 
 // How long the robot may take to answer: what the command should take, twice, plus

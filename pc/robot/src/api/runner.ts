@@ -3,7 +3,7 @@
 // throws: whatever happens is an outcome.
 import type { DoneRecord } from "../robot.ts";
 import { robotLine, timeLimitMs, type Command } from "./commands.ts";
-import { describe, failed, type Outcome } from "./answers.ts";
+import { failed, outcome, type Outcome } from "./answers.ts";
 
 // What the runner needs of the robot (RobotLink is one).
 export interface RobotConnection {
@@ -18,15 +18,20 @@ export interface Runner { run(c: Command): Promise<Outcome> }
 export class StoredSnapshots {
   private boot = "";
   private seqs = new Set<number>();
+  private last: number | null = null;
   private waiters = new Map<number, (() => void)[]>();
 
   add(boot: string, seq: number): void {
-    if (boot !== this.boot) { this.boot = boot; this.seqs.clear(); }
+    if (boot !== this.boot) { this.boot = boot; this.seqs.clear(); this.last = null; }
     this.seqs.add(seq);
+    this.last = Math.max(this.last ?? 0, seq);
     if (this.seqs.size > 100) this.seqs.delete(this.seqs.values().next().value!);
     for (const wake of this.waiters.get(seq) ?? []) wake();
     this.waiters.delete(seq);
   }
+
+  // The newest snapshot stored, of the newest boot; null before the first.
+  newest(): number | null { return this.last; }
 
   // True once snapshot seq is stored; false if it isn't within ms.
   stored(seq: number, ms: number): Promise<boolean> {
@@ -71,6 +76,6 @@ export class CommandRunner implements Runner {
     const d = await done;
     if (!d) return failed("no answer");
     if (d.snapshot !== null && !(await this.snapshots.stored(d.snapshot, deadline - Date.now()))) return failed("no answer (the snapshot wasn't stored)");
-    return describe(c, d);
+    return outcome(c, d);
   }
 }

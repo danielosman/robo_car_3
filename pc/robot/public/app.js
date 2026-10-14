@@ -3,7 +3,7 @@
 // drove), where it was and what it saw then (camera with features, ToF, colour, pose),
 // the log, and steering: buttons, boxes for drive, rotate and watch, and a click on
 // the live map sends the robot there. Every steering command goes to the command API
-// (POST /api/robot/steer, doc/CLI_API_PLAN.md), into the queue the CLI's go into;
+// (POST /api/robot/<command>, doc/CLI_API_PLAN.md), into the queue the CLI's go into;
 // the answers come back in the log, which shows everyone's.
 // Map frame: x forward at power-up, y left; drawn with x up and y to the left, as
 // the robot's `m` prints it.
@@ -13,12 +13,10 @@ const CELL = 0.1, TILE = 20;
 const COLORS = { 1: "--blocked", 2: "--overhang", 3: "--nofloor", 4: "--drivable", 5: "--open" };
 const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const columnColor = Object.fromEntries(Object.entries(COLORS).map(([k, v]) => [k, css(v)]));
-// The steering buttons: what they send (robot steer --help), and a box for the number
-// of those that take one.
-const STEER = [
-  ["d", "drive", "cm", "50"], ["r", "rotate", "°", "30"], ["w", "watch", "s", "60"],
-  ["s", "snapshot"], ["c", "clear map"],
-];
+// The moves with a box for their number (robot steer --help), then the other buttons
+// and the command each sends.
+const MOVES = [["d", "drive", "cm", "50"], ["r", "rotate", "°", "30"], ["w", "watch", "s", "60"]];
+const ACTIONS = [["snap", "snap"], ["clear map", "clear_map"]];
 const GOTO_MAX_CM = 300; // goto's limit on each axis (picoA/app/commands.h)
 const WEAK = 2; // of 15: columns set less confidently count as unknown when "hide weak" is ticked (~10 %, as replay)
 const FOOT = { front: 0.095, back: -0.095, half: 0.1175 }; // the robot's footprint, m
@@ -212,8 +210,8 @@ function clicked(x, y) {
   if (canSteer()) {
     const cx = Math.round(x * 100), cy = Math.round(y * 100);
     if (Math.abs(cx) > GOTO_MAX_CM || Math.abs(cy) > GOTO_MAX_CM) { toast(`A goal is at most ${GOTO_MAX_CM} cm from the start on each axis`); return; }
-    goal = { x, y, command: `g${cx},${cy}` };
-    steer(goal.command);
+    goal = { x, y, command: `steer g${cx},${cy}` };
+    send("steer", `g${cx},${cy}`);
     draw();
     return;
   }
@@ -246,7 +244,7 @@ function showSnapshot() {
       c.drawImage(img, 0, 0, cam.width, cam.height);
       drawFeatures(c, cam.width / img.width);
     };
-    img.src = `/snapshots/${s.boot_id}/${s.seq}.png`;
+    img.src = `/camera/${s.boot_id}/${s.seq}.png`;
   }
   // The ToF grid as the robot sees it.
   const rows = [];
@@ -345,17 +343,17 @@ $("prev").onclick = () => select(index - 1);
 $("next").onclick = () => select(index + 1);
 
 // --- the robot: status, live pose, steering, the log ---
-// One steer, as the CLI sends it; its answers come in the log.
-async function steer(text) {
+// One command, as the CLI sends it; its answers come in the log.
+async function send(command, args = "") {
   try {
-    const r = await fetch("/api/robot/steer?from=page&nowait", { method: "POST", body: text });
-    if (!r.ok) toast((await r.text()).trim());
+    const r = await fetch(`/api/robot/${command}?from=page&nowait`, { method: "POST", body: args });
+    if (!r.ok) { const a = JSON.parse(await r.text()); toast(a.why ?? a.error); }
   } catch (err) { toast(`Not sent: ${err.message}`); }
 }
 
-$("stop").onclick = () => { steer("x"); goal = null; draw(); };
-$("idle").onclick = () => steer("m0");
-$("manual").onclick = () => steer("m1");
+$("stop").onclick = () => { send("stop"); goal = null; draw(); };
+$("idle").onclick = () => send("mode", "idle");
+$("manual").onclick = () => send("mode", "manual");
 
 const buttons = [$("stop"), $("idle"), $("manual")];
 function button(label, onclick) {
@@ -366,21 +364,21 @@ function button(label, onclick) {
   $("keys").append(b);
   return b;
 }
-for (const [letter, what, unit, start] of STEER) {
-  if (!unit) { button(what, () => steer(letter)); continue; }
+for (const [letter, what, unit, start] of MOVES) {
   // A text box, not a number box: those don't take a lone "-" everywhere.
   const box = Object.assign(document.createElement("input"), { type: "text", value: start, size: 4, title: `${what}, ${unit}` });
   box.className = "num";
   button(`${what} (${unit})`, () => {
     const v = box.value.trim();
     if (!/^-?\d+$/.test(v)) { toast(`${what}: a whole number of ${unit}, a minus allowed`); return; }
-    steer(`${letter}${v}`);
+    send("steer", `${letter}${v}`);
   });
   $("keys").append(box);
 }
-const recording = button("recording", () => steer(livePose?.recording ? "R0" : "R1"));
+for (const [label, command] of ACTIONS) button(label, () => send(command));
+const recording = button("recording", () => send("recording", livePose?.recording ? "off" : "on"));
 button("status", async () => {
-  try { append(`${(await (await fetch("/api/robot/status")).text())}`, "note"); } catch (err) { toast(err.message); }
+  try { append(`${await (await fetch("/api/robot/status", { method: "POST" })).text()}`, "note"); } catch (err) { toast(err.message); }
 });
 const logToggle = document.createElement("button");
 logToggle.textContent = "log ▾";
@@ -403,7 +401,7 @@ function append(text, kind, command) {
   while (chars > MAX_CHARS && log.firstChild) { chars -= log.firstChild.textContent.length; log.firstChild.remove(); }
   if (atBottom) log.scrollTop = log.scrollHeight;
   // The goal's command answered (done, dropped or an error): it is gone.
-  if (goal && kind === "answer" && command === goal.command && !/\] queued:/.test(text)) { goal = null; draw(); }
+  if (goal && kind === "answer" && command === goal.command) { goal = null; draw(); }
 }
 
 function showStatus() {

@@ -18,102 +18,106 @@ anything: a key sent while an action ran replaced it.
 what the robot saw, without a person in between. For that, the commands take
 numbers (`drive -40`), each command gets an answer that says how it ended and where
 the robot is now, commands wait for each other, and everything the robot saw is
-readable as short text (or a picture's file path).
+readable as JSON (or a picture's file path).
 
 **In short:**
-- Ten commands, each with one job: drive, rotate, goto, watch, snapshot, clear map,
-  recording, mode, stop, and status (a read). The other keys go.
+- Commands, each with one job. Queued, one at a time: `steer` (the moves: drive,
+  rotate, goto, watch), `snap`, `clear_map`, `recording`, `mode`, and `stop`
+  (which skips the queue). At once: `status`, `check`, the reads of a snapshot
+  (`map`, `tof`, `camera`, `light`, `features`), `log` and `config`.
 - A command API (Hono, in the robot server, its own code in `pc/robot/src/api/`)
-  with one queue. The web page and the CLI (`robot steer r30d50`) both send their
-  commands to it; nothing reaches the robot any other way.
-- One short answer line per command (`done: d50 ok, at (62, -4) cm, yaw +30°`),
-  streamed to the CLI and shown to everyone in one log.
-- Read commands for snapshots, the map (as text, one character per cell, with the
-  path driven), pictures (as file paths), and a `--check` that says what a move
-  would do on the map before it is sent.
+  with one queue. The web page and the CLI both send their commands to it;
+  nothing reaches the robot any other way.
+- Every answer is JSON with the same fields, streamed to the CLI and shown to
+  everyone in one log.
 - Safety numbers from PicoB (the largest jolt and tilt), stored with the pose, so
   that bump and tilt stops can be set from measurements later.
 
-## The steering commands
+## The commands
 
-`robot steer <commands>`: one or more, run one after the other. Spaces between them
-are optional; long names work too (`robot steer rotate 30 drive 50`).
+`robot <command> [args] [--flags]`. Units, said once in the help: cm, degrees (+ is
+left), pixels, g, dBm, lux. The map frame: x forward from where the robot was at
+power-up, y to its left.
 
-| Command | Short | Does |
-|---|---|---|
-| `drive <cm>` | `d50`, `d-40` | drive straight; negative = backwards (-300…300) |
-| `rotate <deg>` | `r30`, `r-30` | turn on the spot; + = left, − = right (-720…720) |
-| `goto <x> <y>` | `g120,40` | go to a point on the map, cm (-300…300 each): turn towards it, drive there |
-| `watch <s>` | `w60` | turn towards movement for that many seconds (1…600) |
-| `snapshot` | `s` | a full snapshot, saved to the database |
-| `clear_map` | `c` | clear the map |
-| `recording on\|off` | `R1`, `R0` | recording on or off (set, not switched) |
-| `mode idle\|manual` | `m0`, `m1` | idle or manual (set, not switched) |
-| `stop` | `x` | motors off, mode idle, the queue emptied; skips the queue, and stands alone |
+**Queued, one at a time, in the order they arrived, whoever sent them:**
 
-- A command that needs a number and gets none is an error. There are no defaults.
-- The API refuses numbers out of range, and the robot checks them again. The limits
-  are in one C header that the API reads (`picoA/app/commands.h`).
-- `goto` turns towards the point, drives there correcting its heading, stops before
-  obstacles on the map (as `drive` does), and goes at most 3 m towards a point
-  farther away. It works in idle too (it switches to manual, as every move does).
-- After every move (drive, rotate, goto, watch) the API adds a `snapshot`,
-  recording on or not: `robot steer r30d50` runs as `r30 s d50 s`. The robot no
-  longer takes one by itself at the end of an action; it still sends one when a
-  server connects.
-- The robot starts in **manual** mode. The mode changes nothing yet; it is kept for
-  the modes to come.
-- Removed: scan (`r390` does the same), record 5 s, direction (negative numbers),
-  WiFi (it starts and reconnects by itself), help, and the text prints (map, ToF,
-  camera, vision, the movement backgrounds). Everything they printed except the
-  backgrounds is in a snapshot.
+| Command | Does |
+|---|---|
+| `steer <moves>` | the moves, one after the other: `d<cm>` drive (negative: backwards), `r<deg>` rotate (+ left), `g<x>,<y>` goto a point on the map (at most 3 m), `w<s>` watch. Spaces optional; long names work too (`drive 50`). |
+| `snap` | takes a snapshot: camera picture, ToF frame, light, map, pose |
+| `clear_map` | clears the map |
+| `recording on\|off` | records every action in full, or not |
+| `mode idle\|manual` | sets the mode (manual at power-up) |
+| `stop` | stops at once: motors off, mode idle; skips the queue and drops what waits |
 
-## The queue
+- A move needs its numbers; there are no defaults. The limits (drive ±300 cm,
+  rotate ±720°, goto ±300 cm per axis, watch 1-600 s) are in one C header the API
+  reads (`picoA/app/commands.h`); the robot checks them again.
+- **auto_snap** (`robot config auto_snap on|off`, on by default): the server sends a
+  `snap` after every move. It is a command like any other, with its own answer.
 
-- Commands run one at a time, in the order they arrived, whoever sent them.
-- `stop` skips the queue: it goes to the robot at once and empties the queue.
-- **Anything that isn't `ok` empties the queue:** an error, a move that ended
-  early (obstacle, safety stop, PicoB lost, didn't start), or `stop`. The commands
-  still waiting are answered `dropped: <command>`, so the agent looks at where it
-  ended up before it goes on. A move's own snapshot still runs first (built 14
-  Oct: without it the newest snapshot would show the robot before the move); `stop`
-  drops everything.
-- **The robot not connected** when a command's turn comes: `error: <command> robot
-  not connected`, and the queue is emptied.
-- **No answer in time:** each command may take its expected time twice over plus
-  10 s (from the firmware's speeds). Without an answer by then: `error: <command>
-  no answer`, and the queue is emptied. No retries, no waiting for a reconnect: the
-  agent decides what to do.
-- The queue lives in the server's memory: restarting the server empties it.
+**At once, never queued:**
+
+| Command | Answers |
+|---|---|
+| `status` | the robot now: pose, mode, recording, WiFi, running, waiting, newest snapshot, safety (largest jolt and tilt since power-up) |
+| `check <moves>` | what the moves would do on the newest snapshot's map, each from where the one before would end; nothing moves (not watch) |
+| `map [n] [--png]` | the 6 × 6 m map window at snapshot n, one character per 10 cm cell, top-left corner, legend; `--png`: the picture's file |
+| `tof [n]` | the ToF frame: 8 × 8 matrices `distance`, `status`, `signal`, `targets`, `distance_2` |
+| `camera [n]` | the camera picture's file |
+| `light [n]` | `lux`, `cie` (x, y), `rgb` (the colour on a screen at a fixed brightness) |
+| `features [n]` | the camera features: x, y in the picture, state (new, tracked, missed, lost) |
+| `log [lines]` | the last lines of the log |
+| `config [auto_snap on\|off]` | the API's settings; changes one |
+
+`n` is a snapshot's number; without it, the newest. Files are under
+`pc/robot/recordings/`: camera pictures in `camera/<boot>/<n>.png`, map pictures in
+`map/<boot>/<n>.png` (singular, as everything else).
 
 ## The answers
 
-Every command gets one line, in the order the commands ran:
+Every queued command answers one JSON line when it ends, in order, with the same
+fields:
 
 ```
-queued:  r30 s d50 s
-done:    r30 ok, at (12, -4) cm, yaw +30°
-done:    s snapshot 41, at (12, -4) cm, yaw +30°
-done:    d50 obstacle after 31 cm, at (43, -4) cm, yaw +30°
-dropped: s
+{"command":"steer d50","result":"ok","pose":{"x":51,"y":0,"yaw":0},"moved":50,"rotated":0}
+{"command":"snap","result":"ok","pose":{"x":51,"y":0,"yaw":0},"snapshot":2}
+{"command":"steer r30","result":"safety_stop","why":"tilt","pose":{"x":51,"y":0,"yaw":12},"moved":0,"rotated":12}
+{"command":"snap","result":"ok","pose":{"x":51,"y":0,"yaw":12},"snapshot":3}
+{"command":"steer d20","result":"dropped","why":"steer r30 ended: safety_stop"}
 ```
 
-- Every answer is `<kind>: <command> <how it ended>`, the command in its short form.
-- A move answers how it ended and the pose after it, in the map frame (x forward
-  at power-up, y left, yaw + = left): `ok`, `obstacle after 31 cm`, `safety stop:
-  tilt`, `safety stop: wheels`, `stopped`, `PicoB lost`, `didn't start`. A goto
-  to a point farther than 3 m: `ok, 3 m towards it (goal 4.2 m away)`.
-- A snapshot answers its number and the pose it was taken at.
-- `c`, `R1`, `m1` and `x` answer `ok`.
-- Other answers: `error: <command> <why>` and `dropped: <command>`.
-- The answers are short on purpose: the agent asks for details with the reads.
+- `command`: as typed. `result`: `ok`; `obstacle` (a move stopped early before an
+  obstacle on the map); `limited` (a goto further than 3 m went 3 m); `stopped` (by
+  `stop`); `safety_stop` (`why`: tilt, wheels); `failed` (`why`: a bad number, robot
+  not connected, no answer, PicoB lost, didn't start); `dropped` (never ran).
+- `pose` after moves, snap and stop; `moved` (cm straight from where it started)
+  and `rotated` (degrees) after every move; `snapshot` after a snap.
+- No `id` and no `queued` lines: the answers come in the order of the commands.
+  `--no-wait` answers only `{"queued":[...]}`.
+- Reads answer one JSON object: one key a line, matrices one row a line, lists one
+  item a line. A read that can't answer: `{"error":"..."}`.
+
+## The queue
+
+- `stop` skips the queue and empties it.
+- **Anything that isn't `ok` empties the queue:** the commands still waiting are
+  answered `dropped`, so the agent looks at where it ended up before it goes on. A
+  move's own snap still runs first, so the newest snapshot shows where the robot
+  ended up.
+- **The robot not connected** when a command's turn comes: `failed`, "robot not
+  connected", and the queue is emptied.
+- **No answer in time:** each command may take its expected time twice over plus
+  10 s (from the firmware's speeds); then `failed`, "no answer". No retries.
+- A snap is answered once its snapshot is stored, so it can be read at once.
+- The queue lives in the server's memory: restarting the server empties it.
 
 ## The robot's side (firmware)
 
 - **Commands are lines**, `drive -40 #17`: the command and the number the API gave
   it. Over WiFi from the server; typed over USB they work too (without a number).
 - **The robot answers each one** with a record when it has ended:
-  `"\001done n=17 end=ok x=43.0 y=-4.0 yaw=30.0 moved=31"` (cm, degrees). `end` is
+  `"\001done n=17 end=ok x=43.0 y=-4.0 yaw=30.0 moved=31 rotated=0"` (cm, degrees). `end` is
   one word: `ok`, `obstacle`, `stopped`, `tilt`, `wheels`, `no_drive`,
   `picob_lost`, `no_start`, `refused`. A goto adds `goal=` (cm, how far the point
   was), a snapshot `snapshot=` (its number; the pose is the snapshot's). The API
@@ -130,45 +134,6 @@ dropped: s
 - **PicoB** keeps the largest jolt and tilt since its last odometry report and
   sends them in it; the link's protocol version goes up.
 
-## Reading data
-
-`robot <read> [n]`, plain text, or JSON with `--json`. `n` is a snapshot's number
-in the newest boot; without it, the newest snapshot.
-
-| Read | Answers |
-|---|---|
-| `status` | the pose now, mode, recording, WiFi; what runs and waits; the largest jolt and tilt since power-up |
-| `snap [n]` | the snapshot in a few lines: when, the last action and how it ended, the pose, the nearest obstacles ahead, left and right, the light, the number of camera features |
-| `light [n]` | lux, the colour (CIE x, y) and a colour name |
-| `features [n]` | each camera feature: its place in the picture, the direction to it (degrees, + = left), new, tracked or lost |
-| `tof [n]` | the 8 × 8 ToF frame, cm (how it is oriented: `robot tof --help`) |
-| `camera [n]` | the camera picture's file path |
-| `map [n]` | the 6 × 6 m map window, one character per 10 cm cell (60 × 60), x and y in cm along the edges, the robot and its heading, the path driven since the map was last cleared, a legend; `--png`: the same as an image, answered with its path |
-| `log [lines]` | the last lines of the log (default 20) |
-| `queue` | what runs and what waits, and who sent it |
-
-## Checking a move first (`--check`)
-
-`robot steer g120,40 --check` moves nothing and queues nothing. It answers what
-each move would do on the newest snapshot's map, each from where the one before
-would end; after one that wouldn't end `ok`, the rest would be dropped:
-
-```
-check: g120,40 turn +34° to yaw +64°, then drive 126 cm; blocked: obstacle after 81 cm, would stop at (52, 31) cm
-check: d80 clear: would end at (92, -4) cm, yaw +30°
-check: r90 clear: turns to yaw +120°
-```
-
-- It is the robot's own check for `drive` and `goto`: a strip as wide as the robot
-  plus 5 cm on each side along the line, looked up in the map
-  (`cell_map_obstacle_along`), stopping 15 cm before an obstacle. For a turn, it
-  looks at the circle the robot sweeps (the robot itself doesn't check turns).
-- The numbers come from the firmware's headers; a test runs the TypeScript check
-  and the C check on the same map and compares them.
-- Only drive, rotate and goto can be checked.
-- The map is the newest snapshot's (taken after the last move): `--check` says
-  "clear on the map I have"; the robot still checks for itself while it drives.
-
 ## The log
 
 One log, and everyone sees all of it: the robot's own text, the server's notes, and
@@ -178,27 +143,28 @@ its WebSocket, `robot log` reads it, and the log file in `logs/` gets the same l
 ## The CLI
 
 ```
-robot --help                     # everything, for a person or an agent
-robot steer --help               # the steering commands; robot <read> --help likewise
-robot steer r30d50               # rotate 30°, then drive 50 cm
-robot steer g120,40 --check      # what would happen, without moving
-robot steer x                    # stop
+robot --help                   # everything, for a person or an agent
+robot steer --help             # robot <command> --help for each
+robot steer r30d50             # rotate 30° left, then drive 50 cm
+robot check g120,40            # what going there would do; nothing moves
+robot snap
 robot map --png
+robot stop
 ```
 
-- A small Node script, `pc/robot/robot`, holding no state and knowing no commands:
-  `robot <name> [args] [--flags]` becomes a request to `/api/robot/<name>`. It
-  finds the server at `ROBOT_API` (default `http://127.0.0.1:8080`). No login: the
-  server is for the home network only.
-- `steer` streams: each answer is printed as soon as its command has ended, and the
-  CLI exits when the last one is answered. `--no-wait` returns after `queued`.
-  Ctrl-C leaves the commands in the queue; `robot steer x` stops them.
-- The help is served by the API (`GET /api/robot/help[/<name>]`), so the CLI and
+- A small TypeScript script, `pc/robot/src/cli.ts` (`./robot` in `pc/robot/` runs
+  it), holding no state and knowing no commands: `robot <command> [args]
+  [--flags]` posts the args to `/api/robot/<command>`, each flag a query
+  parameter. It finds the server at `ROBOT_API` (default `http://127.0.0.1:8080`).
+  No login: the server is for the home network only.
+- It prints each answer as it comes and exits when the last one is in. Ctrl-C
+  leaves the commands queued; `robot stop` stops them.
+- The help is served by the API (`GET /api/robot/help[/<command>]`), so the CLI and
   the API can't disagree.
 
 ## The web page
 
-- Its buttons (stop, mode, snapshot, clear map, recording, status), the steering
+- Its buttons (stop, mode, snap, clear map, recording, status), the steering
   boxes and the map click are API requests, into the same queue as the agent's.
 - Text boxes (not number boxes: those don't take a lone `-` everywhere) next to
   drive, rotate and watch, filled in with 50, 30 and 60.
@@ -208,94 +174,92 @@ robot map --png
 
 ## The API server, module by module
 
-The API is a few deep modules with small interfaces. The same word means the same
-thing everywhere:
+A few deep modules with small interfaces. The same word means the same thing
+everywhere:
 
-- **command**: one steering instruction, `{ name: "drive", value: 50 }`; written
-  short (`d50`) in every answer and log line, long (`drive 50`) to the robot.
-- **steer**: a list of commands sent together.
-- **answer**: one line about one command (`queued`, `done`, `error`, `dropped`).
-- **outcome**: how one command ended on the robot (`ok` or not, and the text).
+- **command**: one queued action, `{ name: "drive", values: [50] }`; written as typed
+  (`steer d50`) in answers and the log, long and numbered (`drive 50 #17`) to the robot.
+- **move**: drive, rotate, goto or watch, given to `steer`.
+- **answer**: the JSON line about one command; **outcome**: an answer before it is
+  named (what the runner returns); **result**: how it ended.
 - **done record**: the robot's own line (`\001done n=… end=…`), never shown.
-- **sender**: `cli` or `page`.
-- **read**: a command that only reads (`status`, `map`…), never queued.
-- **pose**: x, y (m) and yaw (rad) in the map frame inside the code; cm and degrees
-  only in text.
+- **sender**: `cli` or `page`. **read**: a command that runs at once.
+- **pose**: x, y (m) and yaw (rad) inside the code; cm and degrees in answers.
 
 ```
 CLI ──HTTP──┐                                  ┌─> RobotLink ──TCP──> PicoA
 page ─HTTP──┴─> routes ─> CommandQueue ─> CommandRunner
                   │                            └─< done records, StoredSnapshots
-                  ├─> reads ─> Store (DuckDB), LiveRobot, Log
+                  ├─> reads ─> Store (DuckDB), LiveRobot, Log, config
                   └─> check ─> RobotMap
 ```
 
 | Module | Interface | Hides |
 |---|---|---|
-| `api/commands.ts` | `parseSteer(text)`, `shortText(cmd)`, `robotLine(cmd, n)`, `timeLimitMs(cmd)`, `withSnapshots(cmds)` | the grammar (letters, long names, spaces), limits, the robot's wording |
-| `api/firmware.ts` | `LIMITS`, `MOVE`, `SPEED` | reading the numbers from the C headers |
+| `api/commands.ts` | `parseSteer`, `parseAction`, `commandText`, `robotLine`, `timeLimitMs`, `withSnaps` | the grammar, limits, the robot's wording |
+| `api/firmware.ts` | `LIMITS`, `MOVE`, `SPEED`, `CAMERA` | reading the numbers from the C headers |
 | `api/runner.ts` | `run(cmd): Promise<Outcome>` (never rejects); `StoredSnapshots` | numbering, sending, matching done records, time limits, waiting for a snapshot to be stored |
-| `api/queue.ts` | `submit(cmds, sender, onAnswer): Promise<void>`, `stop(sender, onAnswer)`, `state()` | order, emptying on anything not `ok`, dropped answers |
-| `api/answers.ts` | `describe(cmd, done)`, `answerLine(answer)`, `poseText(pose)` | how an end reads in words |
-| `api/reads.ts` | a table: name → `{ usage, help, run(ctx, arg, flags) → { data, text } }` | queries, units, rendering |
-| `api/check.ts` | `checkSteer(cmds, map, pose)` | the move simulation |
-| `api/map.ts` | `RobotMap.column(cx, cy)`, `obstacleAlong(...)`, `text()`, `png()` | the window over the whole-house tiles |
-| `api/colour.ts` | `colourName(x, y, lux)` | white by colour temperature, else a hue |
-| `api/help.ts` | `help(name?)` | the text an agent steers from |
+| `api/queue.ts` | `submit(cmds, sender, onAnswer)`, `stop(sender, onAnswer)`, `state()` | order, emptying on anything not ok, dropped answers |
+| `api/answers.ts` | `outcome(cmd, done)`, `poseOut(pose)` | how a done record becomes an answer |
+| `api/reads.ts` | a table: name → `{ usage, help, run(ctx, args, flags) → object }` | queries, units |
+| `api/check.ts` | `checkMoves(cmds, map, pose)` | the move simulation |
+| `api/map.ts` | `RobotMap.column`, `obstacleAlong`, `grid()`, `png()` | the window over the whole-house tiles |
+| `api/json.ts` | `formatJson(value)` | matrices and lists laid out to read |
+| `api/colour.ts` | `displayRgb(X, Y, Z)` | XYZ to a screen colour |
+| `api/help.ts` | `help(command?)` | the text an agent steers from |
 | `api/routes.ts` | `createApi(ctx): Hono` | HTTP: paths, streaming, flags |
 | `log.ts` | `text()`, `note()`, `answer()`, `tail(n)`, `backlog()`, event `item` | the backlog, the file, the fan-out to pages |
 | `live.ts` | `LiveRobot`: `status`, `pose`, `boot`, `peaks`; `flush()` | the live feed; the pose lines into DuckDB |
 
-The routes are generic: `POST /api/robot/steer` (the commands as the body;
-`?check`, `?nowait`, `?from=page`), and `GET /api/robot/<read>[/<arg>]` (`?json`,
-`?png`), `GET /api/robot/help[/<name>]`. Errors are values: a command that fails
-ends with an outcome, never an exception through the queue.
+Errors are values: a command that fails ends with an outcome, never an exception
+through the queue.
 
-## Gaps (left for later)
+## To do, to be discussed
 
+- **The map as text is hard to read** (Daniel, 14 Oct). Ideas:
+  - A smaller window around the robot (2 × 2 m), turned so the robot faces up:
+    what is ahead is at the top.
+  - Two characters per cell, so cells are square in a terminal.
+  - A list of obstacles instead of a grid: connected blocked cells grouped, each
+    with where it is and how big ("blocked, 30 × 10 cm, from (120, 40)").
+  - A scan: the free distance in each of 24 directions around the robot (every
+    15°), like a lidar.
+  - Only the PNG, for agents that read pictures.
+- **The map PNG**: the whole map (the window and the whole-house tiles), not only
+  the 6 × 6 m, with every row and column labelled with its cm coordinate. The text
+  map stays 6 × 6 m.
 - The old console page (`/console`) still sends keys over the WebSocket, which
   nothing takes any more. Either it goes, or it moves to the API.
 - The movement backgrounds (the old `o` and `k`) are in no snapshot: nothing
   shows them any more.
-- `robot features` gives each feature's place in pixels, not the direction in
-  degrees: the camera's field of view isn't measured or in the code yet.
+- `features` gives each feature's place in pixels, not the direction in degrees:
+  the camera's field of view isn't measured or in the code yet.
 - Safety step 2: the bump stop and the 10° tilt stop, once the measured numbers
   show what normal looks like.
 
 ## Decided (13-14 Oct)
 
-1. The commands are drive, rotate, goto, watch, snapshot, status, clear_map, recording, mode and stop; scan, record 5 s, direction, WiFi, help and the text prints go.
-2. Every command that takes a number needs one (watch in seconds), and there are no defaults.
-3. The limits are drive ±300 cm, rotate ±720°, watch 1–600 s and goto ±300 cm per axis, checked by the API and again by the robot.
-4. All steering goes through `robot steer <commands>` (e.g. `robot steer r30d50`), with the letters as in the table.
-5. One parser in the API reads the steering text for both the CLI and the page.
-6. One CLI call is either one steer or one read, never a mix.
-7. Commands run one at a time in the order they arrived, whoever sent them; `stop` skips the queue, and `status` is a read.
-8. Any end that isn't `ok` empties the queue, and the waiting commands are answered `dropped: <command>`; a move's own snapshot still runs first, so the newest snapshot shows where the robot ended up (found while building, 14 Oct).
-9. The robot takes commands only from the API (the USB is for debugging), so a command replaced by another needs no handling.
-10. The API numbers each command; the robot's done record carries the number, how it ended, how far it drove and its pose, and a number nothing waits for is ignored.
-11. The robot answers clear_map, recording, mode, stop and snapshot too (a snapshot with its number); the API answers status itself.
-12. A snapshot command is answered once that snapshot is stored in DuckDB, so it can be read right away.
-13. If the robot isn't connected when a command's turn comes, the answer is `error: <command> robot not connected`.
-14. If no answer arrives within the command's time limit, the answer is `error: <command> no answer` and the queue is emptied, with no retries and no waiting for a reconnect.
-15. The time limit is the command's expected time (from the firmware's speeds) twice over plus 10 s.
-16. The API adds a snapshot after every move, recording on or not.
-17. The robot no longer takes a snapshot at the end of each action, but still sends one when a server connects.
-18. Every answer is `<kind>: <command> <how it ended>`: a move adds `at (x, y) cm, yaw …°`, a snapshot says `snapshot <n>` and its pose.
-19. The safety stops answer `safety stop: tilt` and `safety stop: wheels` now, and `safety stop: bump` later.
-20. Everyone sees one log with every command's answers and who sent it, on the page, in `robot log`, and in the log file.
-21. The CLI streams its answers, `--no-wait` returns after `queued`, and Ctrl-C leaves the queue running.
-22. The API lives in `pc/robot/src/api/`, built with Hono inside the existing HTTP server, under `/api/robot/`.
-23. The CLI finds the API at `ROBOT_API` (default `http://127.0.0.1:8080`), with no login.
-24. `robot --help` covers everything and `robot <name> --help` each command, all from the text the API serves at `/api/robot/help`.
-25. The pose line stays at 0.25 s and gains only recording on/off and the safety numbers; the server stores each one in DuckDB with the boot of the newest snapshot.
-26. `robot map [n]` shows the 6 × 6 m map window as 60 × 60 characters, with the robot, the path driven since the last clear_map and a legend, and `--png` answers with an image's path.
-27. Pictures (camera, map PNG) are answered with their file's path.
-28. `robot steer … --check` moves nothing; it checks each move in turn from where the one before would end, on the newest snapshot's map, and answers in text.
-29. The check's numbers come from the firmware's headers, and a test compares the C and TypeScript checks on the same map.
-30. Recording and mode are set (`R1`/`R0`, `m0`/`m1`), not switched, and the robot starts in manual.
-31. goto works in idle too, like the other moves.
-32. The page sends its buttons and map clicks to the API, with text boxes (50, 30, 60 to start) next to drive, rotate and watch.
-33. The map click's limit is 300 cm (the old code checked 300 m).
-34. For safety, PicoB measures the largest jolt and tilt first; the bump and 10° tilt stops are set from those numbers later.
-35. The old console page stays as it is for now.
+1. Queued commands: `steer` (drive, rotate, goto, watch), `snap`, `clear_map`, `recording on|off`, `mode idle|manual`, `stop` (skips the queue). At once: `status`, `check`, `map`, `tof`, `camera`, `light`, `features`, `log`, `config`.
+2. Scan, record 5 s, direction, WiFi, help and the text prints are gone.
+3. Every move needs its numbers; there are no defaults. The limits are checked by the API and again by the robot.
+4. `snap` takes a snapshot; reading one is `map`, `tof`, `camera`, `light`, `features`.
+5. auto_snap (on by default, `robot config`): a snap after every move, as its own command with its own answer.
+6. Every answer is one JSON line with the same fields: `command` (as typed), `result`, `why` (when not ok), `pose`, `moved` and `rotated` (every move), `snapshot`.
+7. Results: ok, obstacle, limited, stopped, safety_stop, failed, dropped. An obstacle stop isn't a failure.
+8. No ids, no `queued` lines; no units in field names (the help says them once).
+9. Anything that isn't ok empties the queue; a move's own snap still runs first.
+10. The robot takes commands only from the API (the USB is for debugging).
+11. The robot not connected, or no answer in time: `failed`, and the queue is emptied. No retries.
+12. A snap is answered once its snapshot is stored.
+13. `status` is the robot now; no obstacles in it, no map.
+14. `tof`: one 8 × 8 matrix per reading (`distance`, `status`, `signal`, `targets`, `distance_2`).
+15. `light`: lux, CIE x, y and rgb; no colour names.
+16. Reads answer JSON laid out to read: matrices one row a line.
+17. Pictures are answered with their file's path, in `recordings/camera/` and `recordings/map/` (singular).
+18. The pose line stays at 0.25 s and gains recording and the safety numbers; the server stores each one with its boot: the path on the map.
+19. The page sends its buttons and map clicks to the API, with text boxes (50, 30, 60) next to drive, rotate and watch.
+20. The CLI finds the API at `ROBOT_API`, with no login; Ctrl-C leaves the queue running.
+21. `robot --help` and `robot <command> --help`, from the text the API serves.
+22. Recording and mode are set, not switched; the robot starts in manual; goto works in idle too.
+23. For safety, PicoB measures the largest jolt and tilt first; the stops are set from those numbers later.
+24. The old console page stays as it is for now.

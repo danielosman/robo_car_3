@@ -37,7 +37,9 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
 
 **Built 14 Oct, waiting for its robot test:** the command API and the `robot` CLI
 ([CLI_API_PLAN.md](CLI_API_PLAN.md)). Flash both Picos (the link version went up),
-then the README's "Steering through the API" test. Left of the plan:
+then the README's "Steering through the API" test. Left of the plan (CLI_API_PLAN.md, "To do"):
+   - The map as text is hard to read: ideas to discuss. The map PNG: the whole map
+     with every row and column labelled in cm.
    - The camera features' direction in degrees (`robot features` gives pixels): the
      camera's field of view isn't measured or in the code yet.
    - Safety step 2: the bump stop and the 10° tilt stop, from the jolt and tilt

@@ -1,6 +1,6 @@
 // Imports recordings into DuckDB (recordings/robot.duckdb), every take and snapshot
 // again: what the database holds is derived from the raw files (notes and truth
-// stay), and so are the snapshots' pictures (recordings/snapshots/<boot>/<seq>.png).
+// stay), and so are the snapshots' camera pictures (recordings/camera/<boot>/<seq>.png).
 //   npm run import                         every file in recordings/raw/ and recordings/snapshots/raw/
 //   npm run import -- <file.rec|file.snap>  only these
 import { readFileSync, readdirSync } from "node:fs";
@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Dedup, TakeTracker, readRecordingFile, type Take } from "./recording.ts";
 import { Store } from "./store.ts";
-import { readSnapshotFile, savePicture } from "./snapshot.ts";
+import { SNAPSHOTS_RAW, readSnapshotFile, savePicture } from "./snapshot.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DB_PATH = path.join(root, "recordings", "robot.duckdb");
@@ -33,8 +33,7 @@ export async function importSnapshots(store: Store, file: string, recordingsDir:
   let stored = 0, damaged = 0;
   for (const { arrivalMs, snapshot } of readSnapshotFile(readFileSync(file))) {
     if (!snapshot) { damaged++; continue; }
-    const png = savePicture(path.join(recordingsDir, "snapshots"), snapshot);
-    await store.importSnapshot(snapshot, arrivalMs, file, png ? path.relative(recordingsDir, png) : null);
+    await store.importSnapshot(snapshot, arrivalMs, file, savePicture(recordingsDir, snapshot));
     stored++;
   }
   return { stored, damaged };
@@ -48,7 +47,7 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const recordingsDir = path.join(root, "recordings");
   const files = args.length ? args : [...listed(path.join(recordingsDir, "raw"), ".rec"),
-                                      ...listed(path.join(recordingsDir, "snapshots", "raw"), ".snap")];
+                                      ...listed(path.join(recordingsDir, SNAPSHOTS_RAW), ".snap")];
   const store = new Store(DB_PATH);
   for (const file of files) {
     if (file.endsWith(".snap")) {

@@ -112,7 +112,7 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     assert.deepEqual(await importSnapshots(store, file, dir), { stored: 5, damaged: 1 });
     assert.deepEqual(await importSnapshots(store, file, dir), { stored: 5, damaged: 1 }); // again: replaced, not added
     const boot = parseSnapshot(snaps[0]).bootId;
-    assert.ok(existsSync(path.join(dir, "snapshots", boot, "1.png")));
+    assert.ok(existsSync(path.join(dir, "camera", boot, "1.png")));
 
     const boots = await listBoots(store);
     assert.equal(boots.length, 1);
@@ -124,7 +124,7 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
 
     const one = (await snapshotDetail(store, boot, 1))!;
     assert.equal(one.snapshot.why, "server connected");
-    assert.equal(one.snapshot.image, path.join("snapshots", boot, "1.png"));
+    assert.equal(one.snapshot.image, path.join("camera", boot, "1.png"));
     assert.equal(one.targets.length, Array.from({ length: 64 }, (_, z) => z % 3).reduce((a, b) => a + b, 0));
     assert.ok(one.targets.every(t => t.x !== null));
     // Zone 5 (the sensor's own number) has two targets; the grid shows each zone's first sure one.

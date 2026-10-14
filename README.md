@@ -53,21 +53,23 @@ median; `clock_start.h`: both Picos start their clock 30 s before
 How it works, module by module: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md). In
 short: the robot does nothing by itself; it is steered through the robot server's
 command API ([doc/CLI_API_PLAN.md](doc/CLI_API_PLAN.md)), from the `robot` CLI
-(`pc/robot/robot`; for an agent or a person) or the page at
-http://127.0.0.1:8080/, which share one queue and one log:
+(`pc/robot/src/cli.ts`; for an agent or a person) or the page at
+http://127.0.0.1:8080/, which share one queue and one log. Start the server
+(`npm start` in `pc/robot/`), then, in another terminal, in `pc/robot/`:
 
 ```sh
-ln -s "$PWD/pc/robot/robot" /usr/local/bin/robot   # once
-robot --help                  # everything: the commands, the answers, the reads
-robot steer r30d50            # rotate 30° left, then drive 50 cm (a snapshot after each move)
-robot steer g120,40 --check   # what going to (120, 40) cm would do on the map; nothing moves
-robot snap; robot map; robot camera; robot status
-robot steer x                 # stop
+./robot --help                # everything: the commands, the answers, the units
+./robot steer r30d50          # rotate 30° left, then drive 50 cm (a snap after each move)
+./robot check g120,40         # what going to (120, 40) would do on the map; nothing moves
+./robot snap                  # take a snapshot
+./robot status; ./robot map; ./robot camera
+./robot stop
 ```
 
+Every answer is JSON, e.g. `{"command":"steer d50","result":"ok","pose":{"x":51,"y":0,"yaw":0},"moved":50,"rotated":0}`.
 After every move a snapshot (pose, camera picture and features, ToF frame,
 colour, its map) is stored; the page shows any of them back in time, with the path
-driven, and sends the robot where you click on the map. With `robot steer R1` each
+driven, and sends the robot where you click on the map. With `./robot recording on` each
 action is also recorded in full and can be looked at in 3D at
 http://127.0.0.1:8080/viewer. Typed on PicoA's USB serial monitor, the same
 commands work for debugging (`drive 50`, `status`).
@@ -92,7 +94,8 @@ commands work for debugging (`drive 50`, `status`).
 ### The map as text (`robot map`)
 
 The 6 × 6 m window around the robot, 10 cm columns, x up (forward at power-up), y
-to the left; one character per column, x and y in cm along the edges:
+to the left; one character per column (`rows`), the top-left cell's x and y given
+(`x_top`, `y_left`). How to make it easier to read is open (doc/CLI_API_PLAN.md):
 
 | Symbol | Meaning |
 |---|---|
@@ -138,40 +141,44 @@ header). Re-run it after adding big locals and before core 1 is started.
 ### Robot tests (repeat after changes)
 
 Since 14 Oct the robot takes commands, not keys. The older tests below are written
-in the keys; read them as: `f` → `robot steer d50` (`r`, `f` → `d-50`), `t` →
-`r30`, `s` (scan) → `r390`, `a` → `w60`, `S` → `s`, `C` → `c`, `R` → `R1` / `R0`,
-`M` → `m1` / `m0`, space → `robot steer x`, `p` → `robot status` (or `status` typed
-on USB for PicoA's diagnostics: link, loop time, RAM), `m` → `robot map`, `z` →
-`robot tof`, `v` → `robot features`, `5` (record 5 s) → `w5` with nothing moving.
-The prints `c` (camera blocks) and `o` / `k` (movement backgrounds) are gone:
-`robot camera` gives the picture; the backgrounds can't be seen any more. On USB,
-type the long form (`drive 50`).
+in the keys; read them as (`./robot` in `pc/robot/`): `f` → `robot steer d50` (`r`,
+`f` → `d-50`), `t` → `steer r30`, `s` (scan) → `steer r390`, `a` → `steer w60`, `S` →
+`robot snap`, `C` → `robot clear_map`, `R` → `robot recording on|off`, `M` → `robot
+mode manual|idle`, space → `robot stop`, `p` → `robot status` (or `status` typed on
+USB for PicoA's diagnostics: link, loop time, RAM), `m` → `robot map`, `z` → `robot
+tof`, `v` → `robot features`, `5` (record 5 s) → `steer w5` with nothing moving. The
+prints `c` (camera blocks) and `o` / `k` (movement backgrounds) are gone: `robot
+camera` gives the picture; the backgrounds can't be seen any more. On USB, type the
+robot's own words (`drive 50`, `snapshot`).
 
 **Steering through the API** (14 Oct; both Picos flashed: the link version went up;
-battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open). Paste the
-terminal and the page's log:
-1. `robot status`: "robot connected (…)", the pose, "mode manual, recording off",
-   "running: nothing", and the safety line (jolt near 0 g on x and y, ~0 on z;
-   tilt a few degrees at most).
-2. `robot steer r390`: "queued: r390 s", then after ~14 s "done: r390 ok, at (…),
-   yaw +30°" and "done: s snapshot N, …". The page's log shows both lines with
-   `[cli]`, and the new snapshot.
+battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot` in
+`pc/robot/`). Paste the terminal and the page's log:
+1. `robot status`: `"connected": true`, the pose, `"mode": "manual"`, `"recording":
+   false`, and `safety` (jolt near 0 g on x and y, small on z; tilt a few degrees
+   at most).
+2. `robot steer r390`: after ~14 s `{"command":"steer r390","result":"ok",…,
+   "rotated":390}`, then `{"command":"snap","result":"ok",…,"snapshot":N}`. The
+   page's log shows both lines with `[cli]`, and the new snapshot.
 3. `robot map`: the room around `R`, the walls where they are. `robot map --png`
-   prints a file path; open it. `robot snap`, `robot tof`, `robot camera` (open the
-   file), `robot light`, `robot features`.
-4. Facing a piece of furniture 40-70 cm away: `robot steer d100 --check` says
-   "blocked: obstacle after N cm"; `robot steer d100 r30`: "done: d100 obstacle
-   after M cm" (M within a few cm of N), "done: s snapshot …" (where it stopped),
-   "dropped: r30", "dropped: s". The front edge is 15-25 cm from the furniture.
-5. `robot steer w60`, and in another terminal `robot queue` and, after a few
-   seconds, `robot steer x`: "done: w60 stopped", "done: x ok"; `robot status` says
-   "mode idle".
+   gives a file; open it. `robot tof`, `robot camera` (open the file), `robot
+   light`, `robot features`.
+4. Facing a piece of furniture 40-70 cm away: `robot check d100` says `"result":
+   "obstacle"` with `moved` N; `robot steer d100 r30`: `"result":"obstacle"`,
+   `moved` within a few cm of N, then the snap (where it stopped), then
+   `"result":"dropped"` for r30 and its snap. The front edge is 15-25 cm from the
+   furniture.
+5. `robot steer w60`, and in another terminal `robot status` (running: steer w60)
+   and, after a few seconds, `robot stop`: `"result":"stopped"` for the watch,
+   `"result":"ok"` for stop; `robot status` says `"mode": "idle"`.
 6. On the page: `drive` with 30 in its box, `rotate` with -30, a click on the map
-   (the yellow cross goes when its answer comes), Stop. The terminal's
-   `robot log` shows them with `[page]`. A box with "abc" says what it wants.
+   (the yellow cross goes when its answer comes), Stop. `robot log` shows them with
+   `[page]`. A box with "abc" says what it wants.
 7. Out of range or no number: `robot steer d400`, `robot steer d` answer
-   "error: …", nothing moves. `robot steer R1 d20`, then `robot steer R0`: one take
-   (the take list), recording shown on the page's button.
+   `"result":"failed"`, nothing moves. `robot recording on`, `robot steer d20`,
+   `robot recording off`: one take (the take list), recording shown on the page's
+   button. `robot config auto_snap off`, `robot steer d10`: no snap after it; `robot
+   config auto_snap on` again.
 8. Bump the robot lightly by hand while it drives (`robot steer d50`): `robot
    status` shows a larger jolt on x afterwards. Paste it: this is the measurement
    the bump stop will be set from.
@@ -355,9 +362,10 @@ Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
 3. `robot steer r390` (a scan): after the turn snapshot #2 comes: the room on the
    map, the robot in it. The grey pill next to Stop says "manual · (x, y) cm" and
    follows the robot.
-4. `robot steer s`: another snapshot. Drag the timeline back: the map, picture and
+4. `robot snap`: another snapshot. Drag the timeline back: the map, picture and
    grid are those of the older snapshot; ▶ to the newest to come back.
-5. The page's Stop and the space key: "Stopped", "Mode: idle", "[page] done: x ok".
+5. The page's Stop and the space key: "Stopped", "Mode: idle", `[page]
+   {"command":"stop","result":"ok",…}`.
 6. Unplug the server (stop `npm start`) during a snapshot, start it again: the
    snapshot comes again whole (the log says "snapshots from boot …").
 
@@ -366,14 +374,14 @@ a piece of furniture 1-2 m away:
 1. `robot steer r390`, then press Idle and click on the map: the robot switches to
    manual and goes (a go to works in idle too, as every move does).
 2. Click a free spot ~1 m away: a yellow cross; "Go to: (x, y) cm, N cm away at A
-   deg", the robot turns towards it, drives, "[page] done: g… ok, at (…)"; the
-   cross goes, a snapshot follows. Measure where it stopped against the spot
-   (expected within a few cm plus odometry's error).
-3. Click behind the furniture: "done: g… obstacle after N cm"; the gap from the
-   front edge 15-25 cm, as for a drive.
+   deg", the robot turns towards it, drives, `[page] {"command":"steer g…",
+   "result":"ok",…}`; the cross goes, a snapshot follows. Measure where it stopped
+   against the spot (expected within a few cm plus odometry's error).
+3. Click behind the furniture: `"result":"obstacle"`; the gap from the front edge
+   15-25 cm, as for a drive.
 4. `robot steer g400,0` is refused (out of range); from near the start, a click
-   ~3 m away and then `robot steer g300,300`: "ok, 3 m towards it (goal 4.x m
-   away)" (only where the room allows it; `robot steer x` stops).
+   ~3 m away and then `robot steer g300,300`: `"result":"limited"`, `moved` 300
+   (only where the room allows it; `robot stop` stops).
 5. Drag the timeline back and click: the toast says it's an old snapshot, nothing
    moves.
 

@@ -48,6 +48,7 @@ typedef struct {
     rec_end_t reason;
     uint8_t stop_reason;  // REC_END_SAFETY_STOP: PicoB's STOP_* (link_msgs.h)
     float moved_m;        // from where it started to where it ended, straight
+    float rotated_rad;    // how far it turned, + = left (not wrapped)
     float goal_m;         // Go to: how far the point was when it started; 0 for the others
 } behaviour_end_t;
 // Counts the actions that ended; the last one's end (all zero before the first).

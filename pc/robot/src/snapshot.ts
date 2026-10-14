@@ -1,8 +1,8 @@
 // Snapshots from the robot (doc/ARCHITECTURE.md, snapshots; picoA/app/snapshot.c): what it
 // knows when a command asks (after every move), sent between its console text (robot.ts takes the bytes
 // out). Each boot's snapshots are saved as they arrive, never changed, in
-// recordings/snapshots/<time>-boot-<id>.snap (the truth); the database rows and
-// the PNG pictures are derived from them (store.ts, npm run import).
+// recordings/snapshots/raw/<time>-boot-<id>.snap (the truth); the database rows and
+// the camera pictures (recordings/camera/) are derived from them (store.ts, npm run import).
 //
 // A snapshot: "SNAP", version u8, total length u32, sections [type u8][length u32]
 // [payload], CRC-32 of everything before it. Little-endian.
@@ -218,7 +218,9 @@ export const grayPng = (width: number, height: number, pixels: Buffer) => png(wi
 export const rgbPng = (width: number, height: number, pixels: Buffer) => png(width, height, pixels, 3);
 
 export const snapId = (bootId: string, seq: number) => `${bootId}-${seq}`;
-export const imagePath = (dir: string, bootId: string, seq: number) => path.join(dir, bootId, `${seq}.png`);
+// Under recordings/: the raw snapshot files, and the camera pictures as camera/<boot>/<seq>.png.
+export const SNAPSHOTS_RAW = path.join("snapshots", "raw");
+export const cameraPicture = (bootId: string, seq: number) => path.join("camera", bootId, `${seq}.png`);
 
 // The snapshots in a raw file, with their arrival times; damaged ones are skipped (counted).
 export function* readSnapshotFile(buf: Buffer): Generator<{ arrivalMs: number; snapshot: Snapshot | null; error?: string }> {
@@ -232,8 +234,9 @@ export function* readSnapshotFile(buf: Buffer): Generator<{ arrivalMs: number; s
   }
 }
 
-// Saves each snapshot as it arrives (one raw file per boot) and its picture, and
-// passes it on. Events: "snapshot" (Snapshot, arrivalMs, file), "note" (string).
+// Saves each snapshot as it arrives (one raw file per boot) and its camera picture,
+// under recordings/ (dir), and passes it on. Events: "snapshot" (Snapshot, arrivalMs,
+// file, picture: relative to dir, or null), "note" (string).
 export class SnapshotSaver extends EventEmitter {
   private dir: string;
   private bootId = "";
@@ -243,7 +246,7 @@ export class SnapshotSaver extends EventEmitter {
   constructor(dir: string) {
     super();
     this.dir = dir;
-    mkdirSync(path.join(dir, "raw"), { recursive: true });
+    mkdirSync(path.join(dir, SNAPSHOTS_RAW), { recursive: true });
   }
 
   arrived(bytes: Buffer): void {
@@ -253,8 +256,7 @@ export class SnapshotSaver extends EventEmitter {
     const ms = Date.now(), head = Buffer.alloc(8);
     head.writeDoubleLE(ms, 0);
     this.file!.write(Buffer.concat([head, bytes]));
-    savePicture(this.dir, s);
-    this.emit("snapshot", s, ms, this.fileName);
+    this.emit("snapshot", s, ms, this.fileName, savePicture(this.dir, s));
   }
 
   stop(): void { this.file?.end(); }
@@ -263,18 +265,19 @@ export class SnapshotSaver extends EventEmitter {
     this.file?.end();
     this.bootId = bootId;
     const stamp = new Date().toLocaleString("sv-SE").replace(/[ :]/g, "-");
-    this.fileName = path.join(this.dir, "raw", `${stamp}-boot-${bootId}.snap`);
+    this.fileName = path.join(this.dir, SNAPSHOTS_RAW, `${stamp}-boot-${bootId}.snap`);
     this.file = createWriteStream(this.fileName);
     this.file.write(SNAP_FILE_MAGIC);
     this.emit("note", `snapshots from boot ${bootId}: saving to snapshots/raw/${path.basename(this.fileName)}`);
   }
 }
 
-// The camera frame as recordings/snapshots/<boot>/<seq>.png.
+// The camera frame as camera/<boot>/<seq>.png under recordings/ (dir); its path
+// relative to dir, null without a picture.
 export function savePicture(dir: string, s: Snapshot): string | null {
   if (!s.camera) return null;
-  const file = imagePath(dir, s.bootId, s.seq);
+  const picture = cameraPicture(s.bootId, s.seq), file = path.join(dir, picture);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, grayPng(s.camera.width, s.camera.height, s.camera.pixels));
-  return file;
+  return picture;
 }

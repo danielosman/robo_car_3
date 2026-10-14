@@ -7,13 +7,13 @@
 //                                          map's tiles as they were (the newest of each tile up to this
 //                                          snapshot since the map was last cleared), where the robot was,
 //                                          and the path it drove since the map was last cleared
-//   GET /snapshots/<boot>/<seq>.png        the camera picture
+//   GET /camera/<boot>/<seq>.png           the camera picture
 import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
 import type { Pose } from "./robot.ts";
-import { tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
+import { cameraPicture, tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
 
 const BOOT = /^[0-9a-f]{8}$/;
 
@@ -113,10 +113,10 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
       if (body) send(200, body); else send(404, { error: "no such snapshot" });
       return true;
     }
-    const png = /^\/snapshots\/([0-9a-f]{8})\/(\d+)\.png$/.exec(url.pathname);
+    const png = /^\/camera\/([0-9a-f]{8})\/(\d+)\.png$/.exec(url.pathname);
     if (png) {
       try {
-        const data = await readFile(path.join(dir, "snapshots", png[1], `${png[2]}.png`));
+        const data = await readFile(path.join(dir, cameraPicture(png[1], Number(png[2]))));
         res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=86400" });
         res.end(data);
       } catch { res.writeHead(404); res.end("no picture"); }

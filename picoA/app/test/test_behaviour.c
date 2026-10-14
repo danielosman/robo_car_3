@@ -287,6 +287,7 @@ int main(void) {
     assert(!take_running && take_end == REC_END_DONE && takes == 1);
     behaviour_end_t ended;
     assert(behaviour_endings(&ended) == 1 && ended.command == 7 && ended.reason == REC_END_DONE && ended.moved_m < 0.03f);
+    assert(fabsf(DEG(ended.rotated_rad) - DEG(sim.yaw_rad)) < 0.5f);
     printf("scan done in %.0f s; turned %.1f deg\n", (double)seconds, (double)DEG(sim.yaw_rad));
     assert(seconds > 14 && seconds < 25);
     assert(fabsf(DEG(sim.yaw_rad) - 390) < 3 && fabsf(DEG(max_yaw_rad) - DEG(sim.yaw_rad)) < 0.5f);

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { Store } from "./store.ts";
 import { DB_PATH, importSnapshots } from "./import.ts";
 import { exportFrames } from "./replay.ts";
+import { SNAPSHOTS_RAW } from "./snapshot.ts";
 
 const run = promisify(execFile);
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -20,7 +21,7 @@ const BUILD = path.join(repo, "build", "replay");
 const [boot, outArg] = process.argv.slice(2);
 if (!boot || !/^[0-9a-f]{8}$/.test(boot)) { console.error("usage: npm run snapreplay -- <boot id> [out file]"); process.exit(2); }
 const recordingsDir = path.join(root, "recordings");
-const out = outArg ?? path.join(recordingsDir, "snapshots", "raw", `replay-boot-${boot}.snap`);
+const out = outArg ?? path.join(recordingsDir, SNAPSHOTS_RAW, `replay-boot-${boot}.snap`);
 mkdirSync(BUILD, { recursive: true });
 mkdirSync(path.dirname(out), { recursive: true });
 const binary = path.join(BUILD, "replay_snapshots");

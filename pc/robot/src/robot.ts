@@ -103,9 +103,11 @@ export function parsePose(record: string): LivePose | null {
 }
 
 // How command n ended (picoA/app/commands.h): "\x01done n=17 end=obstacle x=43.0
-// y=-4.0 yaw=30.0 moved=31 goal=420 snapshot=41" (cm, degrees); moved, goal and
-// snapshot only where they apply.
-export interface DoneRecord { n: number; end: string; pose: Pose | null; movedM: number | null; goalM: number | null; snapshot: number | null }
+// y=-4.0 yaw=30.0 moved=31 rotated=0 goal=420 snapshot=41" (cm, degrees); moved,
+// rotated, goal and snapshot only where they apply.
+export interface DoneRecord {
+  n: number; end: string; pose: Pose | null; movedM: number | null; rotatedDeg: number | null; goalM: number | null; snapshot: number | null;
+}
 export function parseDone(record: string): DoneRecord | null {
   if (!record.startsWith("done ")) return null;
   const f = Object.fromEntries(record.slice(5).split(" ").map(kv => kv.split("=")));
@@ -114,7 +116,7 @@ export function parseDone(record: string): DoneRecord | null {
   if (n === null || !f.end) return null;
   const cm = (k: string) => { const v = num(k); return v === null ? null : v / 100; };
   return { n, end: f.end, pose: x === null || y === null || yaw === null ? null : { x: x / 100, y: y / 100, yaw: yaw * Math.PI / 180 },
-           movedM: cm("moved"), goalM: cm("goal"), snapshot: num("snapshot") };
+           movedM: cm("moved"), rotatedDeg: num("rotated"), goalM: cm("goal"), snapshot: num("snapshot") };
 }
 
 export function broadcastAddresses(): string[] {

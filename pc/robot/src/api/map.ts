@@ -1,12 +1,11 @@
 // The robot's map at one snapshot (snapshots_api.ts, MapView) for the API: each world
 // column (10 cm) as the robot has it (picoA/app/cell_map.c, column_at: the window's
 // inside it, the whole-house map's tiles outside), the robot's own obstacle check
-// along a path (cell_map_obstacle_along), and the map drawn as text, one character a
+// along a path (cell_map_obstacle_along), and the map as rows of characters, one a
 // column, or as a PNG. Map frame: x forward at power-up, y left; drawn with x up and
 // y to the left, as the page does.
 import type { MapView } from "../snapshots_api.ts";
 import { COLUMN, TILE_COLS, rgbPng } from "../snapshot.ts";
-import { poseText } from "./answers.ts";
 
 const CELL_M = 0.1;
 const cellOf = (m: number) => Math.floor(m / CELL_M);
@@ -18,9 +17,11 @@ export const MAP_CHARS: Record<number, string> = {
   [COLUMN.DRIVABLE]: ".", [COLUMN.OPEN]: ":",
 };
 const ROBOT = "R", AHEAD = "*", PATH = "o";
-export const MAP_LEGEND = `# blocked (3-13 cm high)  ' overhang (13-23 cm, nothing below)  ? no floor (a drop)
-. drivable (floor seen, free above)  : free, floor not seen  blank unknown
-R the robot  * 30 cm ahead of it  o the path driven since the map was last cleared`;
+export const MAP_LEGEND = {
+  "#": "blocked (3-13 cm high)", "'": "overhang (13-23 cm high, nothing below)", "?": "no floor (a drop)",
+  ".": "drivable (floor seen, free above)", ":": "free, floor not seen", " ": "unknown",
+  R: "the robot", "*": "30 cm ahead of the robot", o: "the path driven since the map was last cleared",
+};
 // The page's colours (public/app.html).
 const COLORS: Record<number, [number, number, number]> = {
   [COLUMN.UNKNOWN]: [0x15, 0x15, 0x15], [COLUMN.BLOCKED]: [0xd0, 0x45, 0x3b], [COLUMN.OVERHANG]: [0xe3, 0x9b, 0x3a],
@@ -80,28 +81,13 @@ export class RobotMap {
     return false;
   }
 
-  // The window drawn as text: x up, y to the left, one character a column, x and y
-  // (cm) along the edges every metre, the robot, the path, the legend. null without a
-  // window.
-  text(): string | null {
+  // The window as rows of characters: x up (the top row is the largest x), y to the
+  // left; the robot and the path marked. xTop, yLeft: the top-left cell's x and y
+  // (cm, its lower edges). null without a window.
+  grid(): { xTop: number; yLeft: number; rows: string[] } | null {
     const w = this.view.window;
     if (!w) return null;
-    const grid = this.cells();
-    const ruler = Array(w.cellsY).fill(" ");
-    for (let col = 0; col < w.cellsY; col++) {
-      const cy = w.orgY + w.cellsY - 1 - col;
-      const label = `${cy > 0 ? "+" : ""}${cy * 10}`;
-      if (cy % 10 === 0 && col + label.length <= w.cellsY) [...label].forEach((ch, i) => { ruler[col + i] = ch; });
-    }
-    const lines = [`y cm:  ${ruler.join("")}`];
-    grid.forEach((row, r) => {
-      const cx = w.orgX + w.cellsX - 1 - r;
-      lines.push(`${cx % 10 === 0 ? `${cx > 0 ? "+" : ""}${cx * 10}`.padStart(5) : "     "} |${row.join("")}|`);
-    });
-    const robot = this.view.robot;
-    const head = `The map, 10 cm a character, x up (forward at power-up), y left; x cm on the left, y cm on top.` +
-      (robot ? `\nThe robot ${poseText(robot)}.` : "");
-    return `${head}\n${lines.join("\n")}\n${MAP_LEGEND}`;
+    return { xTop: (w.orgX + w.cellsX - 1) * 10, yLeft: (w.orgY + w.cellsY - 1) * 10, rows: this.cells().map(r => r.join("")) };
   }
 
   // The window as an RGB PNG, scale pixels a column; null without a window.

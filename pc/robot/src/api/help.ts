@@ -1,70 +1,94 @@
-// The help the CLI prints and the API serves (GET /api/robot/help[/<name>]): written
-// so that an agent can steer the robot from it alone.
-import { COMMANDS } from "./commands.ts";
+// The help the CLI prints and the API serves (GET /api/robot/help[/<command>]): short
+// sentences an agent can steer the robot from.
+import { MOVES } from "./commands.ts";
 import { READS } from "./reads.ts";
 
-const FRAME = `The map frame: x forward from where the robot was at power-up, y to its left, in cm;
-yaw in degrees, + = turned left. "at (43, -4) cm, yaw +30°" is where the robot is and which way it faces.`;
+const UNITS = `Units: distances and positions in cm, angles in degrees (+ is left), picture positions in
+pixels, jolt in g, WiFi in dBm, light in lux.
 
-const STEER = `robot steer <commands> [--check] [--no-wait]
+The map frame: x points forward from where the robot was at power-up, y to its left.
+pose is where the robot is: {"x":51,"y":0,"yaw":30} is 51 cm forward, facing 30° left.`;
 
-Steers the robot: the commands run one after the other, after whatever is queued
-before them (the web page's too). Spaces are optional; long names work too.
-  robot steer r30d50            rotate 30° left, then drive 50 cm
-  robot steer rotate 30 drive 50
-  robot steer g120,40           go to (120, 40) cm on the map
-  robot steer x                 stop: everything, at once
+const ANSWERS = `Every queued command answers one JSON line when it ends, in order:
+  {"command":"steer d50","result":"ok","pose":{"x":51,"y":0,"yaw":0},"moved":50,"rotated":0}
+  {"command":"snap","result":"ok","pose":{"x":51,"y":0,"yaw":0},"snapshot":2}
+result is one of:
+  ok           it did what was asked
+  obstacle     a move stopped early, before an obstacle on the map
+  limited      a goto further than 3 m went 3 m
+  stopped      robot stop ended it
+  safety_stop  the robot stopped itself; why says tilt or wheels
+  failed       why says what went wrong (a bad number, robot not connected, no answer...)
+  dropped      it never ran, because a command before it didn't end ok
+After anything that isn't ok, the queue is emptied. A move's own snap still runs first,
+so the newest snapshot shows where the robot ended up. Look at it before going on.
+moved is cm in a straight line from where the move started; rotated is degrees turned.`;
 
-${COMMANDS.map(c => {
-  const values = c.values.map(v => (v.kind === "number" ? `${v.min}..${v.max} ${v.unit}` : v.words.join("|"))).join(", ");
-  return `  ${c.letter.padEnd(2)} ${(c.name + (values ? ` <${values}>` : "")).padEnd(32)} ${c.does}`;
+const STEER = `robot steer <moves> [--no-wait]
+
+Moves the robot. The moves run one after the other, after anything already queued
+(also the web page's commands). Spaces between moves are optional.
+  robot steer r30d50       turn 30° left, then drive 50 cm
+  robot steer g120,40      go to x 120, y 40 on the map
+  robot steer d-40 w60     drive 40 cm backwards, then watch for a minute
+
+${MOVES.map(m => {
+  const values = m.values.map(v => `${v.min}..${v.max}`).join(",");
+  return `  ${(m.letter + values).padEnd(18)} ${m.does}`;
 }).join("\n")}
 
-Every number is required. After every move (d, r, g, w) a snapshot (s) is taken by
-itself, so each move's result can be read at once.
+Every move needs its numbers. With auto_snap on (the default, robot config), a snap
+runs after each move, with its own answer line.
+--no-wait answers only {"queued":[...]} and returns; the answers are in robot log.
+Ctrl-C leaves the moves queued; robot stop stops them.
 
-Answers, one line per command, as each ends:
-  queued:  r30 s d50 s
-  done:    r30 ok, at (12, -4) cm, yaw +30°
-  done:    s snapshot 41, at (12, -4) cm, yaw +30°
-  done:    d50 obstacle after 31 cm, at (43, -4) cm, yaw +30°
-  dropped: s
-A move ends ok, or: obstacle after N cm, stopped, safety stop: tilt | wheels,
-PicoB lost, didn't start. Anything that doesn't end ok (or an error: robot not
-connected, no answer, refused) empties the queue: what still waited is "dropped",
-after the snapshot of that move, which shows where the robot ended up. Look at it
-(robot snap, robot map) before going on.
+${ANSWERS}`;
 
---check   moves nothing: says what each d, r, g would do on the newest snapshot's map,
-          each from where the one before would end:
-            check: d80 clear: would end at (92, -4) cm, yaw +30°
-            check: g120,40 turn +34° to yaw +64°, then drive 126 cm; blocked: obstacle after 81 cm, would stop at (52, 31) cm
---no-wait returns after "queued"; the answers are in robot log. Ctrl-C leaves the
-          commands queued; robot steer x stops them.
-
-${FRAME}`;
+const ACTIONS_HELP: Record<string, string> = {
+  snap: "robot snap\n\nTakes a snapshot: the camera picture, the ToF frame, the light, the map, the pose. It is saved,\n" +
+        "and its number comes back. Read it with robot map, tof, camera, light and features.",
+  stop: "robot stop\n\nStops the robot at once: motors off, mode idle. It skips the queue, and everything waiting is\n" +
+        "dropped. The move it interrupted answers \"stopped\".",
+  clear_map: "robot clear_map\n\nClears the map. The path on the map starts again from here.",
+  recording: "robot recording on|off\n\nRecords every action in full (every sensor reading), for looking at later in\n" +
+             "the 3D viewer. Off at power-up.",
+  mode: "robot mode idle|manual\n\nidle: the robot stands with the motors off. manual: commands steer it (after power-up).\n" +
+        "A move in idle switches to manual.",
+  check: "robot check <moves>\n\nSays what drive, rotate and goto would do on the newest snapshot's map. Nothing moves.\n" +
+         "Each move is checked from where the one before would end. The answers look like steer's.\n" +
+         "  robot check d80 r90 g120,40",
+};
 
 function general(): string {
-  const reads = Object.values(READS).map(r => `  robot ${r.usage.padEnd(22)} ${r.help.split("\n")[0]}`);
-  return `robot: steer the RoboCar and read what it saw (the robot server at ROBOT_API,
-default http://127.0.0.1:8080).
+  const reads = Object.values(READS).map(r => `  robot ${r.usage.padEnd(26)} ${r.help.split(/(?<=\.)\s/)[0]}`);
+  return `robot: steers the RoboCar and reads what it saw. Talks to the robot server
+(ROBOT_API, default http://127.0.0.1:8080; npm start in pc/robot/).
 
-  robot steer <commands>         steer it (robot steer --help: the commands)
+Queued, one at a time, in order:
+  robot steer <moves>              Moves the robot (robot steer --help).
+  robot snap                       Takes a snapshot.
+  robot clear_map                  Clears the map.
+  robot recording on|off           Records every action in full, or not.
+  robot mode idle|manual           Sets the mode.
+  robot stop                       Stops at once, skipping the queue; drops what waits.
+
+At once:
+  robot check <moves>              Says what moves would do on the map; nothing moves.
 ${reads.join("\n")}
 
-  robot <name> --help            more about one
-  --json                         the data as JSON instead of text (the reads)
+n is a snapshot's number; without it, the newest snapshot.
+robot <command> --help says more about one command.
 
-n is a snapshot's number (the newest boot's); without it, the newest snapshot. A
-snapshot is taken after every move. Pictures are answered with their file's path.
+${UNITS}
 
-${STEER}`;
+${ANSWERS}`;
 }
 
-// The help for one command (steer, or a read), or everything; null for an unknown name.
+// The help for one command, or everything; null for an unknown name.
 export function help(name?: string): string | null {
   if (name === undefined) return general();
-  if (name === "steer") return STEER;
+  if (name === "steer") return `${STEER}\n\n${UNITS}`;
+  if (ACTIONS_HELP[name]) return ACTIONS_HELP[name];
   const r = READS[name];
-  return r ? `robot ${r.usage}\n\n${r.help}${/^(snap|map)$/.test(name) ? `\n\n${FRAME}` : ""}` : null;
+  return r ? `robot ${r.usage}\n\n${r.help}\n\n${UNITS}` : null;
 }

@@ -14,7 +14,8 @@
 //   status                 PicoA's and PicoB's state, printed (for a serial monitor)
 // A move in idle switches to manual. Each command is answered once it has ended, by
 // a done record to the server: "\001done n=<n> end=<end> x=<cm> y=<cm> yaw=<deg>"
-// and, for a move, "moved=<cm>" (from where it started, straight), for a go to also
+// and, for a move, "moved=<cm> rotated=<deg>" (from where it started: straight, and
+// how far it turned, + = left), for a go to also
 // "goal=<cm>" (how far the point was), for a snapshot "snapshot=<its number>" (the
 // pose is the snapshot's). end: ok, obstacle, stopped, replaced, tilt, wheels,
 // no_drive, picob_lost, no_start, refused (not a command, or a number out of range).

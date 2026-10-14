@@ -5,7 +5,7 @@
 // Events: "item" (LogItem).
 import { EventEmitter } from "node:events";
 import type { WriteStream } from "node:fs";
-import { answerLine, type Answer } from "./api/answers.ts";
+import type { Answer, Sender } from "./api/answers.ts";
 
 export interface LogItem { kind: "text" | "note" | "answer"; text: string; command?: string }
 
@@ -39,9 +39,9 @@ export class Log extends EventEmitter {
     this.add({ kind: "note", text: line });
   }
 
-  // "[cli] done: d50 ok, at (62, -4) cm, yaw +30°".
-  answer(a: Answer): void {
-    const line = `[${a.sender}] ${answerLine(a)}\n`;
+  // '[cli] {"command":"steer d50","result":"ok",…}'.
+  answer(a: Answer, sender: Sender): void {
+    const line = `[${sender}] ${JSON.stringify(a)}\n`;
     this.file?.write(line);
     if (this.echo) process.stdout.write(line);
     this.add({ kind: "answer", text: line, command: a.command });

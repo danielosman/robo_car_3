@@ -1,9 +1,9 @@
 // The `robot` command line (doc/CLI_API_PLAN.md): turns its arguments into a request to
-// the robot server's command API and prints the answer. It knows no commands and
-// holds no state: `robot <name> [args] [--flags]` becomes /api/robot/<name>, each
-// --flag a query parameter (--no-wait: nowait). `robot steer` posts its commands and
-// prints each answer as it comes. The server: ROBOT_API, default http://127.0.0.1:8080.
-//   robot --help | robot steer r30d50 | robot map 42 --png | robot status --json
+// the robot server's command API and prints the answer as it comes. It knows no
+// commands and holds no state: `robot <name> [args] [--flags]` posts the args to
+// /api/robot/<name>, each --flag a query parameter (--no-wait: nowait); --help gets
+// the help. The server: ROBOT_API, default http://127.0.0.1:8080.
+//   robot --help | robot steer r30d50 | robot snap | robot map 42 --png
 const API = (process.env.ROBOT_API ?? "http://127.0.0.1:8080").replace(/\/$/, "");
 
 const args = process.argv.slice(2);
@@ -16,12 +16,8 @@ if (!name || flags.includes("help") || args.includes("-h")) {
   url = `${API}/api/robot/help${name ? `/${encodeURIComponent(name)}` : ""}`;
 } else {
   const query = flags.length ? `?${flags.map(encodeURIComponent).join("&")}` : "";
-  if (name === "steer") {
-    url = `${API}/api/robot/steer${query}`;
-    init = { method: "POST", body: rest.join(" "), headers: { "content-type": "text/plain" } };
-  } else {
-    url = `${API}/api/robot/${encodeURIComponent(name)}${rest.length ? `/${rest.map(encodeURIComponent).join("/")}` : ""}${query}`;
-  }
+  url = `${API}/api/robot/${encodeURIComponent(name)}${query}`;
+  init = { method: "POST", body: rest.join(" "), headers: { "content-type": "text/plain" } };
 }
 
 try {

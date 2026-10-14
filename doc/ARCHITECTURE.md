@@ -168,7 +168,7 @@ the frame was measured. Nothing is learned first; `C` clears the map.
   free, G unknown), unknown.
 - **Queries:** `cell_map_column()`, `cell_map_obstacle_along()` (the nearest blocked
   or overhang column on a path of a given width: what drive and go-to stop at; the
-  PC's `--check` has a copy, tested against it), `cell_map_print()` (4 × 4 m as
+  PC's `robot check` has a copy, tested against it), `cell_map_print()` (4 × 4 m as
   text, for the tests and `tools/replay.sh`). Outside the window they answer from
   the whole-house map's columns.
 - **The window follows the robot** (`cell_map_follow()`, before every frame): it is
@@ -376,11 +376,13 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
 - **`api/`, `cli.ts`, `robot`**: the command API under `/api/robot/` (Hono) and the
   `robot` CLI that calls it ([CLI_API_PLAN.md](CLI_API_PLAN.md): the commands,
   answers and the design, module by module). One queue (`api/queue.ts`) for the
-  page's and the CLI's commands, one at a time; anything that doesn't end ok
-  empties it. `api/runner.ts` numbers each command, sends it and waits for its
-  done record; `api/commands.ts` is the steering language (`robot steer r30d50`);
-  `api/reads.ts` the reads (status, snap, light, features, tof, camera, map, log,
-  queue) as text or JSON; `api/check.ts` `--check` on the newest snapshot's map;
+  page's and the CLI's commands (steer, snap, clear_map, recording, mode; stop
+  skips it), one at a time; anything that doesn't end ok empties it; a snap after
+  every move (auto_snap). Every answer is a JSON line with the same fields.
+  `api/runner.ts` numbers each command, sends it and waits for its done record;
+  `api/commands.ts` is the command language (`robot steer r30d50`); `api/reads.ts`
+  the commands that run at once (status, map, tof, camera, light, features, log,
+  config) as JSON; `api/check.ts` `robot check` on the newest snapshot's map;
   `api/firmware.ts` reads the limits and the move rules from the firmware's headers.
 - **`log.ts`, `live.ts`**: the one log everyone sees (the robot's text, the server's
   notes, every answer with who sent it), kept for new pages and `robot log` and
@@ -402,8 +404,9 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
   sends the robot there (`g<x>,<y>`). The old console page, `/console`, still sends
   keys nothing takes (CLI_API_PLAN.md, gaps).
 - **`snapshot.ts`, `snapshots_api.ts`**: each boot's snapshots as they arrive in
-  `recordings/snapshots/raw/<time>-boot-<id>.snap` (the truth), each picture as
-  `recordings/snapshots/<boot>/<seq>.png`, and in DuckDB: `snapshots` (one row each),
+  `recordings/snapshots/raw/<time>-boot-<id>.snap` (the truth), each camera picture
+  as `recordings/camera/<boot>/<seq>.png` (map pictures from `robot map --png` in
+  `recordings/map/`), and in DuckDB: `snapshots` (one row each),
   `snapshot_targets`, `snapshot_features`, `snapshot_tiles`, the window as a BLOB.
   The API composes the map at any snapshot: the newest of each tile up to it since
   the map was last cleared.
@@ -446,7 +449,7 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
   snapshots as the PC reads them (`test_snapshot`, whose file the PC's test reads,
   and the map's obstacle check on it, which the PC's copy must match).
 - `npm test` and `npm run typecheck` in `pc/robot/`: also the API (the steering
-  language, the queue and runner, `--check`, the reads and the routes end to end).
+  language, the queue and runner, `robot check`, the reads and the routes end to end).
 - `tools/lint.sh`: cppcheck, ESLint, tsc.
 - `tools/stack_depth.py`: worst-case stack from GCC's call graph.
 

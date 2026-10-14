@@ -63,6 +63,7 @@ static void ended(rec_end_t reason) {
         .command = command, .action = take_name[action], .reason = reason,
         .stop_reason = reason == REC_END_SAFETY_STOP ? o->stop_reason : STOP_NONE,
         .moved_m = started ? hypotf(o->x_m - start.x_m, o->y_m - start.y_m) : 0,
+        .rotated_rad = started ? o->yaw_rad - start.yaw_rad : 0,
         .goal_m = action == GOTO ? goal_m : 0,
     };
     recorder_take_end(reason);

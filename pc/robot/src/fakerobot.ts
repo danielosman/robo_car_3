@@ -27,7 +27,7 @@ const socket = net.connect(Number(process.env.ROBOT_PORT ?? ROBOT_PORT), "127.0.
 const pose = { x: parsed[0]?.pose?.x ?? 0, y: parsed[0]?.pose?.y ?? 0, yaw: parsed[0]?.pose?.yaw ?? 0 };
 let mode = "manual", recording = false, next = 0;
 // The running action: what it still has to do, step by step; its command's number.
-let action: { name: string; take: string; n: number; steps: (() => boolean)[]; start: { x: number; y: number }; goal?: number } | null = null;
+let action: { name: string; take: string; n: number; steps: (() => boolean)[]; start: { x: number; y: number; yaw: number }; goal?: number } | null = null;
 const say = (text: string) => { socket.write(text); process.stdout.write(`robot: ${text}`); };
 const record = (text: string) => socket.write(`\x01${text}\n`);
 const f1 = (v: number) => v.toFixed(1);
@@ -38,10 +38,10 @@ function done(n: number, end: string, more = "", at = pose): void {
 
 function end(how: string): void {
   if (!action) return;
-  const a = action, moved = Math.hypot(pose.x - a.start.x, pose.y - a.start.y) * 100;
+  const a = action, moved = Math.hypot(pose.x - a.start.x, pose.y - a.start.y) * 100, rotated = (pose.yaw - a.start.yaw) * 180 / Math.PI;
   action = null;
   say(`${a.name} ${how}\n`);
-  done(a.n, how === "done" ? "ok" : how, ` moved=${moved.toFixed(0)}${a.goal !== undefined ? ` goal=${(a.goal * 100).toFixed(0)}` : ""}`);
+  done(a.n, how === "done" ? "ok" : how, ` moved=${moved.toFixed(0)} rotated=${rotated.toFixed(0)}${a.goal !== undefined ? ` goal=${(a.goal * 100).toFixed(0)}` : ""}`);
 }
 
 const turn = (rad: number) => {
@@ -62,7 +62,7 @@ const wait = (s: number) => { let left = s; return () => (left -= STEP_S) <= 0; 
 function begin(name: string, take: string, n: number, steps: (() => boolean)[], goal?: number): void {
   end("replaced");
   if (mode === "idle") { mode = "manual"; say("Mode: manual\n"); }
-  action = { name, take, n, steps, start: { x: pose.x, y: pose.y }, goal };
+  action = { name, take, n, steps, start: { ...pose }, goal };
   say(`${name}: started\n`);
 }
 

@@ -7,6 +7,18 @@ older entries point to the plans of their day, now in [archive/](archive/).
 
 ## 14 Oct 2026: the command API and the `robot` CLI
 
+Later the same day, after Daniel tried it: the answers became JSON with the same
+fields every time (`command` as typed, `result`, `why`, `pose`, `moved` and
+`rotated` for every move, `snapshot`), no ids and no "queued" lines; an obstacle
+stop is its own result, not a failure. Each action became its own command (`robot
+snap`, `stop`, `clear_map`, `recording`, `mode`); `steer` takes only the moves, and
+the snap after each move is a setting (`robot config auto_snap`). `status` is only
+the robot now; the old snapshot summary went. `tof` gives one matrix per reading,
+`light` lux, CIE and rgb (the colour name was made up and went). The robot's done
+record says `rotated` too. Camera pictures moved to `recordings/camera/`, map
+pictures go to `recordings/map/` (a snapshot is more than its picture). The text
+map's readability and a labelled PNG of the whole map are open (CLI_API_PLAN.md).
+
 Built from [CLI_API_PLAN.md](CLI_API_PLAN.md), so an AI agent can steer the robot
 and read what it saw. The keys went: PicoA takes one command per line (drive,
 rotate, goto, watch, snapshot, clear_map, recording, mode, stop, status), numbered

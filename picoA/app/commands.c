@@ -190,8 +190,9 @@ static void answer_ended(void) {
     uint32_t endings = behaviour_endings(&e);
     if (endings != endings_seen) {
         endings_seen = endings;
-        char more[40];
-        int len = snprintf(more, sizeof more, " moved=%.0f", (double)(e.moved_m * 100));
+        char more[48];
+        int len = snprintf(more, sizeof more, " moved=%.0f rotated=%.0f", (double)(e.moved_m * 100),
+                           (double)(e.rotated_rad * DEG_PER_RAD));
         if (e.goal_m > 0) snprintf(more + len, sizeof more - (size_t)len, " goal=%.0f", (double)(e.goal_m * 100));
         const odom_report_t *o = body_odom();
         answer_at(e.command, end_word(&e), o->x_m, o->y_m, o->yaw_rad, more);

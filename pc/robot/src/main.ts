@@ -4,7 +4,8 @@
 // through the command API at /api/robot/ (api/, doc/CLI_API_PLAN.md): the page's and
 // the `robot` CLI's commands share one queue, and everyone sees one log (log.ts),
 // also written to a file in logs/. Snapshots arrive between the
-// console's text and are saved in recordings/snapshots/ (snapshot.ts) and stored in
+// console's text and are saved in recordings/snapshots/raw/, their pictures in
+// recordings/camera/ (snapshot.ts), and stored in
 // DuckDB (store.ts, snapshots_api.ts), as are the pose lines (live.ts). PicoA's recordings arrive on a second connection and are saved in
 // recordings/ (recording.ts); each take goes into DuckDB as it
 // ends (store.ts), listed at http://127.0.0.1:8080/takes and shown in 3D at /viewer
@@ -25,7 +26,7 @@ import { Store } from "./store.ts";
 import { DB_PATH } from "./import.ts";
 import { handleViewerApi } from "./viewer_api.ts";
 import { handleSnapshotApi } from "./snapshots_api.ts";
-import { SnapshotSaver, imagePath, type Snapshot } from "./snapshot.ts";
+import { SnapshotSaver, type Snapshot } from "./snapshot.ts";
 import { Log } from "./log.ts";
 import { LiveRobot } from "./live.ts";
 import { CommandRunner, StoredSnapshots } from "./api/runner.ts";
@@ -59,10 +60,9 @@ async function main(): Promise<void> {
       .catch(err => note(`${take.name} NOT stored: ${(err as Error).message}`));
   });
   const recordingsDir = path.join(root, "recordings");
-  const snapshots = new SnapshotSaver(path.join(recordingsDir, "snapshots"));
+  const snapshots = new SnapshotSaver(recordingsDir);
   snapshots.on("note", note);
-  snapshots.on("snapshot", (s: Snapshot, ms: number, file: string) => {
-    const image = s.camera ? path.relative(recordingsDir, imagePath(path.join(recordingsDir, "snapshots"), s.bootId, s.seq)) : null;
+  snapshots.on("snapshot", (s: Snapshot, ms: number, file: string, image: string | null) => {
     live.setBoot(s.bootId);
     void live.flush(); // the path up to this snapshot goes in first
     store.importSnapshot(s, ms, file, image)
@@ -78,8 +78,8 @@ async function main(): Promise<void> {
   robot.on("status", status => { live.setStatus(status); broadcast({ type: "status", status }); });
   robot.on("snapshot", (b: Buffer) => snapshots.arrived(b));
   robot.on("pose", (p: LivePose) => { live.setPose(p); broadcast({ type: "pose", pose: p }); });
-  const queue = new CommandQueue(new CommandRunner(robot, stored), a => log.answer(a));
-  const api = getRequestListener(createApi({ store, live, queue, log, recordingsDir }).fetch);
+  const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
+  const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true }, recordingsDir }).fetch);
   await robot.start();
   note(`server started; announcing on ${(announceTo.length ? announceTo : broadcastAddresses()).join(", ") || "no network"}; log ${path.relative(root, logPath)}`);
 
