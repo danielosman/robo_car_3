@@ -4,7 +4,7 @@
 //   GET  /api/robot/help[/<command>] the help, as text
 // steer, snap, stop, clear_map, recording and mode go into the queue (stop skips it):
 // one JSON line per command streams back as each ends; ?nowait answers only what was
-// queued. check, and the reads (reads.ts), answer one JSON object at once. A command
+// queued. check, the reads (reads.ts), and detect and objects (objects/api.ts) answer one JSON object at once. A command
 // the API can't take is answered 400 ("result":"failed"); an unknown one 404.
 import { Hono } from "hono";
 import { commandText, parseAction, parseSteer, withSnaps, type Command, type Parsed } from "./commands.ts";
@@ -13,6 +13,7 @@ import { checkMoves } from "./check.ts";
 import { help } from "./help.ts";
 import { formatJson } from "./json.ts";
 import { READS, ReadError, findSnapshot, mapOf, type ApiContext } from "./reads.ts";
+import { OBJECT_COMMANDS } from "../objects/api.ts";
 
 const JSON_TYPE = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const json = (lines: string, status = 200) => new Response(`${lines}\n`, { status, headers: JSON_TYPE });
@@ -40,7 +41,7 @@ export function createApi(ctx: ApiContext): Hono {
       if (name === "check") return check(parsed.commands);
       return queued(name === "steer" ? withSnaps(parsed.commands, ctx.config.autoSnap) : parsed.commands, sender, flags.has("nowait"));
     }
-    const read = READS[name];
+    const read = READS[name] ?? OBJECT_COMMANDS[name];
     if (!read) return json(line({ error: `${name} is not a command (robot --help lists them)` }), 404);
     try {
       return json(formatJson(await read.run(ctx, arg ? arg.split(/\s+/) : [], flags)));

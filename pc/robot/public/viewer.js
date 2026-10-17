@@ -150,7 +150,7 @@ function buildRobot() {
   body.position.set(f.x[i], f.y[i], 0.05);
   body.rotation.z = f.yaw[i];
   robotObj.add(body);
-  const g = data.take.geometry ?? { sensorM: [0.025, -0.03, 0.07] };
+  const g = data.take.geometry ?? { sensorM: [0.032, -0.026, 0.07] };
   const o = [f.x[i] + c * g.sensorM[0] - s * g.sensorM[1], f.y[i] + s * g.sensorM[0] + c * g.sensorM[1], g.sensorM[2]];
   // A ray to each zone's closest target among the points shown (a farther target lies
   // along the same line).

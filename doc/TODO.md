@@ -35,6 +35,13 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
      weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
+**Built 17 Oct, waiting for Daniel's look:** objects from the camera, first step
+([OBJECTS_PLAN.md](OBJECTS_PLAN.md)): `robot detect` / `robot objects` and the
+overlays; the README's "Objects from the camera" test. Camera calibrated (f 180 px,
+tilt −1.8°). Next: the plan's "Next phase" (bottom edge from the pixels, ToF
+distance and "ToF verified", the tilt calibrating itself). Flash PicoA: the ToF's
+position changed (3.2 cm ahead, 2.6 cm right).
+
 **Built 14 Oct, waiting for its robot test:** the command API and the `robot` CLI
 ([CLI_API_PLAN.md](CLI_API_PLAN.md)). Flash both Picos (the link version went up),
 then the README's "Steering through the API" test. Left of the plan (CLI_API_PLAN.md, "To do"):

@@ -7,6 +7,8 @@
 //                                          map's tiles as they were (the newest of each tile up to this
 //                                          snapshot since the map was last cleared), where the robot was,
 //                                          and the path it drove since the map was last cleared
+//   GET /api/snapshots/<boot>/<seq>/objects  what robot detect found in its picture, and the boot's
+//                                          objects on the map up to it (objects/api.ts)
 //   GET /camera/<boot>/<seq>.png           the camera picture
 import type http from "node:http";
 import { readFile } from "node:fs/promises";
@@ -14,6 +16,7 @@ import path from "node:path";
 import type { Store } from "./store.ts";
 import type { Pose } from "./robot.ts";
 import { cameraPicture, tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
+import { pageObjects } from "./objects/db.ts";
 
 const BOOT = /^[0-9a-f]{8}$/;
 
@@ -107,9 +110,11 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
   try {
     if (url.pathname === "/api/boots") { send(200, await listBoots(store)); return true; }
     if (url.pathname === "/api/snapshots") { send(200, await listSnapshots(store, url.searchParams.get("boot") ?? "")); return true; }
-    const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map)?$/.exec(url.pathname);
+    const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map|\/objects)?$/.exec(url.pathname);
     if (one) {
-      const body = one[3] ? await snapshotMap(store, one[1], Number(one[2])) : await snapshotDetail(store, one[1], Number(one[2]));
+      const boot = one[1], seq = Number(one[2]);
+      const body = one[3] === "/map" ? await snapshotMap(store, boot, seq) : one[3] === "/objects" ? await pageObjects(store, boot, seq)
+        : await snapshotDetail(store, boot, seq);
       if (body) send(200, body); else send(404, { error: "no such snapshot" });
       return true;
     }

@@ -2,9 +2,9 @@
 // the robot server's command API and prints the answer as it comes. It knows no
 // commands and holds no state: `robot <name> [args] [--flags]` posts the args to
 // /api/robot/<name>, each --flag a query parameter (--no-wait: nowait); --help gets
-// the help. The server: ROBOT_API, default http://127.0.0.1:8080.
+// the help. The server: ROBOT_API, default http://127.0.0.1:8081.
 //   robot --help | robot steer r30d50 | robot snap | robot map 42 --png
-const API = (process.env.ROBOT_API ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+const API = (process.env.ROBOT_API ?? "http://127.0.0.1:8081").replace(/\/$/, "");
 
 const args = process.argv.slice(2);
 const flags = args.filter(a => a.startsWith("--")).map(a => a.slice(2).replace(/-/g, ""));

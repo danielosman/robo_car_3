@@ -1,6 +1,6 @@
 #pragma once
 // The VL53L8CX as rays in the robot frame. Hides the zone order and how the sensor
-// is mounted (turned 90° on the PCB, 2.5 cm ahead of the centre, 3 cm right, 7 cm
+// is mounted (turned 90° on the PCB, 3.2 cm ahead of the centre, 2.6 cm right, 7 cm
 // up), its settings and status codes. What the readings mean is the map's
 // (cell_map) and movement detection's (tof_motion) business.
 #include <stdbool.h>

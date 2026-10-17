@@ -69,6 +69,22 @@ CREATE TABLE IF NOT EXISTS poses (  -- the pose lines (4 a second while the robo
   boot_id VARCHAR, arrived_at TIMESTAMP, -- PicoB's safety numbers; the PC's local time, as snapshots.arrived_at
   x DOUBLE, y DOUBLE, yaw DOUBLE, mode VARCHAR, action VARCHAR, rssi INTEGER, recording BOOLEAN,
   jolt_x DOUBLE, jolt_y DOUBLE, jolt_z DOUBLE, tilt DOUBLE);  -- g and rad, the largest since the line before; NULL from older firmware
+-- Objects on the map (doc/OBJECTS_PLAN.md, objects/): robot detect on a snapshot's picture. Not derived from
+-- the raw files: npm run import leaves them. Running detect again on a snapshot replaces its rows.
+CREATE TABLE IF NOT EXISTS detect_runs (  -- one per snapshot detected: how the model was asked and how it went
+  snap_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, ran_at TIMESTAMP, model VARCHAR, prompt_version INTEGER,
+  thinking BOOLEAN, seconds DOUBLE, turns INTEGER, result VARCHAR, why VARCHAR, -- result: ok or failed (why)
+  transcript VARCHAR);  -- the conversation as JSON, without the picture
+CREATE TABLE IF NOT EXISTS detections (  -- the model's boxes as it gave them: [ymin, xmin, ymax, xmax] on 0-1000
+  snap_id VARCHAR, n INTEGER, label VARCHAR, ymin INTEGER, xmin INTEGER, ymax INTEGER, xmax INTEGER);
+CREATE TABLE IF NOT EXISTS map_objects (  -- the shapes on the map, m and rad in the boot's map frame
+  object_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, label VARCHAR,
+  source VARCHAR,     -- camera (a first guess from one detection)
+  floor VARCHAR,      -- floor, cut_off (at most this far), above_horizon, too_far (the last two: not placed)
+  kind VARCHAR,       -- rect, line, or NULL (not placed)
+  distance DOUBLE,    -- camera to the front edge's middle, along the floor
+  cx DOUBLE, cy DOUBLE, width DOUBLE, depth DOUBLE, angle DOUBLE);
+CREATE TABLE IF NOT EXISTS object_detections (object_id VARCHAR, snap_id VARCHAR, n INTEGER);  -- which boxes made an object
 -- Added later: kept by "IF NOT EXISTS", filled by importing again (npm run import).
 ALTER TABLE takes ADD COLUMN IF NOT EXISTS geometry VARCHAR;   -- GEOMETRY as JSON (the viewer's rays)
 ALTER TABLE truth ADD COLUMN IF NOT EXISTS truth_id VARCHAR;
@@ -141,6 +157,8 @@ export class Store {
 
   // Runs fn with a connection (read-only use: the API's queries with BLOBs).
   async read<T>(fn: (c: DuckDBConnection) => Promise<T>): Promise<T> { return this.use(fn); }
+  // Runs fn with a connection that writes (objects/db.ts).
+  async write<T>(fn: (c: DuckDBConnection) => Promise<T>): Promise<T> { return this.use(fn); }
 
   // Imports a snapshot, replacing what was there for it. image: its PNG, relative to recordings/.
   async importSnapshot(s: Snapshot, arrivalMs: number, file: string, image: string | null): Promise<{ targets: number; tiles: number }> {

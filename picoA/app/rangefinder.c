@@ -6,8 +6,8 @@
 
 #define POLL_US          5000      // tof_poll() checks for data this often
 #define ZONE_RAD         (5.625f * RAD_PER_DEG) // 45° field of view over 8 zones
-#define SENSOR_X_M       0.025f    // ahead of the centre
-#define SENSOR_Y_M       (-0.03f)  // right of the centre line
+#define SENSOR_X_M       0.032f    // ahead of the centre (measured 17 Oct 2026)
+#define SENSOR_Y_M       (-0.026f) // right of the centre line (measured 17 Oct 2026)
 #define SENSOR_Z_M       0.07f     // above the floor
 #define FIRST_FLOOR_ROW  4         // index: rows 5-8 see the floor
 #define DROP_SHARE       1.15f     // a floor zone's reading this much farther than where its upper

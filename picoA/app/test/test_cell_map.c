@@ -134,7 +134,11 @@ int main(void) {
     // distance (about 20, 30, 45 and 70 cm); between them it is free, floor not seen.
     int drivable = count(-0.8f, 0.8f, -0.8f, 0.8f, COLUMN_DRIVABLE);
     int free_near = drivable + count(-0.8f, 0.8f, -0.8f, 0.8f, COLUMN_OPEN);
-    int wall_blocked = count(1.9f, 2.0f, -1.0f, 1.0f, COLUMN_BLOCKED);
+    // The wall's face is on a cell boundary (x = 2.0 m): a hit lands on either side of it
+    // with the range's noise, so a wall column counts as blocked if either cell is.
+    int wall_blocked = 0;
+    for (float y = -0.95f; y < 1.0f; y += 0.1f)
+        wall_blocked += cell_map_column(1.95f, y) == COLUMN_BLOCKED || cell_map_column(2.05f, y) == COLUMN_BLOCKED;
     printf("empty room: %d blocked columns on the open floor; within 0.8 m %d of 256 free, %d of them drivable;"
            " %d of 20 wall columns blocked\n", false_blocked, free_near, drivable, wall_blocked);
     assert(false_blocked == 0);

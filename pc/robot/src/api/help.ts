@@ -2,6 +2,7 @@
 // sentences an agent can steer the robot from.
 import { MOVES } from "./commands.ts";
 import { READS } from "./reads.ts";
+import { OBJECT_COMMANDS } from "../objects/api.ts";
 
 const UNITS = `Units: distances and positions in cm, angles in degrees (+ is left), picture positions in
 pixels, jolt in g, WiFi in dBm, light in lux.
@@ -60,9 +61,10 @@ const ACTIONS_HELP: Record<string, string> = {
 };
 
 function general(): string {
-  const reads = Object.values(READS).map(r => `  robot ${r.usage.padEnd(26)} ${r.help.split(/(?<=\.)\s/)[0]}`);
+  const line = (r: { usage: string; help: string }) => `  robot ${r.usage.padEnd(26)} ${r.help.split(/(?<=\.)\s/)[0]}`;
+  const reads = Object.values(READS).map(line), objects = Object.values(OBJECT_COMMANDS).map(line);
   return `robot: steers the RoboCar and reads what it saw. Talks to the robot server
-(ROBOT_API, default http://127.0.0.1:8080; npm start in pc/robot/).
+(ROBOT_API, default http://127.0.0.1:8081; npm start in pc/robot/).
 
 Queued, one at a time, in order:
   robot steer <moves>              Moves the robot (robot steer --help).
@@ -75,6 +77,9 @@ Queued, one at a time, in order:
 At once:
   robot check <moves>              Says what moves would do on the map; nothing moves.
 ${reads.join("\n")}
+
+Objects on the map (the vision model; at once, any snapshot):
+${objects.join("\n")}
 
 n is a snapshot's number; without it, the newest snapshot.
 robot <command> --help says more about one command.
@@ -89,6 +94,6 @@ export function help(name?: string): string | null {
   if (name === undefined) return general();
   if (name === "steer") return `${STEER}\n\n${UNITS}`;
   if (ACTIONS_HELP[name]) return ACTIONS_HELP[name];
-  const r = READS[name];
+  const r = READS[name] ?? OBJECT_COMMANDS[name];
   return r ? `robot ${r.usage}\n\n${r.help}\n\n${UNITS}` : null;
 }

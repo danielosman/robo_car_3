@@ -1,5 +1,5 @@
 // RoboCar robot server (doc/ARCHITECTURE.md, the PC): PicoA connects over WiFi, the browser at
-// http://127.0.0.1:8080/ shows the robot's map, its snapshots (camera, ToF, colour,
+// http://127.0.0.1:8081/ shows the robot's map, its snapshots (camera, ToF, colour,
 // pose; any one of them back in time), the log, and steers it. All steering goes
 // through the command API at /api/robot/ (api/, doc/CLI_API_PLAN.md): the page's and
 // the `robot` CLI's commands share one queue, and everyone sees one log (log.ts),
@@ -8,9 +8,10 @@
 // recordings/camera/ (snapshot.ts), and stored in
 // DuckDB (store.ts, snapshots_api.ts), as are the pose lines (live.ts). PicoA's recordings arrive on a second connection and are saved in
 // recordings/ (recording.ts); each take goes into DuckDB as it
-// ends (store.ts), listed at http://127.0.0.1:8080/takes and shown in 3D at /viewer
-// (viewer_api.ts). Ports: PORT (HTTP 8080),
+// ends (store.ts), listed at http://127.0.0.1:8081/takes and shown in 3D at /viewer
+// (viewer_api.ts). Ports: PORT (HTTP 8081),
 // ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one;
+// MODEL_API (the vision model's server for robot detect, default http://127.0.0.1:8080) and MODEL;
 // ANNOUNCE_TO (comma-separated addresses, default every network's broadcast): a test
 // server announcing only to 127.0.0.1 isn't found by the robot.
 import http from "node:http";
@@ -32,9 +33,10 @@ import { LiveRobot } from "./live.ts";
 import { CommandRunner, StoredSnapshots } from "./api/runner.ts";
 import { CommandQueue } from "./api/queue.ts";
 import { createApi } from "./api/routes.ts";
+import { MODEL, MODEL_API, openAiChat } from "./objects/model.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const HTTP_PORT = Number(process.env.PORT ?? 8080);
+const HTTP_PORT = Number(process.env.PORT ?? 8081);
 
 async function main(): Promise<void> {
   await mkdir(path.join(root, "logs"), { recursive: true });
@@ -79,7 +81,9 @@ async function main(): Promise<void> {
   robot.on("snapshot", (b: Buffer) => snapshots.arrived(b));
   robot.on("pose", (p: LivePose) => { live.setPose(p); broadcast({ type: "pose", pose: p }); });
   const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
-  const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true }, recordingsDir }).fetch);
+  const chat = openAiChat(MODEL_API, MODEL, note);
+  const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true }, recordingsDir,
+                                              chat, modelName: MODEL }).fetch);
   await robot.start();
   note(`server started; announcing on ${(announceTo.length ? announceTo : broadcastAddresses()).join(", ") || "no network"}; log ${path.relative(root, logPath)}`);
 

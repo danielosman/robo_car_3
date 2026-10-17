@@ -16,10 +16,12 @@ import { displayRgb } from "./colour.ts";
 import { MAP_LEGEND, RobotMap } from "./map.ts";
 import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
+import type { Chat } from "../objects/model.ts";
 
 export interface Config { autoSnap: boolean }
 export interface ApiContext {
   store: Store; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDir: string;
+  chat?: Chat; modelName?: string;  // the vision model for robot detect (objects/)
 }
 export interface Read {
   usage: string;  // "map [n] [--png]"

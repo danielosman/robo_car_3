@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { FrameParser } from "./protocol.ts";
 
 const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
-const HTTP_PORT = Number(process.env.PORT ?? 8080);
+const HTTP_PORT = Number(process.env.PORT ?? 8081);
 async function findPicoPath(): Promise<string> {
   if (process.argv[2]) return process.argv[2];
   const ports = await SerialPort.list();

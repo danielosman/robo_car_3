@@ -19,6 +19,7 @@ import { parsePose } from "../robot.ts";
 import { CommandRunner, StoredSnapshots } from "./runner.ts";
 import { CommandQueue } from "./queue.ts";
 import { createApi } from "./routes.ts";
+import type { Chat } from "../objects/model.ts";
 
 const FIRMWARE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../../build/test_snapshot.snap");
 const skip = !existsSync(FIRMWARE) && "run ./run_tests.sh first";
@@ -37,7 +38,7 @@ class EchoRobot extends EventEmitter {
   }
 }
 
-async function setUp() {
+async function setUp(chat?: Chat) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "api-"));
   const file = path.join(dir, "snapshots", "raw", "test.snap");
   mkdirSync(path.dirname(file), { recursive: true });
@@ -56,7 +57,7 @@ async function setUp() {
   live.setStatus({ state: "connected", ip: "10.0.0.7", since: 0, rssi: -58, quietSince: null });
   live.setPose(parsePose("pose 43.0 -4.0 30.0 manual - -58 0 0.20 0.10 1.05 4.0")!);
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
-  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDir: dir });
+  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDir: dir, chat, modelName: "fake" });
   const post = async (command: string, body = "", query = "") => {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });
     return { status: r.status, text: await r.text() };
@@ -140,4 +141,45 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     assert.equal((await post("map", "x")).status, 400);
     assert.equal((await post("nope")).status, 404);
   } finally { await done(); }
+});
+
+// A vision model that reports one chair the first time, a door the next.
+function fakeModel(): Chat {
+  const answers = [[{ label: "chair", bbox: [300, 400, 617, 600] }], [{ label: "door", bbox: [0, 300, 600, 700] }]];
+  return async () => ({ reasoning: "looked", tokens: 1, message: { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function",
+    function: { name: "report_objects", arguments: JSON.stringify({ objects: answers.shift() }) } }] } });
+}
+
+test("detect and objects: placed, saved, read back, replaced on a second run", { skip }, async () => {
+  const { post, done } = await setUp(fakeModel());
+  try {
+    const r = await post("detect", "1");
+    assert.equal(r.status, 200, r.text);
+    const d = JSON.parse(r.text);
+    assert.equal(d.snapshot, 1);
+    assert.equal(d.result, "ok");
+    assert.equal(d.objects.length, 1);
+    assert.deepEqual(d.objects[0].bbox, [300, 400, 617, 600]);
+    assert.equal(d.objects[0].floor, "floor");
+    assert.equal(d.objects[0].shape.kind, "rect");
+    assert.ok(d.objects[0].distance > 50 && d.objects[0].distance < 200, `${d.objects[0].distance}`); // the row 1 m ahead when level; the test pose has some pitch
+    const o = JSON.parse((await post("objects", "1")).text);
+    assert.equal(o.model, "fake");
+    assert.equal(o.thinking, true);
+    assert.deepEqual(o.objects, d.objects);
+    const t = JSON.parse((await post("objects", "1", "?transcript")).text);
+    assert.equal(t.transcript[0].role, "system");
+    assert.equal(t.transcript.at(-2).reasoning, "looked");
+    const again = JSON.parse((await post("detect", "1", "?nothinking")).text);
+    assert.deepEqual(again.objects.map((x: { label: string }) => x.label), ["door"]);
+    const after = JSON.parse((await post("objects", "1")).text);
+    assert.equal(after.thinking, false);
+    assert.equal(after.objects.length, 1);
+    assert.equal((await post("objects", "2")).status, 404);
+  } finally { await done(); }
+});
+
+test("detect without a model set up: 503", { skip }, async () => {
+  const { post, done } = await setUp();
+  try { assert.equal((await post("detect", "1")).status, 503); } finally { await done(); }
 });

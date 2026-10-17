@@ -96,8 +96,8 @@ lines, and their answers). `loop_stats` times every stage. Core 1 is not used.
   the robot was when a sensor frame was measured (interpolated; pitch included,
   roll not).
 - **`rangefinder`**: the VL53L8CX as 64 rays (8 × 8 zones, 5.625° each, 15 Hz). It
-  hides the zone order and the mounting: turned 90° on the PCB, 2.5 cm ahead of
-  the centre, 3 cm right, 7 cm above the floor. Per zone it keeps the nearest sure
+  hides the zone order and the mounting: turned 90° on the PCB, 3.2 cm ahead of
+  the centre, 2.6 cm right, 7 cm above the floor. Per zone it keeps the nearest sure
   target (status 5, 6 or 9), or "nothing in range", or "unsure"; and the next sure
   target behind it (the wall behind a leg). Each with its own status (the sensor's
   echo at ~30 cm often comes first, with status 12 or 14: it is skipped). It gives each
@@ -366,7 +366,7 @@ are the `rec_*_t` structs in `recorder.c` (format version 3); the PC reads them 
 
 ## 5. The PC (`pc/robot/`)
 
-Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
+Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
 
 - **`main.ts`, `robot.ts`**: the server. Announces itself on the network (or only to
   `ANNOUNCE_TO`, for a test server), accepts PicoA's console connection, takes the
@@ -390,7 +390,7 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
   largest jolt and tilt since power-up), and each pose line into DuckDB (`poses`)
   with its boot: the path driven.
 - **`public/app.html`, `app.js`**: the viewer and steering page at
-  http://127.0.0.1:8080/. A 2D map (x up, y left, as `robot map`): the snapshot's window
+  http://127.0.0.1:8081/. A 2D map (x up, y left, as `robot map`): the snapshot's window
   over the whole-house map's tiles as they were then (where the window is unknown
   and a tile knows the column, dimmed; "hide weak" hides columns under 10 %
   confident, as the 3D viewer), the path driven up to the snapshot (from the pose
@@ -418,12 +418,32 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8080/.
   from the raw files; `npm run import` rebuilds it): takes, ToF frames, zones,
   targets (also in world x, y, z), odometry, drive, marks, WiFi, and truth boxes.
   The database is opened per operation, so the `duckdb` command line can use it in
-  between. The take list: http://127.0.0.1:8080/takes (`public/takes.js`).
-- **`viewer_api.ts`, `public/viewer.js`**: http://127.0.0.1:8080/viewer, three.js
+  between. The take list: http://127.0.0.1:8081/takes (`public/takes.js`).
+- **`viewer_api.ts`, `public/viewer.js`**: http://127.0.0.1:8081/viewer, three.js
   served locally. A take, or a boot's whole drive (every take since a power-up on
   one timeline): the targets as points (coloured by row, signal, status, height),
   the robot's path and rays on a time slider, the replayed map as cubes, truth
   boxes placed by hand and the map's score against them.
+- **`objects/`**: objects on the map from the camera ([OBJECTS_PLAN.md](OBJECTS_PLAN.md)).
+  `robot detect [n]` sends the snapshot's picture to a vision model on an
+  OpenAI-compatible server (`MODEL_API`, default http://127.0.0.1:8080, llama.cpp's
+  router; `MODEL`, default `gemma-4-26b`; loaded on the first request if it isn't),
+  with a system prompt that asks for the bottom edge exactly where the object meets
+  the floor (`session.ts`). The model answers by calling `report_objects` with
+  `{label, bbox: [ymin, xmin, ymax, xmax]}` on 0-1000; a fixed list of labels
+  (`labels.ts`: chair, table, sofa, door, wall, plant, shelf, cabinet, box, object).
+  Wrong calls go back with what to fix (3 corrections), no call gets a reminder (3),
+  the first empty list is pushed back once. `place.ts` puts each box's bottom edge
+  on the floor through the camera (8.8 cm up, 2.5 cm ahead, 0.5 cm right, f 180 px,
+  looking 1.8° further down than the robot's pitch: calibrated 17 Oct) and the
+  snapshot's pose and pitch: its front edge, and a
+  rectangle of the label's depth behind it (doors and walls a line); camera only.
+  `db.ts`: `detect_runs`, `detections`, `map_objects`, `object_detections` in
+  DuckDB; a new run on a snapshot replaces the old. `robot objects [n]` reads them
+  back (`--transcript`: the conversation). `npm run place-objects` places every
+  saved box again with the camera's numbers now (after a calibration). The page draws the boxes on the camera
+  picture and the shapes on the map (`/api/snapshots/<boot>/<seq>/objects`;
+  `?snapshot=<n>` opens a snapshot).
 - **`replay.ts`, `tools/replay_map.c`**: the robot's own `cell_map.c`, built for
   the Mac, run on a take's frames (`npm run frames` exports them;
   `tools/replay.sh <take>` prints the map). The floor margin can be changed to try

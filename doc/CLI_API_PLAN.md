@@ -172,7 +172,7 @@ robot stop
 - A small TypeScript script, `pc/robot/src/cli.ts` (`./robot` in `pc/robot/` runs
   it), holding no state and knowing no commands: `robot <command> [args]
   [--flags]` posts the args to `/api/robot/<command>`, each flag a query
-  parameter. It finds the server at `ROBOT_API` (default `http://127.0.0.1:8080`).
+  parameter. It finds the server at `ROBOT_API` (default `http://127.0.0.1:8081`).
   No login: the server is for the home network only.
 - It prints each answer as it comes and exits when the last one is in. Ctrl-C
   leaves the commands queued; `robot stop` stops them.

@@ -54,7 +54,7 @@ How it works, module by module: [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md). In
 short: the robot does nothing by itself; it is steered through the robot server's
 command API ([doc/CLI_API_PLAN.md](doc/CLI_API_PLAN.md)), from the `robot` CLI
 (`pc/robot/src/cli.ts`; for an agent or a person) or the page at
-http://127.0.0.1:8080/, which share one queue and one log. Start the server
+http://127.0.0.1:8081/, which share one queue and one log. Start the server
 (`npm start` in `pc/robot/`), then, in another terminal, in `pc/robot/`:
 
 ```sh
@@ -71,7 +71,7 @@ After every move a snapshot (pose, camera picture and features, ToF frame,
 colour, its map) is stored; the page shows any of them back in time, with the path
 driven, and sends the robot where you click on the map. With `./robot recording on` each
 action is also recorded in full and can be looked at in 3D at
-http://127.0.0.1:8080/viewer. Typed on PicoA's USB serial monitor, the same
+http://127.0.0.1:8081/viewer. Typed on PicoA's USB serial monitor, the same
 commands work for debugging (`drive 50`, `status`).
 
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
@@ -150,6 +150,24 @@ tof`, `v` → `robot features`, `5` (record 5 s) → `steer w5` with nothing mov
 prints `c` (camera blocks) and `o` / `k` (movement backgrounds) are gone: `robot
 camera` gives the picture; the backgrounds can't be seen any more. On USB, type the
 robot's own words (`drive 50`, `snapshot`).
+
+**Objects from the camera** (17 Oct; no robot needed: the model server on :8080
+(llama.cpp's router with `gemma-4-26b`), `npm start` in `pc/robot/`, the page open;
+`./robot` in `pc/robot/`, on the newest boot, 7a587226). Paste the terminal:
+1. `robot detect 31`: after ~15 s (longer the first time: the model loads)
+   `"result": "ok"` and the objects: the pouf as `object`, `floor` `floor`, a
+   `distance` and a `shape`; the sofa maybe `too_far` (its front doesn't touch the
+   floor). The page's log says `detect 31: N objects`.
+2. Open http://127.0.0.1:8081/?snapshot=31: the boxes on the camera picture (the
+   bottom edge thicker, label and distance on top), the shapes on the map in the
+   same colours, the camera's view as a dotted triangle. "objects" hides them.
+3. `robot detect 31 --no-thinking`: ~1 s; it replaces the first run (`robot objects
+   31` says `"thinking": false`). `robot objects 31 --transcript`: the conversation.
+4. A few more snapshots, one at a time (e.g. 19, 49, 61, 85), each looked at on the
+   page: near objects (under ~1 m) should land close to the ToF's points on the
+   map; far ones can be off a lot (the model's bottom edge; OBJECTS_PLAN.md).
+5. After a change of the camera's numbers in `src/objects/place.ts`: `npm run
+   place-objects` places the saved boxes again.
 
 **Steering through the API** (14 Oct; both Picos flashed: the link version went up;
 battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot` in
@@ -317,7 +335,7 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
    build, flash `picoA_app`.
 2. Robot on USB, serial monitor open: the robot does nothing at start-up (motors
    off) and tries the WiFi.
-3. `npm ci` then `npm start` in `pc/robot/`; open **http://127.0.0.1:8080/** ("Waiting
+3. `npm ci` then `npm start` in `pc/robot/`; open **http://127.0.0.1:8081/** ("Waiting
    for robot…"; the console alone is at /console). The first time, allow `node`
    to accept incoming connections.
 4. Expected ~3 s after power-up: "WiFi: connecting…", "WiFi: connected, IP …",
@@ -443,7 +461,7 @@ WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):
 5. Drive around the room with `t`, `f` and an `s` now and then; keep a finger on
    space for the first moves (thin legs and things under ~8 cm may be missed).
    End where you started, facing the same way, and `s`.
-6. In the viewer (http://127.0.0.1:8080/viewer) pick "whole drive" for this boot:
+6. In the viewer (http://127.0.0.1:8081/viewer) pick "whole drive" for this boot:
    the points and the replayed map of every take together, the path on the floor.
    The two scans at the start point show the odometry's drift (a wall seen twice).
    Note any move that stopped early or touched something.
@@ -548,7 +566,7 @@ while the wheel turns: encoder wiring or power. Paste a few lines of each side.
 2. With Node.js 24+, run `npm ci`, then `npm start` in `pc/bringup/`.
    With multiple Picos attached, use `npm start -- /dev/tty.usbmodem1101` (replace with PicoA's port;
    list candidates with `ls /dev/tty.usbmodem*`).
-3. Open **http://127.0.0.1:8080/**. Restart the Node app after reflashing/reconnecting.
+3. Open **http://127.0.0.1:8081/**. Restart the Node app after reflashing/reconnecting.
    Sensor initialization and errors appear in the page log.
 
 In `picoA/`: `drivers/camera.c` (camera driver: continuous capture into three
@@ -610,6 +628,9 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 - **[doc/CHANGELOG.md](doc/CHANGELOG.md)**: what happened, newest first (robot runs,
   results, what was tried and dropped, review findings). Only history.
 - **[doc/GLOSSARY.md](doc/GLOSSARY.md)**: the words.
+- **[doc/OBJECTS_PLAN.md](doc/OBJECTS_PLAN.md)**: objects on the map from the camera
+  (in progress); background in [doc/inspiration/](doc/inspiration/).
+- **[AGENTS.md](AGENTS.md)**: how AI agents answer (short, bullets, plain words).
 - **[doc/archive/](doc/archive/)**: the old plans and reviews, unchanged. TODO.md
   links into them where they hold a design not built yet.
 

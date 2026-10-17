@@ -5,6 +5,8 @@
 // the live map sends the robot there. Every steering command goes to the command API
 // (POST /api/robot/<command>, doc/CLI_API_PLAN.md), into the queue the CLI's go into;
 // the answers come back in the log, which shows everyone's.
+// The objects robot detect found (doc/OBJECTS_PLAN.md): the boxes on the camera picture,
+// the shapes on the map (the boot's, up to the snapshot shown; this snapshot's brighter).
 // Map frame: x forward at power-up, y left; drawn with x up and y to the left, as
 // the robot's `m` prints it.
 
@@ -20,10 +22,14 @@ const ACTIONS = [["snap", "snap"], ["clear map", "clear_map"]];
 const GOTO_MAX_CM = 300; // goto's limit on each axis (picoA/app/commands.h)
 const WEAK = 2; // of 15: columns set less confidently count as unknown when "hide weak" is ticked (~10 %, as replay)
 const FOOT = { front: 0.095, back: -0.095, half: 0.1175 }; // the robot's footprint, m
+// The camera (objects/place.ts): where it sits on the robot (m), half its view across.
+const CAM = { x: 0.025, y: -0.005, halfFov: Math.atan(80 / 180), viewM: 3 };
+const LABEL_COLORS = { chair: "#ff9f43", table: "#feca57", sofa: "#54a0ff", door: "#c8d6e5", wall: "#ffffff", plant: "#1dd1a1",
+                       shelf: "#ff6b6b", cabinet: "#f368e0", box: "#48dbfb", object: "#a29bfe" };
 
 // --- state ---
 let ws = null, robotStatus = { state: "waiting" }, livePose = null, poseFresh = 0, goal = null;
-let boots = [], boot = null, snaps = [], index = -1, detail = null, mapView = null;
+let boots = [], boot = null, snaps = [], index = -1, detail = null, mapView = null, objects = null;
 let image = null;
 const view = { cx: 0, cy: 0, scale: 80 }; // the map's centre (m) and pixels per metre
 let follow = true;
@@ -148,6 +154,7 @@ function draw() {
     const s = detail.snapshot;
     if (s.x !== null) drawRobot(Number(s.x), Number(s.y), Number(s.yaw), "#7aa7d9", showingLive() ? 0.5 : 1);
   }
+  drawObjects();
   if (livePose && showingLive()) drawRobot(livePose.x, livePose.y, livePose.yaw, "#5fe08a");
   if (goal) {
     const [gx, gy] = toScreen(goal.x, goal.y);
@@ -155,6 +162,57 @@ function draw() {
     ctx.lineWidth = 2 * dpr;
     ctx.beginPath(); ctx.arc(gx, gy, 9 * dpr, 0, 2 * Math.PI); ctx.moveTo(gx - 14 * dpr, gy); ctx.lineTo(gx + 14 * dpr, gy);
     ctx.moveTo(gx, gy - 14 * dpr); ctx.lineTo(gx, gy + 14 * dpr); ctx.stroke();
+  }
+}
+
+// The shape's corners in the map frame (objects/place.ts corners()): a line's two ends, a rectangle's four.
+function objectCorners(o) {
+  if (o.kind === null) return [];
+  const ex = Math.cos(o.angle) * o.width / 2, ey = Math.sin(o.angle) * o.width / 2;
+  if (o.kind === "line") return [[o.cx - ex, o.cy - ey], [o.cx + ex, o.cy + ey]];
+  const nx = Math.sin(o.angle) * o.depth / 2, ny = -Math.cos(o.angle) * o.depth / 2;
+  return [[o.cx - ex - nx, o.cy - ey - ny], [o.cx + ex - nx, o.cy + ey - ny], [o.cx + ex + nx, o.cy + ey + ny], [o.cx - ex + nx, o.cy - ey + ny]];
+}
+
+// The camera's view from the snapshot shown (3 m), and the objects placed so far: this
+// snapshot's solid, older ones dimmer; cut off (at most this far) dashed.
+function drawObjects() {
+  if (!$("showobjects").checked) return;
+  const dpr = window.devicePixelRatio || 1, s = detail?.snapshot;
+  if (s && s.x !== null && s.image) {
+    const c = Math.cos(Number(s.yaw)), sn = Math.sin(Number(s.yaw));
+    const cam = [Number(s.x) + c * CAM.x - sn * CAM.y, Number(s.y) + sn * CAM.x + c * CAM.y];
+    const ray = a => [cam[0] + CAM.viewM * Math.cos(Number(s.yaw) + a), cam[1] + CAM.viewM * Math.sin(Number(s.yaw) + a)];
+    ctx.setLineDash([3 * dpr, 4 * dpr]);
+    ctx.strokeStyle = "#ffffff55";
+    ctx.lineWidth = dpr;
+    ctx.beginPath();
+    for (const p of [ray(CAM.halfFov), cam, ray(-CAM.halfFov)]) ctx.lineTo(...toScreen(p[0], p[1]));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for (const o of objects?.map ?? []) {
+    const pts = objectCorners(o);
+    if (!pts.length) continue;
+    const here = o.seq === Number(s?.seq), color = LABEL_COLORS[o.label] ?? "#fff";
+    ctx.globalAlpha = here ? 1 : 0.45;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = (o.kind === "line" ? 3 : 2) * dpr;
+    ctx.setLineDash(o.floor === "cut_off" ? [5 * dpr, 4 * dpr] : []);
+    ctx.beginPath();
+    for (const [x, y] of pts) ctx.lineTo(...toScreen(x, y));
+    if (o.kind === "rect") { ctx.closePath(); ctx.fillStyle = color + "33"; ctx.fill(); }
+    ctx.stroke();
+    ctx.setLineDash([]);
+    if (here) {
+      const [px, py] = toScreen(o.cx, o.cy);
+      ctx.fillStyle = color;
+      ctx.font = `${11 * dpr}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(o.label, px, py - 4 * dpr);
+      ctx.textAlign = "start";
+    }
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -243,6 +301,7 @@ function showSnapshot() {
       if (image !== img) return;
       c.drawImage(img, 0, 0, cam.width, cam.height);
       drawFeatures(c, cam.width / img.width);
+      drawBoxes(c, cam.width, cam.height);
     };
     img.src = `/camera/${s.boot_id}/${s.seq}.png`;
   }
@@ -279,6 +338,33 @@ function showSnapshot() {
   ]);
 }
 
+// The model's boxes ([ymin, xmin, ymax, xmax] on 0-1000) with their labels; the bottom
+// edge, which places the object, thicker; dashed when it wasn't placed on the floor.
+function drawBoxes(c, w, h) {
+  const here = objects?.here ?? [], run = objects?.run;
+  $("objinfo").textContent = !run ? `no objects: robot detect ${detail?.snapshot?.seq ?? ""}`
+    : run.result !== "ok" ? `detect failed: ${run.why}`
+    : `${here.length} objects · ${run.model}${run.thinking ? "" : " (no thinking)"} · ${run.seconds} s · ${run.ran_at}`;
+  if (!$("showobjects").checked) return;
+  c.font = "11px system-ui, sans-serif";
+  for (const o of here) {
+    const x = o.xmin / 1000 * w, y = o.ymin / 1000 * h, bw = (o.xmax - o.xmin) / 1000 * w, bh = (o.ymax - o.ymin) / 1000 * h;
+    const color = LABEL_COLORS[o.label] ?? "#fff";
+    c.strokeStyle = color;
+    c.setLineDash(o.floor === "floor" ? [] : [4, 3]);
+    c.lineWidth = 1;
+    c.strokeRect(x + 0.5, y + 0.5, bw, bh);
+    c.lineWidth = 2.5;
+    c.beginPath(); c.moveTo(x, y + bh); c.lineTo(x + bw, y + bh); c.stroke();
+    c.setLineDash([]);
+    const text = `${o.label}${o.distance !== null ? ` ${Math.round(o.distance * 100)} cm` : ""}${o.floor === "cut_off" ? " (at most)" : o.floor === "floor" ? "" : ` (${o.floor.replace("_", " ")})`}`;
+    c.fillStyle = "#000a";
+    c.fillRect(x, Math.max(0, y - 13), c.measureText(text).width + 6, 13);
+    c.fillStyle = color;
+    c.fillText(text, x + 3, Math.max(10, y - 3));
+  }
+}
+
 function drawFeatures(c, k) {
   if (!$("showfeatures").checked || !detail?.features) return;
   for (const f of detail.features) {
@@ -291,6 +377,16 @@ function drawFeatures(c, k) {
   }
 }
 $("showfeatures").onchange = () => showSnapshot();
+$("showobjects").onchange = () => { showSnapshot(); draw(); };
+
+// What robot detect saved for the snapshot shown, again (after a detect ran on it).
+async function reloadObjects() {
+  const s = snaps[index];
+  if (!s) return;
+  objects = await getJson(`/api/snapshots/${boot}/${s.seq}/objects`);
+  showSnapshot();
+  draw();
+}
 
 // XYZ (any scale) as a display colour of fixed brightness (sRGB, D65).
 function swatch(X, Y, Z) {
@@ -321,6 +417,9 @@ async function loadSnapshots(b) {
   boot = b;
   snaps = (await getJson(`/api/snapshots?boot=${b}`)).map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) }));
   $("timeline").max = Math.max(0, snaps.length - 1);
+  // ?snapshot=<n> opens that snapshot of the newest boot (once), e.g. after robot detect n.
+  const asked = Number(new URL(location.href).searchParams.get("snapshot")), at = snaps.findIndex(s => s.seq === asked);
+  if (at >= 0 && b === boots[0]?.boot_id && !loadSnapshots.opened) { loadSnapshots.opened = true; follow = true; await select(at); return; }
   await select(snaps.length - 1);
 }
 
@@ -330,10 +429,12 @@ async function select(i) {
   index = Math.max(0, Math.min(snaps.length - 1, i));
   $("timeline").value = index;
   const s = snaps[index], mine = ++loading;
-  const [d, m] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.seq}`), getJson(`/api/snapshots/${boot}/${s.seq}/map`)]);
+  const [d, m, o] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.seq}`), getJson(`/api/snapshots/${boot}/${s.seq}/map`),
+                                       getJson(`/api/snapshots/${boot}/${s.seq}/objects`)]);
   if (mine !== loading) return;
   detail = d;
   mapView = m;
+  objects = o;
   if (follow) centre();
   showSnapshot();
   draw();
@@ -431,7 +532,12 @@ function connect() {
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     if (msg.type === "backlog") { $("log").textContent = ""; chars = 0; for (const it of msg.items) append(it.text, it.kind, it.command); }
-    else if (msg.type === "text" || msg.type === "note" || msg.type === "answer") append(msg.text, msg.type, msg.command);
+    else if (msg.type === "text" || msg.type === "note" || msg.type === "answer") {
+      append(msg.text, msg.type, msg.command);
+      // robot detect notes "--- <time> detect <n>: ... ---" when it has saved (objects/api.ts): show it if that's the snapshot shown.
+      const detected = msg.type === "note" && /^--- \S+ detect (\d+): /.exec(msg.text);
+      if (detected && boot === boots[0]?.boot_id && Number(detected[1]) === snaps[index]?.seq) reloadObjects();
+    }
     else if (msg.type === "status") { robotStatus = msg.status; showStatus(); }
     else if (msg.type === "pose") {
       livePose = msg.pose;

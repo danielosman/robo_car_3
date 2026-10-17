@@ -5,6 +5,40 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 17 Oct 2026: objects from the camera, first step
+
+Planned in [OBJECTS_PLAN.md](OBJECTS_PLAN.md) with Daniel; inspiration in
+[inspiration/](inspiration/). The robot server moved from port 8080 to 8081 (8080 is
+the local model server now). Daniel measured the camera again: 8.8 cm up, 2.5 cm
+ahead of the centre, 0.5 cm right; maybe a few degrees off level.
+
+Checked first: Gemma 4 gives boxes as `[ymin, xmin, ymax, xmax]` on 0-1000 (Google's
+Gemma docs); the camera's field of view isn't settled by the data sheets (DFOV 64°
+gives 53.1° across, the 2.59 mm focal length 48°; the inspiration doc's 51.2° split
+64° wrongly). Tried by hand on snapshot 31 of boot 7a587226: llama.cpp's router
+passes tool calls through; with thinking ~14 s, without ~1 s (but the sofa missed).
+A sofa's bottom edge sits on the horizon at any distance: its front doesn't touch
+the floor, so the prompt asks for where the legs or base meet it.
+
+Built: `robot detect [n]` and `robot objects [n]`, the tables, the overlays on the
+page (ARCHITECTURE.md, the PC, `objects/`). The first real run (snapshot 31, 13.8 s):
+the pouf as `object` at 229 cm and 94 cm wide; the ToF zones on it read 126-143 cm.
+So the camera looks ~2-3° further down than the pose says.
+
+Calibrated the same day, from the floor contacts read from the pixels (not the
+model's boxes): the pouf in snapshot 31 (ToF ~124 cm, 35.5 cm high over 52 rows)
+and the table in snapshot 1 (Daniel: 178-179 cm). The lens is f 180 px (~48°
+across, as its 2.59 mm says), the camera looks 1.8° further down than the robot's
+pitch (−1.78° and −1.88° from the two). After: the pouf at 131 cm, 48 cm wide. The
+table still at 340 cm instead of ~185: the model put its bottom edge 3.6 px too
+high. At 2 m one pixel is ~25 cm, one degree of tilt ~60-130 cm. So no more
+calibration by hand: next, the bottom edge from the pixels, the ToF's distance
+(objects marked ToF verified and moved), and the tilt calibrating itself
+(OBJECTS_PLAN.md). The ToF's position measured again: 3.2 cm ahead of the centre,
+2.6 cm right (was 2.5 and 3 in the firmware); the empty-room map test counted the
+wall cells on one side of a cell boundary only and failed by luck with the new
+position (15 of 20); it now counts either side (20 of 20 with both positions).
+
 ## 14 Oct 2026: the command API and the `robot` CLI
 
 Later the same day, after Daniel tried it: the answers became JSON with the same

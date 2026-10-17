@@ -15,6 +15,7 @@
     "frames": "node src/frames.ts",
     "snapreplay": "node src/snapreplay.ts",
     "fakerobot": "node src/fakerobot.ts",
+    "place-objects": "node src/objects/place_again.ts",
     "typecheck": "tsc -p .",
     "lint": "eslint ."
   },
