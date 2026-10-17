@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS object_detections (object_id VARCHAR, snap_id VARCHAR
 -- Added later: kept by "IF NOT EXISTS", filled by importing again (npm run import).
 ALTER TABLE takes ADD COLUMN IF NOT EXISTS geometry VARCHAR;   -- GEOMETRY as JSON (the viewer's rays)
 ALTER TABLE truth ADD COLUMN IF NOT EXISTS truth_id VARCHAR;
+ALTER TABLE detections ADD COLUMN IF NOT EXISTS confidence INTEGER;  -- 0-100 %, the model's own (prompt 2 on)
 `;
 const TAKE_TABLES = ["tof_frames", "tof_zones", "tof_targets", "odom", "drive", "marks", "wifi"];
 const SNAP_TABLES = ["snapshots", "snapshot_targets", "snapshot_tiles", "snapshot_features"];

@@ -7,19 +7,19 @@ import { DEPTH_M, type Detection, type Label } from "./labels.ts";
 
 // The camera in the robot frame: x forward, y left, z up, m (measured by Daniel, 17 Oct
 // 2026: 8.8 cm up, 2.5 cm ahead of the centre, 0.5 cm right).
-// focalPx 180: the lens's 2.59 mm over the binned 14.4 µm pixels (Arducam's data
-// sheet), i.e. ~48° across; the pouf in boot 7a587226 snapshot 31 (35.5 cm high, 52 px
-// at the ToF's ~124 cm) says the same. The firmware's FOCAL_PX 160 came from the
-// data sheet's 64° diagonal, which doesn't match its focal length.
-// tiltRad -1.8°: the camera looks this much further down than the robot's pitch says
+// focalPx 188 (~46° across): the table in boot 7a587226 snapshot 1, 80.5 cm across its
+// front legs (measured by Daniel), 83 px wide at the ToF's ~182 cm. The pouf
+// (snapshot 31) gives 182 px. The firmware's FOCAL_PX 160 (the data sheet's 64°
+// diagonal) is wrong (doc/OBJECTS_PLAN.md, "Settled by the table").
+// tiltRad -1.86°: the camera looks this much further down than the robot's pitch says
 // (+ = up). From two objects at known distances, their floor contact read from the
-// pixels: the pouf (snapshot 31, ToF ~124 cm) -1.78°, the table (snapshot 1, measured
-// ~185 cm from the camera) -1.88° (doc/OBJECTS_PLAN.md, the calibration).
+// pixels, with f 188: the pouf (snapshot 31, ToF ~124 cm) -1.84°, the table (snapshot
+// 1, ~185 cm from the camera) -1.88° (doc/OBJECTS_PLAN.md, the calibration).
 export const CAMERA_GEOMETRY = {
   x: 0.025, y: -0.005, z: 0.088,
   width: 160, height: 120,
-  focalPx: 180,
-  tiltRad: -1.8 * Math.PI / 180,
+  focalPx: 188,
+  tiltRad: -1.86 * Math.PI / 180,
 };
 export type CameraGeometry = typeof CAMERA_GEOMETRY;
 
@@ -56,7 +56,7 @@ export function floorPoint(px: number, py: number, pitch: number, cam: CameraGeo
   return [cam.x + k * fwd, cam.y + k * left];
 }
 
-export function place(d: Detection, pose: SnapPoseLike, cam: CameraGeometry = CAMERA_GEOMETRY): Placed {
+export function place(d: Pick<Detection, "label" | "bbox">, pose: SnapPoseLike, cam: CameraGeometry = CAMERA_GEOMETRY): Placed {
   const [, x1, y2, x2] = d.bbox;
   const none = (floor: Floor, distanceM: number | null = null): Placed =>
     ({ label: d.label, floor, kind: null, distanceM, cx: null, cy: null, width: null, depth: null, angle: null });

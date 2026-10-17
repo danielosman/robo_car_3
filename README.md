@@ -159,7 +159,7 @@ robot's own words (`drive 50`, `snapshot`).
    `distance` and a `shape`; the sofa maybe `too_far` (its front doesn't touch the
    floor). The page's log says `detect 31: N objects`.
 2. Open http://127.0.0.1:8081/?snapshot=31: the boxes on the camera picture (the
-   bottom edge thicker, label and distance on top), the shapes on the map in the
+   bottom edge thicker, label, confidence and distance on top), the shapes on the map in the
    same colours, the camera's view as a dotted triangle. "objects" hides them.
 3. `robot detect 31 --no-thinking`: ~1 s; it replaces the first run (`robot objects
    31` says `"thinking": false`). `robot objects 31 --transcript`: the conversation.

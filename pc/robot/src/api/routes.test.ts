@@ -145,7 +145,7 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
 
 // A vision model that reports one chair the first time, a door the next.
 function fakeModel(): Chat {
-  const answers = [[{ label: "chair", bbox: [300, 400, 617, 600] }], [{ label: "door", bbox: [0, 300, 600, 700] }]];
+  const answers = [[{ label: "chair", bbox: [300, 400, 617, 600], confidence: 85 }], [{ label: "doorway", bbox: [0, 300, 600, 700], confidence: 40 }]];
   return async () => ({ reasoning: "looked", tokens: 1, message: { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function",
     function: { name: "report_objects", arguments: JSON.stringify({ objects: answers.shift() }) } }] } });
 }
@@ -160,6 +160,7 @@ test("detect and objects: placed, saved, read back, replaced on a second run", {
     assert.equal(d.result, "ok");
     assert.equal(d.objects.length, 1);
     assert.deepEqual(d.objects[0].bbox, [300, 400, 617, 600]);
+    assert.equal(d.objects[0].confidence, 85);
     assert.equal(d.objects[0].floor, "floor");
     assert.equal(d.objects[0].shape.kind, "rect");
     assert.ok(d.objects[0].distance > 50 && d.objects[0].distance < 200, `${d.objects[0].distance}`); // the row 1 m ahead when level; the test pose has some pitch
@@ -171,7 +172,7 @@ test("detect and objects: placed, saved, read back, replaced on a second run", {
     assert.equal(t.transcript[0].role, "system");
     assert.equal(t.transcript.at(-2).reasoning, "looked");
     const again = JSON.parse((await post("detect", "1", "?nothinking")).text);
-    assert.deepEqual(again.objects.map((x: { label: string }) => x.label), ["door"]);
+    assert.deepEqual(again.objects.map((x: { label: string }) => x.label), ["doorway"]);
     const after = JSON.parse((await post("objects", "1")).text);
     assert.equal(after.thinking, false);
     assert.equal(after.objects.length, 1);

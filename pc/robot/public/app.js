@@ -23,9 +23,10 @@ const GOTO_MAX_CM = 300; // goto's limit on each axis (picoA/app/commands.h)
 const WEAK = 2; // of 15: columns set less confidently count as unknown when "hide weak" is ticked (~10 %, as replay)
 const FOOT = { front: 0.095, back: -0.095, half: 0.1175 }; // the robot's footprint, m
 // The camera (objects/place.ts): where it sits on the robot (m), half its view across.
-const CAM = { x: 0.025, y: -0.005, halfFov: Math.atan(80 / 180), viewM: 3 };
-const LABEL_COLORS = { chair: "#ff9f43", table: "#feca57", sofa: "#54a0ff", door: "#c8d6e5", wall: "#ffffff", plant: "#1dd1a1",
-                       shelf: "#ff6b6b", cabinet: "#f368e0", box: "#48dbfb", object: "#a29bfe" };
+const CAM = { x: 0.025, y: -0.005, halfFov: Math.atan(80 / 188), viewM: 3 };
+const LABEL_COLORS = { chair: "#ff9f43", table: "#feca57", sofa: "#54a0ff", door: "#c8d6e5", doorway: "#ffffff", plant: "#1dd1a1",
+                       shelf: "#ff6b6b", cabinet: "#f368e0", box: "#48dbfb", person: "#ee5253",
+                       animal: "#c8a27a", object: "#a29bfe" };
 
 // --- state ---
 let ws = null, robotStatus = { state: "waiting" }, livePose = null, poseFresh = 0, goal = null;
@@ -357,7 +358,7 @@ function drawBoxes(c, w, h) {
     c.lineWidth = 2.5;
     c.beginPath(); c.moveTo(x, y + bh); c.lineTo(x + bw, y + bh); c.stroke();
     c.setLineDash([]);
-    const text = `${o.label}${o.distance !== null ? ` ${Math.round(o.distance * 100)} cm` : ""}${o.floor === "cut_off" ? " (at most)" : o.floor === "floor" ? "" : ` (${o.floor.replace("_", " ")})`}`;
+    const text = `${o.label}${o.confidence !== null ? ` ${o.confidence}%` : ""}${o.distance !== null ? ` ${Math.round(o.distance * 100)} cm` : ""}${o.floor === "cut_off" ? " (at most)" : o.floor === "floor" ? "" : ` (${o.floor.replace("_", " ")})`}`;
     c.fillStyle = "#000a";
     c.fillRect(x, Math.max(0, y - 13), c.measureText(text).width + 6, 13);
     c.fillStyle = color;

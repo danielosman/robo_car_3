@@ -19,7 +19,7 @@ const cm = (m: number | null) => (m === null ? null : Math.round(m * 100));
 
 function objectOut(o: StoredObject) {
   return {
-    label: o.label, bbox: [o.ymin, o.xmin, o.ymax, o.xmax], floor: o.floor, distance: cm(o.distance),
+    label: o.label, confidence: o.confidence, bbox: [o.ymin, o.xmin, o.ymax, o.xmax], floor: o.floor, distance: cm(o.distance),
     shape: o.kind === null ? null : { kind: o.kind, x: cm(o.cx), y: cm(o.cy), width: cm(o.width), depth: cm(o.depth), angle: yawDeg(o.angle ?? 0) },
   };
 }
@@ -40,12 +40,14 @@ export const OBJECT_COMMANDS: Record<string, Read> = {
     usage: "detect [n] [--no-thinking]",
     help: "Finds the objects in the camera picture at snapshot n with the vision model, places each on the map,\n" +
           "and saves them, replacing what detect found for that snapshot before. Takes ~15 s (the first time also\n" +
-          "the model loading); --no-thinking: ~1 s, finds less. Each object: label, bbox as the model gave it\n" +
-          "([ymin, xmin, ymax, xmax] on 0-1000, y first), floor, distance (cm from the camera to its front edge)\n" +
+          "the model loading); --no-thinking: ~1 s, finds less. Each object: label, confidence (the model's, 0-100 %),\n" +
+          "bbox as the model gave it ([ymin, xmin, ymax, xmax] on 0-1000, y first), floor, distance (cm from the\n" +
+          "camera to its front edge) " +
           "and shape on the map (x, y its centre, width along the front edge, depth, angle of the front edge).\n" +
           "floor: floor (placed where its bottom edge meets the floor), cut_off (the picture's bottom cuts it:\n" +
-          "at most this far), above_horizon or too_far (not placed). Labels: chair, table, sofa, door, wall,\n" +
-          "plant, shelf, cabinet, box, object. result failed: why says what went wrong.",
+          "at most this far), above_horizon or too_far (not placed). Labels: chair, table, sofa, door (the part\n" +
+          "that swings), doorway (the opening), plant, shelf, cabinet, box, person, animal, object. result failed: why says what\n" +
+          "went wrong.",
     async run(ctx, args, flags) {
       usage(args, this.usage);
       if (!ctx.chat) throw new ReadError("no vision model set up (MODEL_API)", 503);

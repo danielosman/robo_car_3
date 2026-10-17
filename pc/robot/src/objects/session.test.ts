@@ -2,7 +2,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Chat, ChatMessage, ChatReply } from "./model.ts";
-import { detectObjects } from "./session.ts";
+import { SYSTEM_PROMPT, detectObjects } from "./session.ts";
+import { LABELS } from "./labels.ts";
 
 const PNG = Buffer.from("not really a png");
 
@@ -23,10 +24,10 @@ function scripted(script: (object[] | string)[]) {
 const lastTool = (m: ChatMessage[]) => String(m.filter(x => x.role === "tool").at(-1)?.content);
 
 test("a good call is accepted at once; the picture goes with the first message", async () => {
-  const { chat, seen } = scripted([[{ label: "sofa", bbox: [70, 0, 460, 1000] }]]);
+  const { chat, seen } = scripted([[{ label: "sofa", bbox: [70, 0, 460, 1000], confidence: 70 }]]);
   const r = await detectObjects(chat, PNG, { thinking: true });
   assert.equal(r.result, "ok");
-  assert.deepEqual(r.result === "ok" && r.detections, [{ label: "sofa", bbox: [70, 0, 460, 1000] }]);
+  assert.deepEqual(r.result === "ok" && r.detections, [{ label: "sofa", bbox: [70, 0, 460, 1000], confidence: 70 }]);
   assert.equal(r.turns, 1);
   const user = seen[0][1].content as { type: string }[];
   assert.equal(user[1].type, "image_url");
@@ -34,7 +35,7 @@ test("a good call is accepted at once; the picture goes with the first message",
 });
 
 test("a wrong label goes back with the list; the corrected call is accepted", async () => {
-  const { chat, seen } = scripted([[{ label: "pouf", bbox: [100, 250, 535, 670] }], [{ label: "object", bbox: [100, 250, 535, 670] }]]);
+  const { chat, seen } = scripted([[{ label: "pouf", bbox: [100, 250, 535, 670], confidence: 70 }], [{ label: "object", bbox: [100, 250, 535, 670], confidence: 70 }]]);
   const r = await detectObjects(chat, PNG, { thinking: false });
   assert.equal(r.result, "ok");
   assert.equal(r.turns, 2);
@@ -42,28 +43,29 @@ test("a wrong label goes back with the list; the corrected call is accepted", as
 });
 
 test("still wrong after 3 corrections: failed", async () => {
-  const bad = [{ label: "pouf", bbox: [1, 2, 3, 4] }];
+  const bad = [{ label: "pouf", bbox: [1, 2, 3, 4], confidence: 70 }];
   const r = await detectObjects(scripted([bad, bad, bad, bad]).chat, PNG, { thinking: true });
   assert.equal(r.result, "failed");
   assert.match(r.result === "failed" ? r.why : "", /after 3 corrections/);
   assert.equal(r.turns, 4);
 });
 
-test("the first empty list is pushed back once; the second is accepted", async () => {
-  const { chat, seen } = scripted([[], []]);
-  const r = await detectObjects(chat, PNG, { thinking: true });
+test("an empty list is accepted at once", async () => {
+  const r = await detectObjects(scripted([[]]).chat, PNG, { thinking: true });
   assert.equal(r.result, "ok");
   assert.deepEqual(r.result === "ok" && r.detections, []);
-  assert.match(lastTool(seen[1]), /An empty list is unusual/);
-  const found = await detectObjects(scripted([[], [{ label: "door", bbox: [0, 0, 600, 300] }]]).chat, PNG, { thinking: true });
-  assert.equal(found.result === "ok" && found.detections.length, 1);
+  assert.equal(r.turns, 1);
 });
 
 test("no tool call: reminded up to 3 times, then failed", async () => {
-  const { chat, seen } = scripted(["I see a sofa.", [{ label: "sofa", bbox: [70, 0, 460, 1000] }]]);
+  const { chat, seen } = scripted(["I see a sofa.", [{ label: "sofa", bbox: [70, 0, 460, 1000], confidence: 70 }]]);
   assert.equal((await detectObjects(chat, PNG, { thinking: true })).result, "ok");
   assert.match(String(seen[1].at(-1)!.content), /Call report_objects now/);
   const r = await detectObjects(scripted(["a", "b", "c", "d"]).chat, PNG, { thinking: true });
   assert.equal(r.result, "failed");
   assert.match(r.result === "failed" ? r.why : "", /didn't call report_objects after 3 reminders/);
+});
+
+test("the system prompt lists every label", () => {
+  for (const label of LABELS) assert.match(SYSTEM_PROMPT, new RegExp(`- \`${label}\``));
 });

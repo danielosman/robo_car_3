@@ -55,25 +55,30 @@ test("the robot's pitch: nose up puts the same row further away", () => {
   assert.ok(up.distanceM! > 1.2, `${up.distanceM}`);
 });
 
-test("doors and walls are lines along the front edge", () => {
+test("doors and doorways are lines along the front edge", () => {
   const p = place({ label: "door", bbox: [0, 300, rowAt(1.5), 700] }, origin, CAM);
   assert.equal(p.kind, "line");
   near(p.cx, CAM.x + 1.5);
   assert.equal(corners(p).length, 2);
+  assert.equal(place({ label: "doorway", bbox: [0, 300, rowAt(1.5), 700] }, origin, CAM).kind, "line");
 });
 
 test("checkReport: labels from the list, boxes on 0-1000, what to fix", () => {
-  assert.deepEqual(checkReport({ objects: [{ label: "chair", bbox: [10, 20, 30.4, 40] }] }),
-                   { ok: true, detections: [{ label: "chair", bbox: [10, 20, 30, 40] }] });
+  assert.deepEqual(checkReport({ objects: [{ label: "chair", bbox: [10, 20, 30.4, 40], confidence: 72.6 }] }),
+                   { ok: true, detections: [{ label: "chair", bbox: [10, 20, 30, 40], confidence: 73 }] });
   assert.deepEqual(checkReport({ objects: [] }), { ok: true, detections: [] });
-  const bad = checkReport({ objects: [{ label: "pouf", bbox: [10, 20, 30, 40] }, { label: "box", bbox: [50, 20, 30, 40] },
-                                      { label: "box", bbox: [10, 20, 30, 1200] }, { label: "box", bbox: [1, 2] }] });
+  const bad = checkReport({ objects: [{ label: "pouf", bbox: [10, 20, 30, 40], confidence: 50 }, { label: "box", bbox: [50, 20, 30, 40], confidence: 50 },
+                                      { label: "box", bbox: [10, 20, 30, 1200], confidence: 50 }, { label: "box", bbox: [1, 2], confidence: 50 },
+                                      { label: "box", bbox: [10, 20, 30, 40] }, { label: "box", bbox: [10, 20, 30, 40], confidence: 120 }] });
   assert.equal(bad.ok, false);
   const errors = (bad as { errors: string[] }).errors;
   assert.match(errors[0], /objects\[0\]: label "pouf" is not one of: chair, .*object\. Use object if nothing fits/);
   assert.match(errors[1], /objects\[1\]: bbox must have ymin < ymax/);
   assert.match(errors[2], /objects\[2\]: bbox values must be 0-1000/);
   assert.match(errors[3], /objects\[3\]: bbox must be four numbers/);
+  assert.match(errors[4], /objects\[4\]: confidence must be a number 0-100/);
+  assert.match(errors[5], /objects\[5\]: confidence must be a number 0-100/);
+  assert.equal(checkReport({ objects: [{ label: "wall", bbox: [10, 20, 30, 40], confidence: 50 }] }).ok, false);
   assert.equal(checkReport([{ label: "chair" }]).ok, false);
   assert.equal(checkReport(null).ok, false);
 });

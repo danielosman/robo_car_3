@@ -3,7 +3,7 @@
 First draft, 17 Oct 2026. **The first step is built** (17 Oct): `robot detect`,
 `robot objects`, the tables and the page's overlays (ARCHITECTURE.md, the PC,
 `objects/`); the README's "Objects from the camera" test. The camera calibrated
-(f 180 px, tilt −1.8°). Next: the next phase's to-do (the bottom edge from the
+(f 188 px from the table's width, tilt −1.86°). Next: the next phase's to-do (the bottom edge from the
 pixels, the ToF's distance, the tilt calibrating itself). Background reading is in
 [inspiration/](inspiration/): `vlm_bbox_to_floor_map.md` (boxes from a model, then
 geometry) and `typescript_2d_spatial_query_libraries.md` (rbush, turf,
@@ -88,10 +88,34 @@ where the answer is obvious. The server converts to pixels:
 
 ### The fixed list of labels
 
-`chair, table, sofa, door, wall, plant, shelf, cabinet, box, object`.
+`chair, table, sofa, door, doorway, plant, shelf, cabinet, box, person, animal, object`.
 `object` is for anything that fits none of the others. (Chair, table, sofa, door,
 wall and box were proposed earlier; plant, shelf, cabinet and object are Daniel's.
 Cabinet replaces the earlier "cupboard". The list is easy to change.)
+
+Changed 17 Oct (Daniel), prompt version 2 (version 3: an empty list is fine, below):
+- **door** is the part that swings, open or closed. **doorway** is the opening in
+  the wall. Both are lines on the map.
+- **wall is dropped.** Walls come from the ToF's cells (next steps), not the model.
+- **The model gives a confidence** for each object, 0-100 %. All objects are saved
+  and shown with it, also the unsure ones. Nothing is filtered by it for now.
+- All earlier detections were deleted (they were from prompt version 1).
+
+Changed again 17 Oct (Daniel), prompt version 4:
+- **person** and **animal** added: the robot has to avoid them too.
+- "Report everything you can see; give the unsure ones a low confidence."
+- An empty list only if the model sees only floor or a wall (a wall with pictures
+  on it counts as a wall).
+- All snapshots of boot 7a587226 run again without thinking: 132 ok, 76 empty,
+  63 objects (version 3: 103 empty, 32 objects). Still missed: the table in 1,
+  the stairs and cabinet in 85, the door in 120.
+
+Prompt version 5 (17 Oct, Daniel): rewritten in markdown, in sections (context,
+the camera, the task, the output format with an example, the object labels, the
+box, when there is nothing). Short sentences, each rule once. It is in
+`pc/robot/src/objects/system_prompt.md`. Run without thinking on all 132: 70
+empty, 81 objects, confidence 40-95 %. Still missed: the table in 1, the stairs
+and cabinet in 85; the door in 120 is now an `object`.
 
 ### Step 0: the model server, tried by hand (17 Oct)
 
@@ -123,7 +147,7 @@ One picture (boot 7a587226, snapshot 31: a sofa with a pouf in front), the
 ### The tool the model reports with
 
 The model reports through one tool, `report_objects`, with one argument: an
-array of `{label, bbox: [y1, x1, y2, x2]}` (0-1000, Gemma's own order and grid;
+array of `{label, bbox: [y1, x1, y2, x2], confidence}` (0-1000, Gemma's own order and grid;
 the key is `bbox` rather than Gemma's `box_2d`, as clearer). An
 empty array means "nothing here". Gemma 4 supports function calling; whether the
 local server passes it through well is the first thing the first run shows. If
@@ -135,12 +159,12 @@ can correct itself and call it again:
 - a label not on the list: `"label 'stool' is not one of: chair, table, ..., object.
   Use object if nothing fits."`
 - a box outside 0-1000, or with y1 ≥ y2 or x1 ≥ x2;
+- a confidence missing or outside 0-100;
 - arguments that aren't the array asked for.
 
-**An empty list is pushed back once.** The first time the model reports nothing,
-the tool answers: "An empty list is unusual: a room in a flat almost always has
-something in view (furniture, a wall, a door). Look again; if there really is
-nothing, report the empty list again." A second empty list is accepted.
+**An empty list is accepted at once** (changed 17 Oct, Daniel; it was pushed back
+once). The pictures are small: many show only floor, a bare wall, or a blur. The
+system prompt says an empty list is a normal answer.
 
 **The session's end is checked.** If the model ends its turn without calling the
 tool (or after a call that got errors), the server asks it to call
@@ -158,13 +182,18 @@ What it has to say (wording to work out on the first runs):
   off at the top; the floor fills the bottom of the picture.
 - The job: find the objects standing on the floor, from the list (`object` if
   nothing fits), and report each with `report_objects`.
+- What they are for (prompt version 3): the robot drives by the map, so it needs
+  what it must avoid (furniture, anything on the floor in its way) and what it may
+  go to or through (doors, doorways).
+- Report everything it can see, the unsure ones with a low confidence; an empty
+  list only for floor or a wall (version 4).
 - **The bottom edge matters most.** Each box's bottom edge is used to work out how
   far away the object is: it must be exactly where the object touches the floor
   (the lowest point of its legs, base or front), as precise as possible, to the
   pixel. The top edge matters little; the left and right edges give its width
   and bearing.
 - One box per object; a chair's legs are one chair. Partly hidden or cut-off
-  objects are boxed for the part that is seen. Walls and doors: the box's bottom
+  objects are boxed for the part that is seen. Doors and doorways: the box's bottom
   edge along where they meet the floor.
 - The coordinate format, with an example, and that the answer goes through the
   tool, not in text.
@@ -177,8 +206,8 @@ What it has to say (wording to work out on the first runs):
 |---|---|---|
 | Height of the lens | **8.8 cm** above the floor | measured by Daniel, 17 Oct |
 | Position | **2.5 cm ahead** of the centre, **0.5 cm right** (y = −0.5 cm) | measured by Daniel, 17 Oct |
-| Tilt | **−1.8°** (down) on top of the robot's pitch from the pose | calibrated 17 Oct (below) |
-| Lens | **f = 180 px** (~48° across) | calibrated 17 Oct (below) |
+| Tilt | **−1.86°** (down) on top of the robot's pitch from the pose | calibrated 17 Oct (below) |
+| Lens | **f = 188 px** (~46° across), from the table's width | calibrated 17 Oct (below) |
 | Picture | 160 × 120, from the sensor's 640 × 480 window (subsampled and binned), so it covers close to the full field of view | `picoA/drivers/hm0360_init.h` |
 | Sensor | HM0360, 3.6 µm pixels; the 640 × 480 window is 2.30 × 1.73 mm (2.88 mm across: the 1/6″ format Arducam gives) | Arducam |
 | Lens | Arducam's listing: **focal length 2.59 mm, DFOV 64°** | [Arducam HM0360](https://www.arducam.com/hm0360-vga-monochrome-dvp-camera-module-for-arduino-giga-r1-wifi-board.html) |
@@ -222,9 +251,31 @@ from the data sheets. **The calibration says f = 180 px, ~48° across** (below).
 - Himax sells HM0360 modules with 70°, 96°, 129° and 179° lenses. Lenses differ
   between modules.
 
-**So, open:** our one measurement (the pouf's height) says 180 px, the web says
-160 px for other modules. 180 px stays in the code for now. The ToF pairs of the
-next phase (step 3) can fit f together with the tilt and settle it.
+**Settled by the table (17 Oct): f ≈ 188 px, ~46° across. Not 160.**
+
+The table in snapshot 1, measured by Daniel: **80.5 cm** across the outside of
+its two front legs. Width = distance × pixels ÷ f, so f = distance × pixels ÷ width.
+
+| | Pixels | Distance (ToF) | f | FOV across |
+|---|---|---|---|---|
+| The model's box (x 380-900) | 83 px | ~182 cm | **188 px** | 46° |
+| The legs, read from the pixels (62-147) | 85 px | ~182 cm | 192 px | 45° |
+| f 180 would give | | | 84-87 cm | 48° |
+| f 160 would give | | | 95-98 cm | 53° |
+
+- The ToF: the second target in almost every zone, 178-188 cm. The first (~30
+  cm) is marked invalid.
+- The other checks agree: the pouf's height 182 px; the pouf and the table's tilts
+  together ~194 px.
+- 1 px is ~1 cm here, so f is good to a few %. A table at a slight angle would
+  make f a little higher still.
+- With f 188 the tilt would be **−1.86°** (pouf −1.84°, table −1.88°).
+- **In the code (17 Oct):** `place.ts` has f 188 and tilt −1.86°; the saved
+  boxes were placed again (`npm run place-objects`). The table (the model's box)
+  now at 316 cm, 139 cm wide: its bottom edge is still too high (next phase, step 1).
+  The pouf at 131 cm, 46 cm wide.
+- Not modelled: the lens's distortion near the edges and its true centre (taken
+  as 80, 60). A few % at most.
 
 ### Why the tilt and the bottom edge matter so much
 
@@ -262,7 +313,7 @@ matters much less: it scales every distance by the same few %.
      and marked "at most".
    - the bottom edge is at or above the horizon (a picture on a wall, a shelf's top
      part): not placed. Only its bearing is kept.
-   - doors and walls have no footprint: a line along the front edge.
+   - doors and doorways have no footprint: a line along the front edge.
 5. **Keep it re-runnable.** The model's boxes are stored as they came; the shapes on
    the map are computed from them and the camera's numbers. After the calibration
    the placing runs again without asking the model again.
@@ -350,10 +401,10 @@ Decided with Daniel, 17 Oct. Nobody will check each box, so the code has to:
 3. **The tilt calibrates itself.** Each time the ToF and a box see the same object,
    the two give a tilt (as in the calibration above); a running average keeps
    `tiltRad` current with no one checking, and shows when the mount has moved.
-   Pairs at different distances also fit f (160 or 180 px: still open, above).
+   Pairs at different distances also check f (~188 px from the table, above).
 
-Also: the firmware's `FOCAL_PX` (`camera_motion.c`) is 160, the calibration says
-180: for the camera features' bearings, to change with their next robot test.
+Also: the firmware's `FOCAL_PX` (`camera_motion.c`) is 160, the table says
+~188: for the camera features' bearings, to change with their next robot test.
 
 ## Next steps after that (rough)
 

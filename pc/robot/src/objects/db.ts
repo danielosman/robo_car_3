@@ -14,7 +14,7 @@ export interface DetectRun {
 export interface StoredObject {
   object_id: string; seq: number; n: number; label: string; floor: string; kind: string | null; distance: number | null;
   cx: number | null; cy: number | null; width: number | null; depth: number | null; angle: number | null;
-  ymin: number; xmin: number; ymax: number; xmax: number;
+  ymin: number; xmin: number; ymax: number; xmax: number; confidence: number | null;
 }
 
 const snapId = (boot: string, seq: number) => `${boot}-${seq}`;
@@ -33,7 +33,7 @@ export async function saveRun(store: Store, run: DetectRun, detections: Detectio
        run.turns, run.result, run.why, run.transcript]);
     for (const [n, d] of detections.entries()) {
       const p = placed[n], objectId = `${id}-${n}`;
-      await c.run("INSERT INTO detections VALUES ($1, $2, $3, $4, $5, $6, $7)", [id, n, d.label, ...d.bbox]);
+      await c.run("INSERT INTO detections VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id, n, d.label, ...d.bbox, d.confidence]);
       await c.run("INSERT INTO map_objects VALUES ($1, $2, $3, $4, 'camera', $5, $6, $7, $8, $9, $10, $11, $12)",
         [objectId, run.boot, run.seq, d.label, p.floor, p.kind, p.distanceM, p.cx, p.cy, p.width, p.depth, p.angle]);
       await c.run("INSERT INTO object_detections VALUES ($1, $2, $3)", [objectId, id, n]);
@@ -43,7 +43,7 @@ export async function saveRun(store: Store, run: DetectRun, detections: Detectio
 }
 
 const OBJECTS_SQL = `SELECT o.object_id, o.seq, od.n, o.label, o.floor, o.kind, o.distance, o.cx, o.cy, o.width, o.depth, o.angle,
-    d.ymin, d.xmin, d.ymax, d.xmax
+    d.ymin, d.xmin, d.ymax, d.xmax, d.confidence
   FROM map_objects o JOIN object_detections od USING (object_id) JOIN detections d ON d.snap_id = od.snap_id AND d.n = od.n`;
 
 const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
@@ -52,7 +52,7 @@ function objectRow(r: Record<string, unknown>): StoredObject {
     object_id: String(r.object_id), seq: Number(r.seq), n: Number(r.n), label: String(r.label), floor: String(r.floor),
     kind: r.kind === null ? null : String(r.kind), distance: numberOrNull(r.distance),
     cx: numberOrNull(r.cx), cy: numberOrNull(r.cy), width: numberOrNull(r.width), depth: numberOrNull(r.depth), angle: numberOrNull(r.angle),
-    ymin: Number(r.ymin), xmin: Number(r.xmin), ymax: Number(r.ymax), xmax: Number(r.xmax),
+    ymin: Number(r.ymin), xmin: Number(r.xmin), ymax: Number(r.ymax), xmax: Number(r.xmax), confidence: numberOrNull(r.confidence),
   };
 }
 
@@ -90,7 +90,7 @@ export async function transcriptOf(store: Store, boot: string, seq: number): Pro
 // Places every saved detection again with the camera's numbers now (place.ts), from
 // the boxes as the model gave them and the snapshots' poses: after a calibration. The
 // model isn't asked again. Returns how many objects were placed.
-export async function placeAgain(store: Store, placeOne: (d: Detection, pose: { x: number; y: number; yaw: number; pitch: number }) => Placed): Promise<number> {
+export async function placeAgain(store: Store, placeOne: (d: Pick<Detection, "label" | "bbox">, pose: { x: number; y: number; yaw: number; pitch: number }) => Placed): Promise<number> {
   return store.write(async c => {
     const rows = (await c.runAndReadAll(`SELECT od.object_id, d.label, d.ymin, d.xmin, d.ymax, d.xmax, s.x, s.y, s.yaw, s.pitch
       FROM object_detections od JOIN detections d ON d.snap_id = od.snap_id AND d.n = od.n JOIN snapshots s ON s.snap_id = od.snap_id

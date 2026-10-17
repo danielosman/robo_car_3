@@ -1,29 +1,20 @@
 // One detection session (doc/OBJECTS_PLAN.md, "What robot detect does"): the camera
 // picture goes to the vision model with the system prompt, and the model answers by
 // calling report_objects. Every call is checked (labels.ts); what is wrong goes back
-// to the model so it can correct itself. The first empty list is pushed back once.
+// to the model so it can correct itself. An empty list is accepted at once.
 // A turn without the tool call gets a reminder. At most 3 corrections and 3 reminders,
 // then the session fails and says why. The whole conversation is kept (without the
 // picture) for looking at later.
+import { readFileSync } from "node:fs";
 import { LABELS, checkReport, type Detection } from "./labels.ts";
 import type { Chat, ChatMessage } from "./model.ts";
 
-export const PROMPT_VERSION = 1;
+export const PROMPT_VERSION = 5;  // 2: door and doorway, no wall, confidence; 3: what to look for; 4: person, animal,
+                                  // report everything; 5: rewritten in markdown (system_prompt.md)
 const MAX_CORRECTIONS = 3, MAX_REMINDERS = 3;
 
-export const SYSTEM_PROMPT = `You find objects in pictures from a small robot's camera, for a map of the flat it drives in.
-
-The camera: 160 x 120 pixels, greyscale, 8.8 cm above the floor, looking straight ahead. The floor fills the bottom of the picture; furniture looks tall and is often cut off at the top.
-
-Find every object that stands on the floor and report each one with the report_objects tool, once, with all of them in one call. Labels: ${LABELS.join(", ")}. Use object when nothing else fits; don't stretch a label (a pouf is an object, not a box).
-
-Each object's bbox is [ymin, xmin, ymax, xmax] on a 0-1000 grid: 0,0 is the top left corner, 1000,1000 the bottom right; y first. Example: {"label": "chair", "bbox": [310, 420, 655, 580]}.
-
-The bottom edge (ymax) matters most. It is used to work out how far away the object is, so put it exactly where the object touches the floor: the lowest point of its legs, base or feet, as precisely as you can, to the pixel. If the object's front doesn't reach the floor (a sofa or cabinet with a gap or a recessed base underneath), put ymax where its legs or base meet the floor, not at its lower front edge. The left and right edges give its width and direction; the top edge matters little.
-
-One box per object (a chair's legs are one chair). An object cut off by the picture's edge: box the part that is seen. A wall or door: the box's bottom edge along where it meets the floor.
-
-If there really is nothing, call report_objects with an empty list.`;
+// The system prompt is in system_prompt.md, to read and edit as it is.
+export const SYSTEM_PROMPT = readFileSync(new URL("./system_prompt.md", import.meta.url), "utf8");
 
 export const TOOLS = [{
   type: "function",
@@ -32,16 +23,15 @@ export const TOOLS = [{
     description: "Reports every object found in the picture, all in one call. An empty list means nothing was found.",
     parameters: {
       type: "object", required: ["objects"],
-      properties: { objects: { type: "array", items: { type: "object", required: ["label", "bbox"], properties: {
+      properties: { objects: { type: "array", items: { type: "object", required: ["label", "bbox", "confidence"], properties: {
         label: { type: "string", description: `One of: ${LABELS.join(", ")}` },
         bbox: { type: "array", items: { type: "number" }, description: "[ymin, xmin, ymax, xmax] on a 0-1000 grid, y first" },
+        confidence: { type: "number", description: "How sure you are of this object, 0-100 (%)" },
       } } } },
     },
   },
 }];
 
-const EMPTY_PUSHBACK = "An empty list is unusual: a room in a flat almost always has something in view (furniture, a wall, " +
-  "a door). Look again and report what you see. If there really is nothing, report the empty list again.";
 const REMINDER = "Call report_objects now with the objects you found (an empty list if there is nothing). Don't answer in text.";
 
 export interface Turn { role: ChatMessage["role"]; text: string; tool_calls?: unknown; reasoning?: string | null }
@@ -61,7 +51,7 @@ export async function detectObjects(chat: Chat, png: Buffer, opts: { thinking: b
     transcript.push({ role: m.role, text: typeof m.content === "string" ? m.content : "", ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
                       ...(reasoning ? { reasoning } : {}) });
   };
-  let corrections = 0, reminders = 0, pushedBack = false, turns = 0;
+  let corrections = 0, reminders = 0, turns = 0;
 
   for (;;) {
     const reply = await chat(messages, TOOLS, opts);
@@ -84,7 +74,6 @@ export async function detectObjects(chat: Chat, png: Buffer, opts: { thinking: b
         try { args = JSON.parse(call.function.arguments); } catch { /* checked below */ }
         const checked = checkReport(args);
         if (!checked.ok) { answer = `Not accepted. Fix these and call report_objects again:\n${checked.errors.join("\n")}`; wrong = true; }
-        else if (!checked.detections.length && !pushedBack) { answer = EMPTY_PUSHBACK; pushedBack = true; }
         else { answer = `Accepted: ${checked.detections.length} objects.`; accepted = checked.detections; }
       }
       say({ role: "tool", tool_call_id: call.id, content: answer });
