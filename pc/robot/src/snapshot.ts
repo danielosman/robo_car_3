@@ -2,7 +2,7 @@
 // knows when a command asks (after every move), sent between its console text (robot.ts takes the bytes
 // out). Each boot's snapshots are saved as they arrive, never changed, in
 // recordings/snapshots/raw/<time>-boot-<id>.snap (the truth); the database rows and
-// the camera pictures (recordings/camera/) are derived from them (store.ts, npm run import).
+// the camera pictures (recordings/camera/<boot's folder>/) are derived from them (store.ts, npm run import).
 //
 // A snapshot: "SNAP", version u8, total length u32, sections [type u8][length u32]
 // [payload], CRC-32 of everything before it. Little-endian.
@@ -12,6 +12,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { END_REASONS, parseRecord, REC, type Geometry, type TofRaw } from "./recording.ts";
 import { decodeOpt } from "../../bringup/src/opt4048.ts";
+import type { BootFolders } from "./boot_folders.ts";
 
 export const SNAP_MAGIC = "SNAP";
 export const SNAP_FILE_MAGIC = "RCSNAP01"; // a file of snapshots: then [arrival ms f64][snapshot] each
@@ -218,9 +219,10 @@ export const grayPng = (width: number, height: number, pixels: Buffer) => png(wi
 export const rgbPng = (width: number, height: number, pixels: Buffer) => png(width, height, pixels, 3);
 
 export const snapId = (bootId: string, seq: number) => `${bootId}-${seq}`;
-// Under recordings/: the raw snapshot files, and the camera pictures as camera/<boot>/<seq>.png.
+// Under recordings/: the raw snapshot files, and the camera pictures as camera/<folder>/<seq>.png,
+// folder: the boot's folder name (boot_folders.ts).
 export const SNAPSHOTS_RAW = path.join("snapshots", "raw");
-export const cameraPicture = (bootId: string, seq: number) => path.join("camera", bootId, `${seq}.png`);
+export const cameraPicture = (bootFolder: string, seq: number) => path.join("camera", bootFolder, `${seq}.png`);
 
 // The snapshots in a raw file, with their arrival times; damaged ones are skipped (counted).
 export function* readSnapshotFile(buf: Buffer): Generator<{ arrivalMs: number; snapshot: Snapshot | null; error?: string }> {
@@ -239,13 +241,15 @@ export function* readSnapshotFile(buf: Buffer): Generator<{ arrivalMs: number; s
 // file, picture: relative to dir, or null), "note" (string).
 export class SnapshotSaver extends EventEmitter {
   private dir: string;
+  private bootFolders: BootFolders;
   private bootId = "";
   private file: WriteStream | null = null;
   private fileName = "";
 
-  constructor(dir: string) {
+  constructor(dir: string, bootFolders: BootFolders) {
     super();
     this.dir = dir;
+    this.bootFolders = bootFolders;
     mkdirSync(path.join(dir, SNAPSHOTS_RAW), { recursive: true });
   }
 
@@ -256,7 +260,10 @@ export class SnapshotSaver extends EventEmitter {
     const ms = Date.now(), head = Buffer.alloc(8);
     head.writeDoubleLE(ms, 0);
     this.file!.write(Buffer.concat([head, bytes]));
-    this.emit("snapshot", s, ms, this.fileName, savePicture(this.dir, s));
+    let picture: string | null = null;
+    try { picture = savePicture(this.dir, this.bootFolders.folderForBoot(s.bootId, ms), s); }
+    catch (err) { this.emit("note", `snapshot ${s.seq}: picture NOT saved: ${(err as Error).message}`); }
+    this.emit("snapshot", s, ms, this.fileName, picture);
   }
 
   stop(): void { this.file?.end(); }
@@ -272,11 +279,11 @@ export class SnapshotSaver extends EventEmitter {
   }
 }
 
-// The camera frame as camera/<boot>/<seq>.png under recordings/ (dir); its path
-// relative to dir, null without a picture.
-export function savePicture(dir: string, s: Snapshot): string | null {
+// The camera frame as camera/<folder>/<seq>.png under recordings/ (dir), folder: the
+// boot's folder name; its path relative to dir, null without a picture.
+export function savePicture(dir: string, bootFolder: string, s: Snapshot): string | null {
   if (!s.camera) return null;
-  const picture = cameraPicture(s.bootId, s.seq), file = path.join(dir, picture);
+  const picture = cameraPicture(bootFolder, s.seq), file = path.join(dir, picture);
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, grayPng(s.camera.width, s.camera.height, s.camera.pixels));
   return picture;

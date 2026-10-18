@@ -1,5 +1,5 @@
 // The viewer's snapshot data (doc/ARCHITECTURE.md, the PC; snapshot.ts):
-//   GET /api/boots                         each boot with snapshots: how many, first and last
+//   GET /api/boots                         each boot with snapshots: its folder name, how many, first and last
 //   GET /api/snapshots?boot=<id>           a boot's snapshots for the timeline: when, why, the action, the pose
 //   GET /api/snapshots/<boot>/<seq>        one snapshot: its row, the ToF frame (8 x 8 grid and targets in the world),
 //                                          the camera features
@@ -9,14 +9,15 @@
 //                                          and the path it drove since the map was last cleared
 //   GET /api/snapshots/<boot>/<seq>/objects  what robot detect found in its picture, and the boot's
 //                                          objects on the map up to it (objects/api.ts)
-//   GET /camera/<boot>/<seq>.png           the camera picture
+//   GET /camera/<boot>/<seq>.png           the camera picture (its file: camera/<boot's folder>/)
 import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
 import type { Pose } from "./robot.ts";
-import { cameraPicture, tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
+import { tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
 import { pageObjects } from "./objects/db.ts";
+import type { BootFolders } from "./boot_folders.ts";
 
 const BOOT = /^[0-9a-f]{8}$/;
 
@@ -40,9 +41,12 @@ export function mapViewOf(s: Snapshot): MapView {
 
 const bytes = (v: unknown): Buffer => Buffer.from((v as { bytes: Uint8Array }).bytes);
 
-export async function listBoots(store: Store) {
-  return store.query(`SELECT boot_id, count(*) AS snapshots, strftime(min(arrived_at), '%Y-%m-%d %H:%M:%S') AS first,
+// The boots with snapshots, newest first; folder: the boot's folder name (YYYYMMDDHHMM,
+// boot_folders.ts), what the page shows; the boot id if it has none.
+export async function listBoots(store: Store, bootFolders: BootFolders) {
+  const boots = await store.query(`SELECT boot_id, count(*) AS snapshots, strftime(min(arrived_at), '%Y-%m-%d %H:%M:%S') AS first,
     strftime(max(arrived_at), '%Y-%m-%d %H:%M:%S') AS last FROM snapshots GROUP BY boot_id ORDER BY max(arrived_at) DESC`);
+  return boots.map((b): Record<string, unknown> => ({ ...b, folder: bootFolders.knownFolder(String(b.boot_id)) ?? String(b.boot_id) }));
 }
 
 export async function listSnapshots(store: Store, boot: string) {
@@ -100,7 +104,8 @@ export async function snapshotMap(store: Store, boot: string, seq: number): Prom
 }
 
 // Answers the snapshot requests; false if the URL isn't one of them. dir: recordings/.
-export async function handleSnapshotApi(req: http.IncomingMessage, res: http.ServerResponse, store: Store, dir: string): Promise<boolean> {
+export async function handleSnapshotApi(req: http.IncomingMessage, res: http.ServerResponse, store: Store, dir: string,
+                                        bootFolders: BootFolders): Promise<boolean> {
   if (req.method !== "GET") return false;
   const url = new URL(req.url ?? "/", "http://localhost");
   const send = (code: number, body: unknown) => {
@@ -108,7 +113,7 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     res.end(JSON.stringify(body));
   };
   try {
-    if (url.pathname === "/api/boots") { send(200, await listBoots(store)); return true; }
+    if (url.pathname === "/api/boots") { send(200, await listBoots(store, bootFolders)); return true; }
     if (url.pathname === "/api/snapshots") { send(200, await listSnapshots(store, url.searchParams.get("boot") ?? "")); return true; }
     const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map|\/objects)?$/.exec(url.pathname);
     if (one) {
@@ -121,7 +126,10 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     const png = /^\/camera\/([0-9a-f]{8})\/(\d+)\.png$/.exec(url.pathname);
     if (png) {
       try {
-        const data = await readFile(path.join(dir, cameraPicture(png[1], Number(png[2]))));
+        // The URL has the boot id; the picture's file (in the boot's folder) is in its row.
+        const [row] = await store.query(`SELECT image FROM snapshots WHERE snap_id = '${png[1]}-${Number(png[2])}'`);
+        if (!row?.image) throw new Error("no picture");
+        const data = await readFile(path.join(dir, String(row.image)));
         res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=86400" });
         res.end(data);
       } catch { res.writeHead(404); res.end("no picture"); }

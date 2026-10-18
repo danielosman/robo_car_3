@@ -17,16 +17,20 @@ import { MAP_LEGEND, RobotMap } from "./map.ts";
 import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
 import type { Chat } from "../objects/model.ts";
+import type { BootFolders } from "../boot_folders.ts";
 
 export interface Config { autoSnap: boolean }
 export interface ApiContext {
   store: Store; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDir: string;
+  bootFolders: BootFolders;  // the robot's boot ids to our folder names (map --png)
   chat?: Chat; modelName?: string;  // the vision model for robot detect (objects/)
 }
 export interface Read {
   usage: string;  // "map [n] [--png]"
   help: string;   // a few simple sentences
-  run(ctx: ApiContext, args: string[], flags: Set<string>): Promise<object>;
+  // req: the request as it came, for a command whose argument isn't words (detect_save's
+  // JSON) or whose flags carry a value (--by=<name>: query.by)
+  run(ctx: ApiContext, args: string[], flags: Set<string>, req?: { body: string; query: Record<string, string> }): Promise<object>;
 }
 
 // A read that can't answer: the message says why; status is the HTTP status.
@@ -86,11 +90,11 @@ export const READS: Record<string, Read> = {
           "10 cm. The top row is the largest x (forward from where the robot started), the left column the largest\n" +
           "y (left). x_top and y_left say where the top-left cell is. --png writes the same as a picture and gives\n" +
           "its file.",
-    async run({ store, recordingsDir }, args, flags) {
+    async run({ store, recordingsDir, bootFolders }, args, flags) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), map = await mapOf(store, id);
       if (flags.has("png")) {
-        const file = path.join(recordingsDir, "map", id.boot, `${id.seq}.png`);
+        const file = path.join(recordingsDir, "map", bootFolders.folderForBoot(id.boot), `${id.seq}.png`);
         await mkdir(path.dirname(file), { recursive: true });
         await writeFile(file, map.png()!);
         return { snapshot: id.seq, file };

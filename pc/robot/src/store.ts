@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS detect_runs (  -- one per snapshot detected: how the 
   snap_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, ran_at TIMESTAMP, model VARCHAR, prompt_version INTEGER,
   thinking BOOLEAN, seconds DOUBLE, turns INTEGER, result VARCHAR, why VARCHAR, -- result: ok or failed (why)
   transcript VARCHAR);  -- the conversation as JSON, without the picture
-CREATE TABLE IF NOT EXISTS detections (  -- the model's boxes as it gave them: [ymin, xmin, ymax, xmax] on 0-1000
+CREATE TABLE IF NOT EXISTS detections (  -- the boxes y first on 0-1000, whatever the model gave (objects/labels.ts)
   snap_id VARCHAR, n INTEGER, label VARCHAR, ymin INTEGER, xmin INTEGER, ymax INTEGER, xmax INTEGER);
 CREATE TABLE IF NOT EXISTS map_objects (  -- the shapes on the map, m and rad in the boot's map frame
   object_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, label VARCHAR,
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS object_detections (object_id VARCHAR, snap_id VARCHAR
 ALTER TABLE takes ADD COLUMN IF NOT EXISTS geometry VARCHAR;   -- GEOMETRY as JSON (the viewer's rays)
 ALTER TABLE truth ADD COLUMN IF NOT EXISTS truth_id VARCHAR;
 ALTER TABLE detections ADD COLUMN IF NOT EXISTS confidence INTEGER;  -- 0-100 %, the model's own (prompt 2 on)
+ALTER TABLE detect_runs ADD COLUMN IF NOT EXISTS reasoning_budget INTEGER;  -- the thinking limit in tokens; NULL: none (or no thinking)
 `;
 const TAKE_TABLES = ["tof_frames", "tof_zones", "tof_targets", "odom", "drive", "marks", "wifi"];
 const SNAP_TABLES = ["snapshots", "snapshot_targets", "snapshot_tiles", "snapshot_features"];

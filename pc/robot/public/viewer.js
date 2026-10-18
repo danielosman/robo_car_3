@@ -54,6 +54,10 @@ renderer.setAnimationLoop(() => renderer.render(scene, camera));
 // --- state ---
 let data = null, map = null, truth = [], frameIndex = 0, playing = null;
 let pointsObj = null, shown = [], mapObj = new THREE.Group(), robotObj = new THREE.Group(), pathObj = null, truthObj = new THREE.Group();
+// The boots' folder names (YYYYMMDDHHMM: when each started), shown instead of the boot ids.
+const bootFolder = new Map();
+// A take id (<boot id>-<n> or <boot id>-all) as shown: <folder name>-<n>.
+const shownTakeId = t => t.take_id.replace(t.boot_id, bootFolder.get(t.boot_id) ?? t.boot_id);
 scene.add(mapObj, robotObj, truthObj);
 
 for (let r = 1; r <= 8; r++) {
@@ -273,7 +277,7 @@ function status(text) {
   if (text !== undefined) { $("status").textContent = text; return; }
   if (!data) return;
   const t = data.take, solidN = map ? map.cells.filter(solid).length : null;
-  $("status").textContent = `${t.take_id} · ${t.key} ${t.action} · ${t.duration_s} s · ${t.started}\n` +
+  $("status").textContent = `${shownTakeId(t)} · ${t.key} ${t.action} · ${t.duration_s} s · ${t.started}\n` +
     `${shown.length} of ${data.points.x.length} points shown` + (solidN !== null ? ` · ${solidN} blocked or overhang columns` : "");
 }
 
@@ -288,7 +292,7 @@ async function load(id) {
   frameIndex = 0;
   $("slider").max = Math.max(0, data.frames.x.length - 1);
   $("slider").value = 0;
-  $("takeinfo").innerHTML = `<small>${data.take.note ? `${data.take.note} · ` : ""}boot ${data.take.boot_id}, ended ${data.take.end_reason} ·
+  $("takeinfo").innerHTML = `<small>${data.take.note ? `${data.take.note} · ` : ""}boot ${bootFolder.get(data.take.boot_id) ?? data.take.boot_id}, ended ${data.take.end_reason} ·
     <a href="/takes" target="_blank">all takes</a></small>`;
   buildPath();
   buildPoints();
@@ -299,7 +303,7 @@ async function load(id) {
 async function start() {
   const takes = await (await fetch("/api/takes")).json();
   const ids = new Set(), perBoot = new Map();
-  for (const t of takes) perBoot.set(t.boot_id, (perBoot.get(t.boot_id) ?? 0) + 1);
+  for (const t of takes) { perBoot.set(t.boot_id, (perBoot.get(t.boot_id) ?? 0) + 1); bootFolder.set(t.boot_id, t.folder); }
   const option = (value, text) => {
     const o = document.createElement("option");
     o.value = value;
@@ -309,8 +313,8 @@ async function start() {
   };
   for (const t of takes) { // newest first: a boot's whole drive above its newest take
     if (perBoot.get(t.boot_id) > 1 && !ids.has(`${t.boot_id}-all`))
-      option(`${t.boot_id}-all`, `${t.started} · ${t.boot_id} · whole drive, ${perBoot.get(t.boot_id)} takes`);
-    option(t.take_id, `${t.started} · ${t.take_id} · ${t.key} ${t.action}${t.note ? ` · ${t.note}` : ""}`);
+      option(`${t.boot_id}-all`, `${t.started} · ${t.folder} · whole drive, ${perBoot.get(t.boot_id)} takes`);
+    option(t.take_id, `${t.started} · ${t.folder}-${t.take_no} · ${t.key} ${t.action}${t.note ? ` · ${t.note}` : ""}`);
   }
   const wanted = new URLSearchParams(location.search).get("take");
   const id = ids.has(wanted) ? wanted : takes[0]?.take_id;

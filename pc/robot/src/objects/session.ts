@@ -6,17 +6,33 @@
 // then the session fails and says why. The whole conversation is kept (without the
 // picture) for looking at later.
 import { readFileSync } from "node:fs";
-import { LABELS, checkReport, type Detection } from "./labels.ts";
+import { LABELS, checkReport, type BoxFormat, type Detection } from "./labels.ts";
 import type { Chat, ChatMessage } from "./model.ts";
 
 export const PROMPT_VERSION = 5;  // 2: door and doorway, no wall, confidence; 3: what to look for; 4: person, animal,
-                                  // report everything; 5: rewritten in markdown (system_prompt.md)
+                                  // report everything; 5: rewritten in markdown (system_prompt_gemma4.md,
+                                  // and system_prompt_qwen.md, with the model)
 const MAX_CORRECTIONS = 3, MAX_REMINDERS = 3;
 
-// The system prompt is in system_prompt.md, to read and edit as it is.
-export const SYSTEM_PROMPT = readFileSync(new URL("./system_prompt.md", import.meta.url), "utf8");
+// A system prompt per model family, picked by the model's name (MODEL in .env), each in
+// its own file to read and edit as it is. Gemma gives boxes y first on a 0-1000 grid;
+// Qwen x first in the picture's pixels (160 × 120), the order shown only in its
+// prompt's example. Qwen's boxes are turned y first on 0-1000 as they arrive
+// (labels.ts), so everything after sees them as Gemma's.
+export interface Prompt { file: string; text: string; box: BoxFormat; bboxHelp: string }
+const PROMPTS: Record<string, Omit<Prompt, "text">> = {
+  gemma: { file: "system_prompt_gemma4.md", box: "y_first_1000", bboxHelp: "[ymin, xmin, ymax, xmax] on a 0-1000 grid, y first" },
+  qwen: { file: "system_prompt_qwen.md", box: "x_first_pixels", bboxHelp: "The object's box in the picture's pixels" },
+};
 
-export const TOOLS = [{
+export function promptFor(model: string): Prompt {
+  const family = Object.keys(PROMPTS).find(f => model.toLowerCase().startsWith(f));
+  if (!family) throw new Error(`no system prompt for model ${model}: its name must start with ${Object.keys(PROMPTS).join(" or ")}`);
+  const p = PROMPTS[family];
+  return { ...p, text: readFileSync(new URL(`./${p.file}`, import.meta.url), "utf8") };
+}
+
+const toolsFor = (prompt: Prompt) => [{
   type: "function",
   function: {
     name: "report_objects",
@@ -25,7 +41,7 @@ export const TOOLS = [{
       type: "object", required: ["objects"],
       properties: { objects: { type: "array", items: { type: "object", required: ["label", "bbox", "confidence"], properties: {
         label: { type: "string", description: `One of: ${LABELS.join(", ")}` },
-        bbox: { type: "array", items: { type: "number" }, description: "[ymin, xmin, ymax, xmax] on a 0-1000 grid, y first" },
+        bbox: { type: "array", items: { type: "number" }, description: prompt.bboxHelp },
         confidence: { type: "number", description: "How sure you are of this object, 0-100 (%)" },
       } } } },
     },
@@ -39,13 +55,14 @@ export type SessionResult =
   | { result: "ok"; detections: Detection[]; turns: number; transcript: Turn[] }
   | { result: "failed"; why: string; turns: number; transcript: Turn[] };
 
-export async function detectObjects(chat: Chat, png: Buffer, opts: { thinking: boolean }): Promise<SessionResult> {
+export async function detectObjects(chat: Chat, png: Buffer, opts: { thinking: boolean; reasoningBudget: number | null; prompt: Prompt }): Promise<SessionResult> {
+  const { prompt, thinking, reasoningBudget } = opts, tools = toolsFor(prompt);
   const image = `data:image/png;base64,${png.toString("base64")}`;
   const messages: ChatMessage[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: prompt.text },
     { role: "user", content: [{ type: "text", text: "Find the objects in this picture." }, { type: "image_url", image_url: { url: image } }] },
   ];
-  const transcript: Turn[] = [{ role: "system", text: SYSTEM_PROMPT }, { role: "user", text: "Find the objects in this picture. [the picture]" }];
+  const transcript: Turn[] = [{ role: "system", text: prompt.text }, { role: "user", text: "Find the objects in this picture. [the picture]" }];
   const say = (m: ChatMessage, reasoning?: string | null) => {
     messages.push(m);
     transcript.push({ role: m.role, text: typeof m.content === "string" ? m.content : "", ...(m.tool_calls ? { tool_calls: m.tool_calls } : {}),
@@ -54,7 +71,7 @@ export async function detectObjects(chat: Chat, png: Buffer, opts: { thinking: b
   let corrections = 0, reminders = 0, turns = 0;
 
   for (;;) {
-    const reply = await chat(messages, TOOLS, opts);
+    const reply = await chat(messages, tools, { thinking, reasoningBudget });
     turns++;
     say(reply.message, reply.reasoning);
     const calls = reply.message.tool_calls ?? [];
@@ -72,7 +89,7 @@ export async function detectObjects(chat: Chat, png: Buffer, opts: { thinking: b
       } else {
         let args: unknown = null;
         try { args = JSON.parse(call.function.arguments); } catch { /* checked below */ }
-        const checked = checkReport(args);
+        const checked = checkReport(args, prompt.box);
         if (!checked.ok) { answer = `Not accepted. Fix these and call report_objects again:\n${checked.errors.join("\n")}`; wrong = true; }
         else { answer = `Accepted: ${checked.detections.length} objects.`; accepted = checked.detections; }
       }

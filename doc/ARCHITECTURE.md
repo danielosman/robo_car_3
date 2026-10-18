@@ -95,7 +95,8 @@ lines, and their answers). `loop_stats` times every stage. Core 1 is not used.
 - **`pose`**: the odometry reports of the last ~1.3 s, so `pose_at(t)` gives where
   the robot was when a sensor frame was measured (interpolated; pitch included,
   roll not).
-- **`rangefinder`**: the VL53L8CX as 64 rays (8 × 8 zones, 5.625° each, 15 Hz). It
+- **`rangefinder`**: the VL53L8CX as 64 rays (8 × 8 zones, 5.625° each, 15 Hz;
+  its numbers in [TOF_PARAMS.md](TOF_PARAMS.md)). It
   hides the zone order and the mounting: turned 90° on the PCB, 3.2 cm ahead of
   the centre, 2.6 cm right, 7 cm above the floor. Per zone it keeps the nearest sure
   target (status 5, 6 or 9), or "nothing in range", or "unsure"; and the next sure
@@ -103,7 +104,8 @@ lines, and their answers). `loop_stats` times every stage. Core 1 is not used.
   echo at ~30 cm often comes first, with status 12 or 14: it is skipped). It gives each
   ray's direction, also for points inside a zone and with the robot's pitch.
 - **Drivers:** `tof` (the ST ULD over SPI0, all four targets per zone), `camera`
-  (HM0360, 160 × 120 monochrome, captured by PIO and DMA in the background, its
+  (HM0360, 160 × 120 monochrome, subsampled by 4, no binning; its numbers in
+  [CAMERA_PARAMS.md](CAMERA_PARAMS.md); captured by PIO and DMA in the background, its
   own exposure control in 10 ms steps against mains flicker, each row's time for
   the rolling shutter; `camera_last_frame()` gives other readers the frame
   `motion_sense` took), `opt4048` (the colour sensor on I2C0: coherent readings of
@@ -405,11 +407,21 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   keys nothing takes (CLI_API_PLAN.md, gaps).
 - **`snapshot.ts`, `snapshots_api.ts`**: each boot's snapshots as they arrive in
   `recordings/snapshots/raw/<time>-boot-<id>.snap` (the truth), each camera picture
-  as `recordings/camera/<boot>/<seq>.png` (map pictures from `robot map --png` in
-  `recordings/map/`), and in DuckDB: `snapshots` (one row each),
+  as `recordings/camera/<folder>/<seq>.png` (map pictures from `robot map --png` in
+  `recordings/map/<folder>/`), and in DuckDB: `snapshots` (one row each),
   `snapshot_targets`, `snapshot_features`, `snapshot_tiles`, the window as a BLOB.
   The API composes the map at any snapshot: the newest of each tile up to it since
   the map was last cleared.
+- **`boot_folders.ts`**: the robot names each boot with a random 8-hex boot id (it
+  has no clock); the folders under `recordings/` are named by when the PC first saw
+  the boot, `YYYYMMDDHHMM` (local). `recordings/boots.json` maps boot id to folder
+  name; read once at start, the last boot's folder remembered, written only when a
+  new boot appears (named when its first snapshot or recording arrives; a name
+  already taken is an error). The database and the API keep the boot id; the page's
+  Boot dropdown, the takes page and the 3D viewer show the folder name (`/api/boots`
+  and `/api/takes` send it as `folder`; a take as `<folder>-<n>`);
+  `snapshots.image` holds the picture's path, so the page's `/camera/<boot>/<seq>.png`
+  reads it from there.
 - **`recording.ts`**: receives the datagrams, saves each robot boot's as they
   arrive in `recordings/raw/<time>-boot-<id>.rec` (never changed: the truth), and
   notes each take as it ends (frames whole / half / missing, datagrams lost).
@@ -427,19 +439,29 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
 - **`objects/`**: objects on the map from the camera ([OBJECTS_PLAN.md](OBJECTS_PLAN.md)).
   `robot detect [n]` sends the snapshot's picture to a vision model on an
   OpenAI-compatible server (`MODEL_API`, default http://127.0.0.1:8080, llama.cpp's
-  router; `MODEL`, default `gemma-4-26b`; loaded on the first request if it isn't),
+  router; `MODEL`, default `gemma-4-26b`; loaded on the first request if it isn't;
+  thinking at most `REASONING_BUDGET` tokens, or `--reasoning-budget=N`),
   with a system prompt that asks for the bottom edge exactly where the object meets
-  the floor (`session.ts`). The model answers by calling `report_objects` with
+  the floor (`session.ts`). One prompt per model, picked by `MODEL`'s name:
+  `system_prompt_gemma4.md` (boxes y first on 0-1000) and `system_prompt_qwen.md` (x
+  first, shown only by its example, in the picture's 160 × 120 pixels). Qwen's boxes
+  are turned into Gemma's form as they arrive, so the database and everything after
+  see them y first on 0-1000. The model answers by calling `report_objects` with
   `{label, bbox: [ymin, xmin, ymax, xmax]}` on 0-1000; a fixed list of labels
   (`labels.ts`: chair, table, sofa, door, wall, plant, shelf, cabinet, box, object).
   Wrong calls go back with what to fix (3 corrections), no call gets a reminder (3),
   the first empty list is pushed back once. `place.ts` puts each box's bottom edge
-  on the floor through the camera (8.8 cm up, 2.5 cm ahead, 0.5 cm right, f 180 px,
-  looking 1.8° further down than the robot's pitch: calibrated 17 Oct) and the
-  snapshot's pose and pitch: its front edge, and a
+  on the floor through the camera (its numbers in [CAMERA_PARAMS.md](CAMERA_PARAMS.md))
+  and the snapshot's pose and pitch: its front edge, and a
   rectangle of the label's depth behind it (doors and walls a line); camera only.
   `db.ts`: `detect_runs`, `detections`, `map_objects`, `object_detections` in
-  DuckDB; a new run on a snapshot replaces the old. `robot objects [n]` reads them
+  DuckDB; a new run on a snapshot replaces the old. `robot detect_save <n>
+  --by=<name> '<json>'` saves boxes found elsewhere (an outside agent that looked at
+  `robot camera n`), the JSON as `report_objects` takes it. `robot detect` saves
+  through the same `detectSave` (`api.ts`): checked, placed, saved; `model` is who
+  found them (`--by`), and an outside agent leaves prompt version, thinking, seconds,
+  turns and the conversation null (a program may send them in the JSON). The CLI
+  passes `--name=value` flags as `?name=value`. `robot objects [n]` reads them
   back (`--transcript`: the conversation). `npm run place-objects` places every
   saved box again with the camera's numbers now (after a calibration). The page draws the boxes on the camera
   picture and the shapes on the map (`/api/snapshots/<boot>/<seq>/objects`;

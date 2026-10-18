@@ -17,7 +17,7 @@
 #define DRIFT          0.05f     // a block at its background pulls it this much (dusk, clouds)
 #define CALM_US        5000000   // the exposure is adjusted only after this long with nothing moving...
 #define MAX_WAIT_US    30000000  // ...or after this long wanting it (something that never stops moving)
-#define FOCAL_PX       160.0f    // 160 columns across 53.1° (doc/archive/ROBOT_PLAN.md §3)
+#define FOCAL_PX       188.0f    // ~46° across: from the table's width (doc/OBJECTS_PLAN.md)
 
 static enum { SETTLING, LEARNING, WATCHING } state;
 static int settled;                          // frames in a row not settling

@@ -3,9 +3,9 @@
 First draft, 17 Oct 2026. **The first step is built** (17 Oct): `robot detect`,
 `robot objects`, the tables and the page's overlays (ARCHITECTURE.md, the PC,
 `objects/`); the README's "Objects from the camera" test. The camera calibrated
-(f 188 px from the table's width, tilt −1.86°). Next: the next phase's to-do (the bottom edge from the
-pixels, the ToF's distance, the tilt calibrating itself). Background reading is in
-[inspiration/](inspiration/): `vlm_bbox_to_floor_map.md` (boxes from a model, then
+(f 188 px from the table's width, tilt −1.86°). Next: the ToF's distance (the next
+phase's to-do; the distance from the bottom edge is a dead path). Background
+reading is in [inspiration/](inspiration/): `vlm_bbox_to_floor_map.md` (boxes from a model, then
 geometry) and `typescript_2d_spatial_query_libraries.md` (rbush, turf,
 detect-collisions, rotated shapes, walls, the camera's view as a triangle).
 
@@ -113,7 +113,7 @@ Changed again 17 Oct (Daniel), prompt version 4:
 Prompt version 5 (17 Oct, Daniel): rewritten in markdown, in sections (context,
 the camera, the task, the output format with an example, the object labels, the
 box, when there is nothing). Short sentences, each rule once. It is in
-`pc/robot/src/objects/system_prompt.md`. Run without thinking on all 132: 70
+`pc/robot/src/objects/system_prompt.md` (now `system_prompt_gemma4.md`). Run without thinking on all 132: 70
 empty, 81 objects, confidence 40-95 %. Still missed: the table in 1, the stairs
 and cabinet in 85; the door in 120 is now an `object`.
 
@@ -200,6 +200,9 @@ What it has to say (wording to work out on the first runs):
 
 ## The camera geometry
 
+The numbers as we take them now: [CAMERA_PARAMS.md](CAMERA_PARAMS.md). Below is how
+they were found.
+
 ### What is known
 
 | | Value | Source |
@@ -208,7 +211,7 @@ What it has to say (wording to work out on the first runs):
 | Position | **2.5 cm ahead** of the centre, **0.5 cm right** (y = −0.5 cm) | measured by Daniel, 17 Oct |
 | Tilt | **−1.86°** (down) on top of the robot's pitch from the pose | calibrated 17 Oct (below) |
 | Lens | **f = 188 px** (~46° across), from the table's width | calibrated 17 Oct (below) |
-| Picture | 160 × 120, from the sensor's 640 × 480 window (subsampled and binned), so it covers close to the full field of view | `picoA/drivers/hm0360_init.h` |
+| Picture | 160 × 120, from the sensor's 640 × 480 window (subsampled by 4, no binning: binning gave stripes), so it covers the full window | `picoA/drivers/hm0360_init.h` |
 | Sensor | HM0360, 3.6 µm pixels; the 640 × 480 window is 2.30 × 1.73 mm (2.88 mm across: the 1/6″ format Arducam gives) | Arducam |
 | Lens | Arducam's listing: **focal length 2.59 mm, DFOV 64°** | [Arducam HM0360](https://www.arducam.com/hm0360-vga-monochrome-dvp-camera-module-for-arduino-giga-r1-wifi-board.html) |
 
@@ -218,8 +221,8 @@ change per snapshot. When the calibration changes them, `npm run place-objects`
 places every stored box again (the model isn't asked again).
 
 The old plans said 8.5 cm up and no offset to the side; Daniel's new measurement
-replaces that. The firmware's `FOCAL_PX 160` (`picoA/app/camera_motion.c`, from
-53.1° across) is left as it is for now; the calibration says 180 (below).
+replaces that. The firmware's `FOCAL_PX` (`picoA/app/camera_motion.c`) was 160
+(from 53.1° across); it is 188 since 18 Oct, as the table says (below).
 
 **The ToF** (measured by Daniel, 17 Oct): 3.2 cm ahead of the centre, 2.6 cm right,
 7 cm up; that is 0.7 cm ahead of the camera and 2.1 cm to its right. In the firmware
@@ -245,7 +248,8 @@ from the data sheets. **The calibration says f = 180 px, ~48° across** (below).
 - Every listing of the stock lens says 64° diagonal: Arduino Store, UCTRONICS
   (the GIGA module), and OpenMV (Portenta, HM0360).
 - OpenMV gives "Actual FoV ... D64.0° H53.1° V41.1°": all three fit f ≈ 160 px.
-- So the "2.59 mm" in the listings is probably the error, not the 64°.
+- So the "2.59 mm" in the listings is probably the error, not the 64°. (18 Oct: the
+  table says the reverse; likely the lens's distortion, CAMERA_PARAMS.md.)
 - No source gives a FOV for our module, the Arducam B0319. Its only drawing has a
   table copied from another sensor's module, so it doesn't help.
 - Himax sells HM0360 modules with 70°, 96°, 129° and 179° lenses. Lenses differ
@@ -272,8 +276,8 @@ its two front legs. Width = distance × pixels ÷ f, so f = distance × pixels �
 - With f 188 the tilt would be **−1.86°** (pouf −1.84°, table −1.88°).
 - **In the code (17 Oct):** `place.ts` has f 188 and tilt −1.86°; the saved
   boxes were placed again (`npm run place-objects`). The table (the model's box)
-  now at 316 cm, 139 cm wide: its bottom edge is still too high (next phase, step 1).
-  The pouf at 131 cm, 46 cm wide.
+  now at 316 cm, 139 cm wide: its bottom edge is still too high (a dead path: the
+  distance will come from the ToF). The pouf at 131 cm, 46 cm wide.
 - Not modelled: the lens's distortion near the edges and its true centre (taken
   as 80, 60). A few % at most.
 
@@ -346,7 +350,7 @@ row where the dark object turns into the bright floor), not from the model's box
   the tilt is fixed, and the model's bottom edge is now the larger error.
 - The tilt may change a little over time (the camera's mount). **No more
   calibration by hand** (Daniel, 17 Oct): measuring floor distances by hand adds
-  errors of its own. The ToF is the reference from now on (next phase).
+  errors of its own. The ToF gives the distance from now on (next phase).
 
 ## Storage (DuckDB)
 
@@ -383,28 +387,52 @@ On the page (`public/app.html`, `app.js`), for the snapshot shown:
 A read for the agent: `robot objects [n]`, the snapshot's detections and their
 shapes as JSON.
 
+## Boxes from an outside agent (18 Oct)
+
+An agent in another harness (Claude Code, or its subagents) finds the boxes itself:
+- `robot camera n` gives the picture's file; the agent looks at it.
+- `robot detect_save n --by=<name> '{"objects": [...]}'` saves them. The JSON is
+  `report_objects`'s; the same check, placing and saving as `robot detect`, which
+  now saves through the same code. Wrong boxes: nothing saved, what to fix answered.
+- `model` is saved as `--by`; prompt version, thinking, seconds, turns and the
+  conversation stay empty from the CLI.
+- n is required (the newest could change between reading and saving). Newest boot
+  only. The agent isn't given the rules (`system_prompt_gemma4.md`): the coordinator passes
+  them to its subagents.
+
 ## Next phase: to do
 
-Decided with Daniel, 17 Oct. Nobody will check each box, so the code has to:
+Decided with Daniel, 17-18 Oct. Nobody will check each box. **The camera gives the
+label and the bearing** (the box's left and right edges). **The ToF gives the
+distance.**
 
-1. **Find the bottom edge in the pixels.** Starting from the model's box, search a
-   few rows up and down, in the box's columns, for the row where the object turns
-   into floor (dark to bright, as read by hand for the table: the model was 3.6 px
-   off, the pixels exact). The model gives the label and the left and right edges;
-   the code the bottom edge.
-2. **The ToF for the real distance.** Where the ToF's zones see the object (its 45°
+1. **The ToF for the distance.** Where the ToF's zones see the object (its 45°
    view, 7 cm up, from 3.2 cm ahead and 2.6 cm right of the centre), their distance
-   is the object's. **Objects with only the camera's distance are kept** (beyond
-   the ToF's view or range, or when it saw something else): a first guess.
-   `map_objects` gets a column saying whether the distance is **ToF verified**, and
-   a verified object is **moved on the cell map** to the ToF's distance.
-3. **The tilt calibrates itself.** Each time the ToF and a box see the same object,
-   the two give a tilt (as in the calibration above); a running average keeps
-   `tiltRad` current with no one checking, and shows when the mount has moved.
-   Pairs at different distances also check f (~188 px from the table, above).
+   is the object's. `map_objects` gets a column saying whether the distance is
+   **ToF verified**, and a verified object is **moved on the cell map** to the
+   ToF's distance.
+2. **Objects the ToF doesn't see** (beyond its view or range, or it saw something
+   else) are kept with the camera's distance as it is now, marked not verified: a
+   rough guess, not worth improving (dead path below).
 
-Also: the firmware's `FOCAL_PX` (`camera_motion.c`) is 160, the table says
-~188: for the camera features' bearings, to change with their next robot test.
+Done 18 Oct: the firmware's `FOCAL_PX` (`camera_motion.c`) is 188, was 160. It
+only sets the bearings of the camera's movement blobs. Those are only printed in
+the log while watching; the robot turns towards movement by the ToF alone.
+
+### Dead path: distance from the bottom edge (dropped 18 Oct)
+
+Dropped by Daniel. Not to be worked on:
+- **Finding the bottom edge in the pixels** (where the object meets the floor). Even
+  when exact to a pixel, 1 px is ~6 cm at 1 m and ~50 cm at 2.5 m. Many objects
+  (sofas, cabinets) don't touch the floor at their front anyway.
+- **The tilt calibrating itself** from ToF and box pairs. The tilt only matters for
+  the distance from the bottom edge (1° is ~3 rows); the bearing hardly depends on
+  it.
+- **Checking f from pairs at different distances.** It gives only f × the camera's
+  height, and floor distances only use that product. f alone (widths, bearings) is
+  good to a few % from the table; these checks can't beat that.
+
+The tilt (−1.86°) and f (188 px) stay in `place.ts` as calibrated by hand.
 
 ## Next steps after that (rough)
 

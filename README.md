@@ -152,7 +152,7 @@ camera` gives the picture; the backgrounds can't be seen any more. On USB, type 
 robot's own words (`drive 50`, `snapshot`).
 
 **Objects from the camera** (17 Oct; no robot needed: the model server on :8080
-(llama.cpp's router with `gemma-4-26b`), `npm start` in `pc/robot/`, the page open;
+(llama.cpp's router with `gemma-4-26b`, or `MODEL` in `pc/robot/.env`), `npm start` in `pc/robot/`, the page open;
 `./robot` in `pc/robot/`, on the newest boot, 7a587226). Paste the terminal:
 1. `robot detect 31`: after ~15 s (longer the first time: the model loads)
    `"result": "ok"` and the objects: the pouf as `object`, `floor` `floor`, a
@@ -168,6 +168,12 @@ robot's own words (`drive 50`, `snapshot`).
    map; far ones can be off a lot (the model's bottom edge; OBJECTS_PLAN.md).
 5. After a change of the camera's numbers in `src/objects/place.ts`: `npm run
    place-objects` places the saved boxes again.
+6. Boxes from an outside agent (18 Oct): `robot camera 31` gives the picture's file;
+   look at it, then `robot detect_save 31 --by=claude-code '{"objects":[{"label":
+   "object","bbox":[500,300,800,600],"confidence":80}]}'`. The answer looks like
+   `robot detect`'s; `robot objects 31` says `"model": "claude-code"` and `null` for
+   `thinking`, `seconds`, `turns`; the page shows `by claude-code`. A wrong label
+   answers what to fix and saves nothing.
 
 **Steering through the API** (14 Oct; both Picos flashed: the link version went up;
 battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot` in
@@ -628,6 +634,8 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
 - **[doc/CHANGELOG.md](doc/CHANGELOG.md)**: what happened, newest first (robot runs,
   results, what was tried and dropped, review findings). Only history.
 - **[doc/GLOSSARY.md](doc/GLOSSARY.md)**: the words.
+- **[doc/CAMERA_PARAMS.md](doc/CAMERA_PARAMS.md)**, **[doc/TOF_PARAMS.md](doc/TOF_PARAMS.md)**:
+  the camera's and the ToF's numbers as we take them, next to the data sheets'.
 - **[doc/OBJECTS_PLAN.md](doc/OBJECTS_PLAN.md)**: objects on the map from the camera
   (in progress); background in [doc/inspiration/](doc/inspiration/).
 - **[AGENTS.md](AGENTS.md)**: how AI agents answer (short, bullets, plain words).

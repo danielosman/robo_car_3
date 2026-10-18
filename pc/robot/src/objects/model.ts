@@ -1,6 +1,6 @@
 // The vision model (doc/OBJECTS_PLAN.md): an OpenAI-compatible chat server, by default
 // llama.cpp's router on this machine serving Gemma 4 26B. MODEL_API sets the server,
-// MODEL the model. The router doesn't load a model on a request ("model is not
+// MODEL the model (both can be in pc/robot/.env; .env.example). The router doesn't load a model on a request ("model is not
 // loaded"): it is asked to load it, and the request goes again once it has.
 
 export interface ToolCall { id: string; type: "function"; function: { name: string; arguments: string } }
@@ -13,10 +13,22 @@ export interface ChatMessage {
 }
 export interface ChatReply { message: ChatMessage; reasoning: string | null; tokens: number | null }
 // One turn of the conversation: the messages so far in, the model's answer out.
-export type Chat = (messages: ChatMessage[], tools: object[], opts: { thinking: boolean }) => Promise<ChatReply>;
+// reasoningBudget: at most this many thinking tokens; then llama.cpp ends the thinking
+// and the model answers. null: no limit.
+export type Chat = (messages: ChatMessage[], tools: object[], opts: { thinking: boolean; reasoningBudget: number | null }) => Promise<ChatReply>;
 
 export const MODEL_API = (process.env.MODEL_API ?? "http://127.0.0.1:8080").replace(/\/$/, "");
 export const MODEL = process.env.MODEL ?? "gemma-4-26b";
+// REASONING_BUDGET (.env): robot detect's default thinking limit in tokens; robot detect
+// --reasoning-budget=N overrides it. Unset or -1: no limit.
+export const REASONING_BUDGET = parseBudget(process.env.REASONING_BUDGET ?? "-1", "REASONING_BUDGET");
+
+// A thinking budget as written: a whole number, -1 for no limit (null).
+export function parseBudget(text: string, name: string): number | null {
+  if (!/^(-1|\d+)$/.test(text.trim())) throw new Error(`${name} must be a whole number of tokens, or -1 for no limit: ${text}`);
+  const n = Number(text);
+  return n < 0 ? null : n;
+}
 
 // A failure talking to the model server (not the model's answer being wrong).
 export class ModelError extends Error {}
@@ -53,8 +65,9 @@ export function openAiChat(api = MODEL_API, model = MODEL, note: (text: string) 
     throw new ModelError(`${model} didn't load within ${LOAD_MS / 60_000} minutes`);
   }
 
-  return async (messages, tools, { thinking }) => {
-    const body = { model, messages, tools, temperature: 0, chat_template_kwargs: { enable_thinking: thinking } };
+  return async (messages, tools, { thinking, reasoningBudget }) => {
+    const body = { model, messages, tools, temperature: 0, chat_template_kwargs: { enable_thinking: thinking },
+                   ...(thinking && reasoningBudget !== null ? { thinking_budget_tokens: reasoningBudget } : {}) };
     let r = await post("/v1/chat/completions", body, TURN_MS);
     if (r.status === 400 && r.text.includes("not loaded")) { await load(); r = await post("/v1/chat/completions", body, TURN_MS); }
     if (r.status >= 400) throw new ModelError(`the model server answered ${r.status}: ${r.text.slice(0, 300)}`);

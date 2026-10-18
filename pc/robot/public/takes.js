@@ -1,6 +1,7 @@
-// The take list: one row per take from /api/takes; the note is editable.
+// The take list: one row per take from /api/takes; the note is editable. A take is
+// shown as <boot's folder name>-<n> (YYYYMMDDHHMM: when the boot started).
 const COLUMNS = [
-  ["started", "started", "l"], ["take_id", "take", "l"], ["key", "key", "l"], ["action", "action", "l"],
+  ["started", "started", "l"], ["take", "take", "l"], ["key", "key", "l"], ["action", "action", "l"],
   ["duration_s", "s"], ["end_reason", "ended", "l"], ["frames_whole", "frames"], ["frames_half", "half"],
   ["frames_missing", "missing"], ["datagrams_lost", "dgram lost"], ["odom_reports", "odom"], ["note", "note", "l"],
 ];
@@ -20,6 +21,7 @@ async function load() {
   }
   let lastBoot = null;
   for (const r of rows) {
+    r.take = `${r.folder}-${r.take_no}`;
     const tr = table.insertRow();
     if (lastBoot !== null && r.boot_id !== lastBoot) tr.className = "boot";
     lastBoot = r.boot_id;
@@ -32,7 +34,7 @@ async function load() {
       if (key === "note") {
         td.className = "note";
         td.onclick = async () => {
-          const note = prompt(`Note for ${r.take_id} (${r.key} ${r.action})`, r.note ?? "");
+          const note = prompt(`Note for ${r.take} (${r.key} ${r.action})`, r.note ?? "");
           if (note === null) return;
           await fetch(`/api/takes/${r.take_id}/note`, { method: "POST", body: note });
           load();

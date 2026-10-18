@@ -5,6 +5,93 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 18 Oct 2026: Qwen 3.8 tried, Gemma 4 31B kept
+
+Snapshots 1-42 of boot 202610181635 (Daniel looked at the boxes on the page):
+
+| Model | Boxes | Time per picture (no thinking) |
+|---|---|---|
+| `qwen-3.8-27b` | more objects, boxes off | 4-18 s |
+| `gemma-4-26b` | as before | ~1 s |
+| `gemma-4-31b` | best, more reliable than 26b | 2-9 s |
+
+- Daniel uses `gemma-4-31b` from now on (`MODEL` in `pc/robot/.env`; the code's
+  default stays `gemma-4-26b`).
+- Without thinking the boxes were better than with it (Qwen).
+- Qwen sees our 160 × 120 picture as 20 tokens, too coarse for boxes; llama.cpp asks
+  for at least 1024 (`--image-min-tokens 1024`). That option also applies to Gemma 4
+  and crashes it (its picture no longer fits the 512-token batch), so it is only a
+  comment in `~/run-llama-router.sh`.
+- Saved now: Gemma 31B for snapshots 2-31, Qwen for 1 and 32-42.
+
+## 18 Oct 2026: a thinking budget for robot detect
+
+Qwen 3.8 thought for minutes on one picture (4,000 tokens and still going at about 25
+a second). `robot detect` now sends a thinking limit with each request (llama.cpp's
+`thinking_budget_tokens`): `REASONING_BUDGET` in `pc/robot/.env` (2000), or
+`--reasoning-budget=N` for one run (-1: no limit). When it runs out, llama.cpp ends the
+thinking and the model answers. Saved with the run (`reasoning_budget`, shown by
+`robot objects`). Checked with Qwen: the thinking stopped at ~2000 tokens, then the tool
+call.
+
+Also: the router (`~/run-llama-router.sh`) had no context size, so each model took its
+full one; Qwen's 262k ran the Mac out of GPU memory. Now `-c 200000` for every model,
+and no `-np 4` (llama.cpp picks the slots; they share the 200k).
+
+## 18 Oct 2026: a prompt for Qwen
+
+`system_prompt.md` is now `system_prompt_gemma4.md`, unchanged. New:
+`system_prompt_qwen.md`, the same but with x first, only its example shows the order,
+and in the picture's pixels (160 × 120) instead of a 0-1000 grid (Daniel). The model's
+name in `MODEL` picks the prompt (`gemma…` or `qwen…`; another name: `robot detect`
+says so). Qwen's boxes are turned y first and scaled to 0-1000 before they are checked
+and saved, so the database stays as it was. Prompt version
+stays 5; the saved model name tells the two apart. Not run against Qwen yet.
+
+## 18 Oct 2026: settings in pc/robot/.env
+
+`npm start` reads `pc/robot/.env` if there is one (`node --env-file-if-exists`), e.g.
+`MODEL=qwen-3.8-27b` for `robot detect`. `.env` is not in git; `.env.example` shows
+the settings with their defaults (`MODEL=gemma-4-26b`).
+
+## 18 Oct 2026: boot folders named by date
+
+The folders under `pc/robot/recordings/` (`camera/`, `map/`) are named `YYYYMMDDHHMM`
+instead of the robot's random boot id (`boot_folders.ts`, ARCHITECTURE.md). The robot
+still sends its boot id; `recordings/boots.json` maps it to the folder name, and the
+database keeps the boot id. The existing boots were named once by a script: boots with
+pictures by the first picture's file time, the 7 with only recordings (0558a0ee,
+0b9377b7, 87aa43f1, 54564d43, and 8f3159b3, ace8afeb, 123eef20 from the oldest files
+without the boot id in their name) by their `.rec` file's start time. The raw files stay
+as they were. The page's Boot dropdown shows the folder name and the snapshot count
+(the date is in the name); the takes page and the 3D viewer show a take as
+`<folder>-<n>`. Decided with Daniel: no special case for two boots in the
+same minute (an error).
+
+## 18 Oct 2026: boxes from an outside agent
+
+`robot detect_save <n> --by=<name> '<json>'` (OBJECTS_PLAN.md, "Boxes from an outside
+agent"): an agent outside the server reads `robot camera n`, finds the boxes itself
+and saves them. `robot detect` keeps its `report_objects` tool call and now saves
+through the same code. The CLI passes `--name=value` as a query value. Decided with
+Daniel: named after detect; n required; newest boot only; no command for the rules.
+Host tests pass; not run against the server yet.
+
+## 18 Oct 2026: the firmware's camera focal length
+
+`FOCAL_PX` in `picoA/app/camera_motion.c` is 188, was 160 (from the table's width,
+OBJECTS_PLAN.md). It only sets the bearings of the camera's movement blobs, which are
+only printed in the log while watching; the robot turns by the ToF alone. Not tested
+on the robot.
+
+New: [CAMERA_PARAMS.md](CAMERA_PARAMS.md) and [TOF_PARAMS.md](TOF_PARAMS.md), each
+sensor's numbers next to its data sheet's. Fixed in the docs: the camera is subsampled
+by 4 with no binning (binning gave stripes), not "subsampled and binned". Our f (188
+px, 2.71 mm) is close to Arducam's 2.59 mm, not to its 64° diagonal; most likely the
+lens's barrel distortion, not checked. The objects plan's next phase: the ToF gives
+the distance; the bottom edge from the pixels and the tilt calibrating itself are a
+dead path (Daniel).
+
 ## 17 Oct 2026: objects from the camera, first step
 
 Planned in [OBJECTS_PLAN.md](OBJECTS_PLAN.md) with Daniel; inspiration in

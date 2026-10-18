@@ -286,7 +286,7 @@ function clicked(x, y) {
 function showSnapshot() {
   const s = detail?.snapshot;
   if (!s) return;
-  // One line on top; the rest (the boot and date are in the Boot dropdown) at the bottom.
+  // One line on top; the rest (the boot, named by its date, is in the Boot dropdown) at the bottom.
   $("snapno").textContent = `Snapshot #${s.seq}`;
   // The camera picture, twice its size, and the features on it.
   const cam = $("camera"), c = cam.getContext("2d");
@@ -345,6 +345,7 @@ function drawBoxes(c, w, h) {
   const here = objects?.here ?? [], run = objects?.run;
   $("objinfo").textContent = !run ? `no objects: robot detect ${detail?.snapshot?.seq ?? ""}`
     : run.result !== "ok" ? `detect failed: ${run.why}`
+    : run.seconds === null ? `${here.length} objects · by ${run.model} · ${run.ran_at}`  // detect_save from outside
     : `${here.length} objects · ${run.model}${run.thinking ? "" : " (no thinking)"} · ${run.seconds} s · ${run.ran_at}`;
   if (!$("showobjects").checked) return;
   c.font = "11px system-ui, sans-serif";
@@ -408,7 +409,8 @@ async function getJson(url) {
 
 async function loadBoots(prefer) {
   boots = await getJson("/api/boots");
-  $("boot").innerHTML = boots.map(b => `<option value="${b.boot_id}">${b.boot_id} · ${b.first} · ${b.snapshots}</option>`).join("");
+  // Shown by the boot's folder name (YYYYMMDDHHMM: when it started); chosen by its boot id.
+  $("boot").innerHTML = boots.map(b => `<option value="${b.boot_id}">${b.folder} · ${b.snapshots}</option>`).join("");
   const want = prefer ?? boot ?? boots[0]?.boot_id;
   if (want) { $("boot").value = want; await loadSnapshots(want); }
 }

@@ -57,9 +57,11 @@ export function floorPoint(px: number, py: number, pitch: number, cam: CameraGeo
 }
 
 export function place(d: Pick<Detection, "label" | "bbox">, pose: SnapPoseLike, cam: CameraGeometry = CAMERA_GEOMETRY): Placed {
+  // The box is y first on 0-1000 (labels.ts): [ymin, xmin, ymax, xmax]. ymin isn't used.
   const [, x1, y2, x2] = d.bbox;
   const none = (floor: Floor, distanceM: number | null = null): Placed =>
     ({ label: d.label, floor, kind: null, distanceM, cx: null, cy: null, width: null, depth: null, angle: null });
+  // 0-1000 to the picture's pixels, x across and y down; from here on everything is x first.
   const px = (v: number) => v / 1000 * cam.width, py = (v: number) => v / 1000 * cam.height;
   const bottom = py(Math.min(y2, 1000));
   const a = floorPoint(px(x1), bottom, pose.pitch, cam), b = floorPoint(px(x2), bottom, pose.pitch, cam);

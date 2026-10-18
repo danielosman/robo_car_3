@@ -18,6 +18,7 @@ import {
 import { Store } from "./store.ts";
 import { importSnapshots } from "./import.ts";
 import { listBoots, listSnapshots, snapshotDetail, snapshotMap } from "./snapshots_api.ts";
+import { BootFolders, folderNameAt } from "./boot_folders.ts";
 
 const FIRMWARE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../build/test_snapshot.snap");
 const have = existsSync(FIRMWARE);
@@ -112,10 +113,13 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     assert.deepEqual(await importSnapshots(store, file, dir), { stored: 5, damaged: 1 });
     assert.deepEqual(await importSnapshots(store, file, dir), { stored: 5, damaged: 1 }); // again: replaced, not added
     const boot = parseSnapshot(snaps[0]).bootId;
-    assert.ok(existsSync(path.join(dir, "camera", boot, "1.png")));
+    const folder = folderNameAt(Date.UTC(2026, 9, 12, 10, 0, 0)); // the boot's folder: when its first snapshot arrived
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "boots.json"), "utf8")), { [boot]: folder });
+    assert.ok(existsSync(path.join(dir, "camera", folder, "1.png")));
 
-    const boots = await listBoots(store);
+    const boots = await listBoots(store, new BootFolders(dir));
     assert.equal(boots.length, 1);
+    assert.equal(boots[0].folder, folder);
     assert.equal(Number(boots[0].snapshots), 5);
     const list = await listSnapshots(store, boot);
     assert.deepEqual(list.map(r => Number(r.seq)), [1, 2, 3, 4, 5]);
@@ -124,7 +128,7 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
 
     const one = (await snapshotDetail(store, boot, 1))!;
     assert.equal(one.snapshot.why, "server connected");
-    assert.equal(one.snapshot.image, path.join("camera", boot, "1.png"));
+    assert.equal(one.snapshot.image, path.join("camera", folder, "1.png"));
     assert.equal(one.targets.length, Array.from({ length: 64 }, (_, z) => z % 3).reduce((a, b) => a + b, 0));
     assert.ok(one.targets.every(t => t.x !== null));
     // Zone 5 (the sensor's own number) has two targets; the grid shows each zone's first sure one.

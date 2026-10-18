@@ -8,7 +8,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "start": "node src/main.ts",
+    "start": "node --env-file-if-exists=.env src/main.ts",
     "test": "node --test 'src/**/*.test.ts'",
     "decode": "node src/decode.ts",
     "import": "node src/import.ts",

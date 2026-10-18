@@ -20,6 +20,7 @@ import { CommandRunner, StoredSnapshots } from "./runner.ts";
 import { CommandQueue } from "./queue.ts";
 import { createApi } from "./routes.ts";
 import type { Chat } from "../objects/model.ts";
+import { BootFolders } from "../boot_folders.ts";
 
 const FIRMWARE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../../build/test_snapshot.snap");
 const skip = !existsSync(FIRMWARE) && "run ./run_tests.sh first";
@@ -57,7 +58,8 @@ async function setUp(chat?: Chat) {
   live.setStatus({ state: "connected", ip: "10.0.0.7", since: 0, rssi: -58, quietSince: null });
   live.setPose(parsePose("pose 43.0 -4.0 30.0 manual - -58 0 0.20 0.10 1.05 4.0")!);
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
-  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDir: dir, chat, modelName: "fake" });
+  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDir: dir, bootFolders: new BootFolders(dir),
+                          chat, modelName: "gemma-fake" });
   const post = async (command: string, body = "", query = "") => {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });
     return { status: r.status, text: await r.text() };
@@ -143,10 +145,13 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
   } finally { await done(); }
 });
 
-// A vision model that reports one chair the first time, a door the next.
+// A vision model that reports one chair the first time, a door the next; budgets: the
+// reasoningBudget each request was sent with.
+const budgets: (number | null)[] = [];
 function fakeModel(): Chat {
-  const answers = [[{ label: "chair", bbox: [300, 400, 617, 600], confidence: 85 }], [{ label: "doorway", bbox: [0, 300, 600, 700], confidence: 40 }]];
-  return async () => ({ reasoning: "looked", tokens: 1, message: { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function",
+  const answers = [[{ label: "chair", bbox: [300, 400, 617, 600], confidence: 85 }], [{ label: "doorway", bbox: [0, 300, 600, 700], confidence: 40 }],
+                   [{ label: "box", bbox: [300, 400, 617, 600], confidence: 50 }]];
+  return async (_m, _t, opts) => (budgets.push(opts.reasoningBudget), { reasoning: "looked", tokens: 1, message: { role: "assistant", content: "", tool_calls: [{ id: "c1", type: "function",
     function: { name: "report_objects", arguments: JSON.stringify({ objects: answers.shift() }) } }] } });
 }
 
@@ -165,7 +170,7 @@ test("detect and objects: placed, saved, read back, replaced on a second run", {
     assert.equal(d.objects[0].shape.kind, "rect");
     assert.ok(d.objects[0].distance > 50 && d.objects[0].distance < 200, `${d.objects[0].distance}`); // the row 1 m ahead when level; the test pose has some pitch
     const o = JSON.parse((await post("objects", "1")).text);
-    assert.equal(o.model, "fake");
+    assert.equal(o.model, "gemma-fake");
     assert.equal(o.thinking, true);
     assert.deepEqual(o.objects, d.objects);
     const t = JSON.parse((await post("objects", "1", "?transcript")).text);
@@ -175,8 +180,53 @@ test("detect and objects: placed, saved, read back, replaced on a second run", {
     assert.deepEqual(again.objects.map((x: { label: string }) => x.label), ["doorway"]);
     const after = JSON.parse((await post("objects", "1")).text);
     assert.equal(after.thinking, false);
+    assert.equal(after.reasoning_budget, null);
     assert.equal(after.objects.length, 1);
+    assert.equal((await post("detect", "1", "?nothinking&reasoningbudget=500")).status, 400);
+    assert.equal((await post("detect", "1", "?reasoningbudget=lots")).status, 400);
+    assert.equal((await post("detect", "1", "?reasoningbudget=500")).status, 200);
+    assert.equal(JSON.parse((await post("objects", "1")).text).reasoning_budget, 500);
+    assert.deepEqual(budgets, [null, null, 500]);  // REASONING_BUDGET unset in tests: no limit
     assert.equal((await post("objects", "2")).status, 404);
+  } finally { await done(); }
+});
+
+test("detect_save: boxes from outside checked, placed, saved with who found them; wrong ones refused", { skip }, async () => {
+  const { post, done } = await setUp();
+  try {
+    const chair = { label: "chair", bbox: [300, 400, 617, 600], confidence: 85 };
+    const r = await post("detect_save", `1 ${JSON.stringify({ objects: [chair] })}`, "?by=claude-code");
+    assert.equal(r.status, 200, r.text);
+    const d = JSON.parse(r.text);
+    assert.equal(d.result, "ok");
+    assert.equal(d.seconds, null);
+    assert.deepEqual(d.objects[0].bbox, chair.bbox);
+    assert.equal(d.objects[0].shape.kind, "rect");
+    const o = JSON.parse((await post("objects", "1")).text);
+    assert.equal(o.model, "claude-code");
+    assert.equal(o.thinking, null);
+    assert.equal(o.prompt_version, null);
+    assert.deepEqual(o.objects, d.objects);
+    const t = await post("objects", "1", "?transcript");
+    assert.equal(t.status, 404);
+    assert.match(t.text, /saved by claude-code without a conversation/);
+    // A program can say how it worked, in the JSON.
+    const full = JSON.parse((await post("detect_save", `1 ${JSON.stringify({ objects: [], by: "other", prompt_version: 5, thinking: false,
+                                                                           seconds: 2.5, turns: 1, transcript: [{ role: "user", text: "hi" }] })}`)).text);
+    assert.deepEqual(full.objects, []);
+    const o2 = JSON.parse((await post("objects", "1")).text);
+    assert.equal(o2.model, "other");
+    assert.equal(o2.prompt_version, 5);
+    assert.equal(JSON.parse((await post("objects", "1", "?transcript")).text).transcript[0].text, "hi");
+    // Refused, nothing saved: what was there stays.
+    const bad = await post("detect_save", `1 ${JSON.stringify({ objects: [{ label: "pouf", bbox: [0, 0, 10, 10], confidence: 50 }] })}`, "?by=x");
+    assert.equal(bad.status, 400);
+    assert.match(bad.text, /not saved; fix these:.*pouf/s);
+    assert.equal(JSON.parse((await post("objects", "1")).text).model, "other");
+    assert.equal((await post("detect_save", `1 {"objects":[]}`)).status, 400, "without --by");
+    assert.equal((await post("detect_save", "1 {nope", "?by=x")).status, 400);
+    assert.equal((await post("detect_save", `{"objects":[]}`, "?by=x")).status, 400, "without n");
+    assert.equal((await post("detect_save", `9 {"objects":[]}`, "?by=x")).status, 404);
   } finally { await done(); }
 });
 

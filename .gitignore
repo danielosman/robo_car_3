@@ -6,3 +6,4 @@ picoA/app/wifi_config.h
 pc/robot/logs/
 .DS_Store
 pc/robot/recordings/
+pc/robot/.env

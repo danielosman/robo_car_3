@@ -1,6 +1,7 @@
 // Imports recordings into DuckDB (recordings/robot.duckdb), every take and snapshot
 // again: what the database holds is derived from the raw files (notes and truth
-// stay), and so are the snapshots' camera pictures (recordings/camera/<boot>/<seq>.png).
+// stay), and so are the snapshots' camera pictures (recordings/camera/<boot's folder>/<seq>.png,
+// boot_folders.ts).
 //   npm run import                         every file in recordings/raw/ and recordings/snapshots/raw/
 //   npm run import -- <file.rec|file.snap>  only these
 import { readFileSync, readdirSync } from "node:fs";
@@ -9,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { Dedup, TakeTracker, readRecordingFile, type Take } from "./recording.ts";
 import { Store } from "./store.ts";
 import { SNAPSHOTS_RAW, readSnapshotFile, savePicture } from "./snapshot.ts";
+import { BootFolders } from "./boot_folders.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DB_PATH = path.join(root, "recordings", "robot.duckdb");
@@ -28,12 +30,15 @@ export function takesIn(file: string): Take[] {
   return tracker.takes;
 }
 
-// Every snapshot in a raw snapshot file into the database, its picture written again.
-export async function importSnapshots(store: Store, file: string, recordingsDir: string): Promise<{ stored: number; damaged: number }> {
+// Every snapshot in a raw snapshot file into the database, its picture written again
+// in its boot's folder (a boot not in boots.json is named by its first snapshot's arrival).
+export async function importSnapshots(store: Store, file: string, recordingsDir: string,
+                                      bootFolders = new BootFolders(recordingsDir)): Promise<{ stored: number; damaged: number }> {
   let stored = 0, damaged = 0;
   for (const { arrivalMs, snapshot } of readSnapshotFile(readFileSync(file))) {
     if (!snapshot) { damaged++; continue; }
-    await store.importSnapshot(snapshot, arrivalMs, file, savePicture(recordingsDir, snapshot));
+    const picture = savePicture(recordingsDir, bootFolders.folderForBoot(snapshot.bootId, arrivalMs), snapshot);
+    await store.importSnapshot(snapshot, arrivalMs, file, picture);
     stored++;
   }
   return { stored, damaged };
@@ -48,10 +53,10 @@ async function main(): Promise<void> {
   const recordingsDir = path.join(root, "recordings");
   const files = args.length ? args : [...listed(path.join(recordingsDir, "raw"), ".rec"),
                                       ...listed(path.join(recordingsDir, SNAPSHOTS_RAW), ".snap")];
-  const store = new Store(DB_PATH);
+  const store = new Store(DB_PATH), bootFolders = new BootFolders(recordingsDir);
   for (const file of files) {
     if (file.endsWith(".snap")) {
-      const n = await importSnapshots(store, file, recordingsDir);
+      const n = await importSnapshots(store, file, recordingsDir, bootFolders);
       console.log(`${path.basename(file)}: ${n.stored} snapshots${n.damaged ? `, ${n.damaged} damaged` : ""}`);
       continue;
     }

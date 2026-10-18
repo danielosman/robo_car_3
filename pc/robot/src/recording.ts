@@ -340,7 +340,10 @@ export function* readRecordingFile(buf: Buffer): Generator<{ arrivalMs: number |
   }
 }
 
-export interface RecordingServerOptions { port?: number; dir: string }
+import type { BootFolders } from "./boot_folders.ts";
+
+// bootFolders: a new boot gets its folder name when its first recording arrives (boot_folders.ts).
+export interface RecordingServerOptions { port?: number; dir: string; bootFolders?: BootFolders }
 
 // Listens for PicoA's datagrams; a file per robot boot. Events: "note" (string),
 // "take" (Take: ended or cut, with its records).
@@ -348,6 +351,7 @@ export class RecordingServer extends EventEmitter {
   private socket = dgram.createSocket("udp4");
   private port: number;
   private dir: string;
+  private bootFolders?: BootFolders;
   private bootId = "";
   private file: WriteStream | null = null;
   private arrivals: WriteStream | null = null;
@@ -358,6 +362,7 @@ export class RecordingServer extends EventEmitter {
     super();
     this.port = opts.port ?? DATA_PORT;
     this.dir = path.join(opts.dir, "raw");
+    this.bootFolders = opts.bootFolders;
     this.socket.on("message", msg => this.received(msg));
   }
 
@@ -409,5 +414,7 @@ export class RecordingServer extends EventEmitter {
     this.tracker.onStart = t => this.emit("note", `recording ${t.name}`);
     this.tracker.onEnd = t => { this.emit("note", t.summary()); this.emit("take", t); };
     this.emit("note", `recordings from boot ${bootId}: saving to raw/${path.basename(file)}`);
+    try { this.bootFolders?.folderForBoot(bootId); }
+    catch (err) { this.emit("note", `boot ${bootId} has no folder name: ${(err as Error).message}`); }
   }
 }

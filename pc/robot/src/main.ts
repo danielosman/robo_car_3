@@ -5,7 +5,7 @@
 // the `robot` CLI's commands share one queue, and everyone sees one log (log.ts),
 // also written to a file in logs/. Snapshots arrive between the
 // console's text and are saved in recordings/snapshots/raw/, their pictures in
-// recordings/camera/ (snapshot.ts), and stored in
+// recordings/camera/<boot's folder>/ (snapshot.ts, boot_folders.ts), and stored in
 // DuckDB (store.ts, snapshots_api.ts), as are the pose lines (live.ts). PicoA's recordings arrive on a second connection and are saved in
 // recordings/ (recording.ts); each take goes into DuckDB as it
 // ends (store.ts), listed at http://127.0.0.1:8081/takes and shown in 3D at /viewer
@@ -13,7 +13,8 @@
 // ROBOT_PORT (4211), DATA_PORT (4212), e.g. for a second server beside a running one;
 // MODEL_API (the vision model's server for robot detect, default http://127.0.0.1:8080) and MODEL;
 // ANNOUNCE_TO (comma-separated addresses, default every network's broadcast): a test
-// server announcing only to 127.0.0.1 isn't found by the robot.
+// server announcing only to 127.0.0.1 isn't found by the robot. npm start reads them from .env if there
+// is one (.env.example).
 import http from "node:http";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
@@ -28,6 +29,7 @@ import { DB_PATH } from "./import.ts";
 import { handleViewerApi } from "./viewer_api.ts";
 import { handleSnapshotApi } from "./snapshots_api.ts";
 import { SnapshotSaver, type Snapshot } from "./snapshot.ts";
+import { BootFolders } from "./boot_folders.ts";
 import { Log } from "./log.ts";
 import { LiveRobot } from "./live.ts";
 import { CommandRunner, StoredSnapshots } from "./api/runner.ts";
@@ -51,7 +53,9 @@ async function main(): Promise<void> {
   log.on("item", item => broadcast({ type: item.kind, text: item.text, command: item.command }));
   const note = (text: string) => log.note(text);
 
-  const recordings = new RecordingServer({ dir: path.join(root, "recordings"), port: Number(process.env.DATA_PORT ?? DATA_PORT) });
+  const recordingsDir = path.join(root, "recordings");
+  const bootFolders = new BootFolders(recordingsDir);  // the robot's boot ids to our folder names
+  const recordings = new RecordingServer({ dir: recordingsDir, port: Number(process.env.DATA_PORT ?? DATA_PORT), bootFolders });
   recordings.on("note", note);
   const store = new Store(DB_PATH);
   const live = new LiveRobot(store, err => note(`pose lines NOT stored: ${err.message}`));
@@ -61,8 +65,7 @@ async function main(): Promise<void> {
       .then(n => note(`${take.name} stored: ${n.frames} frames, ${n.targets} targets, ${n.odom} odometry reports`))
       .catch(err => note(`${take.name} NOT stored: ${(err as Error).message}`));
   });
-  const recordingsDir = path.join(root, "recordings");
-  const snapshots = new SnapshotSaver(recordingsDir);
+  const snapshots = new SnapshotSaver(recordingsDir, bootFolders);
   snapshots.on("note", note);
   snapshots.on("snapshot", (s: Snapshot, ms: number, file: string, image: string | null) => {
     live.setBoot(s.bootId);
@@ -82,7 +85,7 @@ async function main(): Promise<void> {
   robot.on("pose", (p: LivePose) => { live.setPose(p); broadcast({ type: "pose", pose: p }); });
   const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
   const chat = openAiChat(MODEL_API, MODEL, note);
-  const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true }, recordingsDir,
+  const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true }, recordingsDir, bootFolders,
                                               chat, modelName: MODEL }).fetch);
   await robot.start();
   note(`server started; announcing on ${(announceTo.length ? announceTo : broadcastAddresses()).join(", ") || "no network"}; log ${path.relative(root, logPath)}`);
@@ -104,12 +107,14 @@ async function main(): Promise<void> {
   const server = http.createServer(async (req, res) => {
     if (/^\/api\/robot(\/|$|\?)/.test(req.url ?? "")) { await api(req, res); return; }
     if (await handleViewerApi(req, res, store)) return;
-    if (await handleSnapshotApi(req, res, store, recordingsDir)) return;
+    if (await handleSnapshotApi(req, res, store, recordingsDir, bootFolders)) return;
     if (req.url === "/api/takes" && req.method === "GET") {
       try {
-        json(res, 200, await store.query(`SELECT take_id, boot_id, take_no, strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started,
+        const takes = await store.query(`SELECT take_id, boot_id, take_no, strftime(started_at, '%Y-%m-%d %H:%M:%S') AS started,
           key, action, round(duration_s, 1) AS duration_s, end_reason, frames_whole, frames_half, frames_missing,
-          datagrams, datagrams_lost, odom_reports, note FROM takes ORDER BY started_at DESC, take_no DESC`));
+          datagrams, datagrams_lost, odom_reports, note FROM takes ORDER BY started_at DESC, take_no DESC`);
+        // folder: the boot's folder name (boot_folders.ts), what the pages show instead of the boot id
+        json(res, 200, takes.map(t => ({ ...t, folder: bootFolders.knownFolder(String(t.boot_id)) ?? String(t.boot_id) })));
       } catch (err) { json(res, 500, { error: (err as Error).message }); }
       return;
     }

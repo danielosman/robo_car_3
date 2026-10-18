@@ -88,8 +88,9 @@ power-up, y to its left.
 | `config [auto_snap on\|off]` | the API's settings; changes one |
 
 `n` is a snapshot's number; without it, the newest. Files are under
-`pc/robot/recordings/`: camera pictures in `camera/<boot>/<n>.png`, map pictures in
-`map/<boot>/<n>.png` (singular, as everything else).
+`pc/robot/recordings/`: camera pictures in `camera/<folder>/<n>.png`, map pictures in
+`map/<folder>/<n>.png` (singular, as everything else); folder: when the boot was first
+seen, `YYYYMMDDHHMM` (18 Oct; `recordings/boots.json` maps the robot's boot id to it).
 
 ## The answers
 

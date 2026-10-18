@@ -6,9 +6,11 @@ import type { Store } from "../store.ts";
 import type { Detection } from "./labels.ts";
 import type { Placed } from "./place.ts";
 
+// model: who found the boxes (the vision model, or detect_save's --by). From detect_save
+// the rest may be null: an outside agent doesn't say how it worked.
 export interface DetectRun {
-  boot: string; seq: number; atMs: number; model: string; promptVersion: number; thinking: boolean;
-  seconds: number; turns: number; result: "ok" | "failed"; why: string | null; transcript: string;
+  boot: string; seq: number; atMs: number; model: string; promptVersion: number | null; thinking: boolean | null;
+  reasoningBudget: number | null; seconds: number | null; turns: number | null; result: "ok" | "failed"; why: string | null; transcript: string | null;
 }
 
 export interface StoredObject {
@@ -28,9 +30,9 @@ export async function saveRun(store: Store, run: DetectRun, detections: Detectio
     const objects = (await c.runAndReadAll("SELECT object_id FROM object_detections WHERE snap_id = $1", [id])).getRowObjects();
     for (const o of objects) await c.run("DELETE FROM map_objects WHERE object_id = $1", [String(o.object_id)]);
     for (const table of ["detect_runs", "detections", "object_detections"]) await c.run(`DELETE FROM ${table} WHERE snap_id = $1`, [id]);
-    await c.run(`INSERT INTO detect_runs VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+    await c.run(`INSERT INTO detect_runs VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [id, run.boot, run.seq, timestampValue(localUs(run.atMs)), run.model, run.promptVersion, run.thinking, run.seconds,
-       run.turns, run.result, run.why, run.transcript]);
+       run.turns, run.result, run.why, run.transcript, run.reasoningBudget]);
     for (const [n, d] of detections.entries()) {
       const p = placed[n], objectId = `${id}-${n}`;
       await c.run("INSERT INTO detections VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id, n, d.label, ...d.bbox, d.confidence]);
@@ -60,7 +62,7 @@ function objectRow(r: Record<string, unknown>): StoredObject {
 export async function runOf(store: Store, boot: string, seq: number) {
   const id = snapId(boot, seq);
   return store.read(async c => {
-    const run = (await c.runAndReadAll(`SELECT model, prompt_version, thinking, seconds, turns, result, why,
+    const run = (await c.runAndReadAll(`SELECT model, prompt_version, thinking, reasoning_budget, seconds, turns, result, why,
       strftime(ran_at, '%Y-%m-%d %H:%M:%S') AS ran_at FROM detect_runs WHERE snap_id = $1`, [id])).getRowObjectsJson()[0];
     if (!run) return null;
     const objects = (await c.runAndReadAll(`${OBJECTS_SQL} WHERE od.snap_id = $1 ORDER BY od.n`, [id])).getRowObjectsJson();
@@ -80,11 +82,13 @@ export async function pageObjects(store: Store, boot: string, seq: number) {
   return { run: here?.run ?? null, here: here?.objects ?? [], map: all };
 }
 
-// The run's conversation (JSON), for looking at what the model said.
-export async function transcriptOf(store: Store, boot: string, seq: number): Promise<string | null> {
-  const rows = await store.read(async c => (await c.runAndReadAll("SELECT transcript FROM detect_runs WHERE snap_id = $1",
+// The run's conversation (JSON), for looking at what the model said: null if nothing
+// ran; transcript null if detect_save saved it without one.
+export async function transcriptOf(store: Store, boot: string, seq: number): Promise<{ by: string; transcript: string | null } | null> {
+  const rows = await store.read(async c => (await c.runAndReadAll("SELECT model, transcript FROM detect_runs WHERE snap_id = $1",
     [snapId(boot, seq)])).getRowObjects());
-  return rows.length ? String(rows[0].transcript) : null;
+  if (!rows.length) return null;
+  return { by: String(rows[0].model), transcript: rows[0].transcript === null ? null : String(rows[0].transcript) };
 }
 
 // Places every saved detection again with the camera's numbers now (place.ts), from

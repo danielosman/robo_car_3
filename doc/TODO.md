@@ -35,6 +35,13 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
      weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
+**18 Oct:** `robot detect` uses `gemma-4-31b` (`.env`), best of three models tried
+([CHANGELOG](CHANGELOG.md)).
+
+**Built 18 Oct, not run yet:** `robot detect_save <n> --by=<name> '<json>'`, boxes from
+an outside agent that looked at `robot camera n` (README's "Objects from the camera",
+step 6). Then: an agent goes through every picture of a run and saves its boxes.
+
 **Built 17 Oct, waiting for Daniel's look:** objects from the camera, first step
 ([OBJECTS_PLAN.md](OBJECTS_PLAN.md)): `robot detect` / `robot objects` and the
 overlays; the README's "Objects from the camera" test. Camera calibrated (f 180 px,
