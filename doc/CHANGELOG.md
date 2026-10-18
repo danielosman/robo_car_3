@@ -13,9 +13,11 @@ Snapshots 1-42 of boot 202610181635 (Daniel looked at the boxes on the page):
 |---|---|---|
 | `qwen-3.8-27b` | more objects, boxes off | 4-18 s |
 | `gemma-4-26b` | as before | ~1 s |
-| `gemma-4-31b` | best, more reliable than 26b | 2-9 s |
+| `gemma-4-31b` | best of the local ones, more reliable than 26b | 2-9 s |
 
-- Daniel uses `gemma-4-31b` from now on (`MODEL` in `pc/robot/.env`; the code's
+Best of all: Opus 5.5 (through `robot detect_save`), but it isn't a local model.
+
+- Daniel uses `gemma-4-31b` from now on for `robot detect` (`MODEL` in `pc/robot/.env`; the code's
   default stays `gemma-4-26b`).
 - Without thinking the boxes were better than with it (Qwen).
 - Qwen sees our 160 × 120 picture as 20 tokens, too coarse for boxes; llama.cpp asks

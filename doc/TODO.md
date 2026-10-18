@@ -35,7 +35,8 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
      weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
-**18 Oct:** `robot detect` uses `gemma-4-31b` (`.env`), best of three models tried
+**18 Oct:** `robot detect` uses `gemma-4-31b` (`.env`), the best local model tried (Opus 5.5
+through `detect_save` was better, not local)
 ([CHANGELOG](CHANGELOG.md)).
 
 **Built 18 Oct, not run yet:** `robot detect_save <n> --by=<name> '<json>'`, boxes from
