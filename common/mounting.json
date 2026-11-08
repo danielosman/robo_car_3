@@ -1,0 +1,22 @@
+{
+  "about": "Where the sensors sit on the robot (doc/ARCHITECTURE.md, the mounting). Robot frame: x forward from the centre, y left, z up from the floor; metres, degrees. Read by the firmware's build (common/mounting.cmake) and the PC (pc/robot/src/mounting.ts).",
+  "tof": {
+    "x_m": 0.032,
+    "y_m": -0.026,
+    "z_m": 0.09,
+    "zone_deg": 5.625,
+    "zones_turn_deg": 90
+  },
+  "camera": {
+    "x_m": 0.025,
+    "y_m": -0.005,
+    "z_m": 0.108,
+    "f_px": 188,
+    "tilt_deg": 0,
+    "width_px": 160,
+    "height_px": 120
+  },
+  "imu": {
+    "robot_from_sensor": [[-1, 0, 0], [0, -1, 0], [0, 0, 1]]
+  }
+}

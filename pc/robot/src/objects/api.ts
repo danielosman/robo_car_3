@@ -16,7 +16,7 @@ import { ReadError, findSnapshot, type ApiContext, type Read } from "../api/read
 import { yawDeg } from "../api/answers.ts";
 import { checkReport } from "./labels.ts";
 import { MODEL, ModelError, REASONING_BUDGET, parseBudget } from "./model.ts";
-import { place, type SnapPoseLike } from "./place.ts";
+import { cameraGeometry, place, type CameraGeometry, type SnapPoseLike } from "./place.ts";
 import { PROMPT_VERSION, detectObjects, promptFor } from "./session.ts";
 import { runOf, saveRun, transcriptOf, type StoredObject } from "./db.ts";
 
@@ -37,7 +37,10 @@ async function snapshotForDetect(ctx: ApiContext, id: SnapshotId) {
   if (!row?.image) throw new ReadError(`snapshot ${id.seq} has no picture`);
   if (row.x === null) throw new ReadError(`snapshot ${id.seq} has no pose (PicoB not connected), so nothing can be placed`);
   const pose: SnapPoseLike = { x: Number(row.x), y: Number(row.y), yaw: Number(row.yaw), pitch: Number(row.pitch ?? 0) };
-  return { pose, file: path.join(ctx.recordingsDir, String(row.image)) };
+  const mounting = await ctx.store.mountingOf(id.boot);
+  if (!mounting) throw new ReadError(`boot ${id.boot} has no mounting in the database`);
+  const camera: CameraGeometry = cameraGeometry(mounting); // the boot's own copy
+  return { pose, camera, file: path.join(ctx.recordingsDir, String(row.image)) };
 }
 
 const usage = (args: string[], u: string) => { if (args.length > 1) throw new ReadError(`usage: robot ${u}`, 400); };
@@ -56,7 +59,7 @@ export interface DetectSave {
 // Checks the boxes, places each on the map and saves them, replacing the snapshot's
 // earlier run. Wrong boxes: nothing saved, a 400 listing what is wrong.
 export async function detectSave(ctx: ApiContext, id: SnapshotId, input: DetectSave) {
-  const { pose } = await snapshotForDetect(ctx, id);
+  const { pose, camera } = await snapshotForDetect(ctx, id);
   const result = input.result ?? "ok";
   const checked = checkReport({ objects: result === "ok" ? input.objects : [] });
   if (!checked.ok) throw new ReadError(`not saved; fix these:\n${checked.errors.join("\n")}`, 400);
@@ -65,7 +68,7 @@ export async function detectSave(ctx: ApiContext, id: SnapshotId, input: DetectS
     boot: id.boot, seq: id.seq, atMs: Date.now(), model: input.by, promptVersion: input.promptVersion, thinking: input.thinking,
     reasoningBudget: input.reasoningBudget, seconds: input.seconds, turns: input.turns, result, why: input.why ?? null,
     transcript: input.transcript === null || input.transcript === undefined ? null : JSON.stringify(input.transcript),
-  }, detections, detections.map(d => place(d, pose)));
+  }, detections, detections.map(d => place(d, pose, camera)));
   ctx.log.note(`detect ${id.seq} (${input.by}): ${result === "ok" ? `${detections.length} objects` : `failed: ${input.why}`}`);
   const saved = await runOf(ctx.store, id.boot, id.seq);
   return { snapshot: id.seq, result, ...(result === "failed" ? { why: input.why } : {}),

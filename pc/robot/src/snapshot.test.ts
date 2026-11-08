@@ -1,28 +1,30 @@
 // Tests for snapshot.ts and snapshots_api.ts: the firmware's own snapshots
 // (build/test_snapshot.snap, written by ./run_tests.sh) put back together from
-// pieces of any size and read; a damaged one refused; the map's columns from the
-// window's cells and the tiles' 4-bit columns; the PNG; and the snapshots stored in
-// DuckDB and served as the page asks: the boots, the timeline, one snapshot with
-// its 8 x 8 grid, the map then (the newest of each tile up to it, since the last
-// clear). Run with `npm test`.
+// pieces of any size and read (the ToF section a compact frame); a damaged one or one
+// of another version refused; the map's columns from the window's cells and the
+// tiles' 4-bit columns; the PNG; and the snapshots stored in DuckDB and served as the
+// page asks: the boots, the timeline, one snapshot with its zones (each in the world,
+// by the boot's mounting) and 8 x 8 grid, the map then (the newest of each tile up to
+// it, since the last clear). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import zlib from "node:zlib";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import {
-  COLUMN, SNAP_FILE_MAGIC, SnapshotAssembler, columnOf, grayPng, parseSnapshot, readSnapshotFile, tileColumns, windowColumns,
-} from "./snapshot.ts";
-import { Store } from "./store.ts";
-import { importSnapshots } from "./import.ts";
+import { COLUMN, SnapshotAssembler, columnOf, grayPng, parseSnapshot, tileColumns, windowColumns } from "./snapshot.ts";
 import { listBoots, listSnapshots, snapshotDetail, snapshotMap } from "./snapshots_api.ts";
 import { BootFolders, folderNameAt } from "./boot_folders.ts";
+import { FIRMWARE_SNAPSHOTS, storeWithSnapshots } from "./test_store.ts";
+import { loadMounting } from "./mounting.ts";
+import { rowCol, zoneAt } from "./tof_format.ts";
 
-const FIRMWARE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../build/test_snapshot.snap");
-const have = existsSync(FIRMWARE);
-const firmware = () => readFileSync(FIRMWARE);
+const have = existsSync(FIRMWARE_SNAPSHOTS);
+const firmware = () => readFileSync(FIRMWARE_SNAPSHOTS);
+// The test frame's zones (test_snapshot.c): sensor zone z has z % 3 targets, the first
+// 100 * z mm away; the robot's zone at row, col reads the sensor's zone (7 - col) * 8
+// + row (the grid turned 90° on the PCB), all 1-8 here less one.
+const sensorZone = (zone: number) => { const [r, c] = rowCol(zone); return (8 - c) * 8 + r - 1; };
 
 test("the firmware's snapshots, put together from pieces of any size, read as written", { skip: !have && "run ./run_tests.sh first" }, () => {
   const bytes = firmware(), a = new SnapshotAssembler(), whole: Buffer[] = [];
@@ -38,11 +40,15 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(first.endReason, null);
   assert.equal(first.pose!.x, 1.25);
   assert.equal(first.pose!.tUs, 4242);
-  assert.ok(Math.abs(first.tof!.x - 1.2) < 1e-6 && first.tof!.poseOk);
-  assert.equal(first.tof!.raw.zones.length, 64);
-  assert.equal(first.tof!.raw.zones[5].targets.length, 2);
-  assert.equal(first.tof!.raw.zones[5].targets[1].distanceMm, 501);
-  assert.equal(first.geometry!.rows, 8);
+  const tof = first.tof!;
+  assert.ok(Math.abs(tof.x - 1.2) < 1e-6 && Math.abs(tof.yaw - 0.7) < 1e-4 && tof.poseKnown && tof.number === 1);
+  assert.equal(tof.zones.length, 64);
+  for (let k = 0; k < 64; k++) {
+    const z = sensorZone(k), zone = tof.zones[k];
+    assert.equal(zone.targets, z % 3);
+    assert.equal(zone.kind, z % 3 ? "sure" : "nothing");
+    if (z % 3) assert.equal(zone.distanceMm, Math.min(100 * z, 2550)); // whole cm; 2550: beyond 2.54 m
+  }
   assert.equal(first.camera!.width * first.camera!.height, first.camera!.pixels.length);
   assert.equal(first.camera!.pixels[10], (10 * 13) & 255);
   assert.equal(first.color!.raw[15], 0xaf);
@@ -51,7 +57,7 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(first.features!.cameraNumber, 77);
   assert.deepEqual(first.features!.features[0], { id: 9, age: 3, flags: 0, x: 12.5, y: 100.25, dx: -0.5, dy: 0.75, strength: 128 / 255, match: 230 / 255 });
   assert.equal(first.features!.features[1].flags, 1);
-  assert.equal(s[1].action, "move");
+  assert.equal(s[1].action, "drive");
   assert.equal(s[1].endReason, "obstacle");
   assert.equal(s[2].running, "goto");
   assert.equal(s[2].mode, "idle");
@@ -60,6 +66,10 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   const bad = Buffer.from(whole[0]);
   bad[100] ^= 1;
   assert.throws(() => parseSnapshot(bad), /CRC/);
+  const old = Buffer.from(whole[0]); // an old robot's (version 1): refused, the layout changed
+  old[4] = 1;
+  old.writeUInt32LE(zlib.crc32(old.subarray(0, old.length - 4)) >>> 0, old.length - 4);
+  assert.throws(() => parseSnapshot(old), /snapshot version 1, this server reads 2/);
 });
 
 test("columns: from the window's three cells, from a tile's 4 bits", { skip: !have && "run ./run_tests.sh first" }, () => {
@@ -98,24 +108,15 @@ test("a grey PNG", () => {
 test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_tests.sh first" }, async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "snaps-"));
   try {
-    const snaps = new SnapshotAssembler().push(firmware());
-    const file = path.join(dir, "snapshots", "test.snap");
-    const parts: Buffer[] = [Buffer.from(SNAP_FILE_MAGIC)];
-    snaps.forEach((b, i) => { const t = Buffer.alloc(8); t.writeDoubleLE(Date.UTC(2026, 9, 12, 10, 0, i), 0); parts.push(t, b); });
-    const damaged = Buffer.from(snaps[1]);
-    damaged[50] ^= 1;
-    parts.push(Buffer.alloc(8), damaged);
-    const { mkdirSync } = await import("node:fs");
-    mkdirSync(path.dirname(file), { recursive: true });
-    writeFileSync(file, Buffer.concat(parts));
-    assert.equal([...readSnapshotFile(readFileSync(file))].length, 6);
-    const store = new Store(path.join(dir, "test.duckdb"));
-    assert.deepEqual(await importSnapshots(store, file, dir), { stored: 5, damaged: 1 });
-    assert.deepEqual(await importSnapshots(store, file, dir), { stored: 5, damaged: 1 }); // again: replaced, not added
-    const boot = parseSnapshot(snaps[0]).bootId;
-    const folder = folderNameAt(Date.UTC(2026, 9, 12, 10, 0, 0)); // the boot's folder: when its first snapshot arrived
+    const { store, boot: b } = await storeWithSnapshots(dir);
+    const boot = b.id;
+    const folder = folderNameAt(Date.UTC(2026, 9, 14, 10, 0, 0)); // the boot's folder: when its first snapshot arrived
     assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "boots.json"), "utf8")), { [boot]: folder });
     assert.ok(existsSync(path.join(dir, "camera", folder, "1.png")));
+    // Stored again: replaced, not added.
+    const again = parseSnapshot(new SnapshotAssembler().push(firmware())[0]);
+    await store.importSnapshot(b, b.stamp().msg, again, new SnapshotAssembler().push(firmware())[0], Date.UTC(2026, 9, 14, 10), null);
+    assert.deepEqual(await store.query("SELECT count(*) AS n FROM snapshots"), [{ n: "5" }]);
 
     const boots = await listBoots(store, new BootFolders(dir));
     assert.equal(boots.length, 1);
@@ -123,17 +124,27 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     assert.equal(Number(boots[0].snapshots), 5);
     const list = await listSnapshots(store, boot);
     assert.deepEqual(list.map(r => Number(r.seq)), [1, 2, 3, 4, 5]);
-    assert.equal(list[1].action, "move");
-    assert.equal(list[0].has_image, true);
+    assert.equal(list[1].action, "drive");
+    assert.equal(list[1].end_reason, "obstacle");
+    assert.equal(list[2].has_image, true);
 
-    const one = (await snapshotDetail(store, boot, 1))!;
-    assert.equal(one.snapshot.why, "server connected");
-    assert.equal(one.snapshot.image, path.join("camera", folder, "1.png"));
-    assert.equal(one.targets.length, Array.from({ length: 64 }, (_, z) => z % 3).reduce((a, b) => a + b, 0));
-    assert.ok(one.targets.every(t => t.x !== null));
-    // Zone 5 (the sensor's own number) has two targets; the grid shows each zone's first sure one.
-    const filled = one.grid.flat().filter(c => c).length;
-    assert.equal(filled, Array.from({ length: 64 }, (_, z) => (z % 3 ? 1 : 0)).reduce((a: number, b) => a + b, 0));
+    const one = (await snapshotDetail(store, boot, 2))!;
+    assert.equal(one.snapshot.why, "command");
+    assert.equal(one.snapshot.image, path.join("camera", folder, "2.png"));
+    assert.equal(one.zones.length, 64);
+    // Each valid zone in the world (the boot's mounting, the frame's pose); the others not.
+    const m = loadMounting();
+    for (const z of one.zones) {
+      const valid = z.kind === "sure";
+      assert.equal(z.x === null, !valid);
+      if (!valid) continue;
+      assert.ok(Math.abs(Number(z.z) - m.tof.z_m) < Number(z.distance_mm) / 1000 + 1e-3); // within its distance of the sensor's height
+    }
+    // The grid: row 1, column 1 reads sensor zone 56: 56 % 3 = 2 targets, 5.6 m: beyond.
+    assert.deepEqual(one.grid[0][0], { mm: 2550, kind: "sure", beyond: true });
+    assert.equal(sensorZone(zoneAt(1, 8)), 0);
+    assert.equal(one.grid[0][7], null); // row 1, column 8: sensor zone 0, no target
+    assert.equal(one.grid.flat().filter(c => c).length, Array.from({ length: 64 }, (_, z) => (z % 3 ? 1 : 0)).reduce((a: number, c) => a + c, 0));
     assert.equal(await snapshotDetail(store, boot, 99), null);
     assert.equal(one.features.length, 2);
     assert.equal(one.features[0].x, 12.5);

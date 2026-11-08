@@ -51,7 +51,33 @@ int main(void) {
     n = send(12, body, 10); wire_to_rx(tx_wire, n);
     assert(link_receive(&m) && m.type == 12); assert(!link_receive(&m));
     s = link_stats(); assert(s.rx_bad == 3);
-    // 5. Oversized body is refused.
+    // 5. The receive buffer overruns (the loop didn't call link_receive() in time): 30
+    // frames of 60 B (~1.9 KB) arrive through the interrupt into the 1 KB buffer. The
+    // ones that fit come through, the one cut is bad, the rest count as lost once a
+    // frame arrives again.
+    s = link_stats();
+    memset(body, 0x33, 50);
+    fake_rx_n = fake_rx_at = 0;
+    for (int i = 0; i < 30; i++) {
+        n = send((uint8_t)(100 + i), body, 50);
+        memcpy(fake_rx + fake_rx_n, tx_wire, n);
+        fake_rx_n += n;
+    }
+    size_t frame_n = n;
+    on_uart_irq();
+    fake_rx_done();
+    int got = 0;
+    while (link_receive(&m)) { assert(m.type == 100 + got); got++; }
+    assert(got == (int)(RX_SIZE / frame_n) && got < 30);
+    // The cut frame's start runs into the next frame: that one is bad too; the one after arrives.
+    n = send(200, body, 50); wire_to_rx(tx_wire, n);
+    n = send(201, body, 50); wire_to_rx(tx_wire, n);
+    assert(link_receive(&m) && m.type == 201 && !link_receive(&m));
+    link_stats_t s2 = link_stats();
+    assert(s2.rx_lost - s.rx_lost == (uint32_t)(30 - got + 1) && s2.rx_bad - s.rx_bad == 1);
+    printf("overrun: %d of 30 frames fit the buffer, %lu lost, 1 bad\n", got, (unsigned long)(s2.rx_lost - s.rx_lost));
+    s = s2;
+    // 6. Oversized body is refused.
     assert(!link_send(1, body, LINK_MAX_BODY + 1));
     printf("OK: %d round trips; bad %lu lost %lu dropped %lu\n", checked,
            (unsigned long)s.rx_bad, (unsigned long)s.rx_lost, (unsigned long)link_stats().tx_dropped);

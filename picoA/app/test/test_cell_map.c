@@ -1,7 +1,7 @@
 // Host test for picoA/app/cell_map.c (doc/ARCHITECTURE.md, the map) in simulated rooms: each
 // VL53 zone reads the nearest surface over 5 x 5 directions across its cone, ±1.5 %
 // noise. After a start-up turn: an empty room has its walls and no obstacle on the
-// open floor, a box is blocked, a table top at 15-20 cm is an overhang, nothing beyond
+// open floor, a box is blocked, a table top at 16-21 cm is an overhang, nothing beyond
 // stairs down is drivable, a hallway with nothing in range shows no obstacles. A chair
 // leg seen from 30 cm and then moved away is erased seen from 1 m; standing still
 // 10 min 2 m from a box keeps it; someone walking across is gone 3 frames after. A
@@ -13,14 +13,27 @@
 // the whole-house map once it scrolls out, one 5.5 m away is mapped; back at the
 // start the box comes back from the whole-house map, and a scan erases it once it
 // is gone.
+// Every frame reaches the map as on the robot: one target per zone, packed and
+// unpacked for the map use (tof_format). A hand-made posed frame: an obstacle
+// ahead blocked, the floor rows' floor drivable, unsure zones and frames without a
+// pose ignored; the same map through packing and unpacking, byte for byte; "nothing
+// in range" free for 1 m; "beyond 2.54 m" free up to 2.55 m and never a hit, a less
+// sure zone's passes weighing half.
 // Run from the repo root (run_tests.sh does):
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_cell_map picoA/app/test/test_cell_map.c -lm && build/test_cell_map
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "../rangefinder.c"
+#include "../tof_rays.c"
+#include "../tof_format.c"
 #include "../cell_map.c"
 #include "../house_map.c"
+#include "../tof.h"
+#include "robot_mounting.h"
+
+#ifndef TOF_HZ
+#define TOF_HZ TOF_DEFAULT_HZ // run_tests.sh also builds it with -DTOF_HZ=15
+#endif
 
 // --- The scene: the floor (z = 0) with an optional hole, and boxes ---
 typedef struct { float x0, x1, y0, y1, z0, z1; bool on; } box_t;
@@ -74,42 +87,44 @@ static float trace(const float o[3], const float d[3]) {
 
 static float jitter(float v) { return v * 0.015f * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }
 
-#define MERGE_M 0.6f // surfaces closer together than this are one target (ST's forum)
-
-static uint16_t range_of(float m) { return m > 4.0f ? RANGE_NO_TARGET : (uint16_t)(1000.0f * (m + jitter(m))); }
-
-// One frame from `pose`: each zone the nearest surface in its cone, up to 4 m, and
-// the nearest one more than MERGE_M behind it.
-static void measure(range_frame_t *f, const pose_t *pose) {
+// One frame from `pose`: each zone the nearest surface in its cone, up to 4 m (one
+// target per zone, as tof.c reads it).
+static void measure(posed_frame_t *f, const pose_t *pose) {
     float origin[3], c = cosf(pose->yaw_rad), s = sinf(pose->yaw_rad);
-    rangefinder_origin(origin);
+    tof_rays_origin(origin);
     float o[3] = {pose->x_m + c * origin[0] - s * origin[1], pose->y_m + s * origin[0] + c * origin[1], origin[2]};
-    for (int i = 0; i < RANGEFINDER_RAYS; i++) {
-        float seen[25];
-        float nearest = 1e9f, behind = 1e9f;
+    *f = (posed_frame_t){.frame = {.period_us = 1000000 / TOF_HZ, .beyond_mm = TOF_EXACT}, .x_m = pose->x_m,
+                         .y_m = pose->y_m, .yaw_rad = pose->yaw_rad, .pitch_rad = pose->pitch_rad, .pose_known = true};
+    for (int i = 0; i < TOF_ZONES; i++) {
+        float nearest = 1e9f;
         for (int k = 0; k < 25; k++) {
             float r[3];
-            rangefinder_sub_ray_direction(i, -0.5f + 0.25f * (float)(k / 5), -0.5f + 0.25f * (float)(k % 5), pose->pitch_rad, r);
+            tof_rays_sub_direction(i, -0.5f + 0.25f * (float)(k / 5), -0.5f + 0.25f * (float)(k % 5), pose->pitch_rad, r);
             float d[3] = {c * r[0] - s * r[1], s * r[0] + c * r[1], r[2]};
-            seen[k] = trace(o, d);
-            nearest = fminf(nearest, seen[k]);
+            nearest = fminf(nearest, trace(o, d));
         }
-        for (int k = 0; k < 25; k++) if (seen[k] > nearest + MERGE_M) behind = fminf(behind, seen[k]);
-        f->range_mm[i] = range_of(nearest);
-        f->status[i] = 5;
-        f->range2_mm[i] = f->range_mm[i] == RANGE_NO_TARGET ? RANGE_NO_TARGET : range_of(behind);
-        f->status2[i] = 5;
+        if (nearest > 4.0f) continue; // nothing in range
+        f->frame.zone[i] = (tof_zone_t){.distance_mm = (uint16_t)(1000.0f * (nearest + jitter(nearest))),
+                                        .kind = TOF_SURE, .targets = 1};
     }
 }
 
-static void frame_at(pose_t pose) {
-    range_frame_t f;
-    measure(&f, &pose);
-    cell_map_add(&f, &pose);
+// The frame as the map gets it on the robot: packed and unpacked for the map use.
+static void add_as_used(const posed_frame_t *f) {
+    uint8_t bytes[TOF_FORMAT_MAX];
+    posed_frame_t used;
+    uint32_t n_bytes = tof_pack(TOF_USE_MAP, f, bytes);
+    assert(tof_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
+    cell_map_add(&used);
 }
 
-static void scan_at(float x, float y) { // the start-up turn: 390° at 30°/s, 15 frames a second
-    for (float yaw = 0; yaw < 390 * RAD_PER_DEG; yaw += 2 * RAD_PER_DEG) frame_at((pose_t){x, y, yaw, 0});
+static void frame_at(pose_t pose) {
+    posed_frame_t f;
+    measure(&f, &pose);
+    add_as_used(&f);
+}
+static void scan_at(float x, float y) { // the start-up turn: 390° at 30°/s, TOF_HZ frames a second
+    for (float yaw = 0; yaw < 390 * RAD_PER_DEG; yaw += 30.0f / TOF_HZ * RAD_PER_DEG) frame_at((pose_t){x, y, yaw, 0});
 }
 
 static int count(float x0, float x1, float y0, float y1, column_t kind) {
@@ -119,9 +134,106 @@ static int count(float x0, float x1, float y0, float y1, column_t kind) {
     return n;
 }
 
+// A posed frame made by hand, robot at the origin facing +x: nothing in range but
+// the floor rows' floor (rows 7-8, whole cm), row 4 column 4 a thing 80 cm ahead,
+// row 3 column 6 unsure at 50 cm.
+static posed_frame_t hand_made(void) {
+    posed_frame_t f = {.frame = {.number = 1, .period_us = 100000, .beyond_mm = TOF_EXACT}, .pose_known = true, .still = true};
+    for (int col = 0; col < 8; col++) {
+        f.frame.zone[6 * 8 + col] = (tof_zone_t){.distance_mm = 370, .kind = TOF_SURE, .targets = 1};
+        f.frame.zone[7 * 8 + col] = (tof_zone_t){.distance_mm = 270, .kind = TOF_SURE, .targets = 1};
+    }
+    f.frame.zone[3 * 8 + 3] = (tof_zone_t){.distance_mm = 800, .kind = TOF_SURE, .targets = 1};
+    f.frame.zone[2 * 8 + 5] = (tof_zone_t){.distance_mm = 500, .kind = TOF_UNSURE, .targets = 1};
+    return f;
+}
+
+// A frame where every zone is unsure (tells nothing) but the ones set after.
+static posed_frame_t all_unsure(void) {
+    posed_frame_t f = {.frame = {.number = 1, .period_us = 100000, .beyond_mm = TOF_EXACT}, .pose_known = true};
+    for (int i = 0; i < TOF_ZONES; i++) f.frame.zone[i] = (tof_zone_t){.distance_mm = 500, .kind = TOF_UNSURE, .targets = 1};
+    return f;
+}
+
+// The cell `d_m` along a zone's centre ray from the robot at the origin, facing +x:
+// its state in the layer it is in, and its confidence.
+static cell_state3_t along(int zone, float d_m, float *conf) {
+    float o[3], d[3];
+    tof_rays_origin(o);
+    tof_rays_direction(zone, d);
+    float z = o[2] + d_m * d[2];
+    return cell_map_cell(o[0] + d_m * d[0], o[1] + d_m * d[1], (int)floorf((z - G_BOTTOM_M) / GRID_M), conf);
+}
+
+static void hand_made_frame(void) {
+    static uint8_t direct[CELL_LAYERS * GRID * GRID];
+    int ox, oy;
+    posed_frame_t f = hand_made();
+    cell_map_clear();
+    f.pose_known = false; // no pose: left out
+    cell_map_add(&f);
+    for (int k = 0; k < CELL_LAYERS * GRID * GRID; k++) assert(cell_map_window(&ox, &oy)[k] == 0);
+    f.pose_known = true;
+    cell_map_add(&f);
+    memcpy(direct, cell_map_window(&ox, &oy), sizeof direct);
+    // The thing 80 cm ahead (centre ray: 2.8° up, 3° left): blocked; the floor 27-37 cm
+    // ahead drivable; nothing blocked anywhere else (the unsure zone tells nothing).
+    float x = 0.032f + 0.8f, y = -0.026f + 0.8f * sinf(2.8125f * RAD_PER_DEG);
+    assert(cell_map_column(x, y) == COLUMN_BLOCKED);
+    assert(cell_map_column(0.3f, 0.0f) == COLUMN_DRIVABLE);
+    int blocked = count(-3, 3, -3, 3, COLUMN_BLOCKED);
+    printf("hand-made frame: the thing 80 cm ahead blocked, the floor at 30 cm drivable, %d column(s) blocked in all\n",
+           blocked);
+    assert(blocked <= 2);
+    // The same frame packed and unpacked for the map: the same map, byte for byte (its
+    // distances are whole cm under 2.54 m, its pose exact).
+    cell_map_clear();
+    add_as_used(&f);
+    assert(memcmp(direct, cell_map_window(&ox, &oy), sizeof direct) == 0);
+    printf("ok: a hand-made posed frame; the same map through packing and unpacking\n");
+
+    // "Nothing in range" frees exactly 1 m along its rays (row 5, column 4: 2.8° down).
+    const int ahead = 4 * 8 + 3;
+    f = all_unsure();
+    f.frame.zone[ahead] = (tof_zone_t){.kind = TOF_NOTHING};
+    cell_map_clear();
+    add_as_used(&f);
+    float conf;
+    for (float d = 0.4f; d <= 0.86f; d += 0.05f) assert(along(ahead, d, &conf) == CELL_STATE_FREE);
+    for (float d = 1.15f; d <= 2.0f; d += 0.05f) assert(along(ahead, d, &conf) == CELL_STATE_UNKNOWN);
+    printf("ok: nothing in range: free 1 m along its rays, unknown beyond\n");
+
+    // Beyond 2.54 m (row 4, column 1: near level, 20° left), packed: free up to 2.55 m,
+    // weakly; nothing marked from there to 3.2 m (a reading of 3.2 m that only says
+    // "at least 2.55 m").
+    const int far = 3 * 8 + 0;
+    f = all_unsure();
+    f.frame.zone[far] = (tof_zone_t){.distance_mm = 3200, .kind = TOF_SURE, .targets = 1};
+    cell_map_clear();
+    add_as_used(&f);
+    for (float d = 0.4f; d <= 2.4f; d += 0.05f) assert(along(far, d, &conf) == CELL_STATE_FREE);
+    for (float d = 2.7f; d <= 3.2f; d += 0.05f) assert(along(far, d, &conf) == CELL_STATE_UNKNOWN);
+    for (int l = 0; l < CELL_LAYERS; l++)
+        for (int ix = 0; ix < GRID; ix++)
+            for (int iy = 0; iy < GRID; iy++) assert(C_STATE(grid[l][ix][iy]) != CELL_STATE_OCCUPIED || l == 0);
+    float sure_conf, less_conf;
+    along(far, 0.6f, &sure_conf);
+    // Less sure (status 6 or 9): its passes count half, as its readings do.
+    f.frame.zone[far].kind = TOF_LESS_SURE;
+    cell_map_clear();
+    add_as_used(&f);
+    along(far, 0.6f, &less_conf);
+    printf("beyond 2.54 m: free up to 2.55 m, nothing marked to 3.2 m; 0.6 m along: confidence %.2f sure, %.2f less sure\n",
+           (double)sure_conf, (double)less_conf);
+    assert(sure_conf > 0.9f && fabsf(less_conf - sure_conf / 2) < 0.07f);
+    printf("ok: beyond 2.54 m is free up to there, never a hit; a less sure zone's passes weigh half\n");
+}
+
 int main(void) {
+    tof_rays_init(&ROBOT_MOUNTING);
     srand(1);
     pose_t home = {0, 0, 0, 0};
+    hand_made_frame();
 
     // An empty 4 x 4 m room: walls blocked, no obstacle on the open floor, the floor
     // around the robot drivable.
@@ -146,11 +258,12 @@ int main(void) {
     assert(wall_blocked >= 16);
     printf("ok: empty room\n");
 
-    // A box 20 x 20 x 10 cm 60 cm ahead; a table top at 15-20 cm 60-90 cm to the left.
+    // A box 20 x 20 x 10 cm 60 cm ahead; a table top at 16-21 cm 60-90 cm to the left,
+    // 7 cm above the ToF (9 cm). A lower one (15-20 cm) is the next case.
     reset_scene();
     walls(2.0f);
     add_box(0.6f, 0.8f, -0.1f, 0.1f, 0, 0.1f);
-    add_box(-0.3f, 0.3f, 0.6f, 0.9f, 0.15f, 0.2f);
+    add_box(-0.3f, 0.3f, 0.6f, 0.9f, 0.16f, 0.21f);
     scan_at(0, 0);
     cell_map_print(&home, 0);
     // The box's front face is seen (its back half hides behind it). Under the table,
@@ -163,7 +276,19 @@ int main(void) {
     assert(count(0.6f, 0.7f, -0.1f, 0.1f, COLUMN_BLOCKED) == 2);
     assert(count(-0.3f, 0.3f, 0.6f, 0.9f, COLUMN_OVERHANG) >= 4);
     assert(table_blocked <= 8);
-    printf("ok: a box is blocked, a table top at 15-20 cm an overhang\n");
+    printf("ok: a box is blocked, a table top at 16-21 cm an overhang\n");
+
+    // KNOWN: a table top at 15-20 cm, only 6 cm above the ToF: from here row 4 grazes
+    // its underside where row 3 sees its edge, so its front columns are blocked, not
+    // overhang (drive stops for both). Before the PCB was lifted (ToF at 7 cm) this
+    // was the overhang case above.
+    reset_scene();
+    walls(2.0f);
+    add_box(-0.3f, 0.3f, 0.6f, 0.9f, 0.15f, 0.2f);
+    scan_at(0, 0);
+    int low_overhang = count(-0.3f, 0.3f, 0.6f, 0.9f, COLUMN_OVERHANG), low_blocked = count(-0.3f, 0.3f, 0.6f, 0.9f, COLUMN_BLOCKED);
+    printf("table top at 15-20 cm: %d of 18 columns overhang, %d blocked (KNOWN)\n", low_overhang, low_blocked);
+    assert(low_overhang <= 1 && low_blocked >= 4);
 
     // A low box (7 cm tall, under the sensor's height) 50 cm to the right: its front
     // face blocked. Rays from the row above pass over it inside the same L1 cell
@@ -246,7 +371,7 @@ int main(void) {
     for (int k = 0; k < 15; k++) frame_at(home);
     int person = add_box(0.9f, 1.1f, -0.9f, -0.6f, 0, 1.7f);
     bool seen = false;
-    for (float y = -0.9f; y < 0.9f; y += 1.0f / 15) {
+    for (float y = -0.9f; y < 0.9f; y += 1.0f / TOF_HZ) { // 1 m/s
         boxes[person].y0 = y;
         boxes[person].y1 = y + 0.3f;
         frame_at(home);

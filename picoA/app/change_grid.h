@@ -7,7 +7,7 @@
 // noise mostly doesn't). Moved cells that touch form blobs.
 #include <stdbool.h>
 #include <stdint.h>
-#include "motion_obs.h"
+#include "watch_obs.h"
 
 #define CHANGE_GRID_MAX_CELLS 300 // the camera's 20 x 15 blocks
 #define CHANGE_GRID_WINDOW 4
@@ -35,7 +35,7 @@ int change_grid_blobs(const change_grid_t *g, uint8_t *label);
 // leftmost and rightmost cell, cells and strength. range_m is −1, point and t_us 0:
 // the detector adds what it knows, using label. Returns the number of blobs.
 int change_grid_observations(const change_grid_t *g, void (*direction)(int cell, float dir[3]), uint8_t *label,
-                             motion_obs_t *all);
+                             watch_obs_t *all);
 // The biggest of all[0..blobs) (most cells first), at most max of them, into obs;
 // returns how many. Reorders all.
-int change_grid_biggest(motion_obs_t *all, int blobs, motion_obs_t *obs, int max);
+int change_grid_biggest(watch_obs_t *all, int blobs, watch_obs_t *obs, int max);

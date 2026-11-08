@@ -1,8 +1,8 @@
 #pragma once
-// PicoB as PicoA sees it: the robot's wheels, odometry and tilt. Hides the link
-// protocol: greeting PicoB and checking its version, repeating the drive command
-// often enough for PicoB's safety stop, re-sending the motor switch until
-// PicoB reports it, and decoding PicoB's reports. PicoB's log lines are printed
+// PicoB as PicoA sees it: the robot's wheels, odometry and tilt, and its IMU as it
+// measured. Hides the link protocol: greeting PicoB and checking its version,
+// repeating the drive command often enough for PicoB's safety stop, re-sending the
+// motor switch until PicoB reports it, decoding PicoB's reports, and the two clocks. PicoB's log lines are printed
 // on PicoA's stdout as "B: ...". When PicoB switches the motors off by itself
 // (a safety stop, see odom_report_t.stop_reason), they stay off until the next
 // body_motors(true).
@@ -26,15 +26,14 @@ uint32_t body_odom_time_us(void);
 uint32_t body_odom_count(void);
 bool body_odom_get(uint32_t n, odom_report_t *report, uint32_t *t_us);
 const status_report_t *body_status(void); // latest status (2 Hz); all zero until the first one
-// The largest jolt (along x, y, z: g, gravity taken out) and tilt PicoB reported
-// since the last call; the next call starts from zero. For the pose line.
-typedef struct {
-    float jolt_g[3];
-    float tilt_rad;
-} body_peaks_t;
-void body_peaks_take(body_peaks_t *peaks);
+// PicoB's imu records (104 a second), their t_us turned into PicoA's clock as they
+// arrive (as body_odom_time_us()). Records that come before PicoB's clock is known
+// (before its first report after a hello) are dropped. The oldest not yet taken;
+// false if none waits. The newest BODY_IMU_KEPT wait (~0.3 s); older ones not taken
+// are lost, counted.
+#define BODY_IMU_KEPT 32
+bool body_imu_take(imu_record_t *r);
+uint32_t body_imu_received(void); // records kept since power-up
+uint32_t body_imu_lost(void);     // ...and lost: not taken in time
 void body_motors(bool on);     // on also clears PicoB's safety stop
 void body_drive(float v_mps, float w_radps); // + = forward / turn left; held until changed
-// The DRIVE commands sent to PicoB so far (repeated every 50 ms), and the latest:
-// what and when (PicoA's clock). For recording.
-uint32_t body_drive_sent(float *v_mps, float *w_radps, uint32_t *t_us);

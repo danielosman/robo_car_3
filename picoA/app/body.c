@@ -1,4 +1,3 @@
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,19 +21,23 @@
 static bool greeted;
 static bool motors_wanted;
 static uint8_t motors_request; // numbers our MOTORS requests; PicoB echoes the last one it acted on
-static drive_msg_t drive, drive_sent;
-static uint32_t drives_sent, drive_sent_us;
+static drive_msg_t drive;
 static odom_report_t odom;
 static struct { odom_report_t report; uint32_t t_us; } kept[BODY_ODOM_KEPT]; // report n at n % BODY_ODOM_KEPT
 static uint32_t odom_count;
 static status_report_t status;
-static body_peaks_t peaks; // since body_peaks_take()
+static imu_record_t imu[BODY_IMU_KEPT]; // record n at n % BODY_IMU_KEPT
+static uint32_t imu_kept, imu_taken, imu_lost;
 static absolute_time_t last_report, next_drive, next_motors, next_hello;
 static uint32_t block_min[OFFSET_BLOCKS], block_start_us, offset_us;
 static int blocks_full;    // completed blocks in block_min, up to OFFSET_BLOCKS
 static bool clock_known;
 
 static void restart_clock(void) { clock_known = false; blocks_full = 0; }
+
+// A time on PicoB's clock on PicoA's: the offset holds the smallest delay of an ODOM,
+// which includes its time on the wire.
+static uint32_t on_picoa_clock(uint32_t picob_us) { return picob_us + offset_us - ODOM_WIRE_US; }
 
 // d = arrival on PicoA's clock - PicoB's clock at sending. The two clocks wrap at
 // the same time, so differences of uint32 values stay right across wraps.
@@ -92,8 +95,6 @@ static void on_message(const link_msg_t *m) {
     case MSG_ODOM:
         if (m->len == sizeof odom) {
             memcpy(&odom, m->body, sizeof odom);
-            for (int i = 0; i < 3; i++) peaks.jolt_g[i] = fmaxf(peaks.jolt_g[i], odom.jolt_g[i]);
-            peaks.tilt_rad = fmaxf(peaks.tilt_rad, odom.tilt_rad);
             last_report = get_absolute_time();
             track_clock(time_us_32() - odom.t_us, time_us_32());
             odom_count++;
@@ -103,6 +104,17 @@ static void on_message(const link_msg_t *m) {
         break;
     case MSG_STATUS:
         if (m->len == sizeof status) memcpy(&status, m->body, sizeof status);
+        break;
+    case MSG_IMU:
+        if (m->len == sizeof(imu_record_t) && clock_known) {
+            imu_record_t *r = &imu[imu_kept++ % BODY_IMU_KEPT];
+            memcpy(r, m->body, sizeof *r);
+            r->t_us = on_picoa_clock(r->t_us);
+            if (imu_kept - imu_taken > BODY_IMU_KEPT) {
+                imu_lost += imu_kept - imu_taken - BODY_IMU_KEPT;
+                imu_taken = imu_kept - BODY_IMU_KEPT;
+            }
+        }
         break;
     case MSG_LOG:
         printf("B: %.*s\n", m->len, (const char *)m->body);
@@ -132,9 +144,6 @@ void body_update(void) {
     if (time_reached(next_drive)) {
         next_drive = make_timeout_time_us(DRIVE_PERIOD_US);
         link_send(MSG_DRIVE, &drive, sizeof drive);
-        drive_sent = drive;
-        drive_sent_us = time_us_32();
-        drives_sent++;
     }
     // PicoB acted on our last request, then switched the motors off by itself
     // (its LOG says why): respect that. Switching them on again is a decision for
@@ -156,7 +165,7 @@ bool body_connected(void) {
 
 const odom_report_t *body_odom(void) { return &odom; }
 
-uint32_t body_odom_time_us(void) { return odom.t_us + offset_us - ODOM_WIRE_US; }
+uint32_t body_odom_time_us(void) { return on_picoa_clock(odom.t_us); }
 
 uint32_t body_odom_count(void) { return odom_count; }
 
@@ -169,17 +178,14 @@ bool body_odom_get(uint32_t n, odom_report_t *report, uint32_t *t_us) {
 
 const status_report_t *body_status(void) { return &status; }
 
-uint32_t body_drive_sent(float *v_mps, float *w_radps, uint32_t *t_us) {
-    *v_mps = drive_sent.v_mps;
-    *w_radps = drive_sent.w_radps;
-    *t_us = drive_sent_us;
-    return drives_sent;
+bool body_imu_take(imu_record_t *r) {
+    if (imu_taken == imu_kept) return false;
+    *r = imu[imu_taken++ % BODY_IMU_KEPT];
+    return true;
 }
 
-void body_peaks_take(body_peaks_t *p) {
-    *p = peaks;
-    peaks = (body_peaks_t){0};
-}
+uint32_t body_imu_received(void) { return imu_kept; }
+uint32_t body_imu_lost(void) { return imu_lost; }
 
 void body_motors(bool on) {
     motors_wanted = on;

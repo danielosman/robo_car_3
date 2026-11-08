@@ -3,7 +3,7 @@
 // answers and to the robot, the snaps after moves, the time limits. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandText, parseAction, parseSteer, robotLine, timeLimitMs, withSnaps, type Command } from "./commands.ts";
+import { commandText, parseAction, parseSteer, robotText, timeLimitMs, withSnaps, type Command } from "./commands.ts";
 import { LIMITS } from "./firmware.ts";
 
 const steer = (text: string) => {
@@ -38,8 +38,11 @@ test("the other actions and their words", () => {
   };
   assert.equal(one("snap", ""), "snap");
   assert.equal(one("snap", "2"), "error: snap takes nothing");
-  assert.equal(one("recording", "on"), "recording on");
-  assert.equal(one("recording", "0"), "recording off");
+  assert.equal(one("recording", "on"), null); // gone with the recorder
+  assert.equal(one("config", "pre_ms 300"), "config pre_ms 300");
+  assert.equal(one("config", "post_ms 0"), "config post_ms 0");
+  assert.equal(one("config", "post_ms 2001"), "error: config takes pre_ms or post_ms and 0 to 2000 (ms)");
+  assert.equal(one("config", "wait_ms 5"), "error: config takes pre_ms or post_ms and 0 to 2000 (ms)");
   assert.equal(one("mode", "manual"), "mode manual");
   assert.equal(one("mode", "fast"), "error: mode takes idle or manual");
   assert.equal(one("clear_map", ""), "clear_map");
@@ -47,12 +50,12 @@ test("the other actions and their words", () => {
   assert.equal(one("toString", ""), null);
 });
 
-test("to the robot, numbered; a snap after each move; time limits", () => {
+test("to the robot; a snap after each move; time limits", () => {
   const moves = commands("d-40 g120,40 w60");
-  const actions = [parseAction("recording", "on"), parseAction("mode", "idle"), parseAction("snap", "")]
+  const actions = [parseAction("config", "post_ms 500"), parseAction("mode", "idle"), parseAction("snap", "")]
     .map(p => (p as { commands: Command[] }).commands[0]);
-  assert.deepEqual([...moves, ...actions].map((c, i) => robotLine(c, i + 1)),
-                   ["drive -40 #1", "goto 120 40 #2", "watch 60 #3", "recording on #4", "mode idle #5", "snapshot #6"]);
+  assert.deepEqual([...moves, ...actions].map(robotText),
+                   ["drive -40", "goto 120 40", "watch 60", "config post_ms 500", "mode idle", "snapshot"]);
   assert.equal(withSnaps(moves, true).map(commandText).join(" | "), "steer d-40 | snap | steer g120,40 | snap | steer w60 | snap");
   assert.ok(withSnaps(moves, true)[1].auto);
   assert.equal(withSnaps(moves, false).length, 3);

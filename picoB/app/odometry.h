@@ -2,10 +2,14 @@
 // How the robot has moved since power-up, from the gyro (heading) and the four
 // wheel encoders (distance: each side is the average of its front and rear wheel), plus tilt from the accelerometer and gyro, and
 // whether the robot is standing still. While still, heading is frozen and the
-// gyro's bias is re-measured, so standing still costs no heading drift.
+// gyro's bias is re-measured, so standing still costs no heading drift. Also the
+// IMU as it measured, for the PC: each 4 samples (416 a second) averaged into one
+// imu_record_t (104 a second; link_msgs.h).
 // Robot frame: x forward, y left, z up. Angles: + = turned left, nose up, left side up.
 #include <stdbool.h>
 #include "encoder.h"
+#include "link_msgs.h"
+#include "mounting.h"
 
 typedef struct {
     float x_m, y_m;          // in the frame the robot had at power-up
@@ -20,12 +24,17 @@ typedef struct {
 } odom_t;
 
 // Starts the IMU and measures the gyro bias: the robot must stand still for ~1 s.
-// Returns false if the IMU doesn't answer; odometry then stays at zero.
-bool odom_init(void);
+// Returns false if the IMU doesn't answer; odometry then stays at zero. The IMU's
+// axes come from the mounting (main.c: ROBOT_MOUNTING).
+bool odom_init(const mounting_t *m);
 // Call as often as possible: it uses every IMU sample (416 per second) and
 // returns at once when there's no new one.
 void odom_update(void);
 const odom_t *odom_get(void);
-// The largest jolt (acceleration with gravity taken out, along x, y, z: g, absolute)
-// and tilt (pitch or roll, absolute) since the last call; the next starts from zero.
-void odom_peaks_take(float jolt_g[3], float *tilt_rad);
+// The oldest imu record not yet taken (t_us on PicoB's clock, time_us_32()); false if
+// none waits. The newest ODOM_IMU_KEPT are kept (take them every loop: one is made
+// every 9.6 ms); older ones not taken are lost.
+#define ODOM_IMU_KEPT 8
+bool odom_imu_take(imu_record_t *r);
+uint32_t odom_imu_lost(void); // records lost (not taken in time) since power-up
+uint32_t odom_imu_skipped(void); // partial records dropped after a skipped sample (a slow loop) since power-up

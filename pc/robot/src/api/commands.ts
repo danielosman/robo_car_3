@@ -1,9 +1,11 @@
 // The commands that go into the queue (doc/CLI_API_PLAN.md): the moves, given to
 // `robot steer` ("d50 r30 g120,40 w60"), and the other actions, each its own
-// command (snap, stop, clear_map, recording on|off, mode idle|manual). A command is
-// a name and its values: numbers, or a word's index (recording off/on = 0/1, mode
-// idle/manual = 0/1). Written in answers as typed ("steer d50", "recording on"),
-// and to the robot long and numbered ("drive 50 #17").
+// command (snap, stop, clear_map, mode idle|manual, config pre_ms|post_ms <ms>). A
+// command is a name and its values: numbers, or a word's index (mode idle/manual =
+// 0/1; config pre_ms/post_ms = 0/1, then the ms). Written in answers as typed
+// ("steer d50", "mode idle", "config pre_ms 300"), and to the robot long and
+// numbered ("drive 50 #17"). Each move is one move on the robot (picoA/app/move.h):
+// "steer r30 d50" is two, each standing still before and after.
 //
 // steer's grammar: moves one after another, spaces optional; each a letter (d, r, g,
 // w) or its long name, then whole numbers (a minus allowed), goto's two separated by
@@ -11,7 +13,7 @@
 import { LIMITS, SPEED } from "./firmware.ts";
 
 export type MoveName = "drive" | "rotate" | "goto" | "watch";
-export type CommandName = MoveName | "snap" | "stop" | "clear_map" | "recording" | "mode";
+export type CommandName = MoveName | "snap" | "stop" | "clear_map" | "mode" | "config";
 // auto: a snap the API added after a move (auto_snap).
 export interface Command { name: CommandName; values: number[]; auto?: boolean }
 
@@ -30,14 +32,14 @@ export const MOVES: readonly MoveSpec[] = [
   { name: "watch", letter: "w", values: [range("s", LIMITS.watchMaxS, LIMITS.watchMinS)],
     does: "For that many seconds, turn towards anything that moves." },
 ];
-// The other actions: their words, if they take one.
+// The other actions: their words, if they take one (config's then takes ms).
 export const ACTIONS: Record<Exclude<CommandName, MoveName>, readonly string[] | null> = {
-  snap: null, stop: null, clear_map: null, recording: ["off", "on"], mode: ["idle", "manual"],
+  snap: null, stop: null, clear_map: null, mode: ["idle", "manual"], config: ["pre_ms", "post_ms"],
 };
 // The robot's word for each (picoA/app/commands.h).
 const ROBOT_NAME: Record<CommandName, string> = {
   drive: "drive", rotate: "rotate", goto: "goto", watch: "watch",
-  snap: "snapshot", stop: "stop", clear_map: "clear_map", recording: "recording", mode: "mode",
+  snap: "snapshot", stop: "stop", clear_map: "clear_map", mode: "mode", config: "config",
 };
 
 const MOVE = new Map(MOVES.map(m => [m.name, m]));
@@ -75,28 +77,34 @@ export function parseSteer(text: string): Parsed {
   return { commands };
 }
 
-// One of the other actions with its argument ("on", "idle", or 0/1); null if name
-// isn't one.
+// One of the other actions with its argument ("idle", or 0/1; config "pre_ms 300");
+// null if name isn't one.
 export function parseAction(name: string, arg: string): Parsed | null {
   if (!Object.hasOwn(ACTIONS, name)) return null;
   const n = name as keyof typeof ACTIONS, words = ACTIONS[n], a = arg.trim();
   if (!words) return a ? { error: `${name} takes nothing` } : { commands: [{ name: n, values: [] }] };
+  if (n === "config") {
+    const m = /^(pre_ms|post_ms)\s+(\d+)$/.exec(a);
+    if (!m || Number(m[2]) > LIMITS.stillMaxMs) return { error: `config takes pre_ms or post_ms and 0 to ${LIMITS.stillMaxMs} (ms)` };
+    return { commands: [{ name: n, values: [words.indexOf(m[1]), Number(m[2])] }] };
+  }
   const index = /^[01]$/.test(a) ? Number(a) : words.indexOf(a);
   return index < 0 ? { error: `${name} takes ${words.join(" or ")}` } : { commands: [{ name: n, values: [index] }] };
 }
 
-// As typed: "steer d50", "steer g120,40", "snap", "recording on".
+// As typed: "steer d50", "steer g120,40", "snap", "mode idle", "config pre_ms 300".
 export function commandText(c: Command): string {
   if (isMoveName(c.name)) return `steer ${MOVE.get(c.name)!.letter}${c.values.join(",")}`;
   const words = ACTIONS[c.name];
-  return words ? `${c.name} ${words[c.values[0]]}` : c.name;
+  return words ? [c.name, words[c.values[0]], ...c.values.slice(1).map(String)].join(" ") : c.name;
 }
 
-// To the robot: "drive 50 #17", "goto 120 40 #18", "recording on #19", "snapshot #20".
-export function robotLine(c: Command, n: number): string {
+// To the robot, in a command message with its number: "drive 50", "goto 120 40",
+// "mode idle", "config pre_ms 300", "snapshot".
+export function robotText(c: Command): string {
   const words = isMoveName(c.name) ? null : ACTIONS[c.name];
-  const values = words ? [words[c.values[0]]] : c.values.map(String);
-  return [ROBOT_NAME[c.name], ...values, `#${n}`].join(" ");
+  const values = words ? [words[c.values[0]], ...c.values.slice(1).map(String)] : c.values.map(String);
+  return [ROBOT_NAME[c.name], ...values].join(" ");
 }
 
 export const isMove = (c: Command) => isMoveName(c.name);
@@ -107,7 +115,7 @@ export function withSnaps(commands: Command[], autoSnap: boolean): Command[] {
 }
 
 // How long the robot may take to answer: what the command should take, twice, plus
-// 10 s (starting, settling, the link).
+// 10 s (starting, standing still before and after: at most 2 s each, the link).
 export function timeLimitMs(c: Command): number {
   const turnS = (deg: number) => (Math.abs(deg) * Math.PI / 180) / SPEED.turnRadps;
   const driveS = (cm: number) => Math.abs(cm) / 100 / SPEED.driveMps;

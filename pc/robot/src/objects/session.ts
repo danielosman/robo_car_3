@@ -9,9 +9,10 @@ import { readFileSync } from "node:fs";
 import { LABELS, checkReport, type BoxFormat, type Detection } from "./labels.ts";
 import type { Chat, ChatMessage } from "./model.ts";
 
-export const PROMPT_VERSION = 5;  // 2: door and doorway, no wall, confidence; 3: what to look for; 4: person, animal,
+export const PROMPT_VERSION = 6;  // 2: door and doorway, no wall, confidence; 3: what to look for; 4: person, animal,
                                   // report everything; 5: rewritten in markdown (system_prompt_gemma4.md,
-                                  // and system_prompt_qwen.md, with the model)
+                                  // and system_prompt_qwen.md, with the model); 6: the camera at 10.8 cm
+                                  // (the PCB lifted 2 cm; the prompts' height is the mounting's, a test checks)
 const MAX_CORRECTIONS = 3, MAX_REMINDERS = 3;
 
 // A system prompt per model family, picked by the model's name (MODEL in .env), each in

@@ -67,12 +67,12 @@ int change_grid_blobs(const change_grid_t *g, uint8_t *label) {
 }
 
 int change_grid_observations(const change_grid_t *g, void (*direction)(int cell, float dir[3]), uint8_t *label,
-                             motion_obs_t *all) {
+                             watch_obs_t *all) {
     int blobs = change_grid_blobs(g, label), n = g->cols * g->rows;
     memset(all, 0, (size_t)blobs * sizeof all[0]);
     for (int i = 0; i < n; i++) {
         if (!label[i]) continue;
-        motion_obs_t *o = &all[label[i] - 1];
+        watch_obs_t *o = &all[label[i] - 1];
         float dir[3];
         direction(i, dir);
         for (int k = 0; k < 3; k++) o->where[k] += dir[k];
@@ -82,7 +82,7 @@ int change_grid_observations(const change_grid_t *g, void (*direction)(int cell,
         o->cells++;
     }
     for (int b = 0; b < blobs; b++) {
-        motion_obs_t *o = &all[b];
+        watch_obs_t *o = &all[b];
         float len = sqrtf(o->where[0] * o->where[0] + o->where[1] * o->where[1] + o->where[2] * o->where[2]);
         for (int k = 0; k < 3; k++) o->where[k] /= len;
         o->range_m = -1.0f;
@@ -92,10 +92,10 @@ int change_grid_observations(const change_grid_t *g, void (*direction)(int cell,
 }
 
 static int compare_cells(const void *a, const void *b) {
-    return ((const motion_obs_t *)b)->cells - ((const motion_obs_t *)a)->cells;
+    return ((const watch_obs_t *)b)->cells - ((const watch_obs_t *)a)->cells;
 }
 
-int change_grid_biggest(motion_obs_t *all, int blobs, motion_obs_t *obs, int max) {
+int change_grid_biggest(watch_obs_t *all, int blobs, watch_obs_t *obs, int max) {
     qsort(all, (size_t)blobs, sizeof all[0], compare_cells);
     int n = blobs < max ? blobs : max;
     memcpy(obs, all, (size_t)n * sizeof all[0]);

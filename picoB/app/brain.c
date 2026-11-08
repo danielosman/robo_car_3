@@ -1,4 +1,3 @@
-#include <string.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
@@ -110,15 +109,20 @@ static void send_odom(void) {
         .motors_request = motors_request,
         .imu_error = !imu_ok,
     };
-    float jolt_g[3], tilt_rad; // packed fields: copied, not pointed at
-    odom_peaks_take(jolt_g, &tilt_rad);
-    memcpy(r.jolt_g, jolt_g, sizeof jolt_g);
-    r.tilt_rad = tilt_rad;
     link_send(MSG_ODOM, &r, sizeof r);
 }
 
+// Each imu record as it is made (104 a second), once PicoA has greeted us (before,
+// they are taken and dropped: PicoA can't place them on its clock yet anyway).
+static void send_imu(void) {
+    imu_record_t r;
+    while (odom_imu_take(&r))
+        if (greeted) link_send(MSG_IMU, &r, sizeof r);
+}
+
 static void send_status(void) {
-    status_report_t r = {.gyro_bias_radps = odom_get()->gyro_bias_radps};
+    status_report_t r = {.gyro_bias_radps = odom_get()->gyro_bias_radps, .imu_lost = odom_imu_lost(),
+                          .imu_skipped = odom_imu_skipped()};
     link_send(MSG_STATUS, &r, sizeof r);
 }
 
@@ -142,6 +146,7 @@ void brain_update(void) {
         reported_fault = fault;
         stop_safely(stop_for_fault[fault]);
     }
+    send_imu();
     if (time_reached(next_odom)) {
         next_odom = make_timeout_time_us(LINK_ODOM_PERIOD_US);
         send_odom();

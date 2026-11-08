@@ -1,6 +1,8 @@
 // Regression test on real recordings (doc/archive/MAP_DESIGN.md §9): the five scans of 10 Oct
-// (picoA/app/test/data/*.frames, exported with pc/robot `npm run frames`: each frame
-// as the robot's map received it) through picoA/app/cell_map.c. Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
+// (picoA/app/test/data/*.frames, exported from the old recordings (tag data-v1): each frame
+// as the robot's map received it; one target per zone, frames_file.h) through
+// picoA/app/cell_map.c, each frame packed and unpacked for the map use first, as on
+// the robot. Prints each scan's columns by kind (≥ 10 % confident) for the CHANGELOG. Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
 // on wheels to the right, a cupboard behind; from scan 3 on the robot started 30 cm
 // further left (the cup then ahead-right). Each object must have a blocked or
 // overhang column in its region; nothing may be blocked within 30 cm of the robot
@@ -12,9 +14,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../rangefinder.c"
+#include "../tof_rays.c"
+#include "../tof_format.c"
 #include "../cell_map.c"
 #include "../house_map.c"
+#include "mounting_before_lift.h"
+#include "frames_file.h"
 
 #define MAX_FRAMES 400
 
@@ -35,8 +40,7 @@ static const scan_t scans[] = {
                     {"chair", -0.4f, 0.3f, -1.0f, -0.5f}, {"cupboard", -0.7f, -0.4f, -0.6f, -0.1f}}},
 };
 
-typedef struct { range_frame_t f; pose_t p; } frame_t;
-static frame_t frames[MAX_FRAMES];
+static posed_frame_t frames[MAX_FRAMES];
 
 static int load(const char *take) {
     char path[128];
@@ -46,28 +50,8 @@ static int load(const char *take) {
     static char line[4096];
     int n = 0;
     while (n < MAX_FRAMES && fgets(line, sizeof line, in)) {
-        frame_t *fr = &frames[n];
-        float t;
-        int used;
-        char *s = line;
-        int got = sscanf(s, "%u %f %f %f %f %f%n", &fr->f.number, &t, &fr->p.x_m, &fr->p.y_m, &fr->p.yaw_rad, &fr->p.pitch_rad, &used);
-        assert(got == 6);
-        s += used;
-        for (int i = 0; i < RANGEFINDER_RAYS; i++) {
-            unsigned mm, st;
-            got = sscanf(s, "%u %u%n", &mm, &st, &used);
-            assert(got == 2);
-            s += used;
-            fr->f.range_mm[i] = (uint16_t)mm;
-            fr->f.status[i] = (uint8_t)st;
-        }
-        // Optional: the second sure target of each ray (0 0: none).
-        unsigned mm2, st2;
-        for (int i = 0, used2; i < RANGEFINDER_RAYS && sscanf(s, "%u %u%n", &mm2, &st2, &used2) == 2; i++) {
-            s += used2;
-            fr->f.range2_mm[i] = (uint16_t)mm2;
-            fr->f.status2[i] = (uint8_t)st2;
-        }
+        bool ok = frames_file_line(line, &frames[n]);
+        assert(ok);
         n++;
     }
     fclose(in);
@@ -96,10 +80,17 @@ static int solid_near(float radius_m) {
 
 static void run(int n) {
     cell_map_clear();
-    for (int i = 0; i < n; i++) cell_map_add(&frames[i].f, &frames[i].p);
+    for (int i = 0; i < n; i++) {
+        uint8_t bytes[TOF_FORMAT_MAX];
+        posed_frame_t used;
+        uint32_t n_bytes = tof_pack(TOF_USE_MAP, &frames[i], bytes);
+        assert(tof_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
+        cell_map_add(&used);
+    }
 }
 
 int main(void) {
+    tof_rays_init(&MOUNTING_BEFORE_LIFT); // the scans were recorded with the ToF at 7 cm
     for (size_t k = 0; k < sizeof scans / sizeof scans[0]; k++) {
         const scan_t *s = &scans[k];
         int n = load(s->take);
@@ -111,6 +102,11 @@ int main(void) {
             found[o] = solid_in(&s->objects[o]);
             printf(" %s %d", s->objects[o].name, found[o]);
         }
+        int kinds[6] = {0};
+        for (int ix = 0; ix < GRID; ix++)
+            for (int iy = 0; iy < GRID; iy++) kinds[column_of(ix, iy, 0.1f)]++;
+        printf(" [blocked %d, overhang %d, no floor %d, drivable %d, open %d]", kinds[COLUMN_BLOCKED],
+               kinds[COLUMN_OVERHANG], kinds[COLUMN_NO_FLOOR], kinds[COLUMN_DRIVABLE], kinds[COLUMN_OPEN]);
         int near = solid_near(0.3f);
         // f towards the cup: its first obstacle is within a cell of the cup's region.
         const region_t *cup = &s->objects[0];

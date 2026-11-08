@@ -1,22 +1,21 @@
 // Snapshots from the robot (doc/ARCHITECTURE.md, snapshots; picoA/app/snapshot.c): what it
-// knows when a command asks (after every move), sent between its console text (robot.ts takes the bytes
-// out). Each boot's snapshots are saved as they arrive, never changed, in
-// recordings/snapshots/raw/<time>-boot-<id>.snap (the truth); the database rows and
-// the camera pictures (recordings/camera/<boot's folder>/) are derived from them (store.ts, npm run import).
+// knows when a command asks (after every move), sent in parts on the bulk lane (link.ts puts them
+// together). Each is stored as it arrives, its bytes too (store.ts); its camera
+// picture is a PNG in recordings/camera/<boot's folder>/ (boot_folders.ts).
 //
-// A snapshot: "SNAP", version u8, total length u32, sections [type u8][length u32]
-// [payload], CRC-32 of everything before it. Little-endian.
+// A snapshot: "SNAP", version u8 (2), total length u32, sections [type u8][length u32]
+// [payload], CRC-32 of everything before it. Little-endian. The ToF section is a
+// compact frame (tof_format.ts), its pose in it.
 import zlib from "node:zlib";
-import { createWriteStream, mkdirSync, writeFileSync, type WriteStream } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { EventEmitter } from "node:events";
-import { END_REASONS, parseRecord, REC, type Geometry, type TofRaw } from "./recording.ts";
 import { decodeOpt } from "../../bringup/src/opt4048.ts";
-import type { BootFolders } from "./boot_folders.ts";
+import { END_WORDS } from "./wire.ts";
+import { unpackTof, type PosedFrame } from "./tof_format.ts";
 
 export const SNAP_MAGIC = "SNAP";
-export const SNAP_FILE_MAGIC = "RCSNAP01"; // a file of snapshots: then [arrival ms f64][snapshot] each
-const SEC = { HEAD: 1, POSE: 2, GEOMETRY: 3, TOF: 4, CAMERA: 5, COLOR: 6, WINDOW: 7, TILES: 8, FEATURES: 9 } as const;
+export const SNAP_VERSION = 2;
+const SEC = { HEAD: 1, POSE: 2, TOF: 4, CAMERA: 5, COLOR: 6, WINDOW: 7, TILES: 8, FEATURES: 9 } as const; // 3 was the sensor geometry
 // vision_feature_t.flags (picoA/app/vision.h)
 export const FEATURE = { NEW: 1, MISSED: 2, LOST: 4, LEFT_IMAGE: 8 } as const;
 export const WHY = ["action ended", "command", "server connected"]; // snapshot_why_t; 0 until 14 Oct, 1 was key S
@@ -27,7 +26,6 @@ export const TILE_BYTES = TILE_COLS * TILE_COLS / 2;
 export const COLUMN = { UNKNOWN: 0, BLOCKED: 1, OVERHANG: 2, NO_FLOOR: 3, DRIVABLE: 4, OPEN: 5 } as const;
 
 export interface SnapPose { tUs: number; x: number; y: number; yaw: number; pitch: number; roll: number; v: number; w: number; stationary: boolean; motorsOn: boolean; stopReason: number }
-export interface SnapTof { poseOk: boolean; x: number; y: number; yaw: number; pitch: number; raw: TofRaw }
 export interface SnapCamera { number: number; lastRowUs: number; lineUs: number; exposureUs: number; gain: number; width: number; height: number; pixels: Buffer }
 export interface SnapColor { tUs: number; sequence: number; overload: boolean; raw: Buffer; lux: number | null; cie: { x: number; y: number } | null; xyz: { X: number; Y: number; Z: number } | null; channels: number[] }
 export interface SnapWindow { orgX: number; orgY: number; cellsX: number; cellsY: number; layers: number; cells: Buffer }
@@ -38,7 +36,7 @@ export interface Snapshot {
   version: number; length: number;
   bootId: string; seq: number; tUs: number; why: string; action: string; endReason: string | null; actionsEnded: number;
   running: string; mode: string; mapClears: number; build: string;
-  pose: SnapPose | null; geometry: Geometry | null; tof: SnapTof | null; camera: SnapCamera | null; color: SnapColor | null;
+  pose: SnapPose | null; tof: PosedFrame | null; camera: SnapCamera | null; color: SnapColor | null;
   window: SnapWindow | null; tiles: SnapTile[]; features: SnapFeatures | null;
 }
 
@@ -62,9 +60,10 @@ export function parseSnapshot(b: Buffer): Snapshot {
   const length = b.readUInt32LE(5);
   if (length !== b.length) throw new Error(`snapshot: ${b.length} bytes, it says ${length}`);
   if (zlib.crc32(b.subarray(0, length - 4)) !== b.readUInt32LE(length - 4)) throw new Error("snapshot: CRC error");
+  if (b[4] !== SNAP_VERSION) throw new Error(`snapshot version ${b[4]}, this server reads ${SNAP_VERSION}`);
   const s: Snapshot = {
     version: b[4], length, bootId: "", seq: 0, tUs: 0, why: "", action: "", endReason: null, actionsEnded: 0, running: "",
-    mode: "", mapClears: 0, build: "", pose: null, geometry: null, tof: null, camera: null, color: null, window: null, tiles: [],
+    mode: "", mapClears: 0, build: "", pose: null, tof: null, camera: null, color: null, window: null, tiles: [],
     features: null,
   };
   for (let at = 9; at < length - 4;) {
@@ -78,7 +77,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
         s.tUs = p.readUInt32LE(8);
         s.why = WHY[p[12]] ?? `why ${p[12]}`;
         s.action = text(p.subarray(13, 25));
-        s.endReason = p[25] === 255 ? null : END_REASONS[p[25]] ?? `reason ${p[25]}`;
+        s.endReason = p[25] === 255 ? null : END_WORDS[p[25]] ?? `end ${p[25]}`;
         s.actionsEnded = p.readUInt32LE(26);
         s.running = text(p.subarray(30, 42));
         s.mode = MODES[p[42]] ?? `mode ${p[42]}`;
@@ -91,12 +90,8 @@ export function parseSnapshot(b: Buffer): Snapshot {
                    stationary: p[32] !== 0, motorsOn: p[33] !== 0, stopReason: p[34] };
         break;
       }
-      case SEC.GEOMETRY:
-        s.geometry = parseRecord({ type: REC.GEOMETRY, payload: p, crcOk: true }) as Geometry;
-        break;
       case SEC.TOF:
-        s.tof = { poseOk: p[0] !== 0, x: p.readFloatLE(1), y: p.readFloatLE(5), yaw: p.readFloatLE(9), pitch: p.readFloatLE(13),
-                  raw: parseRecord({ type: REC.TOF_RAW, payload: p.subarray(17), crcOk: true }) as TofRaw };
+        s.tof = unpackTof("compact", Buffer.from(p));
         break;
       case SEC.CAMERA: {
         const width = p.readUInt16LE(20), height = p.readUInt16LE(22);
@@ -219,65 +214,9 @@ export const grayPng = (width: number, height: number, pixels: Buffer) => png(wi
 export const rgbPng = (width: number, height: number, pixels: Buffer) => png(width, height, pixels, 3);
 
 export const snapId = (bootId: string, seq: number) => `${bootId}-${seq}`;
-// Under recordings/: the raw snapshot files, and the camera pictures as camera/<folder>/<seq>.png,
-// folder: the boot's folder name (boot_folders.ts).
-export const SNAPSHOTS_RAW = path.join("snapshots", "raw");
+// Under recordings/: the camera pictures as camera/<folder>/<seq>.png, folder: the
+// boot's folder name (boot_folders.ts).
 export const cameraPicture = (bootFolder: string, seq: number) => path.join("camera", bootFolder, `${seq}.png`);
-
-// The snapshots in a raw file, with their arrival times; damaged ones are skipped (counted).
-export function* readSnapshotFile(buf: Buffer): Generator<{ arrivalMs: number; snapshot: Snapshot | null; error?: string }> {
-  if (buf.subarray(0, 8).toString("latin1") !== SNAP_FILE_MAGIC) throw new Error("not a snapshot file");
-  for (let at = 8; at + 17 <= buf.length;) {
-    const ms = buf.readDoubleLE(at), length = buf.readUInt32LE(at + 8 + 5);
-    const bytes = buf.subarray(at + 8, at + 8 + length);
-    at += 8 + length;
-    try { yield { arrivalMs: ms, snapshot: parseSnapshot(bytes) }; }
-    catch (err) { yield { arrivalMs: ms, snapshot: null, error: (err as Error).message }; }
-  }
-}
-
-// Saves each snapshot as it arrives (one raw file per boot) and its camera picture,
-// under recordings/ (dir), and passes it on. Events: "snapshot" (Snapshot, arrivalMs,
-// file, picture: relative to dir, or null), "note" (string).
-export class SnapshotSaver extends EventEmitter {
-  private dir: string;
-  private bootFolders: BootFolders;
-  private bootId = "";
-  private file: WriteStream | null = null;
-  private fileName = "";
-
-  constructor(dir: string, bootFolders: BootFolders) {
-    super();
-    this.dir = dir;
-    this.bootFolders = bootFolders;
-    mkdirSync(path.join(dir, SNAPSHOTS_RAW), { recursive: true });
-  }
-
-  arrived(bytes: Buffer): void {
-    let s: Snapshot;
-    try { s = parseSnapshot(bytes); } catch (err) { this.emit("note", `a snapshot NOT kept: ${(err as Error).message}`); return; }
-    if (s.bootId !== this.bootId) this.newFile(s.bootId);
-    const ms = Date.now(), head = Buffer.alloc(8);
-    head.writeDoubleLE(ms, 0);
-    this.file!.write(Buffer.concat([head, bytes]));
-    let picture: string | null = null;
-    try { picture = savePicture(this.dir, this.bootFolders.folderForBoot(s.bootId, ms), s); }
-    catch (err) { this.emit("note", `snapshot ${s.seq}: picture NOT saved: ${(err as Error).message}`); }
-    this.emit("snapshot", s, ms, this.fileName, picture);
-  }
-
-  stop(): void { this.file?.end(); }
-
-  private newFile(bootId: string): void {
-    this.file?.end();
-    this.bootId = bootId;
-    const stamp = new Date().toLocaleString("sv-SE").replace(/[ :]/g, "-");
-    this.fileName = path.join(this.dir, SNAPSHOTS_RAW, `${stamp}-boot-${bootId}.snap`);
-    this.file = createWriteStream(this.fileName);
-    this.file.write(SNAP_FILE_MAGIC);
-    this.emit("note", `snapshots from boot ${bootId}: saving to snapshots/raw/${path.basename(this.fileName)}`);
-  }
-}
 
 // The camera frame as camera/<folder>/<seq>.png under recordings/ (dir), folder: the
 // boot's folder name; its path relative to dir, null without a picture.

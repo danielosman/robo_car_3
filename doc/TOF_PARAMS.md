@@ -1,13 +1,19 @@
 # ToF parameters
 
-The ToF's numbers as we take them now, and the data sheet's numbers next to them. The
-code's copies: `picoA/app/rangefinder.c` and `rangefinder.h`. The camera:
-[CAMERA_PARAMS.md](CAMERA_PARAMS.md).
+The ToF's numbers as we take them now, and the data sheet's numbers next to them.
+Where it sits is in `common/mounting.json` (the one copy; the firmware's build and the
+PC read it); its settings in `picoA/app/tof.c` and `tof.h`, its geometry in
+`tof_rays.c`. The
+camera: [CAMERA_PARAMS.md](CAMERA_PARAMS.md).
 
 ## The sensor
 
-- **ST VL53L8CX**, 8 × 8 zones, up to 4 targets per zone (all four are read).
-- **Settings:** 15 frames a second, 5 ms integration, sharpener 5.
+- **ST VL53L8CX**, 8 × 8 zones, up to 4 targets per zone (all four are read; one
+  is kept).
+- **Settings:** 10 frames a second (a setting: `tof_init(&mounting.tof, hz)`, 1-15;
+  `TOF_DEFAULT_HZ`; 15 until Nov), 5 ms integration, sharpener 5. Each frame
+  measures for the whole 100 ms; its time is the middle, and it carries its own
+  period.
 - **Zones are numbered 1-8** where people read them, row 1 at the top (README,
   "Conventions").
 
@@ -18,10 +24,13 @@ code's copies: `picoA/app/rangefinder.c` and `rangefinder.h`. The camera:
 | Field of view | **45° × 45°**, 8 even zones of **5.625°** | data sheet |
 | Aim | level: rows 1-4 look up, rows 5-8 down at the floor | assumed, no tilt modelled |
 | Mounting | turned 90° on the PCB | bring-up viewer |
-| Height | **7 cm** above the floor | measured by Daniel |
+| Height | **9 cm** above the floor (7 cm before the PCB was lifted 2 cm, Nov) | 7 cm measured by Daniel, + 2 cm |
 | Position | **3.2 cm ahead** of the robot's centre, **2.6 cm right** | measured by Daniel, 17 Oct |
 | From the camera | 0.7 cm ahead, 2.1 cm right, 1.8 cm lower | from the two above |
-| Targets kept | per zone the nearest sure one (status 5, 6 or 9), and the next sure one behind it | `rangefinder.c` |
+| Where the floor rows' centre rays meet the floor, along the ray | rows 8 / 7 / 6 / 5: **27 / 37 / 61 / 183 cm** (21 / 29 / 48 / 143 at 7 cm) | computed (`test_tof_rays`) |
+| Where row 8 first sees the floor | ~25 cm ahead of the centre, 15 cm ahead of the front edge (~20 and 10 at 7 cm) | computed |
+| Targets kept | per zone one: the first with status 5 (sure), 6 or 9 (less sure); none valid: the first, unsure. The others are dropped (7 Nov; before, also the next sure one behind it) | `tof.c` |
+| As packed (map, watch) | distance in whole cm up to 2.54 m, farther "beyond"; signal and sigma capped at 255 | `tof_format.c` |
 | Skipped | the sensor's own echo at ~30 cm (status 12 or 14) | seen in recordings |
 
 ## The data sheet, for comparison
@@ -31,7 +40,7 @@ code's copies: `picoA/app/rangefinder.c` and `rangefinder.h`. The camera:
 | Field of view | 45° × 45° | 45° × 45°, 65° diagonal |
 | Light cone | — | 43.4° wide at 75% of the peak signal, 57.9° at 10% |
 | Range | — | 400 cm in the dark; ~2.8 m in bright indirect light (5000 lux, Pololu) |
-| Frame rate | 15 a second | at most 15 at 8 × 8 (60 at 4 × 4) |
+| Frame rate | 10 a second (a setting) | at most 15 at 8 × 8 (60 at 4 × 4) |
 | Accuracy | — | not found in the sources checked |
 
 - The light cone is weaker at the edges: the outer zones get less signal and are less
@@ -40,8 +49,9 @@ code's copies: `picoA/app/rangefinder.c` and `rangefinder.h`. The camera:
 ## Not measured
 
 - **Tilt**, the aim up or down: taken as level. Only the floor zones care: 1° moves
-  where row 8 meets the floor (~20 cm away) by ~5%, and row 5 (~140 cm) by 25% or
+  where row 8 meets the floor (~27 cm away) by ~5%, and row 5 (~183 cm) by 25% or
   more. Distances to objects don't change.
+- **The height since the lift:** 9 cm is 7 cm measured + 2 cm, not measured again.
 - **Yaw**, the aim left or right: taken as straight ahead.
 - **The zone angles:** taken as even, 5.625° each.
 

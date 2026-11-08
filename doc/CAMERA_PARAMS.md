@@ -1,10 +1,11 @@
 # Camera parameters
 
 The camera's numbers as we take them now, and the data sheets' numbers next to them.
-The code's copies: `CAMERA_GEOMETRY` in `pc/robot/src/objects/place.ts` (placing
-objects) and `FOCAL_PX` in `picoA/app/camera_motion.c` (movement bearings in the
-log). How they were measured: [OBJECTS_PLAN.md](OBJECTS_PLAN.md), "The camera
-geometry". The ToF: [TOF_PARAMS.md](TOF_PARAMS.md).
+Where it sits, f and tilt are in `common/mounting.json` (the one copy): the PC reads
+it (`place.ts`, placing objects; the page's view cone), the firmware gets f through
+its build (`watch_camera.c`, movement bearings in the log). How they were measured:
+[OBJECTS_PLAN.md](OBJECTS_PLAN.md), "The camera geometry". The ToF:
+[TOF_PARAMS.md](TOF_PARAMS.md).
 
 ## The module
 
@@ -39,9 +40,9 @@ geometry". The ToF: [TOF_PARAMS.md](TOF_PARAMS.md).
 |---|---|---|
 | Focal length | **f = 188 px** (picture pixels) = 752 sensor pixels = **2.71 mm** | the table's width at a ToF distance, 17 Oct |
 | Field of view | **46° across, 35° up-down, 56° diagonal** | from f 188, no distortion |
-| Height of the lens | **8.8 cm** above the floor | measured by Daniel, 17 Oct |
+| Height of the lens | **10.8 cm** above the floor (8.8 cm before the PCB was lifted 2 cm, Nov) | 8.8 cm measured by Daniel, 17 Oct, + 2 cm |
 | Position | **2.5 cm ahead** of the robot's centre, **0.5 cm right** | measured by Daniel, 17 Oct |
-| Tilt | **−1.86°** (down), on top of the robot's pitch | the pouf and the table, 17 Oct |
+| Tilt | **0°**, on top of the robot's pitch: assumed, not measured since the lift (the camera was knocked; −1.86° before) | Daniel, 7 Nov; −1.86° from the pouf and the table, 17 Oct |
 | Picture centre | (80, 60) | assumed |
 | Distortion | none | assumed |
 | Yaw (aim left-right), roll | 0 | assumed |

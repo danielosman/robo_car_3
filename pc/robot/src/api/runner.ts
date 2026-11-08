@@ -1,13 +1,13 @@
-// Runs one command on the robot: numbers it, sends it, waits for its done record
+// Runs one command on the robot: numbers it, sends it, waits for its answer
 // (and, for a snapshot, for the snapshot to be stored), within its time limit. Never
 // throws: whatever happens is an outcome.
-import type { DoneRecord } from "../robot.ts";
-import { robotLine, timeLimitMs, type Command } from "./commands.ts";
+import type { DoneRecord } from "../link.ts";
+import { robotText, timeLimitMs, type Command } from "./commands.ts";
 import { failed, outcome, type Outcome } from "./answers.ts";
 
 // What the runner needs of the robot (RobotLink is one).
 export interface RobotConnection {
-  sendLine(line: string): boolean; // false: not connected
+  sendCommand(n: number, text: string): boolean; // false: not connected
   on(event: "done", listener: (d: DoneRecord) => void): unknown;
 }
 
@@ -68,7 +68,7 @@ export class CommandRunner implements Runner {
       timer = setTimeout(() => { this.waiting.delete(n); resolve(null); }, deadline - Date.now());
       this.waiting.set(n, d => { clearTimeout(timer); this.waiting.delete(n); resolve(d); });
     });
-    if (!this.robot.sendLine(robotLine(c, n))) {
+    if (!this.robot.sendCommand(n, robotText(c))) {
       clearTimeout(timer);
       this.waiting.delete(n);
       return failed("robot not connected");

@@ -3,7 +3,9 @@
 First draft, 17 Oct 2026. **The first step is built** (17 Oct): `robot detect`,
 `robot objects`, the tables and the page's overlays (ARCHITECTURE.md, the PC,
 `objects/`); the README's "Objects from the camera" test. The camera calibrated
-(f 188 px from the table's width, tilt −1.86°). Next: the ToF's distance (the next
+(f 188 px from the table's width, tilt −1.86°; 7 Nov: the PCB lifted 2 cm, the camera
+now at 10.8 cm, tilt taken as 0° until calibrated again: CAMERA_PARAMS.md; the numbers
+below are from before). Next: the ToF's distance (the next
 phase's to-do; the distance from the bottom edge is a dead path). Background
 reading is in [inspiration/](inspiration/): `vlm_bbox_to_floor_map.md` (boxes from a model, then
 geometry) and `typescript_2d_spatial_query_libraries.md` (rbush, turf,
@@ -354,7 +356,7 @@ row where the dark object turns into the bright floor), not from the model's box
 
 ## Storage (DuckDB)
 
-DuckDB is already there (`recordings/robot.duckdb`, `@duckdb/node-api`), so no
+DuckDB is already there (`recordings/robot2.duckdb` since 7 Nov; `robot.duckdb` before, `@duckdb/node-api`), so no
 SQLite. A first idea of the tables:
 
 - `detect_runs`: one per `robot detect` on a snapshot: boot, seq, model, prompt

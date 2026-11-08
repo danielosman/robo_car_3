@@ -1,8 +1,8 @@
 // The viewer's snapshot data (doc/ARCHITECTURE.md, the PC; snapshot.ts):
 //   GET /api/boots                         each boot with snapshots: its folder name, how many, first and last
 //   GET /api/snapshots?boot=<id>           a boot's snapshots for the timeline: when, why, the action, the pose
-//   GET /api/snapshots/<boot>/<seq>        one snapshot: its row, the ToF frame (8 x 8 grid and targets in the world),
-//                                          the camera features
+//   GET /api/snapshots/<boot>/<seq>        one snapshot: its row, the ToF frame (its 64 zones, each also in the world;
+//                                          the 8 x 8 grid), the camera features
 //   GET /api/snapshots/<boot>/<seq>/map    the robot's map then: the window's columns over the whole-house
 //                                          map's tiles as they were (the newest of each tile up to this
 //                                          snapshot since the map was last cleared), where the robot was,
@@ -10,14 +10,18 @@
 //   GET /api/snapshots/<boot>/<seq>/objects  what robot detect found in its picture, and the boot's
 //                                          objects on the map up to it (objects/api.ts)
 //   GET /camera/<boot>/<seq>.png           the camera picture (its file: camera/<boot's folder>/)
+//   GET /api/mounting?boot=<id>            where the sensors sat for that boot: its own copy (boot.ts); without a
+//                                          boot (or one the store doesn't know), the file now (common/mounting.json)
 import type http from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
-import type { Pose } from "./robot.ts";
+import type { Pose } from "./link.ts";
 import { tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
 import { pageObjects } from "./objects/db.ts";
 import type { BootFolders } from "./boot_folders.ts";
+import { loadMounting } from "./mounting.ts";
+import { COMPACT_BEYOND_MM } from "./tof_format.ts";
 
 const BOOT = /^[0-9a-f]{8}$/;
 
@@ -59,23 +63,22 @@ export async function listSnapshots(store: Store, boot: string) {
 export async function snapshotDetail(store: Store, boot: string, seq: number) {
   if (!BOOT.test(boot) || !Number.isInteger(seq)) throw new Error("not a snapshot");
   const id = `${boot}-${seq}`;
-  const [row] = await store.query(`SELECT * EXCLUDE (map_cells, color_raw), strftime(arrived_at, '%Y-%m-%d %H:%M:%S') AS arrived
+  const [row] = await store.query(`SELECT * EXCLUDE (map_cells, color_raw, bytes), strftime(arrived_at, '%Y-%m-%d %H:%M:%S') AS arrived
     FROM snapshots WHERE snap_id = '${id}'`);
   if (!row) return null;
-  const targets = await store.query(`SELECT row, col, target, distance_mm, sigma_mm, signal, status,
-    round(x, 3) AS x, round(y, 3) AS y, round(z, 3) AS z FROM snapshot_targets WHERE snap_id = '${id}' ORDER BY row, col, target`);
+  const zones = await store.query(`SELECT row, col, distance_mm, kind, signal, sigma_mm, targets,
+    round(x, 3) AS x, round(y, 3) AS y, round(z, 3) AS z FROM snapshot_zones WHERE snap_id = '${id}' ORDER BY row, col`);
   // The grid as the robot sees it (row 1 at the top, column 1 on the left): each zone's
-  // nearest sure target (status 5, 6, 9), else its first target, else nothing.
-  const grid: ({ mm: number; status: number; sure: boolean } | null)[][] = Array.from({ length: 8 }, () => Array(8).fill(null));
-  for (const t of targets) {
-    const r = Number(t.row) - 1, c = Number(t.col) - 1, status = Number(t.status), sure = [5, 6, 9].includes(status);
-    const now = grid[r]?.[c];
-    if (r < 0 || r > 7 || c < 0 || c > 7) continue;
-    if (!now || (sure && !now.sure)) grid[r][c] = { mm: Number(t.distance_mm), status, sure };
+  // reading and how sure (sure, less_sure, unsure); null: nothing in range.
+  const grid: ({ mm: number; kind: string; beyond: boolean } | null)[][] = Array.from({ length: 8 }, () => Array(8).fill(null));
+  for (const z of zones) {
+    const r = Number(z.row) - 1, c = Number(z.col) - 1, kind = String(z.kind), mm = Number(z.distance_mm);
+    if (r < 0 || r > 7 || c < 0 || c > 7 || kind === "nothing") continue;
+    grid[r][c] = { mm, kind, beyond: kind !== "unsure" && mm >= COMPACT_BEYOND_MM };
   }
   const features = await store.query(`SELECT id, age, flags, x, y, dx, dy, round(strength, 2) AS strength, round(match, 3) AS match
     FROM snapshot_features WHERE snap_id = '${id}' ORDER BY id`);
-  return { snapshot: row, targets, grid, features };
+  return { snapshot: row, zones, grid, features };
 }
 
 export async function snapshotMap(store: Store, boot: string, seq: number): Promise<MapView | null> {
@@ -113,6 +116,11 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     res.end(JSON.stringify(body));
   };
   try {
+    if (url.pathname === "/api/mounting") {
+      const boot = url.searchParams.get("boot") ?? "";
+      send(200, (BOOT.test(boot) && await store.mountingOf(boot)) || loadMounting());
+      return true;
+    }
     if (url.pathname === "/api/boots") { send(200, await listBoots(store, bootFolders)); return true; }
     if (url.pathname === "/api/snapshots") { send(200, await listSnapshots(store, url.searchParams.get("boot") ?? "")); return true; }
     const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map|\/objects)?$/.exec(url.pathname);

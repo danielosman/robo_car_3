@@ -1,36 +1,34 @@
 // Tests for routes.ts, the API over HTTP, end to end below the socket: steer and the
 // actions stream one JSON line per command as each ends; a command the API can't take
-// is refused with nothing queued; stop, no-wait, auto_snap; check on the newest
-// snapshot's map; the reads on the firmware test's snapshots in a fresh database.
+// is refused with nothing queued; stop, no-wait, auto_snap, config pre_ms / post_ms to
+// the robot; check on the newest snapshot's map; the reads on the firmware test's
+// snapshots in a fresh database (frames on a move stored there too).
 // Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { SNAP_FILE_MAGIC, SnapshotAssembler } from "../snapshot.ts";
-import { Store } from "../store.ts";
-import { importSnapshots } from "../import.ts";
+import { noFirmware, storeWithSnapshots } from "../test_store.ts";
 import { Log } from "../log.ts";
 import { LiveRobot } from "../live.ts";
-import { parsePose } from "../robot.ts";
+import { livePose } from "../link.ts";
 import { CommandRunner, StoredSnapshots } from "./runner.ts";
 import { CommandQueue } from "./queue.ts";
 import { createApi } from "./routes.ts";
 import type { Chat } from "../objects/model.ts";
 import { BootFolders } from "../boot_folders.ts";
 
-const FIRMWARE = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../../build/test_snapshot.snap");
-const skip = !existsSync(FIRMWARE) && "run ./run_tests.sh first";
+const skip = noFirmware;
 
 // A robot that answers every line at once: ok, at (43, -4) cm, having moved 31 cm; a
 // snapshot as number 5.
 class EchoRobot extends EventEmitter {
   lines: string[] = [];
   end = "ok";
-  sendLine(line: string): boolean {
+  sendCommand(n_: number, text: string): boolean {
+    const line = `${text} #${n_}`;
     this.lines.push(line);
     const n = Number(/#(\d+)$/.exec(line)![1]), snap = line.startsWith("snapshot") ? 5 : null;
     setTimeout(() => this.emit("done", { n, end: line.startsWith("drive") ? this.end : "ok", pose: { x: 0.43, y: -0.04, yaw: 0 },
@@ -41,22 +39,13 @@ class EchoRobot extends EventEmitter {
 
 async function setUp(chat?: Chat) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "api-"));
-  const file = path.join(dir, "snapshots", "raw", "test.snap");
-  mkdirSync(path.dirname(file), { recursive: true });
-  const parts: Buffer[] = [Buffer.from(SNAP_FILE_MAGIC)];
-  new SnapshotAssembler().push(readFileSync(FIRMWARE)).forEach((b, i) => {
-    const t = Buffer.alloc(8);
-    t.writeDoubleLE(Date.UTC(2026, 9, 14, 10, 0, i), 0);
-    parts.push(t, b);
-  });
-  writeFileSync(file, Buffer.concat(parts));
-  const store = new Store(path.join(dir, "test.duckdb"));
-  await importSnapshots(store, file, dir);
+  const { store, boot } = await storeWithSnapshots(dir);
   const robot = new EchoRobot(), snapshots = new StoredSnapshots(), log = new Log(null, false);
   snapshots.add("x", 5);
-  const live = new LiveRobot(store, err => { throw err; });
+  const live = new LiveRobot();
   live.setStatus({ state: "connected", ip: "10.0.0.7", since: 0, rssi: -58, quietSince: null });
-  live.setPose(parsePose("pose 43.0 -4.0 30.0 manual - -58 0 0.20 0.10 1.05 4.0")!);
+  live.setBoot(boot.id);
+  live.setPose(livePose({ type: "status", x: 0.43, y: -0.04, yaw: 30 * Math.PI / 180, mode: "manual", action: "", rssi: -58 }));
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
   const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDir: dir, bootFolders: new BootFolders(dir),
                           chat, modelName: "gemma-fake" });
@@ -64,8 +53,8 @@ async function setUp(chat?: Chat) {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });
     return { status: r.status, text: await r.text() };
   };
-  const done = async () => { await live.stop(); rmSync(dir, { recursive: true, force: true }); };
-  return { post, robot, log, dir, done };
+  const done = async () => { rmSync(dir, { recursive: true, force: true }); };
+  return { post, robot, log, dir, done, store, boot, live };
 }
 
 const AT = '"pose":{"x":43,"y":-4,"yaw":0}';
@@ -93,11 +82,16 @@ test("steer and the actions: one JSON line per command as it ends; refused; stop
     assert.deepEqual(r, { status: 400, text: '{"command":"steer d500","result":"failed","why":"d500: d takes -300 to 300"}\n' });
     assert.equal(robot.lines.length, 6);
     assert.equal((await post("snap")).text, `{"command":"snap","result":"ok",${AT},"snapshot":5}\n`);
-    assert.equal((await post("recording", "on")).text, '{"command":"recording on","result":"ok"}\n');
+    assert.equal((await post("recording", "on")).status, 404); // gone with the recorder
     assert.equal((await post("mode", "fast")).status, 400);
+    // The still times go to the robot, queued; config shows them (and auto_snap).
+    assert.equal((await post("config", "pre_ms 300")).text, '{"command":"config pre_ms 300","result":"ok"}\n');
+    assert.equal(robot.lines.at(-1), "config pre_ms 300 #8");
+    assert.equal((await post("config", "post_ms 2001")).status, 400);
+    assert.equal((await post("config", "")).text, '{\n  "auto_snap": true,\n  "pre_ms": 300,\n  "post_ms": 200\n}\n');
     assert.equal((await post("stop")).text, `{"command":"stop","result":"ok",${AT}}\n`);
     assert.equal((await post("clear_map", "", "?nowait")).text, '{"queued":["clear_map"]}\n');
-    assert.equal((await post("config", "auto_snap off")).text, '{\n  "auto_snap": false\n}\n');
+    assert.equal((await post("config", "auto_snap off")).text, '{\n  "auto_snap": false,\n  "pre_ms": 300,\n  "post_ms": 200\n}\n');
     robot.end = "ok";
     assert.equal((await post("steer", "d10", "?nowait")).text, '{"queued":["steer d10"]}\n');
   } finally { await done(); }
@@ -115,12 +109,12 @@ test("check on the newest snapshot's map", { skip }, async () => {
 });
 
 test("reads: status, map, tof, camera, light, features, log; errors; help", { skip }, async () => {
-  const { post, dir, done } = await setUp();
+  const { post, dir, done, boot } = await setUp();
   const read = async (command: string, arg = "", query = "") => JSON.parse((await post(command, arg, query)).text);
   try {
     const status = await read("status");
-    assert.deepEqual(status, { connected: true, pose: { x: 43, y: -4, yaw: 30 }, mode: "manual", recording: false, wifi: -58,
-      running: null, waiting: [], newest_snapshot: 5, safety: { jolt: { x: 0.2, y: 0.1, z: 1.05 }, tilt: 4 } });
+    assert.deepEqual(status, { connected: true, boot: boot.id, pose: { x: 43, y: -4, yaw: 30 }, mode: "manual", moving: null, wifi: -58,
+      running: null, waiting: [], newest_snapshot: 5 }); // no safety peaks since step 4c
     const map = await read("map", "1");
     assert.equal(map.snapshot, 1);
     assert.equal(map.rows.length, 60);
@@ -132,9 +126,13 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     const tofText = (await post("tof", "1")).text;
     assert.match(tofText, /"distance": \[\n {4}\[/); // a matrix, one row a line
     const tof = JSON.parse(tofText);
+    assert.deepEqual(Object.keys(tof), ["snapshot", "distance", "kind", "signal", "sigma", "targets"]); // one target: no distance_2
     assert.equal(tof.distance.length, 8);
     const total = tof.targets.flat().reduce((a: number, b: number) => a + b, 0);
     assert.equal(total, Array.from({ length: 64 }, (_, z) => z % 3).reduce((a, b) => a + b, 0)); // the test frame: zone z has z % 3 targets
+    // Zones without targets: nothing (null); the others sure, 255 cm where beyond 2.54 m.
+    tof.kind.flat().forEach((k: string, i: number) => assert.equal(k, tof.targets.flat()[i] ? "sure" : "nothing"));
+    assert.ok(tof.distance.flat().includes(null) && tof.distance.flat().includes(255));
     assert.ok(existsSync((await read("camera", "1")).file));
     assert.deepEqual(await post("light", "1"), { status: 404, text: '{"error":"snapshot 1 has no colour reading"}\n' }); // the test's bytes aren't one
     assert.equal((await read("features", "1")).features.length, 2);
@@ -142,6 +140,88 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     assert.equal((await post("map", "9")).status, 404);
     assert.equal((await post("map", "x")).status, 400);
     assert.equal((await post("nope")).status, 404);
+  } finally { await done(); }
+});
+
+test("frames and imu: a move's frames, its imu records, as text and as JSON; a boot by its folder name; errors", { skip }, async () => {
+  const { post, done, store, boot } = await setUp();
+  try {
+    const t0 = 0xfffff000; // PicoA's clock, just before the wrap
+    await store.moveStart(boot, boot.moveStart({ move: 1, command: 7, kind: "turn", param: Math.PI / 6, tUs: t0, preMs: 200, postMs: 200, refused: false }));
+    const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: k === 0 ? 0 : k === 1 ? 2550 : 300 + 10 * k, signal: k, sigmaMm: 5,
+      kind: k === 0 ? "nothing" as const : k === 2 ? "unsure" as const : k === 3 ? "less_sure" as const : "sure" as const, targets: k ? 1 : 0 }));
+    for (let n = 1; n <= 2; n++) {
+      await store.frame(boot, boot.frame("compact", { number: 40 + n, tUs: (t0 + n * 100000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25,
+        yaw: 0.1 * n, pitch: -0.01, turn: 0.02, still: n === 1, poseKnown: true, beyondMm: 2550, zones }));
+    }
+    // Its imu records: a batch of 10 and its last 3, across the wrap.
+    const records = (from: number, n: number) => Array.from({ length: n }, (_, i) =>
+      ({ tUs: (t0 - 20000 + (from + i) * 9615) % 2 ** 32, accel: [from + i, -1, 16384] as [number, number, number],
+         gyro: [-32768, 32767, 0 - (from + i) % 10] as [number, number, number] }));
+    await store.imu(boot, boot.imu({ move: 1, records: records(0, 10) }));
+    await store.imu(boot, boot.imu({ move: 1, records: records(10, 3) }));
+    await store.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: t0 + 300000 - 2 ** 32, framesSent: 2, framesDropped: 0, firstFrame: 41,
+      lastFrame: 42, moved: 0.01, rotated: Math.PI / 6, imuSent: 2, imuDropped: 0 }));
+    await store.flush();
+    const r = await post("frames", `${boot.id} 1`);
+    assert.equal(r.status, 200);
+    const lines = r.text.split("\n");
+    assert.match(lines[0], new RegExp(`^boot ${boot.id} \\(\\d{12}\\), move 1: turn 30°, command 7, still 200 ms before, 200 ms after$`));
+    assert.match(lines[1], /^ended ok after 0.3 s; 2 stored of 2 sent; 0 dropped on the robot; 0 lost \(dropped connection\) \(frames 41-42\); moved 1 cm, turned 30°$/);
+    assert.equal(lines[2], "imu: 13 records stored (0.1 s at 104 a second), 0 missing (gaps), 2 of 2 batches; 0 dropped on the robot; 0 lost (dropped connection)");
+    assert.match(r.text, /frame 41 {2}t \d+\.\d{3} s {2}period 100 ms {2}x 50 cm {2}y -25 cm {2}yaw 5.73° {2}pitch -0.57° {2}turn 1.15° {2}still\n/);
+    const row1 = lines.find(l => l.includes("- >254"))!; // row 1: nothing, beyond, unsure, less sure, then sure; signal; sigma
+    assert.equal(row1, "     - >254  32?  33~   34   35   36   37      0    1    2    3    4    5    6    7      5    5    5    5    5    5    5    5");
+    const j = JSON.parse((await post("frames", `${boot.id} 1`, "?json")).text);
+    assert.equal(j.frames.length, 2);
+    assert.deepEqual([j.imu_records_stored, j.imu_records_missing, j.imu_batches_stored, j.move.imuSent, j.move.imuDropped], [13, 0, 2, 2, 0]);
+    assert.equal(j.move.end, "ok");
+    assert.equal(j.frames[1].number, 42);
+    assert.ok(Math.abs(j.frames[1].t_s - j.frames[0].t_s - 0.1) < 1e-9); // across the wrap: 0.1 s later
+    assert.deepEqual(j.frames[0].kind[0].slice(0, 4), ["nothing", "sure", "unsure", "less_sure"]);
+    assert.equal(j.frames[0].distance_mm[7][7], 300 + 630);
+    // A move with frames dropped on the robot (the lane full) and lost with a dropped
+    // connection (sent, never arrived): 1 stored of 3 sent, 2 dropped, 2 lost.
+    await store.moveStart(boot, boot.moveStart({ move: 2, command: 8, kind: "drive", param: 0.5, tUs: t0 + 400000 - 2 ** 32, preMs: 200, postMs: 200, refused: false }));
+    await store.frame(boot, boot.frame("compact", { number: 50, tUs: t0 + 450000 - 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25, yaw: 0.2,
+      pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones }));
+    await store.moveEnd(boot, boot.moveEnd({ move: 2, end: "ok", tUs: t0 + 900000 - 2 ** 32, framesSent: 3, framesDropped: 2, firstFrame: 50,
+      lastFrame: 54, moved: 0.5, rotated: 0, imuSent: 3, imuDropped: 1 }));
+    await store.imu(boot, boot.imu({ move: 2, records: records(40, 10) }));
+    await store.imu(boot, boot.imu({ move: 2, records: records(53, 3) })); // 50-52 missing
+    await store.flush();
+    const lossy = (await post("frames", `${boot.id} 2`)).text.split("\n");
+    assert.match(lossy[1], /^ended ok after 0.5 s; 1 stored of 3 sent; 2 dropped on the robot; 2 lost \(dropped connection\) \(frames 50-54\)/);
+    assert.equal(lossy[2], "imu: 13 records stored (0.1 s at 104 a second), 3 missing (gaps), 2 of 3 batches; 1 dropped on the robot; 1 lost (dropped connection)");
+    const lj = JSON.parse((await post("frames", `${boot.id} 2`, "?json")).text);
+    assert.deepEqual([lj.frames_stored, lj.frames_lost, lj.move.framesDropped], [1, 2, 2]);
+    assert.deepEqual([lj.imu_records_stored, lj.imu_records_missing, lj.imu_batches_stored], [13, 3, 2]);
+    const folder = lines[0].match(/\((\d{12})\)/)![1];
+    assert.equal((await post("frames", `${folder} 1`)).status, 200);
+    assert.equal((await post("frames", `${boot.id} 9`)).status, 404);
+    assert.equal((await post("frames", "deadbeef 1")).status, 404);
+    assert.equal((await post("frames", boot.id)).status, 400);
+
+    // robot imu: the move's lines, then a record a line, oldest first, the raw counts.
+    const imu = (await post("imu", `${boot.id} 1`)).text.split("\n");
+    assert.equal(imu[0], lines[0]);
+    assert.equal(imu[2], lines[2]);
+    assert.match(imu[3], /^ax, ay, az \(accel\) and gx, gy, gz \(gyro\): the IMU's raw counts in its own axes/);
+    assert.equal(imu[5], "       t s      ax     ay     az     gx     gy     gz");
+    const counts = (line: string) => line.trim().split(/ +/);
+    assert.equal(imu[6].length, imu[5].length);
+    assert.deepEqual(counts(imu[6]).slice(1), ["0", "-1", "16384", "-32768", "32767", "0"]);
+    assert.deepEqual(counts(imu[18]).slice(1), ["12", "-1", "16384", "-32768", "32767", "-2"]);
+    assert.equal(imu.filter(l => /^ +\d+\.\d{4} /.test(l)).length, 13);
+    const ij = JSON.parse((await post("imu", `${boot.id} 1`, "?json")).text);
+    assert.equal(ij.records.length, 13);
+    assert.deepEqual(ij.records[12].accel, [12, -1, 16384]);
+    assert.ok(Math.abs(ij.records[12].t_s - ij.records[0].t_s - 12 * 0.009615) < 1e-6); // across the wrap
+    assert.ok(ij.records[12].t_us < ij.records[0].t_us);
+    assert.deepEqual([ij.imu_records_stored, ij.imu_batches_stored], [13, 2]);
+    assert.equal((await post("imu", `${folder} 2`)).status, 200);
+    assert.equal((await post("imu", `${boot.id} 9`)).status, 404);
+    assert.equal((await post("imu", boot.id)).status, 400);
   } finally { await done(); }
 });
 

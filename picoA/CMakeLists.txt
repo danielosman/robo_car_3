@@ -3,7 +3,7 @@
 
 add_library(picoA_drivers INTERFACE)
 target_sources(picoA_drivers INTERFACE
-    ${CMAKE_CURRENT_LIST_DIR}/drivers/tof.c
+    ${CMAKE_CURRENT_LIST_DIR}/drivers/vl53.c
     ${CMAKE_CURRENT_LIST_DIR}/drivers/camera.c
     ${CMAKE_CURRENT_LIST_DIR}/drivers/opt4048.c
     ${CMAKE_CURRENT_LIST_DIR}/drivers/lib/vl53l8cx/platform.c
@@ -25,10 +25,10 @@ target_link_libraries(picoA_bringup picoA_drivers)
 pico_add_extra_outputs(picoA_bringup)
 
 # Robot firmware, the brain (doc/ARCHITECTURE.md): link to PicoB, map from the ToF
-# sensor, movement detection, the actions, console (USB and WiFi), recording.
-add_executable(picoA_app app/main.c app/body.c app/pose.c app/rangefinder.c app/surroundings.c app/behaviour.c app/commands.c app/wifi_console.c
-    app/change_grid.c app/tof_motion.c app/camera_motion.c app/tracker.c app/motion_sense.c app/loop_stats.c app/cell_map.c
-    app/house_map.c app/recorder.c app/mode.c app/snapshot.c app/vision.c)
+# sensor, watching, the actions as moves, console (USB and WiFi), the frames to the PC.
+add_executable(picoA_app app/main.c app/body.c app/pose.c app/tof.c app/tof_rays.c app/tof_format.c app/behaviour.c app/commands.c
+    app/link_pc.c app/wire.c app/change_grid.c app/watch_tof.c app/watch_camera.c app/tracker.c app/watch.c app/loop_stats.c app/cell_map.c
+    app/house_map.c app/move.c app/mode.c app/snapshot.c app/vision.c)
 pico_set_program_name(picoA_app "picoA_app")
 pico_set_program_version(picoA_app "0.1")
 pico_generate_pio_header(picoA_app ${CMAKE_CURRENT_LIST_DIR}/drivers/hm0360.pio)
@@ -41,5 +41,5 @@ target_compile_options(picoA_app PRIVATE -Wall -Wextra -Wdouble-promotion)
 target_compile_definitions(picoA_app PRIVATE PICO_STDIO_USB_STDOUT_TIMEOUT_US=5000)
 target_include_directories(picoA_app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/app) # lwipopts.h
 target_compile_definitions(picoA_app PRIVATE CYW43_HOST_NAME=\"robocar\") # as the router lists it
-target_link_libraries(picoA_app common_link picoA_drivers pico_cyw43_arch_lwip_threadsafe_background pico_rand)
+target_link_libraries(picoA_app common_link common_mounting picoA_drivers pico_cyw43_arch_lwip_threadsafe_background pico_rand)
 pico_add_extra_outputs(picoA_app)

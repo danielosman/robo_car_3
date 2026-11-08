@@ -1,4 +1,5 @@
 #include <math.h>
+#include <string.h>
 #include "pico/stdlib.h"
 #include "imu.h"
 #include "encoder.h"
@@ -17,22 +18,43 @@
 #define BIAS_TAU_S        5.0f   // gyro bias tracking while stationary
 
 static odom_t o;
-static float peak_jolt_g[3], peak_tilt_rad; // since odom_peaks_take()
 static bool imu_ok, have_tilt;
 static float yaw_bias_dps;       // on top of the power-up calibration in imu.c
 static float still_s;
 static int32_t last_count[ENC_COUNT];
 static uint64_t last_us;
 
-// How the ISM330DHCX breakout is mounted: Z up, X backward, Y right (turned 180°
-// about Z). Verified in the M0 test: nose up raises pitch, left side up raises
-// roll, turning left raises yaw.
+// How the ISM330DHCX breakout is mounted (common/mounting.json: Z up, X backward, Y
+// right, turned 180° about Z). Verified in the M0 test: nose up raises pitch, left
+// side up raises roll, turning left raises yaw.
+static int8_t robot_from_sensor[3][3];
+
+// The imu records: the samples summed so far (accel x, y, z, gyro x, y, z) and when
+// they were read; the records made, made - taken of them waiting.
+static int32_t sum[6];
+static int summed;
+static uint32_t first_us, offsets_us; // the first sample's time; the others' times after it, added
+static imu_record_t made[ODOM_IMU_KEPT];
+static uint32_t made_n, taken_n, lost_n;
+static uint32_t skipped_n; // partial records dropped after a skipped sample
+static uint32_t last_sample_us;
+// A sample this long after the one before: one (or more) was skipped (3605 µs, 1.5
+// sample times).
+#define SAMPLE_GAP_US (3 * 1000000 / 416 / 2)
+
 static void to_robot_frame(const imu_sample_t *s, float accel_g[3], float gyro_dps[3]) {
-    accel_g[0] = -s->ax; accel_g[1] = -s->ay; accel_g[2] = s->az;
-    gyro_dps[0] = -s->gx; gyro_dps[1] = -s->gy; gyro_dps[2] = s->gz;
+    const float a[3] = {s->ax, s->ay, s->az}, g[3] = {s->gx, s->gy, s->gz};
+    for (int i = 0; i < 3; i++) {
+        accel_g[i] = gyro_dps[i] = 0;
+        for (int k = 0; k < 3; k++) {
+            accel_g[i] += (float)robot_from_sensor[i][k] * a[k];
+            gyro_dps[i] += (float)robot_from_sensor[i][k] * g[k];
+        }
+    }
 }
 
-bool odom_init(void) {
+bool odom_init(const mounting_t *m) {
+    memcpy(robot_from_sensor, m->imu.robot_from_sensor, sizeof robot_from_sensor);
     imu_ok = imu_init();
     if (imu_ok) imu_calibrate_gyro(400); // ~1 s at 416 Hz
     encoder_init();
@@ -101,18 +123,56 @@ static void update_tilt(const float accel_g[3], const float gyro_dps[3], float d
     o.roll_rad = (1 - w) * (o.roll_rad + gyro_dps[0] * RAD_PER_DEG * dt) + w * accel_roll;
 }
 
-// The largest jolt and tilt: the acceleration less gravity (where pitch and roll put
-// it: the accelerometer reads +1 g up), and the larger of pitch and roll.
-static void update_peaks(const float accel_g[3]) {
-    float cp = cosf(o.pitch_rad);
-    float gravity[3] = {sinf(o.pitch_rad), cp * sinf(o.roll_rad), cp * cosf(o.roll_rad)};
-    for (int i = 0; i < 3; i++) peak_jolt_g[i] = fmaxf(peak_jolt_g[i], fabsf(accel_g[i] - gravity[i]));
-    peak_tilt_rad = fmaxf(peak_tilt_rad, fmaxf(fabsf(o.pitch_rad), fabsf(o.roll_rad)));
+// The average of IMU_RECORD_SAMPLES counts that add up to total: the nearest count,
+// halves away from zero. Always within int16: the sum of 4 int16 is at most 4 × 32767.
+static int16_t average(int32_t total) {
+    const int32_t n = IMU_RECORD_SAMPLES;
+    return (int16_t)(total >= 0 ? (total + n / 2) / n : (total - n / 2) / n);
+}
+
+// One sample's raw counts, read at t_us: each IMU_RECORD_SAMPLES-th makes a record, stamped
+// with the middle of its samples' times (the clock's wrap included: uint32 differences).
+static void update_record(const imu_counts_t *c, uint32_t t_us) {
+    // A sample skipped (a slow loop): the partial record goes, so every record is 4
+    // consecutive samples and the skip shows as a gap in the records' times.
+    if (summed > 0 && t_us - last_sample_us > SAMPLE_GAP_US) { memset(sum, 0, sizeof sum); summed = 0; skipped_n++; }
+    last_sample_us = t_us;
+    if (summed == 0) { first_us = t_us; offsets_us = 0; }
+    offsets_us += t_us - first_us;
+    for (int i = 0; i < 3; i++) {
+        sum[i] += c->accel[i];
+        sum[3 + i] += c->gyro[i];
+    }
+    if (++summed < IMU_RECORD_SAMPLES) return;
+    imu_record_t *r = &made[made_n++ % ODOM_IMU_KEPT];
+    r->t_us = first_us + (offsets_us + IMU_RECORD_SAMPLES / 2) / IMU_RECORD_SAMPLES;
+    for (int i = 0; i < 3; i++) {
+        r->accel[i] = average(sum[i]);
+        r->gyro[i] = average(sum[3 + i]);
+    }
+    memset(sum, 0, sizeof sum);
+    summed = 0;
+    if (made_n - taken_n > ODOM_IMU_KEPT) { // the oldest not taken are lost, counted
+        lost_n += made_n - taken_n - ODOM_IMU_KEPT;
+        taken_n = made_n - ODOM_IMU_KEPT;
+    }
+}
+
+uint32_t odom_imu_lost(void) { return lost_n; }
+
+uint32_t odom_imu_skipped(void) { return skipped_n; }
+
+bool odom_imu_take(imu_record_t *r) {
+    if (taken_n == made_n) return false;
+    *r = made[taken_n++ % ODOM_IMU_KEPT];
+    return true;
 }
 
 void odom_update(void) {
     imu_sample_t s;
-    if (!imu_ok || !imu_read(&s)) return;
+    imu_counts_t counts;
+    if (!imu_ok || !imu_read(&s, &counts)) return;
+    update_record(&counts, time_us_32());
     uint64_t now = time_us_64();
     float dt = (float)(now - last_us) * 1e-6f;
     last_us = now;
@@ -124,13 +184,6 @@ void odom_update(void) {
     update_heading(gyro_dps[2], dt); // first: the wheel step uses this step's turn
     update_wheels(dt);
     update_tilt(accel_g, gyro_dps, dt);
-    update_peaks(accel_g);
 }
 
 const odom_t *odom_get(void) { return &o; }
-
-void odom_peaks_take(float jolt_g[3], float *tilt_rad) {
-    for (int i = 0; i < 3; i++) { jolt_g[i] = peak_jolt_g[i]; peak_jolt_g[i] = 0; }
-    *tilt_rad = peak_tilt_rad;
-    peak_tilt_rad = 0;
-}

@@ -5,6 +5,451 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 8 Nov 2026: step 4c re-review fixes; robot height 13 cm
+
+- A fresh review of step 4c passed. Fixes: PicoB counts partial imu records dropped
+  after a skipped sample (`imu_skipped` in STATUS, link version still 6; PicoA's
+  `status` IMU line shows it); `run_tests.sh` runs `test_imu_path` and `test_vision`
+  to a log so a failed assert fails the script; a routes test with real imu gaps
+  (3 missing); comments (3605 µs; the gap count can't see records lost before the
+  first or after the last stored).
+- Robot height measured: 13 cm (was 12, before the PCB was raised).
+
+## 7 Nov 2026: the IMU (data-flow rework, step 4c)
+
+Step 4c of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Changes both Picos and the server
+(link protocol 6, wire version 3: old firmware and the new server refuse each other;
+flash both). Host tests only; no flash yet (one flash of both at the end of the
+rework). **Training data starts here:** the IMU as it measured, 104 a second, during
+every move.
+
+- **PicoB `odometry`** averages each 4 IMU samples (416 a second) into one
+  **imu_record** (104 a second): accel and gyro x, y, z as the sensor's own int16
+  counts (±2 g, ±250 °/s), its own axes, nothing taken out (the gyro's bias neither),
+  rounded to the nearest count with halves away from zero, stamped with the middle of
+  its samples' times. The driver gives the raw counts (`imu_read(&sample, &counts)`),
+  not floats turned back. The cost on PicoB's loop is tiny: 6 additions a sample and 6
+  divisions every 4th (well under a microsecond each), one 16 B link message every
+  9.6 ms; the peaks' 3 sines and cosines a sample are gone, so the loop got lighter.
+- **`MSG_IMU`** (PicoB → PicoA, 16 B, one record each, sent once PicoA has greeted),
+  link protocol 6. The UART from PicoB carries ~4.9 KB/s now (ODOM 2.6, IMU 2.3) of
+  ~100.
+- **PicoA `body`** turns each record's time into PicoA's clock as it arrives (the
+  offset it already tracks from the ODOM reports; within 0.1 ms in the test, across
+  both clocks' wraps) and keeps the newest 32 for `body_imu_take()`; records before
+  the clock is known are dropped. `status` prints "IMU: N records from PicoB, M not
+  taken in time".
+- **`move` batches them**, not `link_pc` as the plan said: the IMU pipeline in
+  `main.c` hands each record to `move_imu()`, which sends 10 to an **imu_batch** on
+  bulk while a move runs, and the last one (however few) at the move's end. `move`
+  already owns "only during a move", the counts and the move end; `link_pc` stays a
+  pipe that knows no payload. Move end carries the batches sent and dropped (41 B);
+  the console says "Turn 1: 35 ToF frames sent, 0 dropped; 40 imu batches sent, 0
+  dropped".
+- **The imu batch** (wire 0x11, bulk, droppable): move number 4 B, first time 4 B,
+  period 2 B (µs), count 1 B, then 12 B a record (131 B for 10). Two fields beyond the
+  plan's "first time, count": the **move number** (the PC files a batch under its
+  move however late it comes: no guessing by time or order, as frames need) and the
+  **period** (the records' real spacing, from the first and last record's times; the
+  sensor's clock is not exactly 416 Hz). A gap (a record lost on the UART) or a step
+  back in time starts a new batch, so a batch's records are always evenly spaced.
+- **The peaks went:** odometry's jolt and tilt peaks, the odom report's fields (61
+  → 45 B), `body_peaks_take()`, the status's jolt and tilt (49 → 33 B), `robot
+  status`'s `safety`, the PC's `LivePose.jolt/tilt`, `live.peaks`, the `status`
+  table's jolt and tilt columns, the CLI help's "jolt in g". PicoB's tilt stop
+  (`drive.c`, pitch or roll beyond 15°) stays.
+- **The PC:** `wire.ts` decodes and encodes the batch (golden bytes from the robot's
+  `test_wire`); the `imu` table, one row per record (boot, move, its batch's message
+  and place, time unwrapped by `boot.ts`, `ax`…`gz` raw); moves get `imu_sent`,
+  `imu_dropped`. `robot frames <boot> <move>` says how many imu records the move has
+  (and the time they cover at 104 a second, batches stored of sent, dropped, lost);
+  **`robot imu <boot> <move> [--json]`** lists them (a separate read: the frames'
+  output stays readable). The fake robot replays the batches. No migration:
+  `robot2.duckdb` hasn't been written by a robot yet.
+- **Tests:** `test_odometry` (averaging: rounding, sign, int16 limits, every axis;
+  104 a second; time stamps across the wrap; raw counts; the newest 8 kept),
+  `test_brain` (sent as made, in order, only once greeted; the odom report 45 B),
+  `test_body` (PicoA's clock within 0.1 ms with drift and random delays, across both
+  wraps; dropped before the clock is known; the newest 32 kept, the lost counted;
+  wrong length), `test_move` (10 to a batch, the last 5 at the end, under the move's
+  number; a lost record or a step back starts a new batch; a replaced move's batch
+  under its own number; a refused move sends none; dropped and counted), `test_wire`
+  (1 and 10 records, the limits, the period, wrong counts refused, the old status and
+  move end refused); PC: the batch's golden bytes and errors, `boot.ts` (times across
+  the wrap, a late batch), the store (round trip, a late batch, the wrap, a restart),
+  `robot frames` / `robot imu` text and JSON, `ingest.ts` (a late batch on a new
+  connection), the fake robot's replay with imu, `link.ts` events in order.
+- **After the review (training data quality):** a sample skipped on PicoB (a slow
+  loop) drops the partial record, so every record is 4 consecutive samples and the
+  skip shows as a gap; PicoB's queue overflow is counted (`imu_lost` in STATUS, still
+  link protocol 6: never shipped) and printed in PicoA's `status`; `robot frames`
+  and `robot imu` count the records missing from the gaps in the stored times
+  ("0 missing (gaps)"; JSON `imu_records_missing`); new tests: the gap's edges (0.5
+  and 1.5 periods), a sensor 2 % slow (one batch, its own period), records while a
+  move starts, a skipped sample, gaps on the PC (at a batch boundary and inside),
+  the link's receive overrun (counted lost), and `test_imu_path`: PicoB's odometry
+  and brain → the link → PicoA's body and move → the batches decoded, end to end.
+- `tools/stack_depth.py`: `move.c:finish` now calls the action's end (no longer
+  inlined into `end_now()`). Core 0 stack unchanged, 6.4 KB; RAM free ~51 KB
+  (+0.8 KB for the records kept and the batch, −0.3 KB for the smaller odom reports).
+
+## 7 Nov 2026: moves and frames (data-flow rework, step 4b)
+
+Step 4b of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Changes PicoA and the server
+(wire version 2, snapshot version 2: old firmware and the new server refuse each
+other). Host tests only; no flash yet (one flash of both at the end of the rework).
+
+- **`move`** (`picoA/app/move.{c,h}`, from `behaviour`'s start and end): each action
+  is a move with phases start → still `pre_ms` → act → still `post_ms` → end. `post_ms`
+  replaces the 300 ms settle (it is the settling: at least `post_ms` and PicoB still,
+  at most 3 s). 200 ms each, set with `config pre_ms|post_ms <ms>` (0-2000) on the
+  robot, `robot config pre_ms N` on the PC (queued). `behaviour` gives the act phase
+  as three functions (begin, step, end), so `move` knows no action; a stop, PicoB
+  lost, a safety stop end a move in any phase; a new one replaces it.
+- **Decided while building:** one command is one move, so `robot steer r30 d50` is
+  two moves, each still before and after; a go to (turn, then drive) is one move; a
+  watch is a move. A move that can't start (blocked, already there) is numbered and
+  sends its start and end at once, no frames (so the PC has a row per command).
+- **Move start / move end** (control lane, never dropped): number, command, kind,
+  parameter, time, still times; how it ended (the answer's end word), frames sent
+  and dropped, the first and last frame number sent, moved, rotated. The end can
+  overtake the move's last frames (they wait on bulk): the PC files them by frame
+  number.
+- **ToF frames** go over bulk only during a move, packed for the map use
+  (`wire_encode_tof()`), dropped and counted per move when the lane is full. The
+  console says "Move 12: 41 ToF frames sent, 0 dropped".
+- **The snapshot's ToF section is a compact frame** (the snapshot use, its pose in
+  it); the geometry section is gone (the PC has the boot's mounting). The back door
+  went: `tof_raw()`, the public `tof_sensor_zone()`, `recorder.c`'s own declaration
+  and `vl53.h` include. `robot tof` and the page's grid show one target per zone:
+  distance, kind, signal, sigma, targets (no `distance_2`).
+- **Gone:** `recorder` (and `recording on|off`, the status's recording flag, the UDP
+  data stream on port 4212, `link_pc_datagram()`, `link_pc_wifi_status()`,
+  `body_drive_sent()`), `test_recorder.c`, `tools/replay_map.c`,
+  `tools/replay_snapshots.c`, `tools/replay.sh`; on the PC `recording.ts`,
+  `decode.ts`, `import.ts`, `replay.ts`, `snapreplay.ts`, `frames.ts`,
+  `viewer_api.ts`, the 3D take viewer (`viewer.html`, `viewer.js`, three.js), the
+  takes page, the raw snapshot files. The UDP announcement stays. The boot id is
+  made in `main.c`, the CRC is `common/crc32.h`. `test_map_replay.c` keeps its 7 cm
+  data (it needed no tool).
+- **PC:** a new DuckDB file, `recordings/robot2.duckdb` (`ROBOT_DB`, `RECORDINGS` in
+  `.env`); the old `robot.duckdb` is never opened. `boot.ts`: per boot its id, its
+  own copy of the mounting (stored with it; `place.ts` takes it, no module default),
+  its messages numbered, its clock unwrapped into seconds since power-up. `store.ts`:
+  boots, moves, frames, zones (row, col 1-8), status, snapshots (with their bytes),
+  snapshot zones, the objects' tables; written as each message arrives (what comes
+  meanwhile goes in the next write); a restarted server goes on with a boot's clock
+  and moves. `ingest.ts` stores link.ts' events in order. `robot frames <boot>
+  <move> [--json]`. `fakerobot.ts` replays a stored boot (`npm run fakerobot --
+  <boot>`), then answers commands as moves. `npm run place-objects` uses each boot's
+  mounting (`--from-file` after a calibration).
+- **Tests:** `test_move` (phases with the fake clock: pre before the action drives,
+  post the only settling, 0 ms, stops in pre and post, replaced, safety stop, PicoB
+  lost, no start; the messages; frames only during a move, dropped and counted);
+  `test_behaviour` runs every action through the real `move` (frames per move, none
+  dropped, a blocked move's start and end); `test_commands` (config, recording
+  refused); `test_snapshot` (the compact section); `test_wire` (move start and end, a
+  tof frame at its limits in the golden bytes). PC: `boot.test.ts` (the clock from 30
+  s before the wrap, three hours, first seen after the wrap, a server away for hours,
+  frames under their move), `store.test.ts`, `robot frames` in `routes.test.ts`, the
+  golden tof frame unpacked and packed again, moves and frames through `link.ts`, a
+  stored boot replayed end to end into a second database.
+- **Found while building:** test_behaviour's 25°/s walker overshot 4.8° at 15 Hz (its
+  limit 4°) after the still times moved where the moves ended; the result hung on
+  that to the 0.1° (known); see the review fixes below. Commands now answer each
+  command's move before the next one runs.
+- RAM free ~47 → ~52 KB (the recorder's buffers); core-0 stack unchanged (6.4 KB).
+- **Review fixes:** a refused move (e.g. a blocked drive during a watch) made the PC
+  file the watch's later frames under no move: move start now has a refused flag
+  (22 B) and the PC keeps the running move open. The same boot's hello on a new
+  connection keeps its boot as it is. `robot frames` says "N stored of M sent; K
+  dropped on the robot; L lost (dropped connection)". The move record keeps how and
+  the stop reason; the end word is made when sent (`move_wire_end()`). The walkers'
+  watch test runs over 8 seeds, without the yaw-0 start: medians under the old limits
+  (15°/s 1.6-1.7°, 25°/s 2.6-3.3°), single seeds up to 3.5° and 5.5° (limits 4° and
+  6°). Tests added: frames during post, a store round trip across the clock's wrap
+  with a server restart in it, `robot frames` with dropped and lost frames,
+  `ingest.test.ts` (refused move, second hello).
+- **Re-review fix:** commands answered only the last ended move, so a refused move and
+  the running one ending in the same loop lost one answer (the PC would wait for
+  ever). `move` now keeps the ended moves not yet taken (`move_next_ended()`, the
+  last 8) and commands answers each, oldest first; tested in `test_move` and
+  `test_commands`.
+
+## 7 Nov 2026: framed messages (data-flow rework, step 4a)
+
+Step 4a of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Changes PicoA and the server.
+Host tests only; no flash yet (one flash of both at the end of the rework). Old
+firmware and the new server (or the reverse) don't talk: each refuses the other
+with a log line.
+
+- **`wire`, on both sides** (`picoA/app/wire.{c,h}`, `pc/robot/src/wire.ts`): the
+  envelope `[type 1 B][length 2 B][payload]` and every payload but the ToF frame's.
+  One table each, the same numbers; the ToF types come from `tof_format`
+  (`tof_format.ts` on the PC, the table only for now), and `wire_check()` finds a
+  collision. `WIRE_VERSION` 1, in hello.
+- **The messages:** hello, console (one line each), answer (was the done record;
+  now binary: number, end code, pose, moved, rotated, goal, snapshot), status (was
+  the pose line; still with PicoB's peaks until step 4c), map cleared (new, from
+  `clear_map`), snapshot part (bulk; the snapshot itself unchanged), command (PC →
+  robot; its number in the message, not `#n`), heartbeat (PC → robot; replaces the
+  `'\0'` byte: the robot needs something every 2 s to know the server is there; not
+  in the plan's table).
+- **`link_pc`** (was `wifi_console`): WiFi, the announcement, TCP, two lanes.
+  Control (16 KB) is sent first and never blocks: when full, the oldest console
+  lines and statuses go (counted), answers never. Bulk (40 KB ring) is first in,
+  first out, sent only while control is empty, ~5.6 KB unacknowledged at most;
+  frames (from 4b) are dropped and counted when full and never take the last
+  ~1.5 KB, so a snapshot part always gets in; a snapshot part waits. A lost
+  connection drops bulk; the snapshot goes again whole. Messages go to TCP whole,
+  so the lanes never cut into each other. Decided: never block the loop (it would
+  starve PicoB's drive commands; PicoB stops after 250 ms).
+- **The status is `link_pc`'s** (every 0.25 s, the WiFi signal its own; the robot's
+  fields from `commands_status()`): `snapshot.c` no longer builds the pose line or
+  takes PicoB's peaks (the plan's "overexposure" red flag).
+- **Commands** come as messages (`link_received()`), not through stdin; USB lines
+  still work. A command's snapshot is answered once every part has been handed to
+  TCP on a connection still up, so on one connection its answer follows it. Lost
+  after that, before the parts arrived: the answer comes on the next connection and
+  the runner says the snapshot wasn't stored. Each bulk ticket holds its connection
+  (`link_bulk_state()`: queued, sent, lost); a snapshot whose connection went before
+  it counted as sent goes again whole.
+- **Review fixes:** another version's hello of another length is refused for its
+  version (not its length); the version refusal is noted once per robot address and
+  version (it reconnects every few seconds); nothing is kept on the control lane
+  while WiFi is off or unavailable; a hello TCP refuses closes the connection and the
+  robot looks for the server again at once; a console line cut at 240 B inside a
+  UTF-8 character reads as U+FFFD on the PC (accepted).
+- **lwIP:** `TCP_SND_BUF` 8 → 16 segments (~23 KB), `MEM_SIZE` 32000 → 44000,
+  `MEMP_NUM_TCP_SEG` 32 → 66 (`TCP_SND_QUEUELEN` 64); lwIP's sanity checks pass.
+  RAM free ~101 → ~47 KB; core-0 stack unchanged (~6.5 KB).
+- **PC:** `robot.ts` → `link.ts` (messages in, typed events out; connected only
+  after a hello of the same version; `sendCommand(n, text)`); the runner, queue and
+  answers unchanged but for that; `fakerobot.ts` speaks the wire (`FakeRobot`).
+- **Tests:** `test_wire` (every message both ways, envelope errors, the golden
+  bytes), `test_link_pc` (from `test_wifi_console`: hello first, lanes' order,
+  pacing, drops and counts, a snapshot part never dropped, reconnecting, console
+  under load, a server sending garbage), `test_commands` (new: answers, map cleared,
+  status), `test_snapshot` (parts wait for room; sent again whole after a lost
+  connection); on the PC `wire.test.ts`, `link.test.ts` (split and merged TCP
+  chunks, another version refused), `fakerobot.test.ts` (end to end with the link
+  and the runner). The golden bytes (`picoA/app/test/data/wire_golden.hex`) are
+  checked in and both sides compare against them, so `npm test` needs no C build
+  and any change on one side fails both until the file is written again
+  (`build/test_wire --write`).
+
+## 7 Nov 2026: the ToF pipeline on the robot (data-flow rework, step 3)
+
+Step 3 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Changes PicoA only. Host tests
+only; no flash yet (one flash of both at the end of the rework).
+
+- **New modules, with the plan's names** (`main.c` shows the flow: poll → stamp →
+  pack and unpack per use → the map, watch):
+  - `tof` (`tof_poll()` → `tof_frame_t`): the only reader of the ST ULD's results
+    and status numbers. Takes the mounting's zone turn and the rate at
+    `tof_init()`. Each frame carries its own period; the global
+    `rangefinder_period_us()` is gone.
+  - `pose_stamp()` (in `pose`) → `posed_frame_t`: the pose at the frame's middle,
+    yaw wrapped to ±180°, the turn during the frame, still, pose known.
+  - `tof_format`: pack and unpack per use; one format, compact, for map, watch
+    and snapshot. Its header is 21 B, not the plan's 17: the period (2 B) and the
+    turn (2 B), so readers need no global rate and no second pose. 277 B a frame.
+  - `tof_rays`: the geometry half of `rangefinder`, and the verdict that was
+    `judge()` in `cell_map.c` (obstacle, floor, unsure): it is about where a zone
+    meets the floor, so the PC's helper and the line map can use it.
+  - `watch` (`watch.h`): the one interface for watching. `motion_sense` became
+    `watch`, `tof_motion` `watch_tof`, `camera_motion` `watch_camera`,
+    `motion_obs_t` `watch_obs_t`.
+- **Gone:** `rangefinder`, `surroundings`. The driver `drivers/tof.*` became
+  `drivers/vl53.*` (`vl53_*`), so the name `tof` is the new module's.
+- **One target per zone, everywhere:** the first with status 5, 6 or 9. The second
+  sure target (the wall behind a leg) is no longer kept or mapped; replays of old
+  recordings drop it too (`frames_file.h`, `npm run frames`).
+- **The map and watch read each frame after packing and unpacking it** (whole cm;
+  beyond 2.54 m only "at least 2.55 m": the map takes such a zone as free up to
+  there, never a hit; a less sure one's passes weigh half, as its readings do).
+- **Watch no longer sees movement beyond ~2.54 m:** someone at 2.7 m in front of a
+  wall at 3.5 m reads "beyond" like the wall (host test: not seen; at 2.3 m seen).
+  Daniel accepted it: watch keeps the 8-bit format for now and may get its own
+  later. Watch's older host tests give the same output as before (their scenes
+  move within 2.5 m).
+- **The snapshot's ToF pose** is now the frame's stamp: yaw wrapped to ±180° (was
+  odometry's unwrapped yaw); same moment as before (the frame's middle).
+- **The verdict is the old judge's:** checked on 203,392 cases (every zone, lengths
+  to 3 m, 7 pitches, the ToF at 9 and 7 cm). The map's ground-layer top is the
+  verdict's floor top (one constant, `TOF_FLOOR_TOP_M`).
+- **Left raw until step 4b** (marked in the code): the recording and the snapshot's
+  ToF section still send the sensor's raw results (`tof_raw()`, all targets).
+- **The map on the recorded scans** (`test_map_replay`, columns ≥ 10 % confident in
+  the 6 × 6 m window; before → after). All objects are still found, nothing within
+  30 cm, the cup still stops `f` at the same distance:
+
+| Scan | blocked | overhang | no floor | drivable | open |
+|---|---|---|---|---|---|
+| 8f3159b3-2 | 136 → 90 | 48 → 35 | 274 → 273 | 118 → 124 | 469 → 474 |
+| ace8afeb-2 | 46 → 43 | 22 → 17 | 141 → 141 | 46 → 48 | 487 → 488 |
+| 123eef20-2 | 91 → 66 | 33 → 16 | 199 → 198 | 108 → 108 | 457 → 463 |
+| 0558a0ee-2 | 140 → 105 | 32 → 26 | 261 → 263 | 155 → 162 | 541 → 546 |
+| 0b9377b7-1 | 145 → 103 | 39 → 19 | 262 → 264 | 150 → 157 | 525 → 537 |
+
+  Almost all of it is the second target: without it alone blocked is 86 / 43 / 61 /
+  101 / 106; packing adds or removes a few (cm rounding). The lost columns are the
+  bands behind walls and objects that only second targets painted (TODO had them
+  as "fine for now"). Per object, cells found: cupboard 12 → 10, 10 → 7, 15 → 11 in
+  scans 3-5; chair 9 → 8 in scans 4-5; cup and box unchanged.
+- **Simulated rooms** (`test_cell_map`, `test_behaviour`) through packing: the same
+  results as before (the empty room's drivable 111 → 116 within 0.8 m).
+- **Tests added:** `test_tof` (status choice 5/6/9 first, 12/14 skipped, a valid
+  status without a distance, negative distances, unsure, nothing, targets capped at
+  4, zone turns, each frame's period), `test_tof_rays` (geometry and verdicts at 9
+  and 7 cm, pitch, the margin, the old judge), `test_tof_format` (0, 1, 254, 255,
+  beyond, caps, pose limits, yaw wrap, refusing a wrong length, the table, 1000
+  random frames), `test_pose` (the stamp; no turn past the extrapolation limit),
+  `test_watch` (stamp → pack → watch at 15, 10 and mixed rates, across ±180°),
+  `test_watch_tof` (beyond 2.54 m not seen, a floor zone's "beyond" ignored),
+  `test_cell_map` (a hand-made posed frame; the same map through pack and unpack,
+  byte for byte; "nothing" frees 1 m; "beyond" free to 2.55 m, never a hit; less
+  sure passes weigh half).
+- **RAM** ~1.8 KB less free (~101 KB; the pipeline's frames are static). Stack
+  unchanged: core 0 ~6.5 KB worst case.
+
+## 7 Nov 2026: the ToF at 10 Hz, a setting (data-flow rework, step 2)
+
+Step 2 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Changes PicoA only. Host tests
+only; no flash yet (one flash of both at the end of the rework).
+
+- **The rate is a setting of `rangefinder`:** `rangefinder_init(hz)` (1-15, else
+  false and nothing changes; `surroundings_init()` passes `RANGEFINDER_DEFAULT_HZ`,
+  10) and `rangefinder_period_us()` (the active rate's period; 10 Hz's before a
+  start). Called again it only restarts the sensor at the new rate (the firmware
+  is uploaded once, ~2 s), so watching can ask for another one later; refused, by
+  it or the sensor, the active rate stays. `status` prints "ToF: 10 Hz set, N
+  frames a second" (over the last 16). `RANGEFINDER_HZ` is gone: the frame's middle time
+  (`rangefinder.c`), the turn during a frame (`motion_sense.c`) and `tof_motion`
+  use the period.
+- **Watching's frame counts are times now**, chosen to keep 15 Hz as it was:
+
+| What | Was (frames at 15 Hz) | Now (time) | Frames at 10 Hz |
+|---|---|---|---|
+| Turning (`tof_motion`) | more than 1° in a frame | faster than 15°/s | 1.5° in a frame |
+| Slack for the frame's time | 0.15 of the frame's turn | 10 ms of turn | 0.10 |
+| A bin raised after farther readings | 150 (`10 × RANGEFINDER_HZ`) | 10 s | 100 |
+| Closer but steady: it has stopped | 15 (`1 × RANGEFINDER_HZ`) | 1 s | 10 |
+| Tracker's history for the angular speed | the last 12 sightings (~0.8 s) | the last 0.75 s (at most 16) | ~8 |
+
+- **Kept as frame counts:** the change grid's "2 of the last 4 frames next to
+  another cell, or 3 alone", and "a nearer reading gone for 4 frames is a surface
+  seen now and then". They say how many readings must agree against noise, not
+  how long; the camera (~15/s) shares the grid. So the window is 0.4 s at 10 Hz
+  (0.27 s at 15): a person stepping in is found after 2 frames, 0.2 s (was 0.13 s).
+  Already times, unchanged: the tracker's 0.15 s before an angular speed, lost
+  after 0.5 s; behaviour's follow fit (0.5 s) and gap (0.3 s).
+- **The tracker's history drops old sightings by time**, so after missed frames it
+  keeps fewer than before, even at 15 Hz (was: the last 12 sightings, however old;
+  with gaps they reached further back).
+- **The map and the loop:** a frame now comes every 100 ms, not 66 ms: the map's
+  worst frame (~27 ms) takes less of the loop; the start-up turn gives 2/3 the
+  frames (`test_cell_map` now scans at 10 frames a second: same results except a
+  few columns either way; the 30 × 40 cm hole shows 2 of 12 columns drivable, was
+  0; known as a limit).
+- **Tests, the rate:** `test_rangefinder`: the default, 1-15 only, a rate refused by
+  it or by the sensor changes nothing, the firmware uploaded once, the period and
+  the frame's time at 10 and 15 Hz, the frames a second for `status`. The fake
+  ToF refuses rates the real one refuses, and can refuse any.
+- **Tests, watching at both rates:** `test_tof_motion` and `test_tracker` run every
+  test at 15 and at 10 Hz (a box still after 1.1 / 1.2 s, the hand, the turns: the
+  same). New: 14°/s is not turning, 16°/s is; the frame's time 10 ms off while
+  turning at 1.5 rad/s: no movement; 15 → 10 Hz while watching (no restart): no
+  movement for a minute, a box still after 1 s, the wall back after 10 s; the
+  tracker's speed is 0 until 0.15 s of history, then from the last 0.75 s only.
+  New `test_motion_sense`: a 30°/s turn reads 30°/s at both rates (a stub for the
+  timer registers, `stubs/hardware/structs/timer.h`).
+- **Tests, the whole robot:** `test_behaviour` and `test_cell_map` run at 10 Hz and
+  again at 15 (`-DTOF_HZ=15`). `test_cell_map` at 15 gives exactly the old output.
+  `test_behaviour`'s watching (its sighting delay is now half a period + 2.5 ms,
+  was 40 ms):
+
+| Walker | 10 Hz | 15 Hz | Before (15 Hz) |
+|---|---|---|---|
+| 15°/s: behind at the end | 2.2° | 1.6° | 0.8° |
+| 25°/s: overshoot | 1.5° | 2.5° | 3.0° |
+| 40°/s: turned before it got away | +14° | +19° | +19° |
+
+- **Tests, recording:** `test_recorder` frames 100 ms apart (its two odometry
+  reports moved between the frames so the PC still places both).
+- **Found on the way (test fixtures, not behaviour):** in `test_tof_motion` a far
+  zone empty in both first frames after a restart makes a later reading a "target
+  where nothing was" (rightly movement; the random draws at 10 Hz hit it): the
+  fixture now reads it in the first frame. The hand waves one column every 2
+  frames at both rates; at other speeds it is mostly not seen, at both rates
+  ([TODO.md](TODO.md), "Movement and watching", with the door case and the
+  tracker's overshoot). The tracker's angular speed
+  halfway through a 40°/s walk is noisier at 10 Hz (fewer frames: 31-40°/s over
+  20 seeds, 35-41 at 15); its limit there is 10°/s (8 at 15).
+- **Old data stays 15 Hz:** `replay_snapshots.c` starts the fake sensor at 15 and
+  steps 1/15 s, as the frames were recorded. The viewer plays a take at its frames'
+  own times (was a fixed 15/s; a gap between takes waits 1 s at most).
+
+## 7 Nov 2026: the mounting in one file; the PCB 2 cm higher (data-flow rework, step 1)
+
+Step 1 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Changes both Picos: PicoA (the
+rays, the camera's f) and PicoB (`odom_init()` takes the IMU's axes). Host tests
+only; no flash yet (one flash of both at the end of the rework).
+
+- **`common/mounting.json`** holds where the sensors sit: the ToF (9 cm up, was 7;
+  3.2 cm ahead, 2.6 cm right; zones of 5.625°, turned 90° on the PCB), the camera
+  (10.8 cm up, was 8.8; 2.5 cm ahead, 0.5 cm right; f 188 px; tilt 0°, was −1.86°:
+  Daniel, the camera was knocked, calibrated later), the IMU's axes (as PicoB turned
+  them: 180° about z).
+- **Firmware:** CMake reads it at configure time (`common/mounting.cmake`, again when
+  it changes) and writes `robot_mounting.h` (`ROBOT_MOUNTING`, type `mounting_t` in
+  `common/mounting.h`). Only `main.c` includes it: PicoA passes it to
+  `rangefinder_rays_init()` (rays, origin, zone angle, the zone grid's turn, floor
+  limits; without it `rangefinder_init()` fails, so "ToF sensor not working" shows)
+  and `camera_motion_init()` (f; false and every frame unused if the picture size
+  or f is wrong; main.c says so); PicoB to
+  `odom_init()` (the IMU's axes, now a matrix). Gone: `SENSOR_X_M/Y/Z`, `ZONE_RAD`
+  (`rangefinder.c`), `HALF_ZONE_RAD` (`tof_motion.c`), `FOCAL_PX` (`camera_motion.c`).
+- **PC:** `mounting.ts` (`loadMounting()`: reads and checks the file, a missing field
+  named); `place.ts` takes the camera from it; `GET /api/mounting` for the page's
+  view cone (was a copy in `app.js`). The prompts say 10.8 cm (prompt version 6; a
+  test checks they say the mounting's height). The viewer's fallback for takes
+  without a GEOMETRY record is named as the old 7 cm one.
+- **Old data stays 7 cm:** `test_map_replay` and the replay tools (`replay_map.c`,
+  `replay_snapshots.c`) pass `MOUNTING_BEFORE_LIFT` (`picoA/app/test/`); the five
+  recorded scans give the same results as before. `npm run place-objects` would
+  place the old boots' boxes with the new camera height.
+- **Tests:** `test_mounting` (the header holds the file's numbers, read on its own);
+  `run_tests.sh` checks the firmware's header is the same as the host's, and that a
+  missing or wrong field (a string, turn 45, a matrix entry 2, 160.5 or 0 pixels, a
+  height of 0) stops CMake, naming it; `test_rangefinder`
+  (where rows 5-8 meet the floor at 7 and 9 cm, the floor limits, the zone turns
+  0 / 90 / 180); `test_odometry` (the IMU's axes); `mounting.test.ts`;
+  `place.test.ts` (the file's camera numbers, each field from its own).
+
+**The map's numbers at 9 cm** (computed; cell_map.c, rangefinder.c):
+
+| Number | Depends on the ToF's height? | At 9 cm |
+|---|---|---|
+| Bands G −7…+3, L1 3-13, L2 13-23 cm | no: heights above the floor, set by what the robot drives over (< 3 cm) and its height. The ToF is in L1 at 7 and at 9 cm | kept |
+| `G_BOTTOM_M` −0.07 | no: G's top (3 cm) minus one layer | kept |
+| `FOOT_M` 0.15 | no: where the robot stands (its corners are ~15 cm from the centre) | kept. But the floor is now first seen ~25 cm ahead (row 8's lower edge, was ~20): standing still, 15-25 cm ahead stays unknown (step 6's floor-first fills it) |
+| `L2_BLIND_M` 0.25 | it gets smaller: row 1's top rays reach 13 cm ~12 cm from the centre, ahead (was ~17; `test_rangefinder`). Behind and beside the robot no zone sees L2 at any height (checked for every upward ray) | kept: still never seen there, and any reading overrides the weak "free" |
+| `DROP_SHARE` 1.15 | no: a share; the limit itself is computed from the height | kept; limits now row 8 36 cm, row 7 53, row 6 106 (were 28 / 41 / 82) |
+| `FIRST_FLOOR_ROW` (rows 5-8) | no: angles only | kept |
+| The floor margin 0.9, judging a reading | no: a share of where the cone meets the floor, computed from the height | kept |
+
+So nothing changed in `cell_map.c`. One simulated test moved: a table top at 15-20 cm,
+6 cm above the ToF now, seen from 0.6 m is all blocked, none overhang (row 4 grazes
+its underside where row 3 sees its edge). The test's table is now 16-21 cm (7 cm
+above the ToF; 4-8 of its front columns overhang over 40 noise seeds); the 15-20 cm
+case is written down as known. Both stop `drive`, so nothing the robot does changes.
+
+**The robot's height (12 cm):** not changed. If the PCB is the robot's top, it is
+now ~14 cm, above L1 (13 cm). That changes nothing the robot does (`drive` stops for
+L1 and L2 alike); only "L1: what blocks the 12 cm robot" might be wrong. Daniel to
+measure.
+
 ## 18 Oct 2026: Qwen 3.8 tried, Gemma 4 31B kept
 
 Snapshots 1-42 of boot 202610181635 (Daniel looked at the boxes on the page):

@@ -1,11 +1,16 @@
 // Tests for place.ts and labels.ts' check: a box's bottom edge on the floor, through the
-// camera at 8.8 cm; the shape behind it in the map frame. Run with `npm test`.
+// camera as common/mounting.json has it; the shape behind it in the map frame; the
+// prompts say the camera's height. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CAMERA_GEOMETRY, corners, floorPoint, place } from "./place.ts";
+import { readFileSync } from "node:fs";
+import { cameraGeometry, corners, floorPoint, place } from "./place.ts";
 import { checkReport } from "./labels.ts";
+import { loadMounting, type Mounting } from "../mounting.ts";
 
-// A level camera, so the rows below are easy to work out; the real one is tilted (one test below).
+// The camera as common/mounting.json has it now (a boot's own copy is one of these).
+const CAMERA_GEOMETRY = cameraGeometry(loadMounting());
+// A level camera, so the rows below are easy to work out (the mounting's tilt may change; one test below tilts it).
 const CAM = { ...CAMERA_GEOMETRY, tiltRad: 0 };
 const near = (a: number | null, b: number, eps = 1e-3) => assert.ok(a !== null && Math.abs(a - b) < eps, `${a} is not ${b}`);
 // The 0-1000 row whose floor point is d m ahead of a level camera.
@@ -52,7 +57,9 @@ test("not on the floor: at or above the horizon, too far; cut off at the bottom"
 
 test("the robot's pitch: nose up puts the same row further away", () => {
   const up = place({ label: "chair", bbox: [300, 400, rowAt(1), 600] }, { ...origin, pitch: 1 * Math.PI / 180 }, CAM);
-  assert.ok(up.distanceM! > 1.2, `${up.distanceM}`);
+  // 1 m ahead the floor is atan(z / 1 m) below the horizon; 1° less of that is further.
+  near(up.distanceM, CAM.z / Math.tan(Math.atan(CAM.z) - Math.PI / 180));
+  assert.ok(up.distanceM! > 1.15, `${up.distanceM}`);
 });
 
 test("doors and doorways are lines along the front edge", () => {
@@ -88,5 +95,22 @@ test("the camera's tilt: looking down puts the same row closer, like the robot's
   const down = place(box, origin, { ...CAM, tiltRad: -1 * Math.PI / 180 }), noseDown = place(box, { ...origin, pitch: -1 * Math.PI / 180 }, CAM);
   assert.ok(down.distanceM! < 0.9, `${down.distanceM}`);
   near(down.distanceM, noseDown.distanceM!);
-  near(place(box, origin).distanceM, place(box, { ...origin, pitch: CAMERA_GEOMETRY.tiltRad }, CAM).distanceM!); // the default is tilted
+  near(place(box, origin, CAMERA_GEOMETRY).distanceM, place(box, { ...origin, pitch: CAMERA_GEOMETRY.tiltRad }, CAM).distanceM!); // the mounting's tilt
+});
+
+test("the camera's numbers are the mounting's", () => {
+  const m = loadMounting();
+  assert.equal(CAMERA_GEOMETRY.z, m.camera.z_m);
+  // Each field from its own: a made-up mounting with every number different.
+  const made: Mounting = { ...m, camera: { x_m: 0.01, y_m: 0.02, z_m: 0.3, f_px: 200, tilt_deg: -2, width_px: 320, height_px: 240 } };
+  assert.deepEqual(cameraGeometry(made), { x: 0.01, y: 0.02, z: 0.3, focalPx: 200, tiltRad: -2 * Math.PI / 180, width: 320, height: 240 });
+  // The same row from a higher camera is further away, in proportion (10.8 cm now, 8.8 before the lift).
+  const box = { label: "chair" as const, bbox: [300, 400, 700, 600] as [number, number, number, number] };
+  near(place(box, origin, { ...CAM, z: 0.108 }).distanceM, place(box, origin, { ...CAM, z: 0.088 }).distanceM! * 0.108 / 0.088);
+});
+
+test("the prompts tell the model the camera's height", () => {
+  const cm = `${(loadMounting().camera.z_m * 100).toFixed(1)} cm above the floor`;
+  for (const f of ["system_prompt_gemma4.md", "system_prompt_qwen.md"])
+    assert.ok(readFileSync(new URL(`./${f}`, import.meta.url), "utf8").includes(cm), `${f} doesn't say "${cm}"`);
 });

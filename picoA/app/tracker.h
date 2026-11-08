@@ -4,14 +4,14 @@
 // that reaches within 10° of where the target is expected (its last direction moved
 // on by its angular speed) and is not more than 0.5 m nearer or farther (a person
 // close by is a big blob and pieces). It keeps the target's direction, range and
-// angular speed (over the last ~0.8 s). With no such blob for 0.5 s it is lost:
+// angular speed (over the last 0.75 s). With no such blob for 0.5 s it is lost:
 // last seen in the outer zone columns, it left the view on that side; else it
 // stopped (it stands still now, or is too small to see). Before it leaves: seen in
 // an outer zone column moving outward (at least 10°/s, its speed measured over at
-// least 3 frames), it is leaving that way, reported once per target.
+// least 0.15 s), it is leaving that way, reported once per target.
 #include <stdbool.h>
 #include <stdint.h>
-#include "motion_obs.h"
+#include "watch_obs.h"
 
 typedef struct {
     float bearing_rad; // + = left of straight ahead, from the sensor
@@ -35,5 +35,5 @@ void tracker_reset(void); // forgets the target (the robot moved: the view chang
 // One frame's observations (the most cells first) at t_us; returns what happened.
 // After TRACK_EXITED_* and TRACK_STOPPED, tracker_target() still gives the lost
 // target until the next call.
-track_event_t tracker_add(const motion_obs_t *obs, int n, uint32_t t_us);
+track_event_t tracker_add(const watch_obs_t *obs, int n, uint32_t t_us);
 const target_t *tracker_target(void); // NULL when there is none

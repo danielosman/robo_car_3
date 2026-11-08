@@ -9,7 +9,7 @@
 # The camera
 
 - 160 × 120 pixels, greyscale.
-- 8.8 cm above the floor, looking straight ahead.
+- 10.8 cm above the floor, looking straight ahead.
 - The floor fills the bottom of the picture.
 - Furniture looks tall and is often cut off at the top.
 

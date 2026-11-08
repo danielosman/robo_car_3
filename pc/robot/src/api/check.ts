@@ -6,7 +6,7 @@
 // point first and goes at most gotoMaxM. The robot doesn't check turns: a turn with an
 // obstacle inside the circle it sweeps gets a warning. After a move that wouldn't end
 // ok, the rest would be dropped. watch can't be checked.
-import type { Pose } from "../robot.ts";
+import type { Pose } from "../link.ts";
 import { MOVE } from "./firmware.ts";
 import { commandText, type Command } from "./commands.ts";
 import { poseOut, type Answer } from "./answers.ts";

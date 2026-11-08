@@ -1,5 +1,5 @@
 // The robot names each power-up (a boot) with a random 8-hex boot id (picoA/app/
-// recorder.c); it has no clock. Our folders under recordings/ (camera/<folder>,
+// main.c); it has no clock. Our folders under recordings/ (camera/<folder>,
 // map/<folder>) are named instead by when the PC first saw the boot: YYYYMMDDHHMM,
 // local time. recordings/boots.json maps each boot id from the robot to its folder
 // name: {"7a587226": "202610142035"}. The database keeps the boot id.
@@ -45,7 +45,7 @@ export class BootFolders {
   }
 
   // The folder name for the robot's boot id; a boot never seen before is named by
-  // firstSeenMs (when its first snapshot or recording arrived).
+  // firstSeenMs (when its first snapshot arrived).
   folderForBoot(bootId: string, firstSeenMs = Date.now()): string {
     if (bootId !== this.current.bootId) {
       this.current = { bootId, folder: this.folders[bootId] ?? this.nameNewBoot(bootId, firstSeenMs) };
@@ -56,6 +56,9 @@ export class BootFolders {
   // The folder name of a boot already in boots.json, null if it has none (for reads:
   // never names a boot).
   knownFolder(bootId: string): string | null { return this.folders[bootId] ?? null; }
+
+  // The boot id whose folder is named so; null if none is.
+  bootOfFolder(folder: string): string | null { return Object.keys(this.folders).find(id => this.folders[id] === folder) ?? null; }
 
   // Gives a new boot its folder name and saves it in boots.json. Two boots in the same
   // minute would share a name: an error (never expected).

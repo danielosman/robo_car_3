@@ -7,23 +7,20 @@
 //          (still or turning), following it at its own angular speed plus a
 //          correction, at most ~29°/s, never past where it was last seen; it starts
 //          when the movement is 8° off and stops within 3° once it is about still,
-//          or when nothing moves. Its movement lines are printed (motion_sense's
+//          or when nothing moves. Its movement lines are printed (watch's
 //          log) only while watching.
 //   Go to: a point on the map (its frame): turn in place towards it, then drive
 //          straight to it, steering a little to keep it ahead, and stop stop_m
 //          before it (measured along the way), or STOP_BEFORE_M before an obstacle
 //          on the map as Move does. At most GOTO_MAX_M at once: a goal farther away
 //          is gone towards. The turn and the distance come from the robot's own pose.
-// Each action switches the motors on at its start and off at its end, and ends
+// Each action is one move (move.h): the move switches the motors on and off, stands
+// still before and after, sends the move's start, end and frames, and ends it
 // exactly once, also when it can't start (a move blocked from the start, a goal
-// already reached): done (after standing still), an obstacle, stopped, replaced by
-// another action, a safety stop on PicoB, PicoB lost, or didn't start. Each action
-// carries the number of the command that started it (commands.h), handed back
-// when it ends. With recording on, each action is one take (recorder.h), from its
-// start to its end.
+// already reached), carrying the number of the command that started it
+// (commands.h). This module is how each action drives, inside its move's act phase.
 #include <stdbool.h>
 #include <stdint.h>
-#include "recorder.h"
 
 // How a move keeps clear of obstacles on the map. The PC's --check reads these
 // (pc/robot/src/api/firmware.ts): plain numbers only.
@@ -37,20 +34,4 @@ void behaviour_move(float distance_m, uint32_t command);
 void behaviour_turn(float angle_rad, uint32_t command);
 void behaviour_watch(float seconds, uint32_t command);
 void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t command);
-void behaviour_stop(void);   // ends the running action: the robot stands still, motors off
-bool behaviour_busy(void);
-void behaviour_update(void); // call every loop iteration
-
-// How an action ended.
-typedef struct {
-    uint32_t command;     // the number of the command that started it
-    const char *action;   // as in recordings: "move", "turn", "watch", "goto"
-    rec_end_t reason;
-    uint8_t stop_reason;  // REC_END_SAFETY_STOP: PicoB's STOP_* (link_msgs.h)
-    float moved_m;        // from where it started to where it ended, straight
-    float rotated_rad;    // how far it turned, + = left (not wrapped)
-    float goal_m;         // Go to: how far the point was when it started; 0 for the others
-} behaviour_end_t;
-// Counts the actions that ended; the last one's end (all zero before the first).
-uint32_t behaviour_endings(behaviour_end_t *last);
-const char *behaviour_action(void); // the running action's name, "" if none
+// Stopping, how it ended and what runs: move.h (move_stop(), move_endings(), move_running()).

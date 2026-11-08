@@ -1,7 +1,9 @@
 // Host test for picoA/app/body.c: the greeting and version check, repeating
 // DRIVE, re-sending MOTORS until PicoB has acted on it (also after a safety stop),
-// respecting PicoB's safety stops, PicoB restarting, the connection timeout, and
-// keeping every report (several can arrive in one loop iteration),
+// respecting PicoB's safety stops, PicoB restarting, the connection timeout,
+// keeping every report (several can arrive in one loop iteration), and PicoB's imu
+// records on PicoA's clock (dropped until the clock is known, both clocks wrapping,
+// the newest kept, the lost counted),
 // against a fake link with the test playing PicoB. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon/test/fakes -Icommon -o build/test_body picoA/app/test/test_body.c && build/test_body
 #include <assert.h>
@@ -211,6 +213,73 @@ int main(void) {
     assert(!body_odom_get(before + 3, &r, &t_us) && body_odom_get(before + 4, &r, &t_us));
     printf("ok: every report kept and numbered, also several in one loop iteration\n");
 
-    printf("OK: body greets, repeats DRIVE, re-sends MOTORS, respects safety stops, times out, syncs clocks\n");
+    // imu records. PicoB restarts: its clock isn't known until its first report, so a
+    // record before that is dropped.
+    imu_record_t rec = {.t_us = 5, .accel = {1, 2, 3}, .gyro = {4, 5, 6}}, got;
+    while (body_imu_take(&got)) {}
+    b_hello(LINK_PROTOCOL_VERSION, false);
+    body_update();
+    uint32_t received0 = body_imu_received();
+    fake_link_deliver(MSG_IMU, &rec, sizeof rec);
+    body_update();
+    assert(!body_imu_take(&got) && body_imu_received() == received0);
+    // Then 4 s of reports and two records each (measured 14 and 4 ms before the
+    // report was sent), with PicoB's clock far off and 50 ppm fast, 0-3 ms random
+    // delays; PicoA's clock wraps 2.5 s in. Each record's time on PicoA's clock is
+    // within 0.3 ms of when it was measured once the clock has settled (1.5 s).
+    uint64_t next_wrap = (fake_now_us | 0xFFFFFFFFull) + 1;
+    assert(next_wrap - 2500000 > fake_now_us);
+    fake_now_us = next_wrap - 2500000;
+    b_start_us = fake_now_us;
+    const uint32_t b0_us = 0x40000000u, before_us[2] = {14000, 4000};
+    float worst_imu_ms = 0;
+    int checked = 0, dropped_first = 0;
+    bool crossed = false;
+    uint32_t prev_t = 0;
+    for (int i = 0; i < 200; i++) {
+        uint64_t sent_us = fake_now_us;
+        for (int k = 0; k < 2; k++) {
+            uint64_t measured = sent_us - before_us[k];
+            rec.t_us = b0_us + (uint32_t)((measured - b_start_us) * 1000050ull / 1000000ull);
+            rec.accel[0] = (int16_t)i;
+            rec.gyro[0] = (int16_t)k;
+            fake_link_deliver(MSG_IMU, &rec, sizeof rec);
+        }
+        b_odom.t_us = b0_us + (uint32_t)((sent_us - b_start_us) * 1000050ull / 1000000ull);
+        fake_now_us += ODOM_WIRE_US + (uint64_t)(rand() % 3000);
+        fake_link_deliver(MSG_ODOM, &b_odom, sizeof b_odom);
+        body_update();
+        if (i == 0) dropped_first = !body_imu_take(&got); // they came before the first report
+        while (body_imu_take(&got)) {
+            assert(got.accel[1] == 2 && got.accel[2] == 3 && got.gyro[1] == 5 && got.gyro[2] == 6); // unchanged
+            uint32_t measured = (uint32_t)(b_start_us + (uint64_t)got.accel[0] * LINK_ODOM_PERIOD_US - before_us[got.gyro[0]]);
+            float err_ms = (float)(int32_t)(got.t_us - measured) * 1e-3f;
+            if (got.accel[0] >= 75) { worst_imu_ms = fmaxf(worst_imu_ms, fabsf(err_ms)); checked++; }
+            if (prev_t && got.t_us < prev_t) crossed = true;
+            prev_t = got.t_us;
+        }
+        fake_now_us = sent_us + LINK_ODOM_PERIOD_US;
+    }
+    assert(dropped_first && crossed && checked == 2 * 125 && worst_imu_ms < 0.3f);
+    printf("imu records on PicoA's clock: within %.2f ms, also across its wrap; dropped before the clock is known\n",
+           (double)worst_imu_ms);
+
+    // A record of the wrong length is dropped; 40 not taken: the newest 32 wait, 8 lost.
+    fake_link_deliver(MSG_IMU, &rec, sizeof rec - 1);
+    body_update();
+    assert(!body_imu_take(&got));
+    uint32_t lost0 = body_imu_lost();
+    received0 = body_imu_received();
+    for (int n = 0; n < 40; n++) {
+        rec.accel[0] = (int16_t)n;
+        fake_link_deliver(MSG_IMU, &rec, sizeof rec);
+        if (n % 10 == 9) body_update(); // the fake link holds 64
+    }
+    assert(body_imu_received() == received0 + 40 && body_imu_lost() == lost0 + 8);
+    for (int n = 8; n < 40; n++) assert(body_imu_take(&got) && got.accel[0] == n);
+    assert(!body_imu_take(&got));
+    printf("ok: imu records kept until taken (the newest %d), the lost counted\n", BODY_IMU_KEPT);
+
+    printf("OK: body greets, repeats DRIVE, re-sends MOTORS, respects safety stops, times out, syncs clocks, keeps imu records\n");
     return 0;
 }

@@ -3,36 +3,36 @@
 #include "pico/stdlib.h"
 #include "body.h"
 #include "pose.h"
-#include "surroundings.h"
+#include "tof_frame.h"
 #include "cell_map.h"
 #include "house_map.h"
 #include "camera.h"
 #include "opt4048.h"
-#include "behaviour.h"
+#include "move.h"
 #include "mode.h"
-#include "recorder.h"
-#include "wifi_console.h"
-#include "units.h"
+#include "tof_format.h"
+#include "crc32.h"
+#include "link_pc.h"
+#include "wire.h"
 #include "vision.h"
 #include "snapshot.h"
 
-#define SNAP_VERSION 1
+#define SNAP_VERSION 2 // 2: the ToF section a compact frame, no geometry section, the end a wire_end_t
 #define SNAP_MAX     38912  // bytes: the fixed sections ~34.5 KB (with 96 features), the rest for tiles
 #define FEATURES_WAIT_US 300000 // a snapshot waits this long at most for vision to process the frame it shows
-#define POSE_US      250000 // "\001pose ..." this often
 #define NO_REASON    255
 
-enum { SEC_HEAD = 1, SEC_POSE, SEC_GEOMETRY, SEC_TOF, SEC_CAMERA, SEC_COLOR, SEC_WINDOW, SEC_TILES, SEC_FEATURES };
+enum { SEC_HEAD = 1, SEC_POSE, SEC_TOF = 4, SEC_CAMERA, SEC_COLOR, SEC_WINDOW, SEC_TILES, SEC_FEATURES }; // 3 was the sensor geometry
 
 typedef struct __attribute__((packed)) {
-    uint32_t boot_id;       // as the recordings'
+    uint32_t boot_id;       // as hello's
     uint32_t seq;           // counts the snapshots since power-up, from 1
     uint32_t t_us;          // when it was built
     uint8_t why;            // snapshot_why_t
-    char action[12];        // the action that ended last ("scan", "goto"...), NUL-padded; "" if none yet
-    uint8_t end_reason;     // how it ended (rec_end_t), 255 if none yet
-    uint32_t actions_ended; // since power-up
-    char running[12];       // the action running now, "" if none
+    char action[12];        // the move that ended last ("drive", "turn", "goto", "watch"), NUL-padded; "" if none yet
+    uint8_t end_reason;     // how it ended (wire_end_t), 255 if none yet
+    uint32_t actions_ended; // moves ended since power-up
+    char running[12];       // the move running now, "" if none
     uint8_t mode;           // robot_mode_t
     uint32_t map_clears;    // the map was cleared this many times (C): the PC starts the whole-house map again
     char build[24];         // when the firmware was built
@@ -44,11 +44,8 @@ typedef struct __attribute__((packed)) {
     uint8_t stationary, motors_on, stop_reason, picob_connected;
 } snap_pose_t;
 
-// Then the TOF_RAW payload of all 64 zones (recorder.h).
-typedef struct __attribute__((packed)) {
-    uint8_t pose_ok;        // where the robot was when the frame was measured (pose_at())
-    float x_m, y_m, yaw_rad, pitch_rad;
-} snap_tof_t;
+// The ToF section: the latest frame packed for the snapshot use (tof_format.h), its
+// pose in it.
 
 // Then width x height pixels, top row first, as the robot sees it.
 typedef struct __attribute__((packed)) {
@@ -92,6 +89,8 @@ typedef struct __attribute__((packed)) {
     uint8_t strength, match; // 0-1 as 0-255
 } snap_feature_t;
 
+static uint32_t boot_id;
+static const char *build_text = "";
 static uint8_t buf[SNAP_MAX];
 static uint32_t len;
 static bool pending;
@@ -99,8 +98,13 @@ static snapshot_why_t pending_why;
 static uint32_t pending_command;  // the command asking for the pending snapshot, 0 if none
 static snapshot_sent_t going;     // the snapshot going out, if a command asked for it (command 0: none)
 static uint32_t seq, sent_bytes, last_len, tiles_sent, connection;
-static uint32_t last_pose_us, wait_since_us;
+static uint32_t wait_since_us;
 static bool waiting;
+// The snapshot going out: its parts handed to the bulk lane up to `at`; the last
+// one's ticket (link_pc.h).
+static bool sending;
+static uint32_t at;
+static link_ticket_t last_ticket;
 
 // Starts a section: its header, and room for `size` bytes after it; NULL if it doesn't fit.
 static uint8_t *section(uint8_t type, uint32_t size) {
@@ -118,19 +122,15 @@ static void add(uint8_t type, const void *payload, uint32_t size) {
     if (p) memcpy(p, payload, size);
 }
 
-static void add_tof(void) {
-    const range_frame_t *f = surroundings_last_frame();
-    if (!f) return;
-    static uint8_t raw[RECORDER_TOF_MAX];
-    uint32_t n = recorder_tof_payload(raw, f, 0, RANGEFINDER_RAYS, 0);
-    if (!n) return;
-    pose_t p;
-    snap_tof_t t = {.pose_ok = pose_at(f->t_us, &p)};
-    if (t.pose_ok) { t.x_m = p.x_m; t.y_m = p.y_m; t.yaw_rad = p.yaw_rad; t.pitch_rad = p.pitch_rad; }
-    uint8_t *out = section(SEC_TOF, sizeof t + n);
-    if (!out) return;
-    memcpy(out, &t, sizeof t);
-    memcpy(out + sizeof t, raw, n);
+// The latest ToF frame, packed for the snapshot use.
+static uint8_t tof_bytes[TOF_FORMAT_MAX];
+static uint32_t tof_len;
+
+void snapshot_tof(const posed_frame_t *f) { tof_len = tof_pack(TOF_USE_SNAPSHOT, f, tof_bytes); }
+
+void snapshot_init(uint32_t boot, const char *build) {
+    boot_id = boot;
+    build_text = build;
 }
 
 static void add_camera(void) {
@@ -216,13 +216,13 @@ static bool features_behind(void) {
 
 static void build(snapshot_why_t why) {
     len = 9; // "SNAP", version, length
-    snap_head_t h = {.boot_id = recorder_boot_id(), .seq = ++seq, .t_us = time_us_32(), .why = (uint8_t)why,
+    snap_head_t h = {.boot_id = boot_id, .seq = ++seq, .t_us = time_us_32(), .why = (uint8_t)why,
                      .end_reason = NO_REASON, .mode = (uint8_t)mode_get(), .map_clears = house_map_clears()};
-    behaviour_end_t last;
-    h.actions_ended = behaviour_endings(&last);
-    if (h.actions_ended) { snprintf(h.action, sizeof h.action, "%s", last.action); h.end_reason = (uint8_t)last.reason; }
-    snprintf(h.running, sizeof h.running, "%s", behaviour_action());
-    snprintf(h.build, sizeof h.build, "%s", __DATE__ " " __TIME__);
+    move_record_t last;
+    h.actions_ended = move_endings(&last);
+    if (h.actions_ended) { snprintf(h.action, sizeof h.action, "%s", move_kind_name(last.kind)); h.end_reason = move_wire_end(&last); }
+    snprintf(h.running, sizeof h.running, "%s", move_running());
+    snprintf(h.build, sizeof h.build, "%s", build_text);
     add(SEC_HEAD, &h, sizeof h);
     if (body_connected()) {
         const odom_report_t *o = body_odom();
@@ -232,10 +232,7 @@ static void build(snapshot_why_t why) {
                          .picob_connected = 1};
         add(SEC_POSE, &p, sizeof p);
     }
-    uint8_t geometry[RECORDER_GEOMETRY_SIZE];
-    uint32_t geometry_len = recorder_geometry_payload(geometry);
-    add(SEC_GEOMETRY, geometry, geometry_len);
-    add_tof();
+    if (tof_len) add(SEC_TOF, tof_bytes, tof_len);
     add_camera();
     add_features();
     opt4048_reading_t r;
@@ -250,7 +247,7 @@ static void build(snapshot_why_t why) {
     buf[4] = SNAP_VERSION;
     uint32_t total = len + 4;
     memcpy(buf + 5, &total, 4);
-    uint32_t crc = recorder_crc32(buf, len);
+    uint32_t crc = crc32_of(buf, len);
     memcpy(buf + len, &crc, 4);
     len = total;
 }
@@ -261,21 +258,49 @@ void snapshot_request(snapshot_why_t why, uint32_t command) {
     if (command) pending_command = command;
 }
 
+// The snapshot going out has wholly gone: every part handed to TCP, on a connection
+// that is still up. Its connection lost before that (even with every part in TCP):
+// it goes again whole on the next.
+static bool gone(void) {
+    if (sending && at == len) {
+        link_bulk_state_t state = link_bulk_state(last_ticket);
+        if (state == LINK_BULK_SENT) sending = false;
+        else if (state == LINK_BULK_LOST) at = 0;
+    }
+    return !sending;
+}
+
 bool snapshot_sent(snapshot_sent_t *s) {
-    if (!going.command || wifi_console_snapshot_busy()) return false;
+    if (!going.command || !gone()) return false;
     *s = going;
     going.command = 0;
     return true;
 }
 
+// Hands the bulk lane the next parts, as many as it takes now (a part it has no room
+// for waits); the snapshot has gone once every part has left the lane.
+static void send_parts(void) {
+    static uint8_t part[WIRE_HEADER + WIRE_PART_MAX];
+    while (at < len) {
+        uint32_t n = len - at > WIRE_PART_MAX ? WIRE_PART_MAX : len - at;
+        uint32_t n_part = wire_encode_snapshot_part(buf + at, n, part);
+        link_ticket_t ticket = link_send_bulk(part, n_part);
+        if (!ticket.n) break;
+        last_ticket = ticket;
+        at += n;
+    }
+}
+
 void snapshot_update(void) {
-    uint32_t now = wifi_console_data_connection();
+    uint32_t now = link_pc_connection();
     if (now != connection) { // a new server: it has none of the tiles
         connection = now;
+        at = 0;              // a snapshot cut by a lost connection goes again from its start
         if (now) { house_map_all_dirty(); snapshot_request(SNAP_SERVER, 0); }
     }
     if (!now) return;
-    if (pending && !going.command && !wifi_console_snapshot_busy() && !features_behind()) {
+    if (sending && !gone()) send_parts();
+    if (pending && gone() && !going.command && !features_behind()) {
         pending = false;
         build(pending_why);
         if (pending_command) {
@@ -284,22 +309,11 @@ void snapshot_update(void) {
                                       .yaw_rad = o->yaw_rad};
             pending_command = 0;
         }
-        wifi_console_snapshot_send(buf, len);
+        sending = true;
+        at = 0;
+        send_parts();
         sent_bytes += len;
         last_len = len;
-    }
-    if (time_us_32() - last_pose_us >= POSE_US) {
-        last_pose_us = time_us_32();
-        const odom_report_t *o = body_odom();
-        const char *action = behaviour_action();
-        body_peaks_t peaks;
-        body_peaks_take(&peaks);
-        char text[112];
-        snprintf(text, sizeof text, "pose %.1f %.1f %.1f %s %s %d %d %.2f %.2f %.2f %.1f", (double)(o->x_m * 100),
-                 (double)(o->y_m * 100), (double)(o->yaw_rad * DEG_PER_RAD), mode_name(mode_get()),
-                 *action ? action : "-", wifi_console_signal_dbm(), recorder_on() ? 1 : 0, (double)peaks.jolt_g[0],
-                 (double)peaks.jolt_g[1], (double)peaks.jolt_g[2], (double)(peaks.tilt_rad * DEG_PER_RAD));
-        wifi_console_record(text);
     }
 }
 
@@ -307,5 +321,5 @@ void snapshot_print_status(void) {
     printf("Snapshots: %lu sent (the last %lu KB), %lu KB in all, %lu map tiles; %d tiles of the whole-house map%s\n",
            (unsigned long)seq, (unsigned long)(last_len / 1024), (unsigned long)(sent_bytes / 1024),
            (unsigned long)tiles_sent, house_map_tiles(),
-           wifi_console_snapshot_busy() ? "; one going out" : "");
+           sending ? "; one going out" : "");
 }

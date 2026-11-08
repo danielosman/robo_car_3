@@ -1,6 +1,6 @@
 #pragma once
-// Fake WiFi chip, lwIP and stdio driver registry for wifi_console.c: the test
-// sets the link status, plays the server (announcements, accepting, keys,
+// Fake WiFi chip, lwIP and stdio driver registry for link_pc.c: the test
+// sets the link status, plays the server (announcements, accepting, messages,
 // closing) and reads what the robot sent. Callbacks are called the way lwIP
 // would, without the lock taken by the caller; lwIP calls from the main loop must
 // hold it (checked).
@@ -92,20 +92,7 @@ static inline u16_t pbuf_copy_partial(const struct pbuf *p, void *buf, u16_t len
     memcpy(buf, p->payload, n);
     return n;
 }
-static int fake_pbufs_alloced;
-static bool fake_pbuf_fail;      // pbuf_alloc() runs out of memory
-#define PBUF_TRANSPORT 0
-#define PBUF_RAM 0
 static inline uint8_t pbuf_free(struct pbuf *p) { (void)p; fake_pbufs_freed++; return 1; }
-static inline struct pbuf *pbuf_alloc(int layer, u16_t len, int type) { // one at a time
-    (void)layer; (void)type;
-    static char payload[2048];
-    static struct pbuf p;
-    if (fake_pbuf_fail || len > sizeof payload) return NULL;
-    p = (struct pbuf){.payload = payload, .len = len, .tot_len = len};
-    fake_pbufs_alloced++;
-    return &p;
-}
 
 // --- UDP: the announcements ---
 struct udp_pcb;
@@ -116,24 +103,6 @@ static int fake_udps;
 static inline struct udp_pcb *udp_new_ip_type(uint8_t type) { (void)type; FAKE_LOCKED(); fake_udps++; return &fake_udp; }
 static inline err_t udp_bind(struct udp_pcb *pcb, const ip_addr_t *ip, u16_t port) { (void)ip; FAKE_LOCKED(); pcb->port = port; return ERR_OK; }
 static inline void udp_recv(struct udp_pcb *pcb, udp_recv_fn fn, void *arg) { FAKE_LOCKED(); pcb->recv = fn; pcb->arg = arg; }
-// The datagrams sent: what, to where.
-static char fake_dgram[2048];
-static uint32_t fake_dgram_len, fake_dgrams;
-static ip_addr_t fake_dgram_ip;
-static u16_t fake_dgram_port;
-static err_t fake_udp_err = ERR_OK;  // what udp_sendto() returns (ERR_MEM: the WiFi chip is full)
-static inline err_t udp_sendto(struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *ip, u16_t port) {
-    FAKE_LOCKED();
-    assert(pcb == &fake_udp && p->len <= sizeof fake_dgram);
-    if (fake_udp_err != ERR_OK) return fake_udp_err;
-    memcpy(fake_dgram, p->payload, p->len);
-    fake_dgram_len = p->len;
-    fake_dgram_ip = *ip;
-    fake_dgram_port = port;
-    fake_dgrams++;
-    return ERR_OK;
-}
-
 // The server broadcasts `text` from `from`.
 static inline void fake_announce(ip_addr_t from, const char *text) {
     assert(fake_udp.recv && fake_udp.port == 4210);
@@ -143,7 +112,7 @@ static inline void fake_announce(ip_addr_t from, const char *text) {
     fake_in_callback = false;
 }
 
-// --- TCP: the console's connection to the server ---
+// --- TCP: the connection to the server ---
 struct tcp_pcb;
 typedef err_t (*tcp_connected_fn)(void *arg, struct tcp_pcb *pcb, err_t err);
 typedef err_t (*tcp_recv_fn)(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err);
@@ -153,15 +122,10 @@ struct tcp_pcb {
     bool open;
     ip_addr_t ip; u16_t port;
     void *arg;
-    // lwIP's fields wifi_console_link_status() reads; the test sets them
-    uint32_t snd_lbb, lastack, cwnd, snd_wnd;
-    uint16_t snd_queuelen;
-    uint8_t nrtx;
-    int16_t rto;
     tcp_connected_fn connected; tcp_recv_fn recv; tcp_sent_fn sent; tcp_err_fn err;
 };
 #define TCP_WRITE_FLAG_COPY 1
-#define TCP_SND_BUF 11680 // as lwipopts.h
+#define TCP_SND_BUF 23360 // as lwipopts.h (16 * TCP_MSS)
 #define FAKE_SNDBUF TCP_SND_BUF
 static struct tcp_pcb fake_tcp;
 static int fake_tcp_aborts, fake_tcp_connects, fake_outputs, fake_recved;
@@ -187,8 +151,10 @@ static inline err_t tcp_connect(struct tcp_pcb *pcb, const ip_addr_t *ip, u16_t 
     return ERR_OK;
 }
 static inline u16_t tcp_sndbuf(const struct tcp_pcb *pcb) { (void)pcb; return (u16_t)fake_sndbuf; }
+static err_t fake_tcp_write_err = ERR_OK; // what tcp_write() returns (ERR_MEM: lwIP out of memory)
 static inline err_t tcp_write(struct tcp_pcb *pcb, const void *data, u16_t len, uint8_t flags) {
     FAKE_LOCKED();
+    if (fake_tcp_write_err != ERR_OK) return fake_tcp_write_err;
     assert(pcb->open && flags == TCP_WRITE_FLAG_COPY && len <= fake_sndbuf);
     assert(fake_sent_len + len <= sizeof fake_sent);
     memcpy(fake_sent + fake_sent_len, data, len);
@@ -213,7 +179,7 @@ static inline void fake_accepts(struct tcp_pcb *pcb) {
     fake_in_callback = false;
 }
 static inline void fake_server_accepts(void) { fake_accepts(&fake_tcp); }
-// The server sends `n` bytes (keys, heartbeats).
+// The server sends `n` bytes (messages).
 static inline void fake_server_sends(const char *bytes, u16_t n) {
     assert(fake_tcp.open);
     struct pbuf p = {.payload = (void *)bytes, .len = n, .tot_len = n};

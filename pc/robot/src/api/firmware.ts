@@ -26,15 +26,15 @@ function header(file: string, names: readonly string[]): Record<string, number> 
 }
 
 const c = header("app/commands.h", ["COMMAND_DRIVE_MAX_CM", "COMMAND_ROTATE_MAX_DEG", "COMMAND_GOTO_MAX_CM",
-                                "COMMAND_WATCH_MIN_S", "COMMAND_WATCH_MAX_S"]);
+                                "COMMAND_WATCH_MIN_S", "COMMAND_WATCH_MAX_S", "COMMAND_STILL_MAX_MS"]);
 const b = header("app/behaviour.h", ["STOP_BEFORE_M", "EDGE_M", "HALF_WIDTH_M", "PATH_HALF_M", "GOTO_MAX_M"]);
 const m = header("app/motion.h", ["MOTION_SPEED_MPS", "MOTION_TURN_RADPS"]);
 const cam = header("drivers/camera.h", ["CAMERA_WIDTH", "CAMERA_HEIGHT"]);
 
-// What the robot takes (cm, degrees, seconds).
+// What the robot takes (cm, degrees, seconds; the still times in ms).
 export const LIMITS = {
   driveCm: c.COMMAND_DRIVE_MAX_CM, rotateDeg: c.COMMAND_ROTATE_MAX_DEG, gotoCm: c.COMMAND_GOTO_MAX_CM,
-  watchMinS: c.COMMAND_WATCH_MIN_S, watchMaxS: c.COMMAND_WATCH_MAX_S,
+  watchMinS: c.COMMAND_WATCH_MIN_S, watchMaxS: c.COMMAND_WATCH_MAX_S, stillMaxMs: c.COMMAND_STILL_MAX_MS,
 } as const;
 
 // A move stops stopBeforeM before an obstacle on the map, measured from the front or

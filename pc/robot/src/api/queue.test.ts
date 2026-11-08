@@ -1,7 +1,7 @@
 // Tests for queue.ts, runner.ts and answers.ts: commands one at a time in the order
 // they came, whoever sent them; anything not ok empties the queue ("dropped"), after a
 // move's own snap; stop skips it; every answer to its sender and to everyone. The
-// runner: numbered lines to the robot, done records matched by number, not connected,
+// runner: numbered lines to the robot, answers matched by number, not connected,
 // no answer, a snap answered once its snapshot is stored. The answers' fields.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -10,7 +10,7 @@ import { parseAction, parseSteer, withSnaps, type Command } from "./commands.ts"
 import type { Answer, Outcome, Sender } from "./answers.ts";
 import { CommandQueue } from "./queue.ts";
 import { CommandRunner, StoredSnapshots, type Runner } from "./runner.ts";
-import type { DoneRecord } from "../robot.ts";
+import type { DoneRecord } from "../link.ts";
 
 const steer = (text: string) => withSnaps((parseSteer(text) as { commands: Command[] }).commands, true);
 const action = (name: string, arg = "") => (parseAction(name, arg) as { commands: Command[] }).commands;
@@ -75,18 +75,18 @@ test("stop skips the queue and empties it", async () => {
   assert.deepEqual(answers.slice(3).sort(), ["steer d100 stopped", "stop ok"]);
 });
 
-// The robot as the runner sees it: the lines sent; done records sent back by hand.
+// The robot as the runner sees it: the lines sent; answers sent back by hand.
 class FakeRobot extends EventEmitter {
   connected = true;
   lines: string[] = [];
-  sendLine(line: string): boolean { if (this.connected) this.lines.push(line); return this.connected; }
+  sendCommand(n: number, text: string): boolean { if (this.connected) this.lines.push(`${text} #${n}`); return this.connected; }
   done(d: Partial<DoneRecord> & { end: string }): void {
     const n = Number(/#(\d+)$/.exec(this.lines.at(-1)!)![1]);
     this.emit("done", { n, pose: { x: 0.43, y: -0.04, yaw: Math.PI / 6 }, movedM: null, rotatedDeg: null, goalM: null, snapshot: null, ...d });
   }
 }
 
-test("the runner: numbered lines, done records by number, not connected, no answer, a stored snap", async () => {
+test("the runner: numbered lines, answers by number, not connected, no answer, a stored snap", async () => {
   const robot = new FakeRobot(), stored = new StoredSnapshots();
   const runner = new CommandRunner(robot, stored, c => (c.name === "watch" ? 30 : 1000));
   const [drive, watch] = (parseSteer("d50 w5") as { commands: Command[] }).commands;
@@ -122,6 +122,6 @@ test("answers: limited, safety stops, refused, an action without a pose", async 
   assert.deepEqual(await run(move("r30"), { end: "tilt", movedM: 0, rotatedDeg: 12 }),
                    { result: "safety_stop", why: "tilt", pose: { x: 43, y: -4, yaw: 30 }, moved: 0, rotated: 12 });
   assert.equal((await run(move("d30"), { end: "wheels" })).why, "wheels");
-  assert.deepEqual(await run(action("recording", "on")[0], { end: "ok" }), { result: "ok" });
+  assert.deepEqual(await run(action("config", "pre_ms 300")[0], { end: "ok" }), { result: "ok" });
   assert.deepEqual(await run(move("d30"), { end: "refused" }), { result: "failed", why: "refused by the robot (robot log says why)" });
 });

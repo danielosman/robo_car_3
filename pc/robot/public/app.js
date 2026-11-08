@@ -22,8 +22,9 @@ const ACTIONS = [["snap", "snap"], ["clear map", "clear_map"]];
 const GOTO_MAX_CM = 300; // goto's limit on each axis (picoA/app/commands.h)
 const WEAK = 2; // of 15: columns set less confidently count as unknown when "hide weak" is ticked (~10 %, as replay)
 const FOOT = { front: 0.095, back: -0.095, half: 0.1175 }; // the robot's footprint, m
-// The camera (objects/place.ts): where it sits on the robot (m), half its view across.
-const CAM = { x: 0.025, y: -0.005, halfFov: Math.atan(80 / 188), viewM: 3 };
+// The camera of the boot shown (its own copy of the mounting, /api/mounting?boot=):
+// where it sits on the robot (m), half its view across; null until loaded.
+let CAM = null;
 const LABEL_COLORS = { chair: "#ff9f43", table: "#feca57", sofa: "#54a0ff", door: "#c8d6e5", doorway: "#ffffff", plant: "#1dd1a1",
                        shelf: "#ff6b6b", cabinet: "#f368e0", box: "#48dbfb", person: "#ee5253",
                        animal: "#c8a27a", object: "#a29bfe" };
@@ -144,10 +145,10 @@ function draw() {
     ctx.beginPath(); ctx.arc(px, py, 2.5 * dpr, 0, 2 * Math.PI); ctx.fill();
   }
 
-  // The ToF frame of the snapshot: its sure targets, by height.
+  // The ToF frame of the snapshot: its valid zones (sure and less sure), by height.
   if (detail) {
-    for (const t of detail.targets) {
-      if (t.x === null || ![5, 6, 9].includes(Number(t.status))) continue;
+    for (const t of detail.zones) {
+      if (t.x === null || !["sure", "less_sure"].includes(t.kind)) continue;
       const z = Number(t.z), [px, py] = toScreen(Number(t.x), Number(t.y));
       ctx.fillStyle = z < 0.03 ? "#6c6" : z < 0.13 ? "#f55" : z < 0.23 ? "#fa4" : "#aaf";
       ctx.fillRect(px - 1.5 * dpr, py - 1.5 * dpr, 3 * dpr, 3 * dpr);
@@ -180,7 +181,7 @@ function objectCorners(o) {
 function drawObjects() {
   if (!$("showobjects").checked) return;
   const dpr = window.devicePixelRatio || 1, s = detail?.snapshot;
-  if (s && s.x !== null && s.image) {
+  if (s && s.x !== null && s.image && CAM) {
     const c = Math.cos(Number(s.yaw)), sn = Math.sin(Number(s.yaw));
     const cam = [Number(s.x) + c * CAM.x - sn * CAM.y, Number(s.y) + sn * CAM.x + c * CAM.y];
     const ray = a => [cam[0] + CAM.viewM * Math.cos(Number(s.yaw) + a), cam[1] + CAM.viewM * Math.sin(Number(s.yaw) + a)];
@@ -311,9 +312,9 @@ function showSnapshot() {
   for (const row of detail.grid) {
     const cells = row.map(z => {
       if (!z) return `<td class="none">--</td>`;
-      if (!z.sure) return `<td class="unsure" title="status ${z.status}">?${z.status}</td>`;
-      const hue = Math.max(0, Math.min(240, z.mm / 3000 * 240));
-      return `<td style="background:hsl(${hue} 70% 32%)" title="${z.mm} mm, status ${z.status}">${Math.round(z.mm / 10)}</td>`;
+      if (z.kind === "unsure") return `<td class="unsure" title="unsure: the distance tells nothing">?</td>`;
+      const hue = Math.max(0, Math.min(240, z.mm / 3000 * 240)), cm = z.beyond ? ">254" : Math.round(z.mm / 10);
+      return `<td style="background:hsl(${hue} 70% 32%)" title="${z.beyond ? "beyond 2.54 m" : `${z.mm} mm`}, ${z.kind.replace("_", " ")}">${cm}${z.kind === "less_sure" ? "~" : ""}</td>`;
     });
     rows.push(`<tr>${cells.join("")}</tr>`);
   }
@@ -417,6 +418,7 @@ async function loadBoots(prefer) {
 $("boot").onchange = () => loadSnapshots($("boot").value);
 
 async function loadSnapshots(b) {
+  if (b !== boot) loadMounting(b);
   boot = b;
   snaps = (await getJson(`/api/snapshots?boot=${b}`)).map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) }));
   $("timeline").max = Math.max(0, snaps.length - 1);
@@ -480,7 +482,6 @@ for (const [letter, what, unit, start] of MOVES) {
   $("keys").append(box);
 }
 for (const [label, command] of ACTIONS) button(label, () => send(command));
-const recording = button("recording", () => send("recording", livePose?.recording ? "off" : "on"));
 button("status", async () => {
   try { append(`${await (await fetch("/api/robot/status", { method: "POST" })).text()}`, "note"); } catch (err) { toast(err.message); }
 });
@@ -526,7 +527,6 @@ function showLive() {
   el.style.display = fresh ? "" : "none";
   $("manual").classList.toggle("on", !!fresh && p.mode === "manual");
   $("idle").classList.toggle("on", !!fresh && p.mode === "idle");
-  recording.classList.toggle("on", !!fresh && !!p.recording);
 }
 setInterval(() => { if (poseFresh > 0) poseFresh--; showLive(); }, 1000); // stale after ~3 s without a pose
 
@@ -571,3 +571,9 @@ window.addEventListener("resize", resize);
 resize();
 connect();
 loadBoots().catch(err => append(`could not load the snapshots: ${err.message}\n`, "note"));
+function loadMounting(b) {
+  getJson(`/api/mounting?boot=${b}`).then(m => {
+    CAM = { x: m.camera.x_m, y: m.camera.y_m, halfFov: Math.atan(m.camera.width_px / 2 / m.camera.f_px), viewM: 3 };
+    draw();
+  }).catch(err => append(`could not load the mounting: ${err.message}\n`, "note"));
+}

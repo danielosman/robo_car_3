@@ -26,5 +26,5 @@ pico_set_program_version(picoB_app "0.1")
 pico_enable_stdio_uart(picoB_app 0) # UART0 is the link to PicoA
 pico_enable_stdio_usb(picoB_app 1)
 target_compile_options(picoB_app PRIVATE -Wall -Wextra -Wdouble-promotion)
-target_link_libraries(picoB_app picoB_drivers common_link)
+target_link_libraries(picoB_app picoB_drivers common_link common_mounting)
 pico_add_extra_outputs(picoB_app)

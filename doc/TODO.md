@@ -35,6 +35,47 @@ a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
      weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
 2. Then Daniel picks the next task from the list below.
 
+**Data-flow rework ([DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)), 7 Nov:** step 1 built
+(both Picos; the mounting in `common/mounting.json`, the PCB 2 cm higher: the ToF at 9 cm, the
+camera at 10.8 cm); host tests only. Its robot test is in the README's "Robot tests
+after the data-flow rework", run once after the last step. Open from it: calibrate
+the camera again (tilt taken as 0° since it was knocked; f 188 not checked since the
+lift); measure where rows 6-8 see the floor at 9 cm. Known: a table whose underside
+is ~13-15 cm up (6 cm or less above the ToF; 16 cm is still an overhang) shows
+blocked, not overhang, seen from ~0.6 m (`test_cell_map`); drive stops the same.
+Step 2 built (PicoA; the ToF at 10 Hz, a setting; watching's frame counts are
+times); host tests only, its robot test with step 1's. Step 3 built (PicoA; the
+ToF pipeline: `tof`, the stamp, `tof_format`, `tof_rays`; one target per zone; the
+map and `watch` read frames packed and unpacked; `rangefinder` and `surroundings`
+gone, movement detection renamed `watch`); host tests only, its robot test with
+the others. Known since step 3: watch doesn't see movement beyond ~2.54 m (its format's limit;
+accepted, it may get its own format). Step 4a built (PicoA, PC; framed messages: `wire`
+on both sides, `link_pc` with the control and bulk lanes, `link.ts`; hello with the
+wire version; the snapshot in parts on bulk; the status is `link_pc`'s); host
+tests only, its robot test with the others. Step 4b built (PicoA, PC; moves with
+still times, ToF frames over bulk during moves, the new DuckDB file, `boot.ts`,
+`robot frames`, the fake robot's replay; the recorder and its tools gone); host
+tests only, its robot test with the others. Step 4c built (both Picos, PC; the IMU:
+raw imu records at 104 a second sent and stored during moves, `robot imu`; the jolt
+and tilt peaks gone); host tests only, its robot test with the others. Open from 4c:
+- A model or tool that uses the imu records (the training data): what to learn
+  from them, and whether the PC turns them into the robot's axes once at storing.
+- Bump reactions from the IMU's own interrupts (the plan's "later", not this rework).
+- An imu record lost on the UART or in PicoB's queue shows only as a gap between
+  batches (their times); count it on PicoA if gaps show up in the data.
+Open from 4b:
+- A viewer for the stored frames (the 3D take viewer went with the recordings): a
+  move's or a boot's frames as points (by row, signal, kind, height), the path, on a
+  time slider; later the PC's cell map beside it.
+- A frame sent but lost with its connection (the bulk lane emptied) counts as sent on
+  the robot; the PC sees fewer frames than the move end says. Fine for now; count
+  them if it happens.
+- The store opens DuckDB for each write (~10 a second while moving, batched): check
+  the server's CPU and the write time on a long watch; keep one connection open if
+  it is slow.
+- `tof_rays_set_floor_margin()` was for the replay tools; keep for the PC helper
+  (step 5) or remove.
+
 **18 Oct:** `robot detect` uses `gemma-4-31b` (`.env`), the best local model tried (Opus 5.5
 through `detect_save` was better, not local)
 ([CHANGELOG](CHANGELOG.md)).
@@ -46,7 +87,7 @@ step 6). Then: an agent goes through every picture of a run and saves its boxes.
 **Built 17 Oct, waiting for Daniel's look:** objects from the camera, first step
 ([OBJECTS_PLAN.md](OBJECTS_PLAN.md)): `robot detect` / `robot objects` and the
 overlays; the README's "Objects from the camera" test. Camera calibrated (f 180 px,
-tilt −1.8°). Next: the plan's "Next phase" (bottom edge from the pixels, ToF
+tilt −1.8°; before the PCB was lifted, now tilt 0° assumed). Next: the plan's "Next phase" (bottom edge from the pixels, ToF
 distance and "ToF verified", the tilt calibrating itself). Flash PicoA: the ToF's
 position changed (3.2 cm ahead, 2.6 cm right).
 
@@ -57,9 +98,9 @@ then the README's "Steering through the API" test. Left of the plan (CLI_API_PLA
      with every row and column labelled in cm.
    - The camera features' direction in degrees (`robot features` gives pixels): the
      camera's field of view isn't measured or in the code yet.
-   - Safety step 2: the bump stop and the 10° tilt stop, from the jolt and tilt
-     numbers the pose lines now store (`poses` in DuckDB) once a few drives show
-     what normal looks like.
+   - Safety step 2: the bump stop and the 10° tilt stop. The jolt and tilt peaks
+     went in step 4c (no stop used them); set them from the stored imu records
+     (`imu` in DuckDB) once a few drives show what normal looks like.
    - The old console page (`/console`) sends keys nothing takes: it goes, or moves
      to the API.
 
@@ -273,7 +314,7 @@ room it shows. The robot itself does no image recognition.
 
 Track the camera features from frame to frame, take the robot's own motion from
 the gyro, and detect movers first while still and then while turning, on core 1.
-This replaces `camera_motion`, which only watches while still and learns for 1 s
+This replaces `watch_camera`, which only watches while still and learns for 1 s
 after each stop. Milestones V1-V5:
 [archive/CAMERA_MOTION_PLAN.md](archive/CAMERA_MOTION_PLAN.md).
 
@@ -298,7 +339,7 @@ inside `pose`, tuned from logs. First measure the drift:
 - From snapshots: compare two windows from different times where they overlap; the
   shift that lines up the same wall best is the drift between them. This needs no
   full telemetry.
-- In the whole 11 Oct drive (boot 54564d43) in the viewer: how far odometry drifted
+- In the whole 11 Oct drive (boot 54564d43; old data: `git checkout data-v1`, its 3D viewer): how far odometry drifted
   between the first and the last scan (a wall seen twice), and which cells are
   false.
 
@@ -392,22 +433,13 @@ speed, so that a blip causes only a small twitch. (Not answered.)
 
 ## Small: fixes and improvements to existing modules
 
-**Recording** (the full telemetry, `R`, off at power-up)
-- **Resend lost datagrams from a ring** (planned 11 Oct; since 12 Oct only the full
-  telemetry needs it, because snapshots go over TCP): the drive of 11 Oct lost up
-  to 20 % of datagrams per take, on the air. The robot keeps ~25-50 KB of sent
-  datagrams; the PC reports the gaps every ~0.2 s; the robot resends them, and at
-  the action's end until the PC has all (or gives up and says so). Details:
-  [archive/TELEMETRY_PLAN.md](archive/TELEMETRY_PLAN.md) §6, T7.
+**The link to the PC**
 - Measure WiFi's CPU time on core 0 (the driver busy-waits for its DMA; estimated
-  ~1 %, stalls up to ~0.5 ms), with and without recording.
-- `TAKE_START`'s build time is `recorder.c`'s compile time, not the firmware's: a
-  git hash from CMake if it matters.
+  ~1 %, stalls up to ~0.5 ms), while idle and during a move (frames on bulk).
+- The build time in hello and snapshots is `main.c`'s compile time, not the
+  firmware's: a git hash from CMake if it matters.
 
 **Map**
-- The replay (`tools/replay_map.c`, the 3D viewer's map) keeps the window fixed
-  around the power-up point: a drive beyond 3 m isn't replayed whole. The
-  snapshot replay (`npm run snapreplay`) follows the robot.
 - The cupboard was missing from the earlier scans of 10 Oct.
 - One-frame blips (a single echo makes a cell); revisit with recordings of driving.
 - Under a table top, false blocked columns; a small hole gets floor hits; far
@@ -425,9 +457,6 @@ speed, so that a blip causes only a small twitch. (Not answered.)
   walker on the map). Next idea: a reading that meets its surface at under ~30°
   (from the neighbouring zone's reading) can't clear occupied cells. Also open:
   what is at (36, 304) cm, behind the wall's end, that only that scan saw.
-- Second targets paint bands up to ~8 cells deep behind walls, where no ray ever
-  clears them (Daniel: fine for now). If it matters: keep only second targets
-  within some distance of the first, or let them mark unknown cells only weakly.
 
 **Movement and watching**
 - The watch test's 25°/s walker overshoots 1-4° depending on the seed and on where
@@ -435,7 +464,25 @@ speed, so that a blip causes only a small twitch. (Not answered.)
   stop by 2 mm; the limit is now 4°): look at why it overshoots at all.
 - A stopped thing becomes background after 1 s: shorter fades a stopped person
   sooner but may absorb someone walking slowly.
-- ToF settings to compare: 15 or 10 Hz; heading bins of 1.4° or 2.8° (half the RAM).
+- ToF settings to compare: heading bins of 1.4° or 2.8° (half the RAM). (15 or
+  10 Hz: decided, 10; data-flow step 2.)
+- A waving hand is movement the whole time only at some speeds (host test,
+  `test_watch_tof`, at 10 and 15 Hz alike): when an edge zone reads it in single
+  frames, the "nearer now and then" rule makes it the background and its
+  neighbours stop seeing it. The test waves one column every 2 frames, which works;
+  e.g. one every 100 ms at 15 Hz or 133 ms at 10 Hz shows movement in only 10-25 %
+  of the frames. Not changed by step 3 (the rename to `watch`): still open.
+- A far zone that flickers (sure now and then, else empty) and is empty in both
+  of the first 2 frames after a restart has "nothing" as its background: its next
+  sure reading is a "target where nothing was", false movement (until it is steady
+  1 s or quiet 4 frames). Seen in `test_watch_tof` at 10 Hz (the fixture now
+  avoids it). Idea: a zone's first background waits for a sure reading, or
+  counts the flicker.
+- The tracker: a big blob's centre jumps (a person close by, pieces coming and
+  going) give a false angular speed, and the guessed direction overshoots out of
+  the view, so the next blob is not matched (seen in `test_tracker` at 10 Hz,
+  where the speed is ready one frame sooner). Idea: keep the guess within
+  ±(22.5° + the 10° reach).
 
 **Robot and console**
 - After a reconnect, the rest of a cut pose record shows as text ("manual -",
@@ -452,11 +499,8 @@ speed, so that a blip causes only a small twitch. (Not answered.)
   start-up.
 - M1 tests not yet done: the encoder distance backwards and the carpet (README
   "Robot tests", M1).
-- Should `m` (the map as text) go now that the viewer shows the replayed map? The
-  robot keeps its map either way (it drives by it).
-
-**Viewer** (the 3D take viewer)
-- Several takes at once; a DuckDB query box.
+- Should `m` (the map as text) go once the PC builds the map (step 5)? The robot
+  keeps its map either way (it drives by it).
 
 **Camera features (V1)**
 - **Too slow on the robot** (first run, 12 Oct): `p` says vision takes ~60-63 ms a
@@ -483,8 +527,6 @@ Daniel's notes after the first run (12 Oct), to do together:
 - **`v` is missing on the page**: the keyboard only passes the keys that have
   buttons, and `v` (camera features) has none. Add a button (Print: v features), or
   pass every key the robot knows.
-- Explain or rename the header's links "3D takes" and "Takes" (they show the full
-  telemetry recordings, `R`; empty unless `R` was on), or move them out of the way.
 - Several snapshots compared side by side; the features' tracks over time.
 
 **Camera**

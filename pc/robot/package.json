@@ -3,17 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "RoboCar PicoA console over WiFi: the robot connects here, the browser shows it (doc/ARCHITECTURE.md).",
+  "description": "RoboCar robot server: PicoA connects here over WiFi; the browser and the robot CLI steer it; DuckDB stores what it sends (doc/ARCHITECTURE.md).",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env src/main.ts",
     "test": "node --test 'src/**/*.test.ts'",
-    "decode": "node src/decode.ts",
-    "import": "node src/import.ts",
-    "frames": "node src/frames.ts",
-    "snapreplay": "node src/snapreplay.ts",
     "fakerobot": "node src/fakerobot.ts",
     "place-objects": "node src/objects/place_again.ts",
     "typecheck": "tsc -p .",
@@ -23,7 +19,6 @@
     "@duckdb/node-api": "1.5.6-r.1",
     "@hono/node-server": "2.1.3",
     "hono": "4.13.11",
-    "three": "0.186.1",
     "ws": "8.22.0"
   },
   "devDependencies": {

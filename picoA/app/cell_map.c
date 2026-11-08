@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include "tof_rays.h"
 #include "cell_map.h"
 #include "house_map.h"
 
@@ -11,7 +12,8 @@
 #define FOLLOW_M      0.5f      // the robot this far out of the window's middle tile: it scrolls by a tile
 #define RESTORED_CONF 1         // cells started from the whole-house map: any measurement overrides them
 _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
-#define G_BOTTOM_M    (-0.07f)  // the ground layer's bottom; layers are GRID_M tall
+#define G_TOP_M       TOF_FLOOR_TOP_M       // 3 cm: a ray ending lower is on the floor (tof_rays)
+#define G_BOTTOM_M    (G_TOP_M - GRID_M)    // −7 cm: the ground layer's bottom; layers are GRID_M tall
 #define NOTHING_M     1.0f      // a zone with nothing in range: free this far
 #define NEAR_M        1.5f      // the ray_closeness sigmoid: 0.5 here...
 #define NEAR_SLOPE_M  0.25f     // ...falling over about this much
@@ -21,7 +23,6 @@ _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define L2_BLIND_M    0.25f     // no zone sees L2 this close to the robot
 #define WEIGHT_ONE    64        // weight 1 in the per-frame hit_w, pass_w
 #define FULL_FLOOR_RAYS 9.0f    // the ground layer: rays' worth of agreement for full confidence
-#define G_TOP_M       (G_BOTTOM_M + GRID_M) // 3 cm: above this an end point is no floor
 #define Z_STEP_M      0.002f    // hit heights kept in 2 mm steps above G_BOTTOM_M
 #define NO_HIT_Z      255
 #define PASS_BELOW_M  0.01f     // a pass counts if this close above the highest hit, or lower
@@ -40,13 +41,10 @@ static uint16_t hit_w[CELL_LAYERS][GRID][GRID], pass_w[CELL_LAYERS][GRID][GRID];
 // a pass below it finds nothing), and in this frame (NO_HIT_Z: no detection marked
 // it): what stands there reaches at least that high.
 static uint8_t hit_z[CELL_LAYERS][GRID][GRID], frame_hit_z[CELL_LAYERS][GRID][GRID];
-static float floor_margin = CELL_MAP_FLOOR_MARGIN;
 // The window: GRID x GRID columns from world cell (org_x, org_y) on (cell (cx, cy)
 // covers cx * 10 cm … (cx + 1) * 10 cm), the middle tile (tile_x, tile_y) of 3 x 3
 // tiles of the whole-house map. At power-up it is centred on the map's origin.
 static int tile_x, tile_y, org_x = -GRID / 2, org_y = -GRID / 2;
-
-void cell_map_set_floor_margin(float margin) { floor_margin = margin; }
 
 void cell_map_clear(void) {
     memset(grid, 0, sizeof grid);
@@ -160,13 +158,13 @@ static void decide_cell(uint8_t *cell, float h, float p, float full) {
 }
 
 // The robot stands and turns on floor; L2 close to it is never seen by any zone.
-static void around_the_robot(const pose_t *pose) {
-    for (int cx = cell_of(pose->x_m - L2_BLIND_M); cx <= cell_of(pose->x_m + L2_BLIND_M); cx++)
-        for (int cy = cell_of(pose->y_m - L2_BLIND_M); cy <= cell_of(pose->y_m + L2_BLIND_M); cy++) {
+static void around_the_robot(float x_m, float y_m) {
+    for (int cx = cell_of(x_m - L2_BLIND_M); cx <= cell_of(x_m + L2_BLIND_M); cx++)
+        for (int cy = cell_of(y_m - L2_BLIND_M); cy <= cell_of(y_m + L2_BLIND_M); cy++) {
             if (!in_window(cx, cy)) continue;
             int ix = cx - org_x, iy = cy - org_y;
-            float dx = ((float)cx + 0.5f) * GRID_M - pose->x_m;
-            float dy = ((float)cy + 0.5f) * GRID_M - pose->y_m;
+            float dx = ((float)cx + 0.5f) * GRID_M - x_m;
+            float dy = ((float)cy + 0.5f) * GRID_M - y_m;
             float r = sqrtf(dx * dx + dy * dy);
             if (r <= FOOT_M) {
                 grid[0][ix][iy] = C_PACK(CELL_STATE_OCCUPIED, 0, 15);
@@ -177,27 +175,6 @@ static void around_the_robot(const pose_t *pose) {
         }
 }
 
-// How a zone's reading is judged as a whole.
-typedef enum { READ_OBSTACLE, READ_FLOOR, READ_UNSURE } reading_t;
-
-// Closer than where the zone's cone first meets the floor (its lower edge, with the
-// robot's pitch): no floor can be there, so an obstacle. Otherwise floor if all its
-// rays end at floor height, unsure if they straddle it (grazing the floor, or a low
-// thing on it: its rays at floor height mark the floor, the others nothing). Beyond
-// the floor patch's far end its rays end below the floor: floor rules (a drop).
-static reading_t judge(int zone, float length_m, float sensor_z_m, float pitch_rad, const float frac[3]) {
-    float edge[3];
-    rangefinder_sub_ray_direction(zone, 0.5f, 0, pitch_rad, edge);
-    float floor_from_m = edge[2] < 0 ? sensor_z_m / -edge[2] : 1e9f;
-    if (length_m < floor_margin * floor_from_m) return READ_OBSTACLE;
-    for (int a = 0; a < 3; a++) {
-        float r[3];
-        rangefinder_sub_ray_direction(zone, frac[a], 0, pitch_rad, r);
-        if (sensor_z_m + length_m * r[2] >= G_TOP_M) return READ_UNSURE;
-    }
-    return READ_FLOOR;
-}
-
 // A detection: a zone's sure target judged an obstacle, `length_m` along rays `d`
 // (its 9, in the world) from `o`. Which of the cells they end in holds it isn't
 // known, so all of them are marked (in L1 if they end in G), each as sure as the
@@ -205,10 +182,10 @@ static reading_t judge(int zone, float length_m, float sensor_z_m, float pitch_r
 // what was seen from closer (q < 0.3 beyond ~1.7 m).
 typedef struct { uint8_t layer, ix, iy, z; } footprint_t; // a cell (window indexes), the highest point in it
 
-static void detect(const float o[3], const float d[9][3], float length_m, float v) {
-    footprint_t cell[9];
+static void detect(const float o[3], const float d[TOF_RAYS_N][3], float length_m, float v) {
+    footprint_t cell[TOF_RAYS_N];
     int n = 0;
-    for (int k = 0; k < 9; k++) {
+    for (int k = 0; k < TOF_RAYS_N; k++) {
         float z = o[2] + length_m * d[k][2];
         int ix = cell_of(o[0] + length_m * d[k][0]) - org_x, iy = cell_of(o[1] + length_m * d[k][1]) - org_y;
         int layer = (int)floorf((z - G_BOTTOM_M) / GRID_M);
@@ -228,54 +205,52 @@ static void detect(const float o[3], const float d[9][3], float length_m, float 
     }
 }
 
-void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
+// How a zone's reading goes into the map.
+typedef enum { ZONE_NONE, ZONE_PASS, ZONE_READING } zone_use_t;
+
+// A zone with nothing in range is free NOTHING_M along its rays; one beyond the
+// frame's limit free up to it; an unsure one tells nothing.
+static zone_use_t zone_use(const tof_frame_t *f, int zone, float *length_m) {
+    const tof_zone_t *z = &f->zone[zone];
+    if (z->kind == TOF_NOTHING) { *length_m = NOTHING_M; return ZONE_PASS; }
+    if (!tof_valid(z)) return ZONE_NONE;
+    if (tof_beyond(f, zone)) { *length_m = (float)f->beyond_mm / 1000.0f; return ZONE_PASS; }
+    *length_m = (float)z->distance_mm / 1000.0f;
+    return ZONE_READING;
+}
+
+void cell_map_add(const posed_frame_t *f) {
+    if (!f->pose_known) return; // no odometry for that moment (PicoB not connected)
+    cell_map_follow(f->x_m, f->y_m);
     memset(hit_w, 0, sizeof hit_w);
     memset(pass_w, 0, sizeof pass_w);
     memset(frame_hit_z, NO_HIT_Z, sizeof frame_hit_z);
-    float origin[3], c = cosf(pose->yaw_rad), s = sinf(pose->yaw_rad);
-    rangefinder_origin(origin);
-    float o[3] = {pose->x_m + c * origin[0] - s * origin[1], pose->y_m + s * origin[0] + c * origin[1], origin[2]};
-    static const float frac[3] = {-1.0f / 3, 0, 1.0f / 3}; // 1/6, 1/2, 5/6 of the zone
-    reading_t judged_as[RANGEFINDER_RAYS];
-    // First every reading's judgement and the detections (the zone's nearest sure
-    // target, and the next one behind it: the wall behind a leg), so that this frame's
-    // passes already know where things were detected.
-    for (int i = 0; i < RANGEFINDER_RAYS; i++) {
-        uint16_t mm = frame->range_mm[i];
-        judged_as[i] = READ_FLOOR;
-        if (mm == RANGE_INVALID || mm == RANGE_NO_TARGET) continue;
-        float d[9][3];
-        for (int k = 0; k < 9; k++) {
-            float r[3];
-            rangefinder_sub_ray_direction(i, frac[k / 3], frac[k % 3], pose->pitch_rad, r);
-            d[k][0] = c * r[0] - s * r[1];
-            d[k][1] = s * r[0] + c * r[1];
-            d[k][2] = r[2];
-        }
-        float length_m = (float)mm / 1000.0f;
-        judged_as[i] = judge(i, length_m, origin[2], pose->pitch_rad, frac);
-        if (judged_as[i] == READ_OBSTACLE) detect(o, d, length_m, frame->status[i] == 5 ? 1.0f : 0.5f);
-        if (frame->range2_mm[i] == RANGE_NO_TARGET) continue;
-        float length2_m = (float)frame->range2_mm[i] / 1000.0f;
-        if (judge(i, length2_m, origin[2], pose->pitch_rad, frac) == READ_OBSTACLE)
-            detect(o, d, length2_m, frame->status2[i] == 5 ? 1.0f : 0.5f);
+    tof_verdict_t verdict[TOF_ZONES];
+    // First every reading's verdict and the detections, so that this frame's passes
+    // already know where things were detected.
+    for (int i = 0; i < TOF_ZONES; i++) {
+        float length_m;
+        verdict[i] = TOF_VERDICT_FLOOR;
+        if (zone_use(&f->frame, i, &length_m) != ZONE_READING) continue;
+        tof_rays_t r;
+        tof_rays_of(f, i, length_m, &r);
+        verdict[i] = r.verdict;
+        if (r.verdict == TOF_VERDICT_OBSTACLE) detect(r.origin, r.dir, length_m, f->frame.zone[i].kind == TOF_SURE ? 1.0f : 0.5f);
     }
-    for (int i = 0; i < RANGEFINDER_RAYS; i++) {
-        uint16_t mm = frame->range_mm[i];
-        if (mm == RANGE_INVALID) continue;
-        bool ends = mm != RANGE_NO_TARGET;
-        float length_m = ends ? (float)mm / 1000.0f : NOTHING_M;
-        float v = !ends || frame->status[i] == 5 ? 1.0f : 0.5f; // sure, or valid with less confidence
-        for (int a = 0; a < 3; a++)
-            for (int b = 0; b < 3; b++) {
-                float r[3];
-                rangefinder_sub_ray_direction(i, frac[a], frac[b], pose->pitch_rad, r);
-                float d[3] = {c * r[0] - s * r[1], s * r[0] + c * r[1], r[2]};
-                ray_end_t end = !ends ? END_PASS : judged_as[i] == READ_FLOOR ? END_HIT
-                              : judged_as[i] == READ_OBSTACLE ? END_NONE // detected above
-                              : o[2] + length_m * d[2] < G_TOP_M ? END_HIT : END_NONE; // unsure
-                walk_ray(o, d, length_m, end, v);
-            }
+    for (int i = 0; i < TOF_ZONES; i++) {
+        float length_m;
+        zone_use_t use = zone_use(&f->frame, i, &length_m);
+        if (use == ZONE_NONE) continue;
+        tof_kind_t kind = (tof_kind_t)f->frame.zone[i].kind; // nothing in range counts fully, as a sure reading
+        float v = kind == TOF_NOTHING || kind == TOF_SURE ? 1.0f : 0.5f; // also when "beyond" only passes
+        tof_rays_t r;
+        tof_rays_of(f, i, length_m, &r);
+        for (int k = 0; k < TOF_RAYS_N; k++) {
+            ray_end_t end = use == ZONE_PASS ? END_PASS : verdict[i] == TOF_VERDICT_FLOOR ? END_HIT
+                          : verdict[i] == TOF_VERDICT_OBSTACLE ? END_NONE // detected above
+                          : r.origin[2] + length_m * r.dir[k][2] < G_TOP_M ? END_HIT : END_NONE; // unsure
+            walk_ray(r.origin, r.dir[k], length_m, end, v);
+        }
     }
     for (int l = 0; l < CELL_LAYERS; l++)
         for (int ix = 0; ix < GRID; ix++)
@@ -289,7 +264,7 @@ void cell_map_add(const range_frame_t *frame, const pose_t *pose) {
                     if (frame_hit_z[l][ix][iy] != NO_HIT_Z) hit_z[l][ix][iy] = higher(hit_z[l][ix][iy], frame_hit_z[l][ix][iy]);
                     else if (C_STATE(grid[l][ix][iy]) != CELL_STATE_OCCUPIED) hit_z[l][ix][iy] = NO_HIT_Z;
                 }
-    around_the_robot(pose);
+    around_the_robot(f->x_m, f->y_m);
 }
 
 static column_t column_of(int ix, int iy, float min_confidence);

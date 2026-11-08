@@ -19,9 +19,6 @@
 #define STATUS_REG 0x1E
 #define OUTX_L_G   0x22 // gyro X..Z, then accel X..Z at 0x28
 
-#define ACCEL_G_PER_LSB  0.000061f // +-2 g: 0.061 mg/LSB
-#define GYRO_DPS_PER_LSB 0.00875f  // +-250 dps: 8.75 mdps/LSB
-
 static float bias_x, bias_y, bias_z;
 
 static void read_regs(uint8_t reg, uint8_t *buf, size_t len) {
@@ -62,22 +59,27 @@ bool imu_init(void) {
     return true;
 }
 
-static void read_raw(imu_sample_t *s) {
+// The output registers: gyro x, y, z, then accel x, y, z, each little-endian int16.
+static void read_raw(imu_sample_t *s, imu_counts_t *c) {
     uint8_t b[12];
     read_regs(OUTX_L_G, b, sizeof b);
-    int16_t v[6];
-    for (int i = 0; i < 6; i++) v[i] = (int16_t)(b[2 * i] | b[2 * i + 1] << 8);
-    s->gx = v[0] * GYRO_DPS_PER_LSB;
-    s->gy = v[1] * GYRO_DPS_PER_LSB;
-    s->gz = v[2] * GYRO_DPS_PER_LSB;
-    s->ax = v[3] * ACCEL_G_PER_LSB;
-    s->ay = v[4] * ACCEL_G_PER_LSB;
-    s->az = v[5] * ACCEL_G_PER_LSB;
+    for (int i = 0; i < 3; i++) {
+        c->gyro[i] = (int16_t)(b[2 * i] | b[2 * i + 1] << 8);
+        c->accel[i] = (int16_t)(b[6 + 2 * i] | b[6 + 2 * i + 1] << 8);
+    }
+    s->gx = c->gyro[0] * IMU_GYRO_DPS_PER_LSB;
+    s->gy = c->gyro[1] * IMU_GYRO_DPS_PER_LSB;
+    s->gz = c->gyro[2] * IMU_GYRO_DPS_PER_LSB;
+    s->ax = c->accel[0] * IMU_ACCEL_G_PER_LSB;
+    s->ay = c->accel[1] * IMU_ACCEL_G_PER_LSB;
+    s->az = c->accel[2] * IMU_ACCEL_G_PER_LSB;
 }
 
-bool imu_read(imu_sample_t *s) {
+bool imu_read(imu_sample_t *s, imu_counts_t *counts) {
     if (!(read_reg(STATUS_REG) & 0x02)) return false; // GDA
-    read_raw(s);
+    imu_counts_t c;
+    read_raw(s, &c);
+    if (counts) *counts = c;
     s->gx -= bias_x; s->gy -= bias_y; s->gz -= bias_z;
     return true;
 }
@@ -85,9 +87,10 @@ bool imu_read(imu_sample_t *s) {
 void imu_calibrate_gyro(int samples) {
     float x = 0, y = 0, z = 0;
     imu_sample_t s;
+    imu_counts_t c;
     for (int n = 0; n < samples; ) {
         if (!(read_reg(STATUS_REG) & 0x02)) continue;
-        read_raw(&s);
+        read_raw(&s, &c);
         x += s.gx; y += s.gy; z += s.gz; n++;
     }
     bias_x = x / samples; bias_y = y / samples; bias_z = z / samples;

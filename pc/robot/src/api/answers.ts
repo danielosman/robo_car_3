@@ -1,6 +1,6 @@
 // The answers (doc/CLI_API_PLAN.md): one JSON line per queued command, when it has
 // ended, always the same fields:
-//   command  as typed: "steer d50", "snap", "recording on"
+//   command  as typed: "steer d50", "snap", "mode idle"
 //   result   ok, obstacle (a move stopped early before an obstacle on the map),
 //            limited (a goto further than 3 m went 3 m), stopped (by stop),
 //            safety_stop, failed, dropped (never ran: one before it didn't end ok)
@@ -9,7 +9,7 @@
 //   moved, rotated   for a move: cm straight from where it started, degrees turned
 //   snapshot for a snap: its number
 // Units are cm and degrees, said once in the help.
-import type { DoneRecord, Pose } from "../robot.ts";
+import type { DoneRecord, Pose } from "../link.ts";
 import { MOVE } from "./firmware.ts";
 import { isMove, type Command } from "./commands.ts";
 

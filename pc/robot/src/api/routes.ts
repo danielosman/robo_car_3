@@ -2,7 +2,7 @@
 //   POST /api/robot/<command>        the body: its arguments ("d50 r30", "on", "42"); flags as query
 //                                    parameters (?png, ?nowait, ?from=page)
 //   GET  /api/robot/help[/<command>] the help, as text
-// steer, snap, stop, clear_map, recording and mode go into the queue (stop skips it):
+// steer, snap, stop, clear_map, mode and config pre_ms|post_ms go into the queue (stop skips it):
 // one JSON line per command streams back as each ends; ?nowait answers only what was
 // queued. check, the reads (reads.ts), and detect, detect_save and objects (objects/api.ts) answer one JSON object at once. A command
 // the API can't take is answered 400 ("result":"failed"); an unknown one 404.
@@ -12,7 +12,7 @@ import type { Answer, Sender } from "./answers.ts";
 import { checkMoves } from "./check.ts";
 import { help } from "./help.ts";
 import { formatJson } from "./json.ts";
-import { READS, ReadError, findSnapshot, mapOf, type ApiContext } from "./reads.ts";
+import { READS, ReadError, TextAnswer, findSnapshot, mapOf, type ApiContext } from "./reads.ts";
 import { OBJECT_COMMANDS } from "../objects/api.ts";
 
 const JSON_TYPE = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -33,7 +33,9 @@ export function createApi(ctx: ApiContext): Hono {
     const sender: Sender = c.req.query("from") === "page" ? "page" : "cli";
     const refuse = (why: string) => json(line({ command: `${name} ${arg}`.trim(), result: "failed", why }), 400);
 
-    if (name === "steer" || name === "check" || name === "stop" || parseAction(name, "") !== null) {
+    // config's auto_snap and config alone are read here; pre_ms and post_ms go to the robot.
+    const queuedAction = parseAction(name, "") !== null && (name !== "config" || /^(pre|post)_ms\b/.test(arg));
+    if (name === "steer" || name === "check" || name === "stop" || queuedAction) {
       const parsed: Parsed = name === "steer" || name === "check" ? parseSteer(arg)
         : name === "stop" ? (arg ? { error: "stop takes nothing" } : { commands: [{ name: "stop", values: [] }] })
         : parseAction(name, arg)!;
@@ -44,7 +46,9 @@ export function createApi(ctx: ApiContext): Hono {
     const read = READS[name] ?? OBJECT_COMMANDS[name];
     if (!read) return json(line({ error: `${name} is not a command (robot --help lists them)` }), 404);
     try {
-      return json(formatJson(await read.run(ctx, arg ? arg.split(/\s+/) : [], flags, { body: arg, query: c.req.query() })));
+      const answer = await read.run(ctx, arg ? arg.split(/\s+/) : [], flags, { body: arg, query: c.req.query() });
+      if (answer instanceof TextAnswer) return new Response(answer.text, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+      return json(formatJson(answer));
     } catch (err) {
       if (err instanceof ReadError) return json(line({ error: err.message }), err.status);
       throw err;
@@ -63,12 +67,23 @@ export function createApi(ctx: ApiContext): Hono {
     }
   }
 
+  // A config pre_ms / post_ms the robot took: the still times now (until a move says them).
+  function stillSet(a: Answer): void {
+    const m = /^config (pre|post)_ms (\d+)$/.exec(a.command);
+    if (!m || a.result !== "ok") return;
+    const now = ctx.live.still ?? { preMs: 200, postMs: 200 }; // not said yet: the robot's power-up values
+    ctx.live.setStill(m[1] === "pre" ? Number(m[2]) : now.preMs, m[1] === "post" ? Number(m[2]) : now.postMs);
+  }
+
   // Into the queue (stop past it); each answer streams back as its command ends.
   function queued(commands: Command[], sender: Sender, nowait: boolean): Response {
     let open = true;
     const stream = new ReadableStream<string>({
       start(controller) {
-        const write = (a: Answer) => { if (open) controller.enqueue(`${line(a)}\n`); };
+        const write = (a: Answer) => {
+          stillSet(a);
+          if (open) controller.enqueue(`${line(a)}\n`);
+        };
         const close = () => { if (open) { open = false; controller.close(); } };
         const finished = commands[0].name === "stop" ? ctx.queue.stop(sender, write) : ctx.queue.submit(commands, sender, write);
         if (nowait) { controller.enqueue(`${line({ queued: commands.map(commandText) })}\n`); close(); }

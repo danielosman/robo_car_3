@@ -1,5 +1,5 @@
 #pragma once
-// Camera features (doc/ARCHITECTURE.md, vision; doc/archive/CAMERA_MOTION_PLAN.md §5-6,
+// Camera features (doc/ARCHITECTURE.md, vision; doc/archive/WATCH_CAMERA_PLAN.md §5-6,
 // milestone V1): corners found in the camera image and followed from frame to
 // frame. Each processed frame gives one record (vision_frame_t) of what was
 // measured: every feature's place (sub-pixel), its measured move since the
@@ -102,7 +102,7 @@ typedef struct {
 void vision_reset(void);   // forgets every feature
 // The core, on one image (host tests call it directly); pose and prev_pose may be NULL.
 const vision_frame_t *vision_process(const vision_image_t *image, const vision_pose_t *pose);
-void vision_update(void);  // call every loop iteration, after motion_sense (it takes the camera's frames)
+void vision_update(void);  // call every loop iteration, after watch (it takes the camera's frames)
 void vision_request(void); // process the next frame, whatever the rate (a snapshot wants its features)
 const vision_frame_t *vision_latest(void); // NULL before the first processed frame
 void vision_status(vision_status_t *status);

@@ -5,7 +5,8 @@ PCB bring-up is complete (tag `pcb-bringup-v1`): every connected part was
 verified with the bring-up firmware and viewer described below. The robot
 firmware (`app/` per Pico) maps its surroundings with a ToF sensor, watches for
 movement and turns to follow it, and drives on command; PicoA (a Pico 2 W) sends
-its console and recordings over WiFi to a server on the PC. The code is the source
+its console, its moves with their ToF frames and imu records (PicoB's IMU, 104 a
+second) and its snapshots over WiFi to a server on the PC, which stores them in DuckDB. The code is the source
 of truth for configuration and protocol details.
 
 **Start here:** [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) (how the robot works,
@@ -19,8 +20,8 @@ robo_car_3/
 ├── .vscode/             # Run / Flash / Debug ask which firmware (picoA/… or picoB/…)
 ├── run_tests.sh         # host tests, no Pico needed
 ├── doc/                 # ARCHITECTURE.md, TODO.md, CHANGELOG.md, GLOSSARY.md; archive/: the old plans
-├── common/              # shared by both Picos: the inter-Pico link, time/angle/statistics helpers (+ host tests)
-├── tools/               # lint.sh; replay.sh + replay_map.c (the map on a recording); stack_depth.py
+├── common/              # shared by both Picos: the inter-Pico link, the mounting (mounting.json), time/angle/statistics helpers (+ host tests)
+├── tools/               # lint.sh; stack_depth.py
 ├── picoA/               # A1 — sensors: camera, ToF, color (MLX90640 planned)
 │   ├── CMakeLists.txt   # picoA_drivers library + one executable per firmware
 │   ├── drivers/         # ToF, camera (HM0360), OPT4048; lib/vl53l8cx/ = ST ULD driver
@@ -43,7 +44,8 @@ One configure and build produces every firmware. Drivers are shared: each Pico's
 `CMakeLists.txt` builds the robot firmware and the bring-up firmware from the same
 `picoX_drivers` library, so the bring-up firmware keeps building and can be used
 to re-test hardware (e.g. a new PCB revision).
-Code shared between the Picos (the inter-Pico link; `stamp.h` time differences
+Code shared between the Picos (the inter-Pico link; `mounting.json`, where the
+sensors sit, which the build turns into `robot_mounting.h` and the PC reads; `crc32.h`; `stamp.h` time differences
 across the clock's wrap, `geom.h` bearings and angles, `stats.h` n-th value and
 median; `clock_start.h`: both Picos start their clock 30 s before
 `time_us_32()` wraps, so every run crosses the wrap 30 s after power-up) is in `common/`.
@@ -59,20 +61,25 @@ http://127.0.0.1:8081/, which share one queue and one log. Start the server
 
 ```sh
 ./robot --help                # everything: the commands, the answers, the units
-./robot steer r30d50          # rotate 30° left, then drive 50 cm (a snap after each move)
+./robot steer r30d50          # rotate 30° left, then drive 50 cm (two moves; a snap after each)
 ./robot check g120,40         # what going to (120, 40) would do on the map; nothing moves
 ./robot snap                  # take a snapshot
 ./robot status; ./robot map; ./robot camera
+./robot frames <boot> 3       # move 3's ToF frames, from the database (--json for a program)
+./robot imu <boot> 3          # move 3's imu records (the IMU's raw counts, 104 a second)
+./robot config pre_ms 300     # stand still 300 ms before each move (post_ms: after; 200 each)
 ./robot stop
 ```
 
 Every answer is JSON, e.g. `{"command":"steer d50","result":"ok","pose":{"x":51,"y":0,"yaw":0},"moved":50,"rotated":0}`.
 After every move a snapshot (pose, camera picture and features, ToF frame,
 colour, its map) is stored; the page shows any of them back in time, with the path
-driven, and sends the robot where you click on the map. With `./robot recording on` each
-action is also recorded in full and can be looked at in 3D at
-http://127.0.0.1:8081/viewer. Typed on PicoA's USB serial monitor, the same
-commands work for debugging (`drive 50`, `status`).
+driven, and sends the robot where you click on the map. Each action is a move: the
+robot stands still 200 ms, acts, stands still 200 ms, and sends every ToF frame and
+imu record of the move; the server stores the moves, frames, imu records, statuses
+and snapshots in `pc/robot/recordings/robot2.duckdb` as they arrive (`robot frames`
+shows a move's frames, `robot imu` its imu records). Typed on PicoA's USB serial monitor, the same commands work for debugging
+(`drive 50`, `status`).
 
 - **Host tests:** `./run_tests.sh` runs them on the Mac, no Pico needed, and stops
   at the first failure. The fake clock starts 30 s before `time_us_32()` wraps, so
@@ -80,16 +87,21 @@ commands work for debugging (`drive 50`, `status`).
   the server. Run them after every change.
 - **Linters:** `tools/lint.sh`: cppcheck on the C (`brew install cppcheck`), ESLint
   and tsc on `pc/robot` (`npm run lint`, `npm run typecheck`). Kept clean.
-- **Replay:** `tools/replay.sh <take id>` runs the robot's map code on a recorded
-  take (needs the take in DuckDB: `npm run import` in `pc/robot/`).
-- **The viewer without the robot:** in `pc/robot/`, `npm run snapreplay -- <boot id>`
-  turns a recorded drive into snapshots (the robot's own map and snapshot code);
-  then `ROBOT_PORT=4311 PORT=8091 DATA_PORT=4312 ANNOUNCE_TO=127.0.0.1 npm start` (a
-  server the robot doesn't find) and `ROBOT_PORT=4311 npm run fakerobot --
-  recordings/snapshots/raw/replay-boot-<id>.snap`, and open
-  http://127.0.0.1:8091/, or `ROBOT_API=http://127.0.0.1:8091 robot …`. The fake
-  robot answers every command, driving its pose at the robot's speeds (the
-  snapshots it sends are the file's).
+- **The page without the robot:** in `pc/robot/`, start a test server with a
+  database and pictures of its own, which the robot doesn't find:
+  `RECORDINGS=/tmp/robocar-test ROBOT_PORT=4311 PORT=8091 ANNOUNCE_TO=127.0.0.1 npm start`;
+  then, in another terminal, replay a stored boot to it: `ROBOT_PORT=4311 npm run
+  fakerobot -- <boot id>` (`robot status` gives a boot's id; `--speed=10` replays
+  10 times faster, `--no-replay` only answers commands). Open http://127.0.0.1:8091/,
+  or `ROBOT_API=http://127.0.0.1:8091 ./robot …`. The fake robot reads the boot from
+  `recordings/robot2.duckdb` (`ROBOT_DB` for another), sends its moves, frames,
+  statuses and snapshots as they came, then answers every command, each as a move,
+  driving its pose at the robot's speeds; `snap` sends the boot's snapshots one
+  after another.
+- **Old drives** (before 7 Nov: the recordings, takes, the 3D viewer): the new code
+  never opens `recordings/robot.duckdb`. Look at them with the code of then:
+  `git checkout data-v1`, `npm ci && npm start` in `pc/robot/` (it opens the old
+  file), then `git checkout main` (and `npm ci`) to come back. No converter.
 
 ### The map as text (`robot map`)
 
@@ -107,8 +119,9 @@ to the left; one character per column (`rows`), the top-left cell's x and y give
 | blank | unknown |
 | `R`, `*`, `o` | the robot, the point 30 cm ahead of it, the path driven since the map was last cleared |
 
-Standing still, the floor is seen in rings at each zone row's distance (~20, 30, 45,
-70 cm); driving fills the rest.
+Standing still, the floor is seen in rings at each zone row's distance (computed for
+the ToF at 9 cm: ~25-33, 33-48, 48-95 cm from the centre, row 5 beyond; ~20, 30, 45,
+70 cm before the lift); driving fills the rest.
 
 A flat face often fills two cells (`##`): the map marks where the face was seen,
 not how thick the object is.
@@ -123,27 +136,166 @@ not how thick the object is.
 | Gyro scale | 0.42 % low (~1.5° per full turn): no correction (M5's full-turn check will) |
 | Effective track width | 28.6 cm (geometric 22.5 cm: the wheels skid) |
 | Turning in place | the body slides ~1.5 cm per turn, which odometry can't see; roll −3…−5° |
-| Floor rows 6 / 7 / 8 | see the floor at ~47 / 31 / 21 cm along the ray; rows 7-8 steady to ±1-2 cm |
+| Floor rows 6 / 7 / 8 | before the lift (ToF at 7 cm): see the floor at ~47 / 31 / 21 cm along the ray; rows 7-8 steady to ±1-2 cm. At 9 cm computed ~61 / 37 / 27, not measured yet |
 | Camera (living room, evening light) | line period 42.7 µs (~12 MHz pixel clock, 512 per line); exposure 40 ms × gain 5.9 for mean brightness ~98, so 24.9 frames/s; a still scene's blocks repeat within ±1 between frames (no flicker bands) |
-| VL53 unsure readings | most zones above the floor rows report a faint unsure target at ~30 cm (signal 3-10 kcps/SPAD), the distance where rows 7-8 see the floor (150-730): the floor's echo inside the sensor; the real target is the next one, sure. Use only sure targets (status 5, 6, 9) |
+| VL53 unsure readings | before the lift (ToF at 7 cm): most zones above the floor rows report a faint unsure target at ~30 cm (signal 3-10 kcps/SPAD), the distance where rows 7-8 see the floor (150-730): the floor's echo inside the sensor; the real target is the next one, sure. Use only sure targets (status 5, 6, 9) |
 | VL53 on the waxed floor | the 6th row sometimes reads a reflection (e.g. the wall); rows 7-8 can read "beyond the floor" in front of glossy furniture (`?`); status 12 zones (two surfaces in one zone) come and go with the scene |
 
 ### Memory and stack (computed from the build, PicoA)
 
 | | Value |
 |---|---|
-| RAM | ~103 KB free of 512 (12 Oct, computed from the build; `p` prints it): the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB came on top of 11 Oct's ~195 KB free; everything static, no `malloc` linked |
-| Core-0 stack | ~6.5 KB worst case: main loop 4.8 KB (`observations()` in `tof_motion.c` 3.2 KB), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
+| RAM | ~51 KB free of 512 (7 Nov, computed from the build; `status` prints it): the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB came on top of 11 Oct's ~195 KB free, the ToF pipeline's frames 1.8 KB on 7 Nov; step 4a's link to the PC took ~54 KB more (the bulk lane 40 KB, lwIP's send buffer +12 KB, the snapshot's part buffers 2.8 KB); step 4b freed the recorder's ~5 KB; step 4c's imu records kept and the batch took ~0.5 KB net; everything static, no `malloc` linked. Step 6 frees ~31 KB |
+| Core-0 stack | ~6.4 KB worst case: main loop 4.8 KB (`watch_tof_add()` 4.3 KB, its blobs included), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
 
 `tools/stack_depth.py` recomputes the stack (how to build for it: the script's
 header). Re-run it after adding big locals and before core 1 is started.
+
+### Robot tests after the data-flow rework (run once, after the last step)
+
+The rework ([doc/DATA_FLOW_PLAN.md](doc/DATA_FLOW_PLAN.md)) is built step by step
+with host tests only; both Picos are flashed once at the end
+(`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`), then these run in order.
+`./robot` in `pc/robot/`, `npm start` running, the page open. Paste the terminal.
+
+**Step 1: the mounting and the higher PCB** (both Picos; the ToF at 9 cm, the camera
+at 10.8 cm, `common/mounting.json`). Robot on the floor, nothing within 2 m ahead, battery on:
+0. `robot status` (or `status` on USB): "ToF: 10 Hz set, 10.0 frames a second"
+   (about 10; the rate step 2 set).
+1. `robot snap`, then `robot tof`: in columns 3-6, rows 8 / 7 / 6 read ~27 / 37 /
+   61 cm (computed; within ~10 %); row 5 ~180 cm or nothing. Before the lift they
+   read 21 / 31 / 47 (the table above). Far off: the height or the ToF's tilt in `mounting.json` is
+   wrong.
+2. `robot steer r390`, then `robot map` and the page: the walls where they are, no
+   `#` on the open floor, `.` in rings from ~25 cm out, `:` between them.
+3. A box ~10 cm tall 50 cm ahead: `robot steer r30`, `robot steer r-30`, `robot
+   map`: the box blocked (`#`); `robot check d100` says `"result": "obstacle"`.
+
+**Step 2: 10 Hz** (PicoA; the ToF runs at 10 frames a second, watching counts in
+time). Robot on the floor, room around it, the page's log open:
+1. `robot status` (or `status` on USB): "ToF: 10 Hz set", about 10 frames a
+   second; the loop's worst time no higher than before.
+2. `robot steer r390`: the turn as before; `robot map`: the walls where they are.
+3. `robot steer w60`, nobody moving, robot still for 20 s: no "Movement (ToF)"
+   lines in the log (a few right after it stops is a fault).
+4. Then walk slowly across at ~1 m, left to right, and stop off to its right.
+   Expected: "Movement (ToF): … 1.0 m" lines, "Target (new)", the robot turns
+   towards you and stops facing you, "Watching: facing the movement". Then stand
+   still: within ~1-2 s "Movement (ToF) ended" and no new lines.
+5. The same walking faster (~2 m away, quick steps): it turns after you, then
+   "nothing moves" once you are out of view.
+
+**Step 3: the ToF pipeline** (PicoA; the map and watching read each frame packed
+and unpacked, one target per zone; movement detection is now `watch`). Robot on
+the floor, a room around it, the page's log open:
+1. `robot status`: "ToF: 10 Hz set", about 10 frames a second; the loop's worst
+   time no higher than before; "RAM free" about 51 KB (after the steps that followed).
+2. A room's map: `robot clear_map`, `robot steer r390`, then `robot map` and the
+   page: the walls where they are, no `#` on the open floor, `.` in rings from
+   ~25 cm out. Walls farther than ~2.5 m may be fainter than before (they read
+   "beyond 2.54 m" now: free up to there, not marked); nothing else should change.
+   Compared with before, fewer `#` behind walls and objects (no second targets).
+3. A box ~10 cm tall 50 cm ahead: `robot check d100` says `"result": "obstacle"`.
+4. A watch: `robot steer w60`, still for 20 s: no "Movement (ToF)" lines; then walk
+   across at ~1 m: "Movement (ToF): … 1.00 m", "Target
+   (new)", it turns towards you and stops facing you; stand still: "Movement (ToF)
+   ended" within ~1-2 s.
+5. Watching far: someone walking across ~2.7 m away in front of a far wall (~3.5 m)
+   is not seen any more (known, accepted: the format ends at 2.54 m); at ~2 m they
+   are.
+
+**Step 4a: framed messages** (PicoA and the server; the robot and the PC now talk
+in messages, `wire`; the console, status, answers and snapshots each have their
+own; the snapshot goes in parts on a second lane that never holds up an answer).
+Restart the server (`npm start`) with this repo's code first. Robot on the floor,
+the page open:
+1. Power PicoA. The log: `robot connected from … (boot <8 hex>, firmware of <today's
+   build>)`, then the robot's lines (WiFi, Server). The page's pill: "Robot <ip>,
+   -NN dBm"; the robot drawn where it is. With an old server or old firmware the
+   log says `refused: it speaks wire version …` or `unknown message type`: flash
+   or restart the other side.
+2. `robot status`: the answer as before; the robot's printout in the log has
+   a line `Link: control 0 B waiting (0 console lines or status dropped, 0
+   refused); bulk 0 B waiting, 0 frames dropped`. "RAM free" about 51 KB (47 after 4a, 52 after 4b, 51 after 4c). The `Link:` line ends `; TCP refused 0 writes`.
+3. `robot steer r30d30`: both moves answered (`"result": "ok"`, moved ~30), a snap
+   after each, the page shows the new snapshots. Then `robot snap` five times
+   quickly: five numbers, one after another, each picture on the page.
+4. `robot clear_map`: `"result": "ok"`; the log shows "Map cleared" and the
+   server's note "the robot's map was cleared".
+5. Robot lost: switch PicoA off for 10 s and on again: the log says the connection
+   closed, then `robot connected …` with a new boot; `robot snap` works.
+6. The server restarted, the robot on: stop `npm start` (Ctrl-C) while the robot
+   stands still, wait 10 s, start it again. Within a few seconds the
+   log says `robot connected …` with the **same** boot id as in step 1 (the robot
+   kept running); `robot snap` works; `robot status`'s `Link:` line shows how many
+   console lines or statuses were dropped while the server was away (some are
+   fine; "refused" should be 0).
+7. The worst WiFi spot (where the signal is lowest, e.g. -75 dBm or below): `robot
+   steer r360`, then `robot snap` three times. Note how long each answer takes
+   (`time ./robot snap`) and any "nothing from the robot" notes in the log; then
+   `robot status` and paste the `Link:` line (anything dropped or refused?).
+
+**Step 4b: moves and frames** (PicoA and the server; each action is a move: still
+200 ms before and after, its ToF frames to the PC only during it, all stored in the
+new database `pc/robot/recordings/robot2.duckdb`; `robot.duckdb` isn't touched). Restart
+the server first. Robot on the floor, a room around it, the page open:
+1. `robot status`: note `"boot"`. The USB printout of `status` (or the log after
+   `robot status`) ends with `Moves: 0 ended; still 200 ms before and 200 ms after each (config pre_ms, post_ms)`.
+2. `robot steer r90`: answered ok as before; the log shows `Turn 1: N ToF frames
+   sent, 0 dropped` with N about 10 a second of the move (a 90° turn ~3-4 s: ~35).
+   The turn starts ~0.2 s after the motors come on, and stops ~0.2 s before they go
+   off. Then `robot steer d30 r-90`: two moves (2 and 3), each with its line.
+3. A watch: `robot steer w20`, walk across once: it turns towards you as before;
+   then `Watch 4: ~200 ToF frames sent, 0 dropped`.
+4. `robot frames <boot> 1`: the turn: kind turn, `ended ok`, the frames sent and
+   dropped (0), then each frame's pose (yaw growing) and its 8 × 8 distances; the
+   bottom rows ~27 / 37 / 61 cm before the turn. `robot frames <boot> 4 --json |
+   head -c 400`: the same as JSON. Paste the first 20 lines of each.
+5. `robot config pre_ms 1000`, `robot steer r30`: it stands a full second before
+   turning; `robot config` shows `"pre_ms": 1000`. `robot config pre_ms 200` again.
+6. The page: live as before (pose, snapshots after each move, the ToF grid with `~`
+   for less sure and `>254` for beyond 2.54 m); `robot tof` shows `kind` and `sigma`,
+   no `distance_2`. Stop the server and start it again with the robot on: `robot
+   steer r30`, then `robot frames <boot> 6` works (the same boot, moves go on).
+7. In the worst WiFi spot: `robot steer r360`; its line says how many frames were
+   dropped (the bulk lane full: some are fine there; paste it).
+
+**Step 4c: the IMU** (both Picos and the server; the link version went up to 6 and
+the wire version to 3: flash both, restart the server. During every move the robot
+sends the IMU as it measured, 104 records a second, in batches of 10; the server
+stores them, `robot imu` lists them; the jolt and tilt peaks are gone). Robot on the
+floor, the page open:
+1. `robot status`: no `safety` in the answer (the jolt and tilt are gone); note
+   `"boot"`. The USB printout of `status` (or the log after `robot status`) has a line
+   `IMU: N records from PicoB (104 a second), 0 not taken in time; on PicoB 0 lost
+   (its queue full), 0 dropped (a sample skipped)`; N grows by ~104 a
+   second (`status` twice, 10 s apart: ~1040 more).
+2. `robot steer r90`, then `robot steer d30`, then `robot steer w10` (nobody
+   moving). Each move's log line ends `; M imu batches sent, 0 dropped`, M about 10 a
+   second of the move (a 90° turn of ~4 s with its still times: ~40).
+3. `robot frames <boot> <move>` for each of the three: the third line says `imu: R
+   records stored (S s at 104 a second), 0 missing (gaps), M of M batches; 0 dropped
+   on the robot; 0 lost`. S is about the move's time (the second line's "after T s"),
+   within ~0.1 s. Missing must be 0: anything else is a hole in the training data
+   (paste the line, and the `IMU:` line of `status`: "lost" and "dropped" on PicoB
+   say whether PicoB's loop was too slow).
+4. `robot imu <boot> <move>` for the turn: one line a record, 9.6 ms apart; `az`
+   ~16400 (1 g) standing still; `gz` large (±2000-4000) during the turn and near 0
+   (a few counts: the gyro's bias) before and after. Paste the first 10 lines and 10
+   from the middle. `robot imu <boot> <move> --json | head -c 300`.
+5. A bump: `robot steer d50` and tap the robot lightly from the front while it
+   drives. `robot imu <boot> <move>`: a few records with `ax` far from the rest
+   (thousands of counts). Paste them.
+6. The tilt stop still works: lift the robot's front by hand ~20° during `robot
+   steer d50`: it stops, the answer says `safety_stop`, why `tilt`.
 
 ### Robot tests (repeat after changes)
 
 Since 14 Oct the robot takes commands, not keys. The older tests below are written
 in the keys; read them as (`./robot` in `pc/robot/`): `f` → `robot steer d50` (`r`,
 `f` → `d-50`), `t` → `steer r30`, `s` (scan) → `steer r390`, `a` → `steer w60`, `S` →
-`robot snap`, `C` → `robot clear_map`, `R` → `robot recording on|off`, `M` → `robot
+`robot snap`, `C` → `robot clear_map`, `R` (recording: gone since 7 Nov; every move's
+frames are stored, `robot frames`), `M` → `robot
 mode manual|idle`, space → `robot stop`, `p` → `robot status` (or `status` typed on
 USB for PicoA's diagnostics: link, loop time, RAM), `m` → `robot map`, `z` → `robot
 tof`, `v` → `robot features`, `5` (record 5 s) → `steer w5` with nothing moving. The
@@ -166,8 +318,9 @@ robot's own words (`drive 50`, `snapshot`).
 4. A few more snapshots, one at a time (e.g. 19, 49, 61, 85), each looked at on the
    page: near objects (under ~1 m) should land close to the ToF's points on the
    map; far ones can be off a lot (the model's bottom edge; OBJECTS_PLAN.md).
-5. After a change of the camera's numbers in `src/objects/place.ts`: `npm run
-   place-objects` places the saved boxes again.
+5. After a change of the camera's numbers in `common/mounting.json`: `npm run
+   place-objects` places the saved boxes again (all boots: the ones from before the
+   PCB was lifted then come out wrong).
 6. Boxes from an outside agent (18 Oct): `robot camera 31` gives the picture's file;
    look at it, then `robot detect_save 31 --by=claude-code '{"objects":[{"label":
    "object","bbox":[500,300,800,600],"confidence":80}]}'`. The answer looks like
@@ -178,9 +331,8 @@ robot's own words (`drive 50`, `snapshot`).
 **Steering through the API** (14 Oct; both Picos flashed: the link version went up;
 battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot` in
 `pc/robot/`). Paste the terminal and the page's log:
-1. `robot status`: `"connected": true`, the pose, `"mode": "manual"`, `"recording":
-   false`, and `safety` (jolt near 0 g on x and y, small on z; tilt a few degrees
-   at most).
+1. `robot status`: `"connected": true`, the pose, `"mode": "manual"` (no `safety`
+   since step 4c of the data-flow rework: the jolt and tilt peaks went).
 2. `robot steer r390`: after ~14 s `{"command":"steer r390","result":"ok",…,
    "rotated":390}`, then `{"command":"snap","result":"ok",…,"snapshot":N}`. The
    page's log shows both lines with `[cli]`, and the new snapshot.
@@ -199,13 +351,10 @@ battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot`
    (the yellow cross goes when its answer comes), Stop. `robot log` shows them with
    `[page]`. A box with "abc" says what it wants.
 7. Out of range or no number: `robot steer d400`, `robot steer d` answer
-   `"result":"failed"`, nothing moves. `robot recording on`, `robot steer d20`,
-   `robot recording off`: one take (the take list), recording shown on the page's
-   button. `robot config auto_snap off`, `robot steer d10`: no snap after it; `robot
+   `"result":"failed"`, nothing moves. `robot config auto_snap off`, `robot steer d10`: no snap after it; `robot
    config auto_snap on` again.
-8. Bump the robot lightly by hand while it drives (`robot steer d50`): `robot
-   status` shows a larger jolt on x afterwards. Paste it: this is the measurement
-   the bump stop will be set from.
+8. (Gone since step 4c of the data-flow rework: `robot status` has no jolt. A bump
+   shows in the move's imu records, `robot imu <boot> <move>`; step 4c's test below.)
 
 **M0** (after changes to `drive`, `odometry` or the link):
 1. Flash `picoB_app` onto PicoB and `picoA_app` onto PicoA. Keep the robot still
@@ -360,11 +509,11 @@ Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
 3. `R`: "Recording: on; each action is recorded". `5`: "Record: 5 s…", then
    "Record done", "Recorded take 1: … ToF frames sent, 0 failed; … datagrams, 0
    refused; … KB". On the page: "recordings from boot …: saving to
-   raw/…-boot-….rec", then "take 1 (5 record, …): done; 5.0 s; ~75 ToF frames
-   (15/s), 0 missing; … datagrams, 0 lost…".
+   raw/…-boot-….rec", then "take 1 (5 record, …): done; 5.0 s; ~50 ToF frames
+   (10/s; 15/s before Nov), 0 missing; … datagrams, 0 lost…".
 4. Robot on the floor with room: `s` (scan). Then `a` (watch) and walk around it
    for the minute. Each ends with a "Recorded take" line and a take note on the
-   page. Expected: ~15 frames/s, no stalls; while turning, a few datagrams lost
+   page. Expected: ~10 frames/s, no stalls; while turning, a few datagrams lost
    (half frames and "missing" frames in the note); how many is what this test
    measures.
 5. During a watch press `p`, then space: the take ends "stopped".
@@ -458,7 +607,7 @@ lights on. Paste each `v`:
 **Move stops before obstacles, and a drive around the room** (M4 step 1; both Picos,
 WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):
 1. Flash `picoA_app`. Power up near the middle of the room (the map is 6 × 6 m
-   around the power-up point), keep the robot still ~1 s. `R` (recording on).
+   around the power-up point), keep the robot still ~1 s.
 2. `s` (scan). Then turn (`t`) until it faces a piece of furniture 40-70 cm away
    and `f`. Expected: "Move stopped: obstacle N cm ahead (map), moved M cm"; N is
    to the map's cell, so the real gap from the front edge is 15-25 cm. Measure it.
@@ -467,8 +616,8 @@ WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):
 5. Drive around the room with `t`, `f` and an `s` now and then; keep a finger on
    space for the first moves (thin legs and things under ~8 cm may be missed).
    End where you started, facing the same way, and `s`.
-6. In the viewer (http://127.0.0.1:8081/viewer) pick "whole drive" for this boot:
-   the points and the replayed map of every take together, the path on the floor.
+6. (Until 7 Nov: the 3D viewer's "whole drive"; now `robot frames <boot> <move>` per
+   move, and a viewer for the stored frames is in TODO.md.)
    The two scans at the start point show the odometry's drift (a wall seen twice).
    Note any move that stopped early or touched something.
 
@@ -578,7 +727,7 @@ while the wheel turns: encoder wiring or power. Paste a few lines of each side.
 In `picoA/`: `drivers/camera.c` (camera driver: continuous capture into three
 buffers, one interrupt per frame, its own exposure control, row times) with
 `drivers/hm0360_init.h` / `hm0360_regs.h` / `hm0360.pio`, and `bringup/camera.c`
-(the bring-up main loop and serial commands); `drivers/tof.c` / `drivers/lib/vl53l8cx/`: ST ULD integration
+(the bring-up main loop and serial commands); `drivers/vl53.c` / `drivers/lib/vl53l8cx/`: ST ULD integration
 (`bringup/tof_stream.c`: the viewer's ToF packets and commands);
 `drivers/opt4048.c`: OPT4048 polling and raw telemetry (conversion to lux/XYZ is in
 `pc/bringup/src/opt4048.ts`).
@@ -670,7 +819,7 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
   the top row, row 8 the bottom; column 1 is on the left as the robot sees it.
   Rows 1-4 look up, rows 5-8 down (row r's centre is (r − 4.5) × 5.625° below
   level); rows 7-8 see the floor close by, row 6 further out, row 5 meets it only
-  beyond ~65 cm. Only array indexes in the code start at 0 (`row index 4` is row
+  beyond ~90 cm (the ToF at 9 cm; ~65 cm before the PCB was lifted). Only array indexes in the code start at 0 (`row index 4` is row
   5); comments that name a row say "index" when they mean one. The sensor's own
   zone numbers (0-63, `zone` in the database) are not rows.
 

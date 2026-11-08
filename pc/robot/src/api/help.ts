@@ -5,7 +5,7 @@ import { READS } from "./reads.ts";
 import { OBJECT_COMMANDS } from "../objects/api.ts";
 
 const UNITS = `Units: distances and positions in cm, angles in degrees (+ is left), picture positions in
-pixels, jolt in g, WiFi in dBm, light in lux.
+pixels, WiFi in dBm, light in lux.
 
 The map frame: x points forward from where the robot was at power-up, y to its left.
 pose is where the robot is: {"x":51,"y":0,"yaw":30} is 51 cm forward, facing 30° left.`;
@@ -38,8 +38,11 @@ ${MOVES.map(m => {
   return `  ${(m.letter + values).padEnd(18)} ${m.does}`;
 }).join("\n")}
 
-Every move needs its numbers. With auto_snap on (the default, robot config), a snap
-runs after each move, with its own answer line.
+Every move needs its numbers. Each stands still 200 ms before and after (robot config
+pre_ms, post_ms); the robot sends its ToF frames and imu records meanwhile (robot frames
+and robot imu show them).
+With auto_snap on (the default, robot config), a snap runs after each move, with its
+own answer line.
 --no-wait answers only {"queued":[...]} and returns; the answers are in robot log.
 Ctrl-C leaves the moves queued; robot stop stops them.
 
@@ -51,8 +54,6 @@ const ACTIONS_HELP: Record<string, string> = {
   stop: "robot stop\n\nStops the robot at once: motors off, mode idle. It skips the queue, and everything waiting is\n" +
         "dropped. The move it interrupted answers \"stopped\".",
   clear_map: "robot clear_map\n\nClears the map. The path on the map starts again from here.",
-  recording: "robot recording on|off\n\nRecords every action in full (every sensor reading), for looking at later in\n" +
-             "the 3D viewer. Off at power-up.",
   mode: "robot mode idle|manual\n\nidle: the robot stands with the motors off. manual: commands steer it (after power-up).\n" +
         "A move in idle switches to manual.",
   check: "robot check <moves>\n\nSays what drive, rotate and goto would do on the newest snapshot's map. Nothing moves.\n" +
@@ -70,8 +71,8 @@ Queued, one at a time, in order:
   robot steer <moves>              Moves the robot (robot steer --help).
   robot snap                       Takes a snapshot.
   robot clear_map                  Clears the map.
-  robot recording on|off           Records every action in full, or not.
   robot mode idle|manual           Sets the mode.
+  robot config pre_ms|post_ms <ms> How long the robot stands still before / after each move.
   robot stop                       Stops at once, skipping the queue; drops what waits.
 
 At once:

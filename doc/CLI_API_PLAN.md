@@ -3,6 +3,11 @@
 Worked out with Daniel on 13-14 Oct 2026, built on 14 Oct. The decisions are at
 the end; the design of the API server is under "The API server, module by module".
 
+Since 7 Nov (data-flow rework, step 4a) the robot's lines below are messages: the
+done record is the **answer**, the pose line the **status**, command lines are
+**command** messages with their number (ARCHITECTURE.md, "The link to the PC"). What
+they carry is the same; `robot.ts` is now `link.ts`.
+
 ## Status (14 Oct, end of the session)
 
 - **Built and committed**: everything under "Decided" below (commits e83be77,
@@ -63,7 +68,7 @@ power-up, y to its left.
 | `steer <moves>` | the moves, one after the other: `d<cm>` drive (negative: backwards), `r<deg>` rotate (+ left), `g<x>,<y>` goto a point on the map (at most 3 m), `w<s>` watch. Spaces optional; long names work too (`drive 50`). |
 | `snap` | takes a snapshot: camera picture, ToF frame, light, map, pose |
 | `clear_map` | clears the map |
-| `recording on\|off` | records every action in full, or not |
+| `config pre_ms\|post_ms <ms>` | how long each move stands still before / after (0-2000 ms, 200 at power-up); sent to the robot (since 7 Nov, step 4b; `recording on\|off` went with the recorder) |
 | `mode idle\|manual` | sets the mode (manual at power-up) |
 | `stop` | stops at once: motors off, mode idle; skips the queue and drops what waits |
 
@@ -72,15 +77,17 @@ power-up, y to its left.
   reads (`picoA/app/commands.h`); the robot checks them again.
 - **auto_snap** (`robot config auto_snap on|off`, on by default): the server sends a
   `snap` after every move. It is a command like any other, with its own answer.
+  `robot config` alone shows auto_snap and the still times.
 
 **At once, never queued:**
 
 | Command | Answers |
 |---|---|
-| `status` | the robot now: pose, mode, recording, WiFi, running, waiting, newest snapshot, safety (largest jolt and tilt since power-up) |
+| `status` | the robot now: boot, pose, mode, the move running, WiFi, running, waiting, newest snapshot, safety (largest jolt and tilt since power-up) |
 | `check <moves>` | what the moves would do on the newest snapshot's map, each from where the one before would end; nothing moves (not watch) |
 | `map [n] [--png]` | the 6 × 6 m map window at snapshot n, one character per 10 cm cell, top-left corner, legend; `--png`: the picture's file |
-| `tof [n]` | the ToF frame: 8 × 8 matrices `distance`, `status`, `signal`, `targets`, `distance_2` |
+| `tof [n]` | the ToF frame (one target per zone): 8 × 8 matrices `distance`, `kind`, `signal`, `sigma`, `targets` |
+| `frames <boot> <move> [--json]` | a move's ToF frames from the database: the move, then each frame's pose and zones (text; `--json` for a program) |
 | `camera [n]` | the camera picture's file |
 | `light [n]` | `lux`, `cie` (x, y), `rgb` (the colour on a screen at a fixed brightness) |
 | `features [n]` | the camera features: x, y in the picture, state (new, tracked, missed, lost) |

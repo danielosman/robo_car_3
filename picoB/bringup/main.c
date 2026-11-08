@@ -70,7 +70,7 @@ int main(void) {
             else if (c == 'h' || c == '?') help();
 
             static imu_sample_t s;
-            if (imu_read(&s)) {
+            if (imu_read(&s, NULL)) {
                 absolute_time_t now = get_absolute_time();
                 float dt = absolute_time_diff_us(last_sample, now) * 1e-6f;
                 last_sample = now;

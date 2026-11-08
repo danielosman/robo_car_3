@@ -66,13 +66,13 @@ footer.hidden #log { display:none; }
   <div id="live" class="pill"></div>
   <div class="spacer"></div>
   <div class="group"><span>Boot</span><select id="boot"></select></div>
-  <a href="/console" target="_blank">Console</a> <a href="/viewer" target="_blank">3D takes</a> <a href="/takes" target="_blank">Takes</a>
+  <a href="/console" target="_blank">Console</a>
 </header>
 <main>
   <div id="mapwrap">
     <canvas id="map"></canvas>
     <div id="maphud"></div>
-    <div id="mapbtns"><label class="pill" title="as the 3D viewer: columns set by a measurement under 10 % confident count as unknown"><input type="checkbox" id="hideweak" checked> hide weak</label><button id="center">Centre on robot</button><button id="zoomin">+</button><button id="zoomout">−</button></div>
+    <div id="mapbtns"><label class="pill" title="columns set by a measurement under 10 % confident count as unknown"><input type="checkbox" id="hideweak" checked> hide weak</label><button id="center">Centre on robot</button><button id="zoomin">+</button><button id="zoomout">−</button></div>
     <div id="legend">
       <span><i style="background:var(--blocked)"></i>blocked</span><span><i style="background:var(--overhang)"></i>overhang</span>
       <span><i style="background:var(--nofloor)"></i>no floor</span><span><i style="background:var(--drivable)"></i>drivable</span>

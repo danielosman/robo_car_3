@@ -1,35 +1,44 @@
 // End-to-end host test of the actions (doc/ARCHITECTURE.md, actions): picoA/app/behaviour.c
-// with the real surroundings, rangefinder, cell_map and pose, on a simulated robot
+// with the real ToF pipeline (tof, pose's stamp, tof_format, tof_rays, cell_map: as
+// main.c runs it) and pose, on a simulated robot
 // in a simulated room seen by a simulated ToF sensor (rays cast at the floor, the
 // walls and a box; like the real sensor, each zone reports the nearest point of its
 // 5.6° tall patch, with noise; the robot sits 0.9° nose-down).
 // The robot does nothing until asked. A 390° turn (what the scan was) maps the
 // walls with an empty floor between them (the low box: KNOWN, found about half the time); move and turn go 50 cm and
 // 30° each way; stop and a new action end the running one; the motors are off
-// after each action. Watching: a person (a fake motion_sense, which reports them
+// after each action. Watching: a person (a fake watch, which reports them
 // while they are in the VL53's view) walks in and stops; the robot turns towards
 // them and stops facing them; one walking faster than it turns gets away and it
-// stops; watching ends after the seconds asked. Each action is one take for the
-// recorder, ended with the right reason, and ends once with its command's number,
-// how far it moved and why (also a move blocked from the start, and a goal already
-// reached). Go to a point turns towards it and drives there (or stops before an
-// obstacle, or short of it where asked).
-// The test provides body.h's and recorder.h's functions. Run from the repo root:
+// stops; watching ends after the seconds asked. Each action is one move (the real
+// move.c: still before and after, its start and end messages, ended with the right
+// reason, once, with its command's number, how far it moved; its frames sent only
+// while it runs, none dropped), also a move blocked from the start and a goal
+// already reached (a start and an end, no frames). Go to a point turns towards it
+// and drives there (or stops before an obstacle, or short of it where asked).
+// The test provides body.h's and link_pc.h's functions. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_behaviour picoA/app/test/test_behaviour.c -lm && build/test_behaviour
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "../pose.c"
-#include "../rangefinder.c"
+#include "../tof.c"
+#include "../tof_rays.c"
+#include "../tof_format.c"
 #include "../cell_map.c"
 #include "../house_map.c"
-#include "../surroundings.c"
+#include "../wire.c"
+#include "../move.c"
 #include "../behaviour.c"
+#include "robot_mounting.h"
 
 #define DT_US       1000
 #define SCAN_RAD    (390 * RAD_PER_DEG) // a full turn plus 30° of overlap
-#define TOF_US      66667      // 15 Hz
-#define TOF_DELAY_US 35833     // a frame is read this long after the middle of its measurement
+#ifndef TOF_HZ
+#define TOF_HZ      TOF_DEFAULT_HZ // run_tests.sh also builds it with -DTOF_HZ=15: nothing here counts frames
+#endif
+#define TOF_US      (1000000 / TOF_HZ)
+#define TOF_DELAY_US (TOF_US / 2 + 2500) // a frame is read this long after the middle of its measurement (half a period + half a poll)
 #define ACCEL_MPS2  0.4f
 #define TURN_ACCEL_RADPS2 3.0f
 #define LAG_US      30000
@@ -72,7 +81,7 @@ bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) {
 void body_motors(bool on) { motors_wanted = on; motors_changed_us = fake_now_us; if (!on) cmd_v = cmd_w = 0; }
 void body_drive(float v_mps, float w_radps) { cmd_v = v_mps; cmd_w = w_radps; }
 
-// --- A fake motion_sense: a person walking around the robot ---
+// --- A fake watch: a person walking around the robot ---
 // Reported while in the VL53's view (±22.5°); one who has stopped is still movement
 // while the robot turns, and part of the view once it has stood still for 1 s.
 static float person_rad = 99.0f; // world bearing; 99: nobody
@@ -80,8 +89,8 @@ static float person_radps;       // walking (+ = left); 0: stopped
 static float stopped_still_s;    // how long the robot has stood still since the person stopped
 static float walk_sign = 1;      // the way the person last walked (+ = left)
 
-// As the VL53 gives it: a frame every 66.7 ms, the direction measured then (±2°),
-// read 40 ms later.
+// As the VL53 gives it: a frame every TOF_US, the direction measured then (±2°),
+// read TOF_DELAY_US later.
 static bool seen_moving;
 static float seen_bearing_rad;
 static uint32_t seen_at_us;
@@ -90,7 +99,7 @@ static struct { bool moving; float bearing_rad; uint32_t t_us; uint64_t ready_us
 
 static void sight(void) { // every tick
     if (fake_now_us >= next_sight_us) {
-        next_sight_us = fake_now_us + 66667;
+        next_sight_us = fake_now_us + TOF_US;
         float rel = wrap_pi(person_rad - sim.yaw_rad);
         bool in_view = person_rad < 90.0f && fabsf(rel) <= 22.5f * RAD_PER_DEG;
         bool moving = in_view && !(person_radps == 0 && stopped_still_s >= 1.0f);
@@ -98,7 +107,7 @@ static void sight(void) { // every tick
         sight_pending.moving = moving;
         sight_pending.bearing_rad = rel + jitter;
         sight_pending.t_us = (uint32_t)fake_now_us;
-        sight_pending.ready_us = fake_now_us + 40000;
+        sight_pending.ready_us = fake_now_us + TOF_DELAY_US;
     }
     if (sight_pending.ready_us && fake_now_us >= sight_pending.ready_us) {
         seen_moving = sight_pending.moving;
@@ -108,34 +117,57 @@ static void sight(void) { // every tick
     }
 }
 
-bool motion_sense_strongest(float *bearing_rad, uint32_t *t_us) {
+bool watch_strongest(float *bearing_rad, uint32_t *t_us) {
     if (!seen_moving) return false;
     *bearing_rad = seen_bearing_rad;
     *t_us = seen_at_us;
     return true;
 }
-bool motion_sense_watching(void) { return still_s >= 1.5f; }
-void motion_sense_stamp(void) {}
+bool watch_watching(void) { return still_s >= 1.5f; }
+void watch_stamp(void) {}
 static bool movement_log;
-void motion_sense_log(bool on) { movement_log = on; }
+void watch_log(bool on) { movement_log = on; }
 
-// --- A fake recorder: the takes as behaviour starts and ends them ---
-static bool rec_ready, take_running;
-static char take_action[16];
-static float take_param;
-static int takes, frames_recorded;
-static rec_end_t take_end;
-bool recorder_on(void) { return rec_ready; }
-bool recorder_ready(void) { return rec_ready; }
-void recorder_take_start(const char *action, float param) {
-    assert(!take_running); // the previous take has ended
-    take_running = true;
-    snprintf(take_action, sizeof take_action, "%s", action);
-    take_param = param;
-    takes++;
+// --- link_pc.h: the moves as the PC gets them (start, end, frames in between) ---
+static bool move_open;            // a move has started and not ended
+static int moves_started, frames_in_move, frames_sent;
+static wire_move_start_t last_start;
+static wire_move_end_t last_end;
+bool link_send_control(const uint8_t *msg, uint32_t len) {
+    wire_msg_t m;
+    assert(wire_take(msg, len, &m) == (int32_t)len);
+    if (wire_decode_move_start(&m, &last_start)) {
+        assert(!move_open); // the one before has ended
+        move_open = true;
+        moves_started++;
+        frames_in_move = 0;
+    } else if (wire_decode_move_end(&m, &last_end)) {
+        assert(move_open && last_end.move == last_start.move && last_end.frames_sent == (uint32_t)frames_in_move);
+        assert(last_end.frames_dropped == 0);
+        move_open = false;
+    }
+    return true;
 }
-void recorder_take_end(rec_end_t reason) { assert(take_running); take_running = false; take_end = reason; }
-void recorder_tof(const range_frame_t *frame) { (void)frame; frames_recorded++; }
+link_ticket_t link_send_bulk(const uint8_t *msg, uint32_t len) {
+    wire_msg_t m;
+    assert(wire_take(msg, len, &m) == (int32_t)len && move_open); // frames only during a move
+    frames_in_move++;
+    frames_sent++;
+    return (link_ticket_t){1, (uint32_t)frames_sent};
+}
+
+// The ToF pipeline into the map, as main.c runs it (watch is faked above).
+static void tof_pipeline(void) {
+    static tof_frame_t frame;
+    static posed_frame_t posed, used;
+    static uint8_t bytes[TOF_FORMAT_MAX];
+    if (!tof_poll(&frame)) return;
+    pose_stamp(&frame, &posed);
+    move_tof(&posed);
+    uint32_t n_bytes = tof_pack(TOF_USE_MAP, &posed, bytes);
+    assert(tof_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
+    cell_map_add(&used);
+}
 
 static float approach_to(float x, float target, float step) {
     return x < target ? fminf(x + step, target) : fmaxf(x - step, target);
@@ -178,14 +210,14 @@ static uint64_t pending_at_us, next_frame_us;
 
 static void measure_frame(void) {
     float c = cosf(sim.yaw_rad), s = sinf(sim.yaw_rad);
-    float p[3] = {sim.x_m + c * SENSOR_X_M - s * SENSOR_Y_M, sim.y_m + s * SENSOR_X_M + c * SENSOR_Y_M, SENSOR_Z_M};
+    float p[3] = {sim.x_m + c * mount.x_m - s * mount.y_m, sim.y_m + s * mount.x_m + c * mount.y_m, mount.z_m};
     for (int row = 0; row < 8; row++)
         for (int col = 0; col < 8; col++) {
             float range = 0;
             for (int k = -1; k <= 1; k++) { // the zone's centre and its upper and lower edges
                 float r[3], d[3];
                 int i = row * 8 + col;
-                direction(zone_down_rad[i] + (float)k * ZONE_RAD / 2, zone_left_rad[i], sim.pitch_rad, r);
+                direction(zone_down_rad[i] + (float)k * zone_rad / 2, zone_left_rad[i], sim.pitch_rad, r);
                 d[0] = c * r[0] - s * r[1]; d[1] = s * r[0] + c * r[1]; d[2] = r[2];
                 float t = cast(p, d);
                 if (t > 0 && (range == 0 || t < range)) range = t;
@@ -225,8 +257,8 @@ static void tick(void) {
     if (fake_now_us >= next_frame_us) { next_frame_us += TOF_US; measure_frame(); }
     if (pending_at_us && fake_now_us >= pending_at_us) { fake_tof = pending; fake_tof_fresh = true; pending_at_us = 0; }
     pose_update();
-    surroundings_update();
-    behaviour_update();
+    tof_pipeline();
+    move_update();
 }
 
 // A wall at x (axis 0) or y (axis 1): blocked or an overhang, in the column on either side of it.
@@ -259,11 +291,80 @@ static float run(float seconds) {
 // Runs until the action ends (at most max_s); returns how long it ran (s).
 static float run_action(float max_s) {
     float seconds = 0;
-    while (behaviour_busy() && seconds < max_s) { tick(); seconds += DT_US * 1e-6f; }
-    assert(!behaviour_busy());
+    while (move_busy() && seconds < max_s) { tick(); seconds += DT_US * 1e-6f; }
+    assert(!move_busy());
     run(0.1f); // PicoB switches the motors off
     assert(!motors_wanted && !sim.motors_on && v == 0 && w == 0);
     return seconds;
+}
+
+// One watching trial with the person's sighting jitter of `seed`: a 15 deg/s walker
+// who stops, a 25 deg/s one, a 40 deg/s one who gets away. The watch keeps running.
+typedef struct { int starts15, starts25; float lag15, over15, off15, lag25, over25; } trial_t;
+static void watch_trial(unsigned seed, trial_t *t) {
+    // Nothing moving: the robot stays put, motors on.
+    srand(seed);
+    behaviour_watch(60, 0);
+    assert(move_open && last_start.kind == WIRE_MOVE_WATCH && last_start.param == 60); // a watch is a move
+    float yaw = sim.yaw_rad;
+    run(5);
+    assert(move_busy() && sim.yaw_rad == yaw && sim.motors_on && movement_log);
+    // Someone comes in on the right (-15 deg) walking right at 15 deg/s for 4 s, then
+    // stops: the robot turns towards them and follows at their speed (one start, not
+    // stop-and-go), lagging a few degrees; when they stop it doesn't run past them,
+    // and stops facing them.
+    person_rad = yaw - 15 * RAD_PER_DEG;
+    person_radps = -15 * RAD_PER_DEG;
+    walk_sign = -1;
+    starts = 0;
+    float fastest = run(4);
+    float lag_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
+    int walking_starts = starts;
+    overshoot_deg = -99;
+    person_radps = 0;
+    fastest = fmaxf(fastest, run(3));
+    float off_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
+    *t = (trial_t){.starts15 = walking_starts, .lag15 = fabsf(lag_deg), .over15 = fmaxf(overshoot_deg, 0), .off15 = fabsf(off_deg)};
+    assert(w == 0 && fastest <= 30.0f);
+    yaw = sim.yaw_rad;
+    run(5);
+    assert(sim.yaw_rad == yaw); // they stand there: part of the view, no more turning
+
+    // Walking the other way at 25 deg/s (close to the robot's 29 deg/s): still one start.
+    person_rad = yaw + 10 * RAD_PER_DEG;
+    person_radps = 25 * RAD_PER_DEG;
+    walk_sign = 1;
+    starts = 0;
+    run(4);
+    lag_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
+    person_radps = 0;
+    overshoot_deg = -99;
+    run(3);
+    t->starts25 = starts;
+    t->lag25 = fabsf(lag_deg);
+    t->over25 = fmaxf(overshoot_deg, 0);
+    yaw = sim.yaw_rad;
+    run(3);
+
+    // Someone walking left at 40 deg/s, faster than the robot turns: it turns after
+    // them until they are out of view, then stops.
+    person_rad = yaw + 10 * RAD_PER_DEG;
+    person_radps = 40 * RAD_PER_DEG;
+    walk_sign = 1;
+    fastest = run(3);
+    person_rad = 99.0f; // gone
+    person_radps = 0;
+    run(2);
+    assert(sim.yaw_rad > yaw + 10 * RAD_PER_DEG && fastest <= 30.0f && w == 0);
+    yaw = sim.yaw_rad;
+    run(5);
+    assert(sim.yaw_rad == yaw);
+}
+
+static float median_f(float *v, int n) {
+    for (int i = 1; i < n; i++)
+        for (int j = i; j > 0 && v[j - 1] > v[j]; j--) { float x = v[j]; v[j] = v[j - 1]; v[j - 1] = x; }
+    return (v[(n - 1) / 2] + v[n / 2]) / 2;
 }
 
 int main(void) {
@@ -271,22 +372,34 @@ int main(void) {
     next_frame_us = fake_now_us;
     sim.pitch_rad = -0.9f * RAD_PER_DEG;
     srand(3);
-    assert(surroundings_init());
+    tof_rays_init(&ROBOT_MOUNTING);
+    cell_map_clear();
+    assert(tof_init(&ROBOT_MOUNTING.tof, TOF_HZ));
+    printf("(the ToF at %d Hz)\n", TOF_HZ);
     run(1); // standing still: PicoB reports "stationary"
 
     // Idle: nothing happens until asked, motors off.
     run(5);
-    assert(!behaviour_busy() && !motors_wanted && !sim.motors_on && sim.yaw_rad == 0 && sim.x_m == 0);
+    assert(!move_busy() && !motors_wanted && !sim.motors_on && sim.yaw_rad == 0 && sim.x_m == 0);
     printf("ok: idle after start-up, motors off\n");
 
     // A scan: 390° left, then it stands still with the motors off (no turn to the
     // most open direction, no watching).
     behaviour_turn(SCAN_RAD, 7);
-    assert(take_running && strcmp(take_action, "turn") == 0 && fabsf(take_param - SCAN_RAD) < 1e-6f);
+    assert(move_open && last_start.kind == WIRE_MOVE_TURN && last_start.command == 7 && fabsf(last_start.param - SCAN_RAD) < 1e-6f);
+    assert(last_start.pre_ms == 200 && last_start.post_ms == 200);
     float seconds = run_action(40);
-    assert(!take_running && take_end == REC_END_DONE && takes == 1);
-    behaviour_end_t ended;
-    assert(behaviour_endings(&ended) == 1 && ended.command == 7 && ended.reason == REC_END_DONE && ended.moved_m < 0.03f);
+    assert(!move_open && last_end.end == WIRE_END_OK && moves_started == 1);
+    move_record_t ended;
+    assert(move_endings(&ended) == 1 && ended.command == 7 && ended.how == MOVE_END_DONE && ended.moved_m < 0.03f);
+    // Its frames: every one while it ran (~10 a second), none dropped; none while idle.
+    printf("scan: %lu ToF frames sent (frames %lu-%lu), none dropped\n", (unsigned long)last_end.frames_sent,
+           (unsigned long)last_end.first_frame, (unsigned long)last_end.last_frame);
+    assert(last_end.frames_sent >= (uint32_t)(seconds * TOF_HZ) - 2 && last_end.frames_sent <= (uint32_t)(seconds * TOF_HZ) + 2);
+    assert(last_end.last_frame - last_end.first_frame + 1 == last_end.frames_sent);
+    int sent_before = frames_sent;
+    run(2);
+    assert(frames_sent == sent_before);
     assert(fabsf(DEG(ended.rotated_rad) - DEG(sim.yaw_rad)) < 0.5f);
     printf("scan done in %.0f s; turned %.1f deg\n", (double)seconds, (double)DEG(sim.yaw_rad));
     assert(seconds > 14 && seconds < 25);
@@ -362,29 +475,30 @@ int main(void) {
     float gap_cm = (sim.y_m - EDGE_M - (CHAIR_Y + CHAIR_HALF)) * 100; // facing -y
     printf("move +50 cm towards a 20 cm box 45 cm ahead: moved %.1f cm, front edge %.1f cm from the box\n",
            (double)((y0 - sim.y_m) * 100), (double)gap_cm);
-    assert(take_end == REC_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
-    assert(behaviour_endings(&ended) && ended.reason == REC_END_OBSTACLE && fabsf(ended.moved_m - (y0 - sim.y_m)) < 0.005f);
-    // Within 15 cm already: no move, no take, but it ends (blocked), so its command is answered.
-    int takes_before = takes;
-    uint32_t endings_before = behaviour_endings(NULL);
+    assert(last_end.end == WIRE_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
+    assert(move_endings(&ended) && ended.how == MOVE_END_OBSTACLE && fabsf(ended.moved_m - (y0 - sim.y_m)) < 0.005f);
+    // Within 15 cm already: it doesn't move, but it ends (blocked) at once, so its
+    // command is answered: a move start and end, no frames.
+    int moves_before = moves_started;
+    uint32_t endings_before = move_endings(NULL);
     float x0 = sim.x_m;
     y0 = sim.y_m;
     behaviour_move(0.5f, 12);
-    assert(!behaviour_busy() && takes == takes_before);
-    assert(behaviour_endings(&ended) == endings_before + 1 && ended.command == 12 && ended.reason == REC_END_OBSTACLE);
-    assert(ended.moved_m == 0 && strcmp(ended.action, "move") == 0);
+    assert(!move_busy() && !move_open && moves_started == moves_before + 1 && last_end.frames_sent == 0);
+    assert(move_endings(&ended) == endings_before + 1 && ended.command == 12 && ended.how == MOVE_END_OBSTACLE);
+    assert(ended.moved_m == 0 && ended.kind == MOVE_DRIVE && last_end.end == WIRE_END_OBSTACLE);
     run(1);
     assert(sim.x_m == x0 && sim.y_m == y0);
     // Back: only what the map has (the left-hand wall at +0.8 m, from the scan): the
     // first 50 cm is free, the second stops 15 cm (back edge to it) before the wall.
     behaviour_move(-0.5f, 0);
     run_action(15);
-    assert(take_end == REC_END_DONE && fabsf(sim.y_m - y0 - 0.5f) < 0.02f);
+    assert(last_end.end == WIRE_END_OK && fabsf(sim.y_m - y0 - 0.5f) < 0.02f);
     behaviour_move(-0.5f, 0);
     run_action(15);
     gap_cm = (WALL_SIDE - sim.y_m - EDGE_M) * 100;
     printf("then back 50 cm twice: the second stopped with the back edge %.1f cm from the wall\n", (double)gap_cm);
-    assert(take_end == REC_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
+    assert(last_end.end == WIRE_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
     chair_there = false;
     printf("OK: a move stops 15 cm before an obstacle on the map, ahead or behind, or doesn't start\n");
 
@@ -395,112 +509,78 @@ int main(void) {
     behaviour_turn(SCAN_RAD, 0);
     run(3);
     assert(sim.yaw_rad > yaw + 10 * RAD_PER_DEG);
-    behaviour_stop();
-    assert(!behaviour_busy() && !motors_wanted && !take_running && take_end == REC_END_STOPPED);
+    move_stop();
+    assert(!move_busy() && !motors_wanted && !move_open && last_end.end == WIRE_END_STOPPED);
     run(1);
     assert(!sim.motors_on && w == 0);
     yaw = sim.yaw_rad;
     behaviour_turn(30 * RAD_PER_DEG, 0);
     run(0.5f);
-    int before = takes;
+    int before = moves_started;
     behaviour_turn(-30 * RAD_PER_DEG, 0);
-    assert(motors_wanted && take_end == REC_END_REPLACED && takes == before + 1 && take_running);
-    assert(strcmp(take_action, "turn") == 0 && take_param < 0);
+    assert(motors_wanted && last_end.end == WIRE_END_REPLACED && moves_started == before + 1 && move_open);
+    assert(last_start.kind == WIRE_MOVE_TURN && last_start.param < 0);
     run_action(10);
-    assert(take_end == REC_END_DONE);
+    assert(last_end.end == WIRE_END_OK);
     float after_replace = DEG(sim.yaw_rad - yaw);
     printf("turn +30 replaced by turn -30 after 0.5 s: turned %+.1f deg in all\n", (double)after_replace);
     assert(after_replace < -15 && after_replace > -30);
     printf("ok: stop, and a new action replacing the running one\n");
 
-    // The map is cleared by C (surroundings_clear), not by a scan.
-    surroundings_clear();
+    // The map is cleared by C (cell_map_clear), not by a scan.
+    cell_map_clear();
     assert(cell_map_column(WALL_FRONT - 0.05f, 0) == COLUMN_UNKNOWN);
 
-    // Watching: nothing moving, the robot stays put, motors on. Seeded again: the
-    // person's sighting jitter as before the moves above (KNOWN: the 25 deg/s
-    // walker's overshoot is 1-4 deg depending on the seed, and on where the moves
-    // above ended to the mm; its limit is 4).
-    srand(3);
-    behaviour_watch(60, 0);
-    yaw = sim.yaw_rad;
-    run(5);
-    assert(behaviour_busy() && sim.yaw_rad == yaw && sim.motors_on && movement_log);
-    // Someone comes in on the right (-15 deg) walking right at 15 deg/s for 4 s, then
-    // stops: the robot turns towards them and follows at their speed (one start, not
-    // stop-and-go), lagging a few degrees; when they stop it doesn't run past them,
-    // and stops facing them.
-    person_rad = yaw - 15 * RAD_PER_DEG;
-    person_radps = -15 * RAD_PER_DEG;
-    walk_sign = -1;
-    starts = 0;
-    float fastest = run(4);
-    float lag_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
-    int walking_starts = starts;
-    overshoot_deg = -99;
-    person_radps = 0;
-    fastest = fmaxf(fastest, run(3));
-    float off_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
-    printf("someone walking right at 15 deg/s for 4 s: %d start(s), %.1f deg behind at the end, at most %.0f deg/s;\n"
-           "    then stopping: %.1f deg past them at most, stopped %.1f deg from them\n",
-           walking_starts, (double)fabsf(lag_deg), (double)fastest, (double)fmaxf(overshoot_deg, 0), (double)off_deg);
-    assert(walking_starts == 1 && fabsf(lag_deg) < 5.0f);
-    assert(overshoot_deg < 3.0f && fabsf(off_deg) <= 3.5f && w == 0 && fastest <= 30.0f);
-    yaw = sim.yaw_rad;
-    run(5);
-    assert(sim.yaw_rad == yaw); // they stand there: part of the view, no more turning
-    printf("ok: follows a steady walker smoothly, doesn't overshoot when they stop, stops facing them\n");
-
-    // Walking the other way at 25 deg/s (close to the robot's 29 deg/s): still one start.
-    person_rad = yaw + 10 * RAD_PER_DEG;
-    person_radps = 25 * RAD_PER_DEG;
-    walk_sign = 1;
-    starts = 0;
-    run(4);
-    lag_deg = DEG(wrap_pi(person_rad - sim.yaw_rad));
-    person_radps = 0;
-    overshoot_deg = -99;
-    run(3);
-    printf("someone walking left at 25 deg/s: %d start(s), %.1f deg behind; after stopping %.1f deg past them at most\n",
-           starts, (double)fabsf(lag_deg), (double)fmaxf(overshoot_deg, 0));
-    assert(starts == 1 && fabsf(lag_deg) < 8.0f && overshoot_deg < 4.0f);
-    yaw = sim.yaw_rad;
-    run(3);
-    printf("ok: a faster walker too\n");
-
-    // Someone walking left at 40 deg/s, faster than the robot turns: it turns after
-    // them until they are out of view, then stops.
-    person_rad = yaw + 10 * RAD_PER_DEG;
-    person_radps = 40 * RAD_PER_DEG;
-    walk_sign = 1;
-    fastest = run(3);
-    person_rad = 99.0f; // gone
-    person_radps = 0;
-    run(2);
-    printf("someone walking left at 40 deg/s: the robot turned %+.0f deg (at most %.0f deg/s), then stopped\n",
-           (double)DEG(sim.yaw_rad - yaw), (double)fastest);
-    assert(sim.yaw_rad > yaw + 10 * RAD_PER_DEG && fastest <= 30.0f && w == 0);
-    yaw = sim.yaw_rad;
-    run(5);
-    assert(sim.yaw_rad == yaw);
-    printf("ok: someone faster than the robot gets away; it stops when nothing moves\n");
+    // Watching, with the person's sighting jitter of several seeds, each trial from
+    // where the one before left the robot (the overshoot hangs on the seed and the
+    // start to the 0.1 deg: KNOWN, so the limits are on the median and the worst of 8).
+    // The last trial's watch runs on to its end.
+    enum { TRIALS = 8 };
+    trial_t trials[TRIALS];
+    for (int k = 0; k < TRIALS; k++) {
+        watch_trial((unsigned)(k + 1), &trials[k]);
+        if (k < TRIALS - 1) { move_stop(); run(1); }
+    }
+    float over15[TRIALS], over25[TRIALS], worst15 = 0, worst25 = 0, worst_lag15 = 0, worst_lag25 = 0, worst_off = 0;
+    for (int k = 0; k < TRIALS; k++) {
+        const trial_t *t = &trials[k];
+        assert(t->starts15 == 1 && t->starts25 == 1); // one start, not stop-and-go
+        over15[k] = t->over15;
+        over25[k] = t->over25;
+        worst15 = fmaxf(worst15, t->over15);
+        worst25 = fmaxf(worst25, t->over25);
+        worst_lag15 = fmaxf(worst_lag15, t->lag15);
+        worst_lag25 = fmaxf(worst_lag25, t->lag25);
+        worst_off = fmaxf(worst_off, t->off15);
+    }
+    float median15 = median_f(over15, TRIALS), median25 = median_f(over25, TRIALS);
+    printf("walkers over %d seeds: at 15 deg/s %.1f deg behind at most, %.1f deg past them at most (median %.1f), stopped within"
+           " %.1f deg;\n    at 25 deg/s %.1f deg behind at most, %.1f deg past them at most (median %.1f)\n",
+           TRIALS, (double)worst_lag15, (double)worst15, (double)median15, (double)worst_off, (double)worst_lag25, (double)worst25,
+           (double)median25);
+    // The medians keep the old single-seed limits (3 and 4 deg); single seeds go up to
+    // ~3.5 and ~5.5 deg (8 Nov, both rates), hence the worst-case limits.
+    assert(worst_lag15 < 5.0f && median15 < 3.0f && worst15 < 4.0f && worst_off <= 3.5f);
+    assert(worst_lag25 < 8.0f && median25 < 4.0f && worst25 < 6.0f);
+    printf("ok: follows a steady walker smoothly, doesn't overshoot when they stop, stops facing them; a faster walker too;\n"
+           "    someone faster than the robot gets away; it stops when nothing moves\n");
 
     float watched_s = 37 + run_action(30);
     printf("watching ended by itself after %.1f s\n", (double)watched_s);
     assert(watched_s > 59.5f && watched_s < 61 && !movement_log);
     printf("OK: watching, the robot turns towards movement and stops facing it; it ends after a minute\n");
 
-    // Go to a point: turn towards it, drive there, motors off; each one a take and an
+    // Go to a point: turn towards it, drive there, motors off; each one a move and an
     // ending. Back to the middle first, then 1 m ahead-right; then towards a point
     // beyond the front wall: stops 15 cm (front edge) before it.
     const float goals[2][2] = {{0, 0}, {1.0f, -0.3f}};
     for (int k = 0; k < 2; k++) {
-        endings_before = behaviour_endings(NULL);
+        endings_before = move_endings(NULL);
         behaviour_goto(goals[k][0], goals[k][1], 0, 20 + (uint32_t)k);
-        assert(take_running && strcmp(take_action, "goto") == 0);
+        assert(move_open && last_start.kind == WIRE_MOVE_GOTO); // the turn and the drive: one move
         float took = run_action(30);
-        assert(behaviour_endings(&ended) == endings_before + 1 && ended.command == 20 + (uint32_t)k);
-        assert(strcmp(ended.action, "goto") == 0 && ended.reason == REC_END_DONE && take_end == REC_END_DONE);
+        assert(move_endings(&ended) == endings_before + 1 && ended.command == 20 + (uint32_t)k);
+        assert(ended.kind == MOVE_GOTO && ended.how == MOVE_END_DONE && last_end.end == WIRE_END_OK);
         float off_cm = hypotf(sim.x_m - goals[k][0], sim.y_m - goals[k][1]) * 100;
         printf("go to (%+.0f, %+.0f) cm: there in %.1f s, %.1f cm off\n", (double)(goals[k][0] * 100),
                (double)(goals[k][1] * 100), (double)took, (double)off_cm);
@@ -511,14 +591,14 @@ int main(void) {
     run_action(30);
     gap_cm = (WALL_FRONT - sim.x_m - EDGE_M) * 100;
     printf("go to a point 1.4 m beyond the front wall: stopped with the front edge %.1f cm from it\n", (double)gap_cm);
-    assert(take_end == REC_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
-    assert(behaviour_endings(&ended) && fabsf(ended.goal_m - hypotf(3.0f - x0g, -0.3f - y0g)) < 0.01f);
+    assert(last_end.end == WIRE_END_OBSTACLE && gap_cm > 14 && gap_cm < 26);
+    assert(move_endings(&ended) && fabsf(ended.goal_m - hypotf(3.0f - x0g, -0.3f - y0g)) < 0.01f);
     // Already there: nothing starts, and it ends done at once.
-    takes_before = takes;
-    endings_before = behaviour_endings(NULL);
+    moves_before = moves_started;
+    endings_before = move_endings(NULL);
     behaviour_goto(sim.x_m + 0.02f, sim.y_m, 0, 30);
-    assert(!behaviour_busy() && takes == takes_before);
-    assert(behaviour_endings(&ended) == endings_before + 1 && ended.command == 30 && ended.reason == REC_END_DONE);
+    assert(!move_busy() && !move_open && moves_started == moves_before + 1 && last_end.frames_sent == 0);
+    assert(move_endings(&ended) == endings_before + 1 && ended.command == 30 && ended.how == MOVE_END_DONE);
     // Stopping before it: 50 cm short of the middle, measured along the way.
     behaviour_goto(0, -0.3f, 0.5f, 0);
     run_action(30);

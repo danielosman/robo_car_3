@@ -1,8 +1,9 @@
 // The commands that run at once, never queued (doc/CLI_API_PLAN.md): `robot <name>
 // [args]`, each answering one JSON object. status is the robot now; map, tof,
-// camera, light and features read a snapshot (its number, or the newest); log the
-// log; config the API's settings (and sets one). Units: cm, degrees, pixels, g, dBm,
-// lux, said once in the help.
+// camera, light and features read a snapshot (its number, or the newest); frames a
+// move's frames, imu its imu records (text, or --json); log the log; config the settings (auto_snap is
+// set here; pre_ms and post_ms go to the robot through the queue: routes.ts). Units:
+// cm, degrees, pixels, dBm, lux, said once in the help.
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "../store.ts";
@@ -18,6 +19,7 @@ import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
 import type { Chat } from "../objects/model.ts";
 import type { BootFolders } from "../boot_folders.ts";
+import { framesJson, framesText, imuJson, imuText } from "./frames.ts";
 
 export interface Config { autoSnap: boolean }
 export interface ApiContext {
@@ -30,7 +32,13 @@ export interface Read {
   help: string;   // a few simple sentences
   // req: the request as it came, for a command whose argument isn't words (detect_save's
   // JSON) or whose flags carry a value (--by=<name>: query.by)
-  run(ctx: ApiContext, args: string[], flags: Set<string>, req?: { body: string; query: Record<string, string> }): Promise<object>;
+  run(ctx: ApiContext, args: string[], flags: Set<string>, req?: { body: string; query: Record<string, string> }): Promise<object | TextAnswer>;
+}
+
+// An answer that is text, not JSON (robot frames and imu without --json).
+export class TextAnswer {
+  readonly text: string;
+  constructor(text: string) { this.text = text; }
 }
 
 // A read that can't answer: the message says why; status is the HTTP status.
@@ -67,20 +75,26 @@ async function snapshotRow(store: Store, id: SnapshotId) {
 }
 
 const round = (v: number, digits = 0) => Number(v.toFixed(digits));
+
+// robot frames' and imu's <boot> <move>: the boot's id (from its id or folder name) and folder.
+async function moveOf(store: Store, bootFolders: BootFolders, args: string[], usage: string): Promise<{ boot: string; folder: string | null }> {
+  if (args.length !== 2 || !/^\d+$/.test(args[1])) throw new ReadError(`usage: robot ${usage}`, 400);
+  const boot = /^[0-9a-f]{8}$/.test(args[0]) ? args[0] : bootFolders.bootOfFolder(args[0]);
+  if (!boot || !(await store.hasBoot(boot))) throw new ReadError(`no boot ${args[0]} in the database`);
+  return { boot, folder: bootFolders.knownFolder(boot) };
+}
 const atMostOne = (args: string[], usage: string) => { if (args.length > 1) throw new ReadError(`usage: robot ${usage}`, 400); };
 
 export const READS: Record<string, Read> = {
   status: {
     usage: "status",
-    help: "Shows the robot right now: where it is, its mode, recording on or off, the WiFi signal, what runs and\n" +
-          "what waits in the queue, and the number of the newest snapshot. safety is the largest jolt (g) and tilt\n" +
-          "PicoB measured since power-up.",
+    help: "Shows the robot right now: where it is, its mode, the move running (moving: drive, turn, goto, watch),\n" +
+          "the WiFi signal, what runs and what waits in the queue, and the number of the newest snapshot.",
     async run({ live, queue, snapshots }) {
       const p = live.pose, q = queue.state();
       return {
-        connected: live.connected, pose: p && poseOut(p), mode: p?.mode ?? null, recording: p?.recording ?? null,
+        connected: live.connected, boot: live.boot, pose: p && poseOut(p), mode: p?.mode ?? null, moving: p ? p.action || null : null,
         wifi: p?.rssi ?? null, running: q.running, waiting: q.waiting, newest_snapshot: snapshots.newest(),
-        safety: { jolt: { x: live.peaks.jolt[0], y: live.peaks.jolt[1], z: live.peaks.jolt[2] }, tilt: round(live.peaks.tilt * 180 / Math.PI) },
       };
     },
   },
@@ -106,22 +120,54 @@ export const READS: Record<string, Read> = {
   tof: {
     usage: "tof [n]",
     help: "Shows the ToF sensor's frame at snapshot n: 8 × 8 zones, as the robot sees them. The top row looks\n" +
-          "highest; the bottom rows see the floor 20-50 cm ahead. The left column looks left. 45° across.\n" +
-          "One matrix per reading: distance (cm, the nearest target), status (5, 6 and 9 mean sure), signal\n" +
-          "(its strength), targets (how many the zone saw), distance_2 (cm, the second target). null: none.",
+          "highest; the bottom rows see the floor ~25-60 cm ahead. The left column looks left. 45° across.\n" +
+          "One target per zone. One matrix per reading: distance (cm; 255 means beyond 2.54 m, null nothing in range),\n" +
+          "kind (sure, less_sure, unsure: the distance tells nothing, nothing), signal (its strength, capped at 255),\n" +
+          "sigma (the distance's noise, mm, capped at 255), targets (how many the sensor saw in the zone).",
     async run({ store }, args) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), d = await snapshotRow(store, id);
-      const matrix = (fill: number | null) => Array.from({ length: 8 }, () => Array<number | null>(8).fill(fill));
-      const m = { distance: matrix(null), status: matrix(null), signal: matrix(null), targets: matrix(0), distance_2: matrix(null) };
-      for (const t of d.targets) {
-        const r = Number(t.row) - 1, c = Number(t.col) - 1, k = Number(t.target);
+      if (!d.zones.length) throw new ReadError(`snapshot ${id.seq} has no ToF frame`);
+      const matrix = <T>(fill: T) => Array.from({ length: 8 }, () => Array<T>(8).fill(fill));
+      const m = { distance: matrix<number | null>(null), kind: matrix("nothing"), signal: matrix(0), sigma: matrix(0), targets: matrix(0) };
+      for (const z of d.zones) {
+        const r = Number(z.row) - 1, c = Number(z.col) - 1, kind = String(z.kind);
         if (r < 0 || r > 7 || c < 0 || c > 7) continue;
-        m.targets[r][c] = (m.targets[r][c] ?? 0) + 1;
-        if (k === 0) { m.distance[r][c] = Math.round(Number(t.distance_mm) / 10); m.status[r][c] = Number(t.status); m.signal[r][c] = Number(t.signal); }
-        if (k === 1) m.distance_2[r][c] = Math.round(Number(t.distance_mm) / 10);
+        m.distance[r][c] = kind === "nothing" ? null : Math.round(Number(z.distance_mm) / 10);
+        m.kind[r][c] = kind;
+        m.signal[r][c] = Number(z.signal);
+        m.sigma[r][c] = Number(z.sigma_mm);
+        m.targets[r][c] = Number(z.targets);
       }
       return { snapshot: id.seq, ...m };
+    },
+  },
+  frames: {
+    usage: "frames <boot> <move> [--json]",
+    help: "Shows a move's ToF frames as the robot sent them, from the database: the move (kind, how it ended, frames\n" +
+          "sent and dropped, its imu records), then each frame's pose and its zones' distance, kind, signal and sigma.\n" +
+          "boot: its id (8 hex digits, robot status says it) or its folder name (YYYYMMDDHHMM); move: its number (1 is\n" +
+          "the boot's first). --json gives the same for a program: the robot's own units (m, rad, mm), one 8 × 8 matrix\n" +
+          "per reading.",
+    async run({ store, bootFolders }, args, flags) {
+      const { boot, folder } = await moveOf(store, bootFolders, args, this.usage);
+      const found = await store.moveFrames(boot, Number(args[1]));
+      if (!found) throw new ReadError(`boot ${args[0]} has no move ${args[1]}`);
+      return flags.has("json") ? framesJson(boot, folder, found.move, found.frames, found.imu)
+        : new TextAnswer(framesText(boot, folder, found.move, found.frames, found.imu));
+    },
+  },
+  imu: {
+    usage: "imu <boot> <move> [--json]",
+    help: "Shows a move's imu records as the robot sent them, from the database (104 a second during a move): the move,\n" +
+          "then each record's time and the IMU's raw counts, accel and gyro x, y, z, in the sensor's own axes. boot and\n" +
+          "move as for robot frames. --json gives the same for a program.",
+    async run({ store, bootFolders }, args, flags) {
+      const { boot, folder } = await moveOf(store, bootFolders, args, this.usage);
+      const found = await store.moveImu(boot, Number(args[1]));
+      if (!found) throw new ReadError(`boot ${args[0]} has no move ${args[1]}`);
+      if (flags.has("json")) return imuJson(boot, folder, found.move, found.imu, found.records);
+      return new TextAnswer(imuText(boot, folder, found.move, found.frames, found.imu, found.records));
     },
   },
   camera: {
@@ -170,14 +216,17 @@ export const READS: Record<string, Read> = {
     },
   },
   config: {
-    usage: "config [auto_snap on|off]",
-    help: "Shows the API's settings, or changes one. auto_snap on (the default): a snap runs after every move.",
-    async run({ config }, args) {
+    usage: "config [auto_snap on|off | pre_ms <ms> | post_ms <ms>]",
+    help: "Shows the settings, or changes one. auto_snap on (the default): a snap runs after every move.\n" +
+          "pre_ms, post_ms: how long the robot stands still before and after each move (0-2000 ms, 200 at power-up);\n" +
+          "they go to the robot in the queue, after what waits, and are answered like the other commands. null: not\n" +
+          "known yet (the robot says them with each move).",
+    async run({ config, live }, args) {
       if (args.length) {
-        if (args.length !== 2 || args[0] !== "auto_snap" || !/^(on|off)$/.test(args[1])) throw new ReadError("usage: robot config auto_snap on|off", 400);
+        if (args.length !== 2 || args[0] !== "auto_snap" || !/^(on|off)$/.test(args[1])) throw new ReadError(`usage: robot ${this.usage}`, 400);
         config.autoSnap = args[1] === "on";
       }
-      return { auto_snap: config.autoSnap };
+      return { auto_snap: config.autoSnap, pre_ms: live.still?.preMs ?? null, post_ms: live.still?.postMs ?? null };
     },
   },
 };

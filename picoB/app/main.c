@@ -4,6 +4,7 @@
 #include "pico/stdlib.h"
 #include "clock_start.h"
 #include "odometry.h"
+#include "robot_mounting.h" // ROBOT_MOUNTING, from common/mounting.json
 #include "drive.h"
 #include "brain.h"
 
@@ -13,7 +14,7 @@ int main(void) {
     clock_start();
     stdio_init_all();
     drive_init();
-    bool imu_ok = odom_init();
+    bool imu_ok = odom_init(&ROBOT_MOUNTING);
     brain_init(imu_ok);
 
     absolute_time_t next_control = get_absolute_time();

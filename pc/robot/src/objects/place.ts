@@ -4,24 +4,18 @@
 // the map. Camera only: no ToF yet. Behind the front edge the object is as deep as its
 // label's default (labels.ts); a door or wall is the front edge alone.
 import { DEPTH_M, type Detection, type Label } from "./labels.ts";
+import type { Mounting } from "../mounting.ts";
 
-// The camera in the robot frame: x forward, y left, z up, m (measured by Daniel, 17 Oct
-// 2026: 8.8 cm up, 2.5 cm ahead of the centre, 0.5 cm right).
-// focalPx 188 (~46° across): the table in boot 7a587226 snapshot 1, 80.5 cm across its
-// front legs (measured by Daniel), 83 px wide at the ToF's ~182 cm. The pouf
-// (snapshot 31) gives 182 px. The firmware's FOCAL_PX 160 (the data sheet's 64°
-// diagonal) is wrong (doc/OBJECTS_PLAN.md, "Settled by the table").
-// tiltRad -1.86°: the camera looks this much further down than the robot's pitch says
-// (+ = up). From two objects at known distances, their floor contact read from the
-// pixels, with f 188: the pouf (snapshot 31, ToF ~124 cm) -1.84°, the table (snapshot
-// 1, ~185 cm from the camera) -1.88° (doc/OBJECTS_PLAN.md, the calibration).
-export const CAMERA_GEOMETRY = {
-  x: 0.025, y: -0.005, z: 0.088,
-  width: 160, height: 120,
-  focalPx: 188,
-  tiltRad: -1.86 * Math.PI / 180,
-};
-export type CameraGeometry = typeof CAMERA_GEOMETRY;
+// The camera in the robot frame (x forward, y left, z up, m), from a mounting: the
+// boot's own copy (boot.ts, store.ts mountingOf), so a snapshot is placed with the
+// numbers of when it was taken (common/mounting.json's numbers and how they were
+// found: doc/CAMERA_PARAMS.md). tiltRad: + = up, on top of the robot's pitch.
+export interface CameraGeometry { x: number; y: number; z: number; width: number; height: number; focalPx: number; tiltRad: number }
+
+export function cameraGeometry(m: Mounting): CameraGeometry {
+  const c = m.camera;
+  return { x: c.x_m, y: c.y_m, z: c.z_m, width: c.width_px, height: c.height_px, focalPx: c.f_px, tiltRad: c.tilt_deg * Math.PI / 180 };
+}
 
 const MAX_M = 5;          // further than this along the floor: too far to place
 const CUT_OFF = 995;      // a bottom edge this low (0-1000) touches the picture's bottom
@@ -47,7 +41,7 @@ export interface SnapPoseLike { x: number; y: number; yaw: number; pitch: number
 // Where the ray through picture point (px, py) (pixels, continuous: 0 the top left
 // corner, 160 the right edge) meets the floor, in the robot frame; null if it doesn't
 // look down.
-export function floorPoint(px: number, py: number, pitch: number, cam: CameraGeometry = CAMERA_GEOMETRY): [number, number] | null {
+export function floorPoint(px: number, py: number, pitch: number, cam: CameraGeometry): [number, number] | null {
   const f = cam.focalPx, left = cam.width / 2 - px, up = cam.height / 2 - py;
   const t = pitch + cam.tiltRad; // nose up turns the ray up
   const fwd = f * Math.cos(t) - up * Math.sin(t), upW = f * Math.sin(t) + up * Math.cos(t);
@@ -56,7 +50,7 @@ export function floorPoint(px: number, py: number, pitch: number, cam: CameraGeo
   return [cam.x + k * fwd, cam.y + k * left];
 }
 
-export function place(d: Pick<Detection, "label" | "bbox">, pose: SnapPoseLike, cam: CameraGeometry = CAMERA_GEOMETRY): Placed {
+export function place(d: Pick<Detection, "label" | "bbox">, pose: SnapPoseLike, cam: CameraGeometry): Placed {
   // The box is y first on 0-1000 (labels.ts): [ymin, xmin, ymax, xmax]. ymin isn't used.
   const [, x1, y2, x2] = d.bbox;
   const none = (floor: Floor, distanceM: number | null = null): Placed =>

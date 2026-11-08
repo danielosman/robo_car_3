@@ -5,6 +5,7 @@ import { timestampValue } from "@duckdb/node-api";
 import type { Store } from "../store.ts";
 import type { Detection } from "./labels.ts";
 import type { Placed } from "./place.ts";
+import type { Mounting } from "../mounting.ts";
 
 // model: who found the boxes (the vision model, or detect_save's --by). From detect_save
 // the rest may be null: an outside agent doesn't say how it worked.
@@ -91,18 +92,20 @@ export async function transcriptOf(store: Store, boot: string, seq: number): Pro
   return { by: String(rows[0].model), transcript: rows[0].transcript === null ? null : String(rows[0].transcript) };
 }
 
-// Places every saved detection again with the camera's numbers now (place.ts), from
-// the boxes as the model gave them and the snapshots' poses: after a calibration. The
-// model isn't asked again. Returns how many objects were placed.
-export async function placeAgain(store: Store, placeOne: (d: Pick<Detection, "label" | "bbox">, pose: { x: number; y: number; yaw: number; pitch: number }) => Placed): Promise<number> {
+// Places every saved detection again (place.ts) from the boxes as the model gave
+// them, the snapshots' poses and each boot's own mounting (store.ts boots): after a
+// boot's copy was corrected. The model isn't asked again. boot: only that one's.
+// Returns how many objects were placed.
+export async function placeAgain(store: Store, placeOne: (d: Pick<Detection, "label" | "bbox">, pose: { x: number; y: number; yaw: number; pitch: number },
+                                                          mounting: Mounting) => Placed, boot: string | null = null): Promise<number> {
   return store.write(async c => {
-    const rows = (await c.runAndReadAll(`SELECT od.object_id, d.label, d.ymin, d.xmin, d.ymax, d.xmax, s.x, s.y, s.yaw, s.pitch
+    const rows = (await c.runAndReadAll(`SELECT od.object_id, d.label, d.ymin, d.xmin, d.ymax, d.xmax, s.x, s.y, s.yaw, s.pitch, b.mounting
       FROM object_detections od JOIN detections d ON d.snap_id = od.snap_id AND d.n = od.n JOIN snapshots s ON s.snap_id = od.snap_id
-      WHERE s.x IS NOT NULL`)).getRowObjects();
+      JOIN boots b ON b.boot_id = s.boot_id WHERE s.x IS NOT NULL AND ($1::VARCHAR IS NULL OR s.boot_id = $1)`, [boot])).getRowObjects();
     await c.run("BEGIN TRANSACTION");
     for (const r of rows) {
       const p = placeOne({ label: String(r.label) as Detection["label"], bbox: [Number(r.ymin), Number(r.xmin), Number(r.ymax), Number(r.xmax)] },
-                         { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw), pitch: Number(r.pitch ?? 0) });
+                         { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw), pitch: Number(r.pitch ?? 0) }, JSON.parse(String(r.mounting)) as Mounting);
       await c.run(`UPDATE map_objects SET floor = $2, kind = $3, distance = $4, cx = $5, cy = $6, width = $7, depth = $8, angle = $9
         WHERE object_id = $1`, [String(r.object_id), p.floor, p.kind, p.distanceM, p.cx, p.cy, p.width, p.depth, p.angle]);
     }
