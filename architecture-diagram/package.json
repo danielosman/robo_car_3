@@ -1,0 +1,25 @@
+{
+  "name": "robocar-architecture-diagram",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The robot's modules and data flows, drawn from data/ (README.md).",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "resolve": "node tools/resolve.ts",
+    "dev": "node tools/resolve.ts --no-fail; vite",
+    "build": "node tools/resolve.ts && vite build",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "d3": "7.9.2"
+  },
+  "devDependencies": {
+    "@types/d3": "7.4.3",
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vite": "8.3.6"
+  }
+}

@@ -101,8 +101,6 @@ then the README's "Steering through the API" test. Left of the plan (CLI_API_PLA
    - Safety step 2: the bump stop and the 10° tilt stop. The jolt and tilt peaks
      went in step 4c (no stop used them); set them from the stored imu records
      (`imu` in DuckDB) once a few drives show what normal looks like.
-   - The old console page (`/console`) sends keys nothing takes: it goes, or moves
-     to the API.
 
 ## Goals: what the robot is for
 

@@ -1,0 +1,89 @@
+/* Colours: the dataviz reference palette (categorical slots in fixed order, its
+   surfaces and inks), light and dark each validated against its own surface. */
+:root {
+  --surface: #fcfcfb; --page: #f9f9f7; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --line: #e1e0d9; --axis: #c3c2b7; --box: #ffffff; --code-bg: #f0efec;
+  --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100;
+  --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948;
+  --planned: #6250d6; --leaving: #898781; --error: #d03b3b;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #1a1a19; --page: #0d0d0d; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #898781;
+    --line: #2c2c2a; --axis: #383835; --box: #222220; --code-bg: #2c2c2a;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500;
+    --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767;
+    --planned: #9085e9;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font: 13px/1.4 system-ui, sans-serif; color: var(--ink); background: var(--page); display: flex; flex-direction: column; }
+header { display: flex; gap: 16px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+header .legend { color: var(--ink-2); flex: 1; }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--ink-2); vertical-align: -1px; }
+.key.turn { background: var(--ink-2); }
+.key.add { border-style: dashed; }
+button { font: inherit; padding: 3px 10px; border: 1px solid var(--axis); background: var(--box); color: var(--ink); border-radius: 4px; cursor: pointer; }
+main { flex: 1; display: grid; grid-template-columns: 280px 1fr 440px; min-height: 0; }
+aside { overflow: auto; padding: 8px 12px; background: var(--surface); }
+#list { border-right: 1px solid var(--line); }
+#side { border-left: 1px solid var(--line); }
+h2 { font-size: 15px; margin: 6px 0; }
+h3 { font-size: 13px; margin: 14px 0 4px; color: var(--ink-2); }
+a.code { color: var(--ink-2); font-family: ui-monospace, monospace; font-size: 11px; }
+pre { background: var(--code-bg); padding: 6px 8px; margin: 4px 0 8px; font-size: 11px; overflow-x: auto; border-radius: 4px; }
+.meta, .kind, .carried { color: var(--ink-2); font-size: 12px; }
+.hint { color: var(--muted); }
+.tag { font-size: 11px; padding: 0 5px; border-radius: 3px; border: 1px dashed var(--planned); color: var(--planned); }
+.tag.leaving { border-color: var(--leaving); color: var(--leaving); }
+.errors { border: 1px solid var(--error); color: var(--error); padding: 6px 8px; border-radius: 4px; margin-bottom: 8px; }
+.member { margin: 6px 0; }
+.at { font-family: ui-monospace, monospace; font-size: 12px; }
+.node { font-size: 11px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--ink-2); }
+ol.steps { padding-left: 20px; }
+ol.steps li { margin-bottom: 8px; }
+.rate { font-size: 12px; font-weight: 600; }
+details summary { cursor: pointer; color: var(--ink-2); font-size: 12px; }
+
+#list ul { list-style: none; padding: 0; margin: 0; }
+#list li { padding: 6px 6px; border-radius: 4px; cursor: pointer; margin-bottom: 2px; }
+#list li:hover { background: var(--code-bg); }
+#list li.on { background: var(--code-bg); outline: 1px solid var(--axis); }
+#list li.sub { margin-left: 16px; }
+#list .title { font-weight: 600; }
+#list .id { font-family: ui-monospace, monospace; font-size: 11px; color: var(--ink-2); }
+#list .desc { color: var(--ink-2); font-size: 12px; }
+#list .ends { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+
+/* the canvas */
+#canvas { width: 100%; height: 100%; background: var(--surface); cursor: grab; }
+text.group { font-size: 16px; font-weight: 700; fill: var(--ink-2); }
+g.box { cursor: move; }
+g.box rect.frame { fill: var(--box); stroke: var(--axis); stroke-width: 1; }
+g.box.on rect.frame { stroke: var(--ink); stroke-width: 2; }
+g.box.planned rect.frame { stroke: var(--planned); stroke-dasharray: 5 4; }
+g.box.leaving { opacity: 0.55; }
+g.box text.name { font-size: 13px; font-weight: 700; fill: var(--ink); }
+g.box text.name .origin { font-weight: 400; font-size: 10px; fill: var(--muted); }
+g.box line.rule { stroke: var(--line); }
+g.box text.member { font: 11px ui-monospace, monospace; fill: var(--ink-2); }
+g.box text.member.touched { fill: var(--ink); font-weight: 700; }
+g.box text.member.planned { fill: var(--planned); }
+g.ribbon path.band { fill: none; opacity: 0.6; stroke-linecap: butt; }
+g.ribbon path.hit { fill: none; stroke: transparent; cursor: pointer; }
+g.ribbon:hover path.band { opacity: 0.9; }
+g.ribbon.planned path.band { stroke-dasharray: 8 5; }
+g.ribbon.leaving path.band { stroke: var(--leaving) !important; }
+svg.dim g.ribbon:not(.on) path.band { opacity: 0.12; }
+svg.dim g.ribbon.on path.band { opacity: 0.9; }
+circle.node { stroke: var(--c); stroke-width: 2; fill: var(--box); cursor: pointer; }
+circle.node.turn { fill: var(--c); }
+circle.node.add { stroke-dasharray: 3 2; }
+svg.dim circle.node:not(.on) { opacity: 0.25; }
+circle.node.on { r: 6; }
+text.rate { font-size: 11px; font-weight: 600; fill: var(--ink-2); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+svg.dim text.rate:not(.on) { opacity: 0.2; }

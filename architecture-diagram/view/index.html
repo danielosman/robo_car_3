@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>RoboCar architecture</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header>
+    <b>RoboCar architecture</b>
+    <span class="legend">ribbon width: bytes of one message (log scale) · circles: <span class="key pick"></span> pick (hollow) <span class="key turn"></span> turn (filled) <span class="key add"></span> add (dashed) · dashed: planned · grey: leaving</span>
+    <button id="reset">reset layout</button>
+  </header>
+  <main>
+    <aside id="list"></aside>
+    <svg id="canvas"></svg>
+    <aside id="side"></aside>
+  </main>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>

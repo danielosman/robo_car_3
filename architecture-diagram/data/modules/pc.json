@@ -1,0 +1,899 @@
+[
+  {
+    "id": "pc.main",
+    "name": "main",
+    "origin": "pc",
+    "path": "pc/robot/src/main.ts",
+    "members": [
+      {
+        "name": "WebSocket /",
+        "kind": "route",
+        "code": "wss.on(\"connection\", ws => {"
+      },
+      {
+        "name": "/api/robot/*",
+        "kind": "route",
+        "code": "if (/^\\/api\\/robot(\\/|$|\\?)/.test(req.url ?? \"\")) { await api(req, res); return; }"
+      }
+    ]
+  },
+  {
+    "id": "pc.link",
+    "name": "link",
+    "origin": "pc",
+    "path": "pc/robot/src/link.ts",
+    "members": [
+      {
+        "name": "RobotStatus",
+        "kind": "type",
+        "code": "type RobotStatus"
+      },
+      {
+        "name": "RobotLinkOptions",
+        "kind": "type",
+        "code": "interface RobotLinkOptions"
+      },
+      {
+        "name": "Pose",
+        "kind": "type",
+        "code": "interface Pose"
+      },
+      {
+        "name": "LivePose",
+        "kind": "type",
+        "code": "interface LivePose"
+      },
+      {
+        "name": "DoneRecord",
+        "kind": "type",
+        "code": "interface DoneRecord",
+        "bytes": 34
+      },
+      {
+        "name": "livePose",
+        "kind": "function",
+        "code": "function livePose("
+      },
+      {
+        "name": "doneRecord",
+        "kind": "function",
+        "code": "function doneRecord("
+      },
+      {
+        "name": "broadcastAddresses",
+        "kind": "function",
+        "code": "function broadcastAddresses("
+      },
+      {
+        "name": "RobotLink",
+        "kind": "type",
+        "code": "class RobotLink"
+      },
+      {
+        "name": "RobotLink.start",
+        "kind": "function",
+        "code": "async start(): Promise<number> {"
+      },
+      {
+        "name": "RobotLink.stop",
+        "kind": "function",
+        "code": "stop(): void {"
+      },
+      {
+        "name": "RobotLink.sendCommand",
+        "kind": "function",
+        "code": "sendCommand(n: number, text: string): boolean {"
+      }
+    ]
+  },
+  {
+    "id": "pc.wire",
+    "name": "wire",
+    "origin": "pc",
+    "path": "pc/robot/src/wire.ts",
+    "members": [
+      {
+        "name": "Lane",
+        "kind": "type",
+        "code": "type Lane"
+      },
+      {
+        "name": "TypeInfo",
+        "kind": "type",
+        "code": "interface TypeInfo"
+      },
+      {
+        "name": "typeInfo",
+        "kind": "function",
+        "code": "function typeInfo("
+      },
+      {
+        "name": "wireCheck",
+        "kind": "function",
+        "code": "function wireCheck("
+      },
+      {
+        "name": "Hello",
+        "kind": "type",
+        "code": "interface Hello"
+      },
+      {
+        "name": "Answer",
+        "kind": "type",
+        "code": "interface Answer",
+        "bytes": 34
+      },
+      {
+        "name": "Status",
+        "kind": "type",
+        "code": "interface Status"
+      },
+      {
+        "name": "MoveStart",
+        "kind": "type",
+        "code": "interface MoveStart"
+      },
+      {
+        "name": "MoveEnd",
+        "kind": "type",
+        "code": "interface MoveEnd"
+      },
+      {
+        "name": "Vec3",
+        "kind": "type",
+        "code": "type Vec3"
+      },
+      {
+        "name": "ImuRecord",
+        "kind": "type",
+        "code": "interface ImuRecord"
+      },
+      {
+        "name": "ImuBatch",
+        "kind": "type",
+        "code": "interface ImuBatch",
+        "bytes": 135
+      },
+      {
+        "name": "Command",
+        "kind": "type",
+        "code": "interface Command",
+        "bytes": 26
+      },
+      {
+        "name": "MoveFrame",
+        "kind": "type",
+        "code": "interface MoveFrame",
+        "bytes": 289
+      },
+      {
+        "name": "Message",
+        "kind": "type",
+        "code": "type Message"
+      },
+      {
+        "name": "RawMessage",
+        "kind": "type",
+        "code": "interface RawMessage"
+      },
+      {
+        "name": "Take",
+        "kind": "type",
+        "code": "type Take"
+      },
+      {
+        "name": "take",
+        "kind": "function",
+        "code": "function take("
+      },
+      {
+        "name": "WireReader",
+        "kind": "type",
+        "code": "class WireReader"
+      },
+      {
+        "name": "WireReader.push",
+        "kind": "function",
+        "code": "push(chunk: Buffer): RawMessage[] {"
+      },
+      {
+        "name": "decode",
+        "kind": "function",
+        "code": "function decode("
+      },
+      {
+        "name": "encodeHello",
+        "kind": "function",
+        "code": "function encodeHello("
+      },
+      {
+        "name": "encodeConsole",
+        "kind": "function",
+        "code": "const encodeConsole ="
+      },
+      {
+        "name": "encodeAnswer",
+        "kind": "function",
+        "code": "function encodeAnswer("
+      },
+      {
+        "name": "encodeStatus",
+        "kind": "function",
+        "code": "function encodeStatus("
+      },
+      {
+        "name": "encodeMapCleared",
+        "kind": "function",
+        "code": "const encodeMapCleared ="
+      },
+      {
+        "name": "encodeMoveStart",
+        "kind": "function",
+        "code": "function encodeMoveStart("
+      },
+      {
+        "name": "encodeMoveEnd",
+        "kind": "function",
+        "code": "function encodeMoveEnd("
+      },
+      {
+        "name": "encodeImuBatch",
+        "kind": "function",
+        "code": "function encodeImuBatch("
+      },
+      {
+        "name": "encodeTof",
+        "kind": "function",
+        "code": "function encodeTof("
+      },
+      {
+        "name": "encodeSnapshotPart",
+        "kind": "function",
+        "code": "function encodeSnapshotPart("
+      },
+      {
+        "name": "encodeCommand",
+        "kind": "function",
+        "code": "function encodeCommand("
+      },
+      {
+        "name": "encodeHeartbeat",
+        "kind": "function",
+        "code": "const encodeHeartbeat ="
+      }
+    ]
+  },
+  {
+    "id": "pc.tof_format",
+    "name": "tof_format",
+    "origin": "pc",
+    "path": "pc/robot/src/tof_format.ts",
+    "members": [
+      {
+        "name": "TofFormat",
+        "kind": "type",
+        "code": "interface TofFormat"
+      },
+      {
+        "name": "tofFormatOfType",
+        "kind": "function",
+        "code": "const tofFormatOfType ="
+      },
+      {
+        "name": "Kind",
+        "kind": "type",
+        "code": "type Kind"
+      },
+      {
+        "name": "Zone",
+        "kind": "type",
+        "code": "interface Zone"
+      },
+      {
+        "name": "PosedFrame",
+        "kind": "type",
+        "code": "interface PosedFrame"
+      },
+      {
+        "name": "unpackTof",
+        "kind": "function",
+        "code": "function unpackTof("
+      },
+      {
+        "name": "packTof",
+        "kind": "function",
+        "code": "function packTof("
+      },
+      {
+        "name": "rowCol",
+        "kind": "function",
+        "code": "const rowCol ="
+      },
+      {
+        "name": "zoneAt",
+        "kind": "function",
+        "code": "const zoneAt ="
+      },
+      {
+        "name": "isValid",
+        "kind": "function",
+        "code": "const isValid ="
+      },
+      {
+        "name": "isBeyond",
+        "kind": "function",
+        "code": "const isBeyond ="
+      }
+    ]
+  },
+  {
+    "id": "pc.ingest",
+    "name": "ingest",
+    "origin": "pc",
+    "path": "pc/robot/src/ingest.ts",
+    "members": [
+      {
+        "name": "IngestOptions",
+        "kind": "type",
+        "code": "interface IngestOptions"
+      },
+      {
+        "name": "ingest",
+        "kind": "function",
+        "code": "function ingest("
+      }
+    ]
+  },
+  {
+    "id": "pc.boot",
+    "name": "boot",
+    "origin": "pc",
+    "path": "pc/robot/src/boot.ts",
+    "members": [
+      {
+        "name": "Stamp",
+        "kind": "type",
+        "code": "interface Stamp"
+      },
+      {
+        "name": "MoveStartRow",
+        "kind": "type",
+        "code": "type MoveStartRow"
+      },
+      {
+        "name": "MoveEndRow",
+        "kind": "type",
+        "code": "type MoveEndRow"
+      },
+      {
+        "name": "FrameRow",
+        "kind": "type",
+        "code": "type FrameRow",
+        "bytes": 289
+      },
+      {
+        "name": "StatusRow",
+        "kind": "type",
+        "code": "type StatusRow"
+      },
+      {
+        "name": "ImuRow",
+        "kind": "type",
+        "code": "type ImuRow",
+        "bytes": 135
+      },
+      {
+        "name": "Boot",
+        "kind": "type",
+        "code": "class Boot"
+      },
+      {
+        "name": "Boot.stamp",
+        "kind": "function",
+        "code": "stamp(atMs = Date.now()): Stamp { return { boot: this.id, msg: ++this.count, atMs }; }"
+      },
+      {
+        "name": "Boot.moveStart",
+        "kind": "function",
+        "code": "moveStart(m: MoveStart, atMs = Date.now()): MoveStartRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }"
+      },
+      {
+        "name": "Boot.moveEnd",
+        "kind": "function",
+        "code": "moveEnd(m: MoveEnd, atMs = Date.now()): MoveEndRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }"
+      },
+      {
+        "name": "Boot.frame",
+        "kind": "function",
+        "code": "frame(f: MoveFrame, atMs = Date.now()): FrameRow {"
+      },
+      {
+        "name": "Boot.status",
+        "kind": "function",
+        "code": "status(pose: LivePose, atMs = Date.now()): StatusRow { return { ...this.stamp(atMs), pose }; }"
+      },
+      {
+        "name": "Boot.imu",
+        "kind": "function",
+        "code": "imu(batch: ImuBatch, atMs = Date.now()): ImuRow {"
+      }
+    ]
+  },
+  {
+    "id": "pc.store",
+    "name": "store",
+    "origin": "pc",
+    "path": "pc/robot/src/store.ts",
+    "members": [
+      {
+        "name": "TofGeometry",
+        "kind": "type",
+        "code": "interface TofGeometry"
+      },
+      {
+        "name": "tofGeometry",
+        "kind": "function",
+        "code": "const tofGeometry ="
+      },
+      {
+        "name": "Pose",
+        "kind": "type",
+        "code": "interface Pose"
+      },
+      {
+        "name": "worldPoint",
+        "kind": "function",
+        "code": "function worldPoint("
+      },
+      {
+        "name": "MoveRow",
+        "kind": "type",
+        "code": "interface MoveRow"
+      },
+      {
+        "name": "StoredFrame",
+        "kind": "type",
+        "code": "interface StoredFrame"
+      },
+      {
+        "name": "StoredImu",
+        "kind": "type",
+        "code": "type StoredImu"
+      },
+      {
+        "name": "Replayed",
+        "kind": "type",
+        "code": "type Replayed"
+      },
+      {
+        "name": "Store",
+        "kind": "type",
+        "code": "class Store"
+      },
+      {
+        "name": "Store.query",
+        "kind": "function",
+        "code": "async query(sql: string): Promise<Record<string, unknown>[]> {"
+      },
+      {
+        "name": "Store.read",
+        "kind": "function",
+        "code": "async read<T>(fn: (c: DuckDBConnection) => Promise<T>): Promise<T> { return this.use(fn); }"
+      },
+      {
+        "name": "Store.write",
+        "kind": "function",
+        "code": "async write<T>(fn: (c: DuckDBConnection) => Promise<T>): Promise<T> { return this.use(fn); }"
+      },
+      {
+        "name": "Store.openBoot",
+        "kind": "function",
+        "code": "async openBoot(hello: Hello, mountingNow: Mounting, atMs = Date.now()): Promise<Boot> {"
+      },
+      {
+        "name": "Store.mountingOf",
+        "kind": "function",
+        "code": "async mountingOf(boot: string): Promise<Mounting | null> {"
+      },
+      {
+        "name": "Store.setMounting",
+        "kind": "function",
+        "code": "async setMounting(boot: string, m: Mounting): Promise<void> {"
+      },
+      {
+        "name": "Store.moveStart",
+        "kind": "function",
+        "code": "moveStart(boot: Boot, row: MoveStartRow): Promise<void> { this.pending.starts.push(row); return this.queued(boot); }"
+      },
+      {
+        "name": "Store.moveEnd",
+        "kind": "function",
+        "code": "moveEnd(boot: Boot, row: MoveEndRow): Promise<void> { this.pending.ends.push(row); return this.queued(boot); }"
+      },
+      {
+        "name": "Store.frame",
+        "kind": "function",
+        "code": "frame(boot: Boot, row: FrameRow): Promise<void> { this.pending.frames.push(row); return this.queued(boot); }"
+      },
+      {
+        "name": "Store.imu",
+        "kind": "function",
+        "code": "imu(boot: Boot, row: ImuRow): Promise<void> { this.pending.imu.push(row); return this.queued(boot); }"
+      },
+      {
+        "name": "Store.status",
+        "kind": "function",
+        "code": "status(boot: Boot, row: StatusRow): Promise<void> { this.pending.status.push(row); return this.queued(boot); }"
+      },
+      {
+        "name": "Store.flush",
+        "kind": "function",
+        "code": "flush(): Promise<void> {"
+      },
+      {
+        "name": "Store.importSnapshot",
+        "kind": "function",
+        "code": "async importSnapshot(boot: Boot, msg: number, s: Snapshot, bytes: Buffer, arrivalMs: number, image: string | null): Promise<void> {"
+      },
+      {
+        "name": "Store.path",
+        "kind": "function",
+        "code": "async path(boot: string, seq: number): Promise<{ x: number; y: number }[]> {"
+      },
+      {
+        "name": "Store.hasBoot",
+        "kind": "function",
+        "code": "async hasBoot(boot: string): Promise<boolean> {"
+      },
+      {
+        "name": "Store.moveFrames",
+        "kind": "function",
+        "code": "async moveFrames(boot: string, move: number): Promise<{ move: MoveRow; frames: StoredFrame[]; imu: ImuCount } | null> {"
+      },
+      {
+        "name": "Store.moveImu",
+        "kind": "function",
+        "code": "async moveImu(boot: string, move: number): Promise<{ move: MoveRow; frames: number; imu: ImuCount; records: StoredImu[] } | null> {"
+      },
+      {
+        "name": "Store.replay",
+        "kind": "function",
+        "code": "async replay(boot: string): Promise<Replayed[]> {"
+      },
+      {
+        "name": "ImuCount",
+        "kind": "type",
+        "code": "interface ImuCount"
+      }
+    ]
+  },
+  {
+    "id": "pc.log",
+    "name": "log",
+    "origin": "pc",
+    "path": "pc/robot/src/log.ts",
+    "members": [
+      {
+        "name": "LogItem",
+        "kind": "type",
+        "code": "interface LogItem"
+      },
+      {
+        "name": "Log",
+        "kind": "type",
+        "code": "class Log"
+      },
+      {
+        "name": "Log.text",
+        "kind": "function",
+        "code": "text(text: string): void {"
+      },
+      {
+        "name": "Log.note",
+        "kind": "function",
+        "code": "note(text: string): void {"
+      },
+      {
+        "name": "Log.answer",
+        "kind": "function",
+        "code": "answer(a: Answer, sender: Sender): void {"
+      },
+      {
+        "name": "Log.backlog",
+        "kind": "function",
+        "code": "backlog(): LogItem[] { return [...this.items]; }"
+      },
+      {
+        "name": "Log.tail",
+        "kind": "function",
+        "code": "tail(n: number): string[] {"
+      }
+    ]
+  },
+  {
+    "id": "pc.routes",
+    "name": "routes",
+    "origin": "pc",
+    "path": "pc/robot/src/api/routes.ts",
+    "members": [
+      {
+        "name": "createApi",
+        "kind": "function",
+        "code": "function createApi("
+      },
+      {
+        "name": "POST /api/robot/:name",
+        "kind": "route",
+        "code": "app.post(\"/:name\", async c => {"
+      },
+      {
+        "name": "GET /api/robot/help/:name?",
+        "kind": "route",
+        "code": "app.get(\"/help/:name?\", c => {"
+      }
+    ]
+  },
+  {
+    "id": "pc.queue",
+    "name": "queue",
+    "origin": "pc",
+    "path": "pc/robot/src/api/queue.ts",
+    "members": [
+      {
+        "name": "QueueState",
+        "kind": "type",
+        "code": "interface QueueState"
+      },
+      {
+        "name": "CommandQueue",
+        "kind": "type",
+        "code": "class CommandQueue"
+      },
+      {
+        "name": "CommandQueue.submit",
+        "kind": "function",
+        "code": "submit(commands: Command[], sender: Sender, onAnswer: Tell): Promise<void> {"
+      },
+      {
+        "name": "CommandQueue.stop",
+        "kind": "function",
+        "code": "async stop(sender: Sender, onAnswer: Tell): Promise<void> {"
+      },
+      {
+        "name": "CommandQueue.state",
+        "kind": "function",
+        "code": "state(): QueueState {"
+      }
+    ]
+  },
+  {
+    "id": "pc.runner",
+    "name": "runner",
+    "origin": "pc",
+    "path": "pc/robot/src/api/runner.ts",
+    "members": [
+      {
+        "name": "RobotConnection",
+        "kind": "type",
+        "code": "interface RobotConnection"
+      },
+      {
+        "name": "Runner",
+        "kind": "type",
+        "code": "interface Runner"
+      },
+      {
+        "name": "StoredSnapshots",
+        "kind": "type",
+        "code": "class StoredSnapshots"
+      },
+      {
+        "name": "StoredSnapshots.add",
+        "kind": "function",
+        "code": "add(boot: string, seq: number): void {"
+      },
+      {
+        "name": "StoredSnapshots.newest",
+        "kind": "function",
+        "code": "newest(): number | null { return this.last; }"
+      },
+      {
+        "name": "StoredSnapshots.stored",
+        "kind": "function",
+        "code": "stored(seq: number, ms: number): Promise<boolean> {"
+      },
+      {
+        "name": "CommandRunner",
+        "kind": "type",
+        "code": "class CommandRunner"
+      },
+      {
+        "name": "CommandRunner.run",
+        "kind": "function",
+        "code": "async run(c: Command): Promise<Outcome> {"
+      }
+    ]
+  },
+  {
+    "id": "pc.commands",
+    "name": "commands",
+    "origin": "pc",
+    "path": "pc/robot/src/api/commands.ts",
+    "members": [
+      {
+        "name": "MoveName",
+        "kind": "type",
+        "code": "type MoveName"
+      },
+      {
+        "name": "CommandName",
+        "kind": "type",
+        "code": "type CommandName"
+      },
+      {
+        "name": "Command",
+        "kind": "type",
+        "code": "interface Command",
+        "bytes": 31
+      },
+      {
+        "name": "MoveSpec",
+        "kind": "type",
+        "code": "interface MoveSpec"
+      },
+      {
+        "name": "Parsed",
+        "kind": "type",
+        "code": "type Parsed"
+      },
+      {
+        "name": "parseSteer",
+        "kind": "function",
+        "code": "function parseSteer("
+      },
+      {
+        "name": "parseAction",
+        "kind": "function",
+        "code": "function parseAction("
+      },
+      {
+        "name": "commandText",
+        "kind": "function",
+        "code": "function commandText("
+      },
+      {
+        "name": "robotText",
+        "kind": "function",
+        "code": "function robotText("
+      },
+      {
+        "name": "isMove",
+        "kind": "function",
+        "code": "const isMove ="
+      },
+      {
+        "name": "withSnaps",
+        "kind": "function",
+        "code": "function withSnaps("
+      },
+      {
+        "name": "timeLimitMs",
+        "kind": "function",
+        "code": "function timeLimitMs("
+      }
+    ]
+  },
+  {
+    "id": "pc.answers",
+    "name": "answers",
+    "origin": "pc",
+    "path": "pc/robot/src/api/answers.ts",
+    "members": [
+      {
+        "name": "Sender",
+        "kind": "type",
+        "code": "type Sender"
+      },
+      {
+        "name": "Result",
+        "kind": "type",
+        "code": "type Result"
+      },
+      {
+        "name": "PoseOut",
+        "kind": "type",
+        "code": "interface PoseOut"
+      },
+      {
+        "name": "Answer",
+        "kind": "type",
+        "code": "interface Answer",
+        "bytes": 95
+      },
+      {
+        "name": "Outcome",
+        "kind": "type",
+        "code": "type Outcome",
+        "bytes": 80
+      },
+      {
+        "name": "failed",
+        "kind": "function",
+        "code": "const failed ="
+      },
+      {
+        "name": "yawDeg",
+        "kind": "function",
+        "code": "function yawDeg("
+      },
+      {
+        "name": "poseOut",
+        "kind": "function",
+        "code": "const poseOut ="
+      },
+      {
+        "name": "outcome",
+        "kind": "function",
+        "code": "function outcome("
+      }
+    ]
+  },
+  {
+    "id": "pc.cell_map",
+    "name": "cell_map",
+    "origin": "pc",
+    "status": "planned",
+    "plan": {
+      "path": "doc/DATA_FLOW_PLAN.md",
+      "code": "| step 5:"
+    },
+    "summary": "The PC's cell map: the robot's cell_map.c, tof_rays.c and house_map.c in a helper program, whole house.",
+    "members": [
+      {
+        "name": "open",
+        "kind": "function"
+      },
+      {
+        "name": "add",
+        "kind": "function"
+      },
+      {
+        "name": "pathClear",
+        "kind": "function"
+      },
+      {
+        "name": "rays",
+        "kind": "function"
+      },
+      {
+        "name": "clear",
+        "kind": "function"
+      },
+      {
+        "name": "tiles",
+        "kind": "function"
+      }
+    ]
+  },
+  {
+    "id": "pc.line_map",
+    "name": "line_map",
+    "origin": "pc",
+    "status": "planned",
+    "plan": {
+      "path": "doc/DATA_FLOW_PLAN.md",
+      "code": "| step 7:"
+    },
+    "summary": "A map of lines in height bands, from the cell map helper's rays (LINE_MAP_PLAN.md).",
+    "members": [
+      {
+        "name": "add",
+        "kind": "function"
+      },
+      {
+        "name": "linesInView",
+        "kind": "function"
+      }
+    ]
+  }
+]

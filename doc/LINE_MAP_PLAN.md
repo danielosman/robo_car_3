@@ -1,9 +1,9 @@
 # Line map on the PC — plan (draft, 7 Nov 2026)
 
 A map of lines, built on the PC from the robot's compact ToF frames. Not built yet;
-nothing here is decided until Daniel says so. Part of
-[DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). The robot keeps its own cell map for driving;
-this map is the PC's.
+it is step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md) and needs the PC cell map's
+helper (step 5) for its rays. Nothing here is decided until Daniel confirms it
+before step 7. The robot keeps its own cell map for driving; this map is the PC's.
 
 ## Is it doable?
 
@@ -30,7 +30,7 @@ Limits to accept:
 
 ## What comes in
 
-Per ToF frame, a **posed_frame** (DATA_FLOW_PLAN.md, sections 3-4) and its
+Per ToF frame, a **posed_frame** (DATA_FLOW_PLAN.md, sections 5-6) and its
 **rays** from the cell map helper:
 
 - posed_frame: frame number, time, the robot's pose then (x, y, yaw, pitch), still
@@ -42,18 +42,18 @@ Per ToF frame, a **posed_frame** (DATA_FLOW_PLAN.md, sections 3-4) and its
   of its own: the helper runs the robot's C code, so both maps judge a reading the
   same way.
 
-## Step 1: points
+## Part 1: points
 
 - Each zone of kind sure or less sure gives one point (from the helper's rays).
 - By the verdict:
   - **floor**: not used for lines;
   - **obstacle**: a point for lines;
   - **unsure**, and zones of kind unsure or nothing: ignored (but they still clear,
-    step 4).
+    part 4).
 - Each point keeps its uncertainty: across the ray, half a zone (d × tan 2.8°);
   along the ray, the sigma (at least 1 cm, the distance's step).
 
-## Step 2: lines from one frame
+## Part 2: lines from one frame
 
 - Work row by row, left to right, over the obstacle points.
 - Grow a line while the next point fits it: its distance from the line is under a
@@ -96,7 +96,7 @@ All 8 rows are used (the cell map uses all 64 zones too). Rows are the unit for
 - Merging and removing happen within a band. The page draws each band in its own
   colour, each can be hidden: the "stacked, different colours" view, but by height.
 
-## Step 3: into the map
+## Part 3: into the map
 
 The map is a list of lines in a quadtree (each line by its box, padded by its
 uncertainty). For each new line:
@@ -118,7 +118,7 @@ uncertainty). For each new line:
 This is how "moving closer corrects the lines": a far line is wide and loose; the
 close look is narrow and sure, and wins.
 
-## Step 4: removing what isn't there
+## Part 4: removing what isn't there
 
 Lines must also go away, all or in part (a moved chair, a person, a far line drawn
 too long). A zone doesn't see along a thin ray: it sees a 5.6° wedge.
@@ -139,7 +139,7 @@ too long). A zone doesn't see along a thin ray: it sees a 5.6° wedge.
 - Cost: cutting a line by a wedge is two line crossings; the quadtree gives the few
   lines near each wedge. Not much more than any removal needs.
 
-## Step 5: still periods
+## Part 5: still periods
 
 The robot stands still 200 ms after sending starts, before it moves, and keeps
 sending 200 ms after it stops (both settings). The frames while still are the best: no blur, sure pose.
@@ -166,11 +166,11 @@ To decide when it is built.
   wall, a wall seen at a shallow angle.
 - **Compare** with the PC's cell map of the same frames, drawn under it.
 
-## Steps
+## Order of work
 
-1. Steps 1-2 (points, lines from one frame); drawn per frame on the page.
-2. Step 3 (merge, bands) with the quadtree; a whole drive drawn.
-3. Step 4 (removing).
+1. Parts 1-2 (points, lines from one frame); drawn per frame on the page.
+2. Part 3 (merge, bands) with the quadtree; a whole drive drawn.
+3. Part 4 (removing).
 4. Live: the same code on the stream from the robot.
 5. Later, if wanted: drive check (`robot check`) on lines instead of cells.
 

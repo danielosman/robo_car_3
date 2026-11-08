@@ -1,0 +1,85 @@
+[
+  {
+    "id": "common.link",
+    "name": "link",
+    "origin": "common",
+    "path": "common/link.h",
+    "members": [
+      {
+        "name": "link_msg_t",
+        "kind": "type",
+        "code": "} link_msg_t;"
+      },
+      {
+        "name": "link_stats_t",
+        "kind": "type",
+        "code": "} link_stats_t;"
+      },
+      {
+        "name": "link_init",
+        "kind": "function",
+        "code": "void link_init("
+      },
+      {
+        "name": "link_send",
+        "kind": "function",
+        "code": "bool link_send("
+      },
+      {
+        "name": "link_receive",
+        "kind": "function",
+        "code": "bool link_receive("
+      },
+      {
+        "name": "link_stats",
+        "kind": "function",
+        "code": "link_stats_t link_stats("
+      }
+    ]
+  },
+  {
+    "id": "common.link_msgs",
+    "name": "link_msgs",
+    "origin": "common",
+    "path": "common/link_msgs.h",
+    "members": [
+      {
+        "name": "hello_msg_t",
+        "kind": "type",
+        "code": "} hello_msg_t;"
+      },
+      {
+        "name": "motors_msg_t",
+        "kind": "type",
+        "code": "} motors_msg_t;"
+      },
+      {
+        "name": "drive_msg_t",
+        "kind": "type",
+        "code": "} drive_msg_t;"
+      },
+      {
+        "name": "stop_reason_text",
+        "kind": "function",
+        "code": "static inline const char *stop_reason_text("
+      },
+      {
+        "name": "odom_report_t",
+        "kind": "type",
+        "code": "} odom_report_t;",
+        "bytes": 45
+      },
+      {
+        "name": "imu_record_t",
+        "kind": "type",
+        "code": "} imu_record_t;",
+        "bytes": 16
+      },
+      {
+        "name": "status_report_t",
+        "kind": "type",
+        "code": "} status_report_t;"
+      }
+    ]
+  }
+]

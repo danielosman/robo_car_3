@@ -1,44 +1,13 @@
-// The robot's console in the browser: the log, the connection status, and the
-// serial monitor's keys as buttons (typing them works too).
-const KEYS = [
-  ["Robot", [[" ", "stop"], ["p", "status"], ["W", "WiFi"], ["h", "help"]]],
-  ["Actions", [["s", "scan"], ["f", "move 50 cm"], ["t", "turn 30°"], ["a", "watch 1 min"], ["5", "record 5 s"]]],
-  ["Settings", [["r", "direction"]]],
-  ["Map", [["C", "clear map"], ["m", "map"], ["z", "ToF frame"]]],
-  ["Look", [["o", "ToF backgrounds"], ["k", "camera backgrounds"], ["c", "camera frame"]]],
-];
+// The robot's console in the browser: the log and the connection status. It only
+// shows; steering goes through the API (the viewer at /, or the CLI).
 const MAX_CHARS = 1024 * 1024;
 const log = document.getElementById("log");
 const statusEl = document.getElementById("status");
 const serverEl = document.getElementById("server");
 const follow = document.getElementById("follow");
-const buttons = [];
-let ws = null, chars = 0;
+let chars = 0;
 
-for (const [group, keys] of KEYS) {
-  const label = document.createElement("span");
-  label.textContent = group;
-  document.getElementById("keys").append(label);
-  for (const [key, what] of keys) {
-    const b = document.createElement("button");
-    b.innerHTML = `<kbd>${key === " " ? "space" : key}</kbd>`;
-    b.append(what);
-    if (key === " ") b.className = "stop";
-    b.onclick = () => sendKey(key);
-    buttons.push(b);
-    document.getElementById("keys").append(b);
-  }
-}
-const known = new Set(KEYS.flatMap(([, keys]) => keys.map(([k]) => k)));
-document.addEventListener("keydown", e => {
-  if (e.metaKey || e.ctrlKey || e.altKey || e.target.tagName === "INPUT") return;
-  if (known.has(e.key)) { e.preventDefault(); sendKey(e.key); }
-});
 document.getElementById("clear").onclick = () => { log.textContent = ""; chars = 0; };
-
-function sendKey(key) {
-  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "key", key }));
-}
 
 function append(text, kind) {
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
@@ -62,12 +31,11 @@ function showStatus(s) {
   else if (s.state === "connected")
     statusEl.textContent = `Robot connected: ${s.ip}${s.rssi !== null ? `, signal ${s.rssi} dBm` : ""}, since ${time(s.since)}`;
   else statusEl.textContent = `Robot lost at ${time(s.at)} (${s.ip}); waiting for it…`;
-  for (const b of buttons) b.disabled = s.state !== "connected";
 }
 setInterval(() => { if (status?.state === "connected" && status.quietSince) showStatus(status); }, 1000);
 
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/`);
+  const ws = new WebSocket(`ws://${location.host}/`);
   ws.onopen = () => { serverEl.textContent = ""; };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
@@ -79,7 +47,6 @@ function connect() {
     statusEl.className = "lost";
     statusEl.textContent = "Server not reachable";
     serverEl.textContent = "is npm start running in pc/robot/? retrying…";
-    for (const b of buttons) b.disabled = true;
     setTimeout(connect, 2000);
   };
 }

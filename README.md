@@ -495,9 +495,8 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
    to accept incoming connections.
 4. Expected ~3 s after power-up: "WiFi: connecting…", "WiFi: connected, IP …",
    "Server: found at …", "Server: connected" (`W` shows how it is connected). The
-   page shows "Robot connected" and the keys.
-5. Press `p` and `m` on the page: the answers show on the page and in the serial
-   monitor. Unplug the USB (battery on): the page keeps working.
+   page shows "Robot connected".
+5. Press "status" on the page: the answer shows on the page. Unplug the USB (battery on): the page keeps working.
 6. Power up without USB: the statuses show on the page, the robot waits; `s` on
    the page scans.
 

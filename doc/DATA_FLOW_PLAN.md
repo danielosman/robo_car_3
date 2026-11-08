@@ -11,55 +11,42 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 6 Data formats · 7 The connection · 8 Modules · 9 Budgets · 10 Old data · 11 Steps left ·
 12 Debugging · 13 Known issues · 14 Open questions.
 
-## 1. Where we are (8 Nov 2026)
+## 1. Where we are
 
-| Step | State |
-|---|---|
-| 0 Tag `data-v1` | done |
-| 1 Mounting file, ToF at 9 cm | done, reviewed |
-| 2 ToF at 10 Hz | done, reviewed |
-| 3 ToF pipeline on the robot | done, reviewed |
-| 4a Framed messages over TCP | done, reviewed |
-| 4b Moves, frames, new database | done, reviewed |
-| 4c Raw IMU at 104 Hz, peaks gone | done, reviewed, re-review fixes done (8 Nov) |
-| 4d Simpler: move number in frames, 64-bit times, simpler link | done (8 Nov), not reviewed |
-| 5 PC cell map | to do |
-| 6 Robot: window only, floor first | to do |
-| 7 Line map | to do |
-| 8 Map switch on the page | to do |
-| 9 Final docs, one flash, robot test list | to do |
-
-- Steps 1-4c are committed (`3f9f8b7`); step 4d is in the working tree. The tag
-  `data-v1` marks the last commit before step 1.
-- All checks green on 8 Nov: `./run_tests.sh`, `tools/lint.sh`, `npm test` (73) and
-  `npm run typecheck` in `pc/robot`, `cmake --build build` (0 warnings).
-- **Docs behind:** ARCHITECTURE, CHANGELOG, README and TODO are not updated for step
-  4d; they are brought up to date once, in step 9.
+- **Done:** steps 1-4 (mounting file, ToF at 10 Hz, the ToF pipeline on the robot,
+  framed messages over one TCP connection, moves, the new database, raw IMU at
+  104 Hz, move numbers in frames, 64-bit times). Committed and pushed; the tag
+  `data-v1` marks the last commit before them.
+- **Next: step 5**, the PC cell map (section 11).
+- **Then:** 6 the robot's map (window only, floor first), 7 line map, 8 map switch on
+  the page, 9 final docs, one flash, the robot test list.
+- **Checks** (all green now): `./run_tests.sh`, `tools/lint.sh`, `cmake --build
+  build` (0 warnings); in `pc/robot`: `npm test`, `npm run typecheck`.
 - **Nothing flashed, no robot tests run.** Both Picos are flashed once, in step 9
-  (link protocol 6, wire version 4: PicoA, PicoB and the server go together).
-- The robot tests for steps 1-4c are collected in the README section "Robot tests
-  after the data-flow rework", to be run once after step 9.
+  (wire version 4: PicoA, PicoB and the server go together).
+- **Docs behind the code:** ARCHITECTURE, README, TODO and CHANGELOG don't yet show
+  the last simplification (move numbers in frames, 64-bit times, the simpler
+  `link_pc`). Where they disagree with this plan, this plan and the code are right.
+  They are brought up to date once, in step 9.
 
 ## 2. How to continue
 
+- **Read first:** this plan, AGENTS.md (how to answer Daniel; the code review guide),
+  the README sections "How we work", "Conventions", "Git conventions".
 - **Each step:** built in the main session from this plan; one review pass after it
-  (the guide in AGENTS.md, "Code review"; no second review of the fixes). Then the
-  next step.
+  (the guide in AGENTS.md, "Code review"); the fixes; then the next step.
 - **Simple first:** a rare case returns an error, is counted or is ignored; it isn't
   handled unless a robot test shows it matters. Tests cover the promised behaviour,
   not every corner.
-- **Each step ends** green (the four checks above) and says which Picos it changes.
-  The docs (ARCHITECTURE, TODO, README robot test list, CHANGELOG) are updated once,
-  in step 9; this plan's state table is kept current.
+- **Each step ends** green (the checks above), with this plan's section 1 updated,
+  and says which Picos it changes. The other docs wait for step 9: until then this
+  overrides the README's "After a step" and robot-test rules.
 - **No robot tests between steps.** Everything is checked by host tests, PC tests and
   review; the robot is flashed once at the end.
-- **To show a reviewer only one step's change:** before the step, save the tree with
-  a temporary index (no commit):
-  `cp .git/index /tmp/idx && GIT_INDEX_FILE=/tmp/idx git add -A && GIT_INDEX_FILE=/tmp/idx git write-tree`;
-  the reviewer runs `git diff <tree>`.
-- Workers must not commit, tag, flash or run robot tests, and must not build later
-  steps. Long test runs: cap them with a time limit, and never read large generated
-  data into the agent's context.
+- **Commit only when Daniel says** (README). To review one step, diff against the
+  last commit.
+- Long test runs: cap them with a time limit, and never read large generated data
+  into the agent's context.
 
 ## 3. Decisions (Daniel)
 
@@ -180,7 +167,8 @@ On the wire a tof frame comes after its **move number** (u32) and its **time** (
 µs since power-up): 12 B, so a frame is filed by the move it names. The format itself
 (below) is the same for every use.
 
-Header 21 B: frame number 4, time 4 (PicoA µs, middle of the measurement), period 2
+Header 21 B: frame number 4, time 4 (PicoA's 32-bit clock, the middle of the
+measurement; `robotClockUs` on the PC, which times frames by the 64-bit time), period 2
 (0.1 ms), pose 8 (x, y mm; yaw ±180° and pitch in 0.01°), turn 2 (0.01°), flags 1
 (still, pose known). Per zone (64, row 1 first), 4 B:
 
@@ -202,8 +190,8 @@ Header 21 B: frame number 4, time 4 (PicoA µs, middle of the measurement), peri
   bias not removed. A skipped sample restarts the record, so every record is 4
   samples in a row and a skip shows as a gap. `body` turns the time into PicoA's.
 - **imu_batch** (PicoA → PC, bulk): move number 4, first time 8 (µs since power-up),
-  period 2 (µs), count 1, then 12 B a record; up to 135 B. A gap or a step back in time starts a new batch;
-  a move's last batch goes at its end, however short.
+  period 2 (µs), count 1, then 12 B a record; up to 135 B. A gap or a step back in
+  time starts a new batch; a move's last batch goes at its end, however short.
 
 ### Time
 
@@ -227,7 +215,7 @@ the PC only divides by 10^6.
   isn't sent again (the new server gets its own).
 - The PC refuses a robot with another wire version (one note per address and version).
 - Move start: move and command number, kind, parameter, time, still times, a
-  **refused** flag (a refused move doesn't close the running one on the PC). Move end:
+  **refused** flag (it couldn't start: blocked or already there). Move end:
   how it ended, frames sent and dropped, moved, rotated, imu batches sent and dropped.
 - Answers: each ended move is answered in order (`move_next_ended()` keeps the last 8).
 - The USB console stays plain text.
@@ -309,9 +297,18 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.9 K
 ## 11. Steps left
 
 **5. The PC cell map** (PC)
+
+Where to start: today the page and `robot map` draw the robot's map from snapshots
+(the window and whole-house tiles in each snapshot: `api/map.ts`, `snapshots_api.ts`,
+`public/app.js`); `robot check` (`api/check.ts`) and `store.ts` `worldPoint` copy
+robot rules in TypeScript. `picoA/app/test/test_map_replay.c` shows how to build
+`cell_map.c` on the Mac with the host stubs (`run_tests.sh` has its command line);
+the stored frames come back with `store.moveFrames()` / `store.replay()`.
+
 1. `native/cell_map_helper.c`: the robot's `cell_map.c`, `tof_rays.c`, `house_map.c`
-   built on the Mac (cc, as the old replay tool was); fed posed frames over a pipe;
-   started per boot with that boot's mounting; whole house (window plus tiles).
+   built on the Mac (cc, as the host tests are); fed posed frames over a pipe (the
+   compact format's bytes: `tof_unpack()` reads them); started per boot with that
+   boot's mounting; whole house (window plus tiles).
 2. `maps/cell_map.ts`: `open(boot)` rebuilds from the store after a server restart;
    `add`, `pathClear`, `rays` (point, heights, verdict per zone, for the line map),
    `clear`, tiles to draw.
@@ -371,5 +368,5 @@ tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2
 
 ## 14. Open questions for Daniel
 
-1. **Commit:** step 4d (this simplification) before step 5?
-2. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
+1. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
+2. **Line map:** LINE_MAP_PLAN.md is a draft; confirm it before step 7.

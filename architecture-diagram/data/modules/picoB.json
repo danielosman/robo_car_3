@@ -1,0 +1,180 @@
+[
+  {
+    "id": "picoB.imu",
+    "name": "imu",
+    "origin": "picoB",
+    "path": "picoB/drivers/imu.h",
+    "members": [
+      {
+        "name": "imu_sample_t",
+        "kind": "type",
+        "code": "} imu_sample_t;",
+        "bytes": 24
+      },
+      {
+        "name": "imu_counts_t",
+        "kind": "type",
+        "code": "} imu_counts_t;",
+        "bytes": 12
+      },
+      {
+        "name": "imu_init",
+        "kind": "function",
+        "code": "bool imu_init("
+      },
+      {
+        "name": "imu_read",
+        "kind": "function",
+        "code": "bool imu_read("
+      },
+      {
+        "name": "imu_calibrate_gyro",
+        "kind": "function",
+        "code": "void imu_calibrate_gyro("
+      },
+      {
+        "name": "imu_gyro_bias_z",
+        "kind": "function",
+        "code": "float imu_gyro_bias_z("
+      }
+    ]
+  },
+  {
+    "id": "picoB.encoder",
+    "name": "encoder",
+    "origin": "picoB",
+    "path": "picoB/drivers/encoder.h",
+    "members": [
+      {
+        "name": "encoder_id_t",
+        "kind": "type",
+        "code": "} encoder_id_t;"
+      },
+      {
+        "name": "encoder_init",
+        "kind": "function",
+        "code": "void encoder_init("
+      },
+      {
+        "name": "encoder_count",
+        "kind": "function",
+        "code": "int32_t encoder_count("
+      },
+      {
+        "name": "encoder_reset",
+        "kind": "function",
+        "code": "void encoder_reset("
+      }
+    ]
+  },
+  {
+    "id": "picoB.odometry",
+    "name": "odometry",
+    "origin": "picoB",
+    "path": "picoB/app/odometry.h",
+    "members": [
+      {
+        "name": "odom_t",
+        "kind": "type",
+        "code": "} odom_t;",
+        "bytes": 68
+      },
+      {
+        "name": "odom_init",
+        "kind": "function",
+        "code": "bool odom_init("
+      },
+      {
+        "name": "odom_update",
+        "kind": "function",
+        "code": "void odom_update("
+      },
+      {
+        "name": "odom_get",
+        "kind": "function",
+        "code": "const odom_t *odom_get("
+      },
+      {
+        "name": "odom_imu_take",
+        "kind": "function",
+        "code": "bool odom_imu_take("
+      },
+      {
+        "name": "odom_imu_lost",
+        "kind": "function",
+        "code": "uint32_t odom_imu_lost("
+      },
+      {
+        "name": "odom_imu_skipped",
+        "kind": "function",
+        "code": "uint32_t odom_imu_skipped("
+      }
+    ]
+  },
+  {
+    "id": "picoB.drive",
+    "name": "drive",
+    "origin": "picoB",
+    "path": "picoB/app/drive.h",
+    "members": [
+      {
+        "name": "drive_init",
+        "kind": "function",
+        "code": "void drive_init("
+      },
+      {
+        "name": "drive_enable",
+        "kind": "function",
+        "code": "void drive_enable("
+      },
+      {
+        "name": "drive_enabled",
+        "kind": "function",
+        "code": "bool drive_enabled("
+      },
+      {
+        "name": "drive_set",
+        "kind": "function",
+        "code": "void drive_set("
+      },
+      {
+        "name": "drive_update",
+        "kind": "function",
+        "code": "void drive_update("
+      },
+      {
+        "name": "drive_fault_t",
+        "kind": "type",
+        "code": "} drive_fault_t;"
+      },
+      {
+        "name": "drive_fault",
+        "kind": "function",
+        "code": "drive_fault_t drive_fault("
+      }
+    ]
+  },
+  {
+    "id": "picoB.brain",
+    "name": "brain",
+    "origin": "picoB",
+    "path": "picoB/app/brain.h",
+    "members": [
+      {
+        "name": "brain_init",
+        "kind": "function",
+        "code": "void brain_init("
+      },
+      {
+        "name": "brain_update",
+        "kind": "function",
+        "code": "void brain_update("
+      },
+      {
+        "name": "brain_log",
+        "kind": "function",
+        "code": "void brain_log("
+      }
+    ]
+  }
+]

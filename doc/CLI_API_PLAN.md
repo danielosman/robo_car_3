@@ -253,8 +253,6 @@ through the queue.
 - **The map PNG**: the whole map (the window and the whole-house tiles), not only
   the 6 × 6 m, with every row and column labelled with its cm coordinate. The text
   map stays 6 × 6 m.
-- The old console page (`/console`) still sends keys over the WebSocket, which
-  nothing takes any more. Either it goes, or it moves to the API.
 - The movement backgrounds (the old `o` and `k`) are in no snapshot: nothing
   shows them any more.
 - `features` gives each feature's place in pixels, not the direction in degrees:

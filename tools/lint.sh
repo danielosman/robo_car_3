@@ -1,7 +1,9 @@
 #!/bin/sh
 # Linters: cppcheck on the firmware's C (PicoA, PicoB, common, their host tests;
 # not the vendor libraries or bring-up code) and ESLint plus tsc on the PC server
-# (pc/robot). Needs `brew install cppcheck` and `npm install` in pc/robot.
+# (pc/robot); the architecture diagram's data against the code (architecture-diagram,
+# npm run resolve). Needs `brew install cppcheck` and `npm install` in pc/robot and in
+# architecture-diagram.
 # Fails on the first finding. Run from anywhere: tools/lint.sh
 set -e
 cd "$(dirname "$0")/.."
@@ -21,3 +23,8 @@ cd pc/robot
 npm run --silent lint
 npm run --silent typecheck
 echo "eslint, tsc: clean"
+
+cd ../../architecture-diagram
+npm run --silent resolve
+npm run --silent typecheck
+echo "architecture diagram: clean"

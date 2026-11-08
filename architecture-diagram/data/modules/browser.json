@@ -1,0 +1,51 @@
+[
+  {
+    "id": "browser.app",
+    "name": "app",
+    "origin": "browser",
+    "path": "pc/robot/public/app.js",
+    "summary": "The viewer at /: the map, the snapshots, the log and the steering.",
+    "members": [
+      {
+        "name": "send",
+        "kind": "function",
+        "code": "async function send("
+      },
+      {
+        "name": "connect",
+        "kind": "function",
+        "code": "function connect() {"
+      },
+      {
+        "name": "getJson",
+        "kind": "function",
+        "code": "async function getJson("
+      },
+      {
+        "name": "loadBoots",
+        "kind": "function",
+        "code": "async function loadBoots("
+      },
+      {
+        "name": "loadSnapshots",
+        "kind": "function",
+        "code": "async function loadSnapshots("
+      },
+      {
+        "name": "select",
+        "kind": "function",
+        "code": "async function select("
+      },
+      {
+        "name": "reloadObjects",
+        "kind": "function",
+        "code": "async function reloadObjects("
+      },
+      {
+        "name": "loadMounting",
+        "kind": "function",
+        "code": "function loadMounting("
+      }
+    ]
+  }
+]

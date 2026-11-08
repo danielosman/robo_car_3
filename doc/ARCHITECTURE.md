@@ -628,8 +628,8 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   colour reading as a swatch, the pose; the log; steering through the API: Idle /
   Manual, Stop (and space), drive, rotate and watch with a box for the number,
   snapshot, clear map, status. On the live view a click on the map
-  sends the robot there (`g<x>,<y>`). The old console page, `/console`, still sends
-  keys nothing takes (CLI_API_PLAN.md, gaps).
+  sends the robot there (`g<x>,<y>`). The old console page, `/console`, only shows
+  the log and the connection status.
 - **`snapshot.ts`, `snapshots_api.ts`**: a snapshot read (version 2; the ToF section a
   compact frame), stored with its bytes, each camera picture as
   `recordings/camera/<folder>/<seq>.png` (map pictures from `robot map --png` in

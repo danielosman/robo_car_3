@@ -1,0 +1,851 @@
+[
+  {
+    "id": "picoA.body",
+    "name": "body",
+    "origin": "picoA",
+    "path": "picoA/app/body.h",
+    "members": [
+      {
+        "name": "body_init",
+        "kind": "function",
+        "code": "void body_init("
+      },
+      {
+        "name": "body_update",
+        "kind": "function",
+        "code": "void body_update("
+      },
+      {
+        "name": "body_connected",
+        "kind": "function",
+        "code": "bool body_connected("
+      },
+      {
+        "name": "body_odom",
+        "kind": "function",
+        "code": "const odom_report_t *body_odom("
+      },
+      {
+        "name": "body_odom_time_us",
+        "kind": "function",
+        "code": "uint32_t body_odom_time_us("
+      },
+      {
+        "name": "body_odom_count",
+        "kind": "function",
+        "code": "uint32_t body_odom_count("
+      },
+      {
+        "name": "body_odom_get",
+        "kind": "function",
+        "code": "bool body_odom_get("
+      },
+      {
+        "name": "body_status",
+        "kind": "function",
+        "code": "const status_report_t *body_status("
+      },
+      {
+        "name": "body_imu_take",
+        "kind": "function",
+        "code": "bool body_imu_take("
+      },
+      {
+        "name": "body_imu_received",
+        "kind": "function",
+        "code": "uint32_t body_imu_received("
+      },
+      {
+        "name": "body_imu_lost",
+        "kind": "function",
+        "code": "uint32_t body_imu_lost("
+      },
+      {
+        "name": "body_motors",
+        "kind": "function",
+        "code": "void body_motors("
+      },
+      {
+        "name": "body_drive",
+        "kind": "function",
+        "code": "void body_drive("
+      }
+    ]
+  },
+  {
+    "id": "picoA.pose",
+    "name": "pose",
+    "origin": "picoA",
+    "path": "picoA/app/pose.h",
+    "members": [
+      {
+        "name": "pose_t",
+        "kind": "type",
+        "code": "} pose_t;",
+        "bytes": 16
+      },
+      {
+        "name": "pose_update",
+        "kind": "function",
+        "code": "void pose_update("
+      },
+      {
+        "name": "pose_now",
+        "kind": "function",
+        "code": "bool pose_now("
+      },
+      {
+        "name": "pose_at",
+        "kind": "function",
+        "code": "bool pose_at("
+      },
+      {
+        "name": "pose_stamp",
+        "kind": "function",
+        "code": "void pose_stamp("
+      }
+    ]
+  },
+  {
+    "id": "picoA.tof",
+    "name": "tof",
+    "origin": "picoA",
+    "path": "picoA/app/tof.h",
+    "members": [
+      {
+        "name": "tof_init",
+        "kind": "function",
+        "code": "bool tof_init("
+      },
+      {
+        "name": "tof_hz",
+        "kind": "function",
+        "code": "int tof_hz("
+      },
+      {
+        "name": "tof_frames_per_s",
+        "kind": "function",
+        "code": "float tof_frames_per_s("
+      },
+      {
+        "name": "tof_poll",
+        "kind": "function",
+        "code": "bool tof_poll("
+      }
+    ]
+  },
+  {
+    "id": "picoA.tof_frame",
+    "name": "tof_frame",
+    "origin": "picoA",
+    "path": "picoA/app/tof_frame.h",
+    "members": [
+      {
+        "name": "tof_kind_t",
+        "kind": "type",
+        "code": "} tof_kind_t;"
+      },
+      {
+        "name": "tof_zone_t",
+        "kind": "type",
+        "code": "} tof_zone_t;"
+      },
+      {
+        "name": "tof_frame_t",
+        "kind": "type",
+        "code": "} tof_frame_t;",
+        "bytes": 528
+      },
+      {
+        "name": "tof_beyond",
+        "kind": "function",
+        "code": "static inline bool tof_beyond("
+      },
+      {
+        "name": "posed_frame_t",
+        "kind": "type",
+        "code": "} posed_frame_t;",
+        "bytes": 552
+      },
+      {
+        "name": "tof_valid",
+        "kind": "function",
+        "code": "static inline bool tof_valid("
+      }
+    ]
+  },
+  {
+    "id": "picoA.tof_format",
+    "name": "tof_format",
+    "origin": "picoA",
+    "path": "picoA/app/tof_format.h",
+    "members": [
+      {
+        "name": "tof_use_t",
+        "kind": "type",
+        "code": "} tof_use_t;"
+      },
+      {
+        "name": "tof_format_t",
+        "kind": "type",
+        "code": "} tof_format_t;"
+      },
+      {
+        "name": "tof_format_of",
+        "kind": "function",
+        "code": "tof_format_t tof_format_of("
+      },
+      {
+        "name": "tof_format_size",
+        "kind": "function",
+        "code": "uint32_t tof_format_size("
+      },
+      {
+        "name": "tof_format_message_type",
+        "kind": "function",
+        "code": "uint8_t tof_format_message_type("
+      },
+      {
+        "name": "tof_pack",
+        "kind": "function",
+        "code": "uint32_t tof_pack("
+      },
+      {
+        "name": "tof_unpack",
+        "kind": "function",
+        "code": "bool tof_unpack("
+      }
+    ]
+  },
+  {
+    "id": "picoA.move",
+    "name": "move",
+    "origin": "picoA",
+    "path": "picoA/app/move.h",
+    "members": [
+      {
+        "name": "move_end_t",
+        "kind": "type",
+        "code": "} move_end_t;"
+      },
+      {
+        "name": "move_act_t",
+        "kind": "type",
+        "code": "} move_act_t;"
+      },
+      {
+        "name": "move_actor_t",
+        "kind": "type",
+        "code": "} move_actor_t;"
+      },
+      {
+        "name": "move_start",
+        "kind": "function",
+        "code": "void move_start("
+      },
+      {
+        "name": "move_refused",
+        "kind": "function",
+        "code": "void move_refused("
+      },
+      {
+        "name": "move_stop",
+        "kind": "function",
+        "code": "void move_stop("
+      },
+      {
+        "name": "move_busy",
+        "kind": "function",
+        "code": "bool move_busy("
+      },
+      {
+        "name": "move_update",
+        "kind": "function",
+        "code": "void move_update("
+      },
+      {
+        "name": "move_tof",
+        "kind": "function",
+        "code": "void move_tof("
+      },
+      {
+        "name": "move_imu",
+        "kind": "function",
+        "code": "void move_imu("
+      },
+      {
+        "name": "move_set_still",
+        "kind": "function",
+        "code": "bool move_set_still("
+      },
+      {
+        "name": "move_pre_ms",
+        "kind": "function",
+        "code": "int move_pre_ms("
+      },
+      {
+        "name": "move_post_ms",
+        "kind": "function",
+        "code": "int move_post_ms("
+      },
+      {
+        "name": "move_record_t",
+        "kind": "type",
+        "code": "} move_record_t;",
+        "bytes": 48
+      },
+      {
+        "name": "move_endings",
+        "kind": "function",
+        "code": "uint32_t move_endings("
+      },
+      {
+        "name": "move_next_ended",
+        "kind": "function",
+        "code": "bool move_next_ended("
+      },
+      {
+        "name": "move_wire_end",
+        "kind": "function",
+        "code": "uint8_t move_wire_end("
+      },
+      {
+        "name": "move_kind_name",
+        "kind": "function",
+        "code": "const char *move_kind_name("
+      },
+      {
+        "name": "move_running",
+        "kind": "function",
+        "code": "const char *move_running("
+      },
+      {
+        "name": "move_kind_t",
+        "kind": "type",
+        "code": "MOVE_WATCH = WIRE_MOVE_WATCH } move_kind_t;"
+      }
+    ]
+  },
+  {
+    "id": "picoA.wire",
+    "name": "wire",
+    "origin": "picoA",
+    "path": "picoA/app/wire.h",
+    "members": [
+      {
+        "name": "wire_lane_t",
+        "kind": "type",
+        "code": "} wire_lane_t;"
+      },
+      {
+        "name": "wire_type_info_t",
+        "kind": "type",
+        "code": "} wire_type_info_t;"
+      },
+      {
+        "name": "wire_info",
+        "kind": "function",
+        "code": "bool wire_info("
+      },
+      {
+        "name": "wire_check",
+        "kind": "function",
+        "code": "bool wire_check("
+      },
+      {
+        "name": "wire_error_t",
+        "kind": "type",
+        "code": "} wire_error_t;"
+      },
+      {
+        "name": "wire_msg_t",
+        "kind": "type",
+        "code": "} wire_msg_t;"
+      },
+      {
+        "name": "wire_take",
+        "kind": "function",
+        "code": "int32_t wire_take("
+      },
+      {
+        "name": "wire_error_text",
+        "kind": "function",
+        "code": "const char *wire_error_text("
+      },
+      {
+        "name": "wire_header",
+        "kind": "function",
+        "code": "uint32_t wire_header("
+      },
+      {
+        "name": "wire_hello_t",
+        "kind": "type",
+        "code": "} wire_hello_t;"
+      },
+      {
+        "name": "wire_encode_hello",
+        "kind": "function",
+        "code": "uint32_t wire_encode_hello("
+      },
+      {
+        "name": "wire_decode_hello",
+        "kind": "function",
+        "code": "bool wire_decode_hello("
+      },
+      {
+        "name": "wire_encode_console",
+        "kind": "function",
+        "code": "uint32_t wire_encode_console("
+      },
+      {
+        "name": "wire_decode_console",
+        "kind": "function",
+        "code": "bool wire_decode_console("
+      },
+      {
+        "name": "wire_end_t",
+        "kind": "type",
+        "code": "} wire_end_t;"
+      },
+      {
+        "name": "wire_answer_t",
+        "kind": "type",
+        "code": "} wire_answer_t;",
+        "bytes": 36
+      },
+      {
+        "name": "wire_encode_answer",
+        "kind": "function",
+        "code": "uint32_t wire_encode_answer("
+      },
+      {
+        "name": "wire_decode_answer",
+        "kind": "function",
+        "code": "bool wire_decode_answer("
+      },
+      {
+        "name": "wire_status_t",
+        "kind": "type",
+        "code": "} wire_status_t;"
+      },
+      {
+        "name": "wire_encode_status",
+        "kind": "function",
+        "code": "uint32_t wire_encode_status("
+      },
+      {
+        "name": "wire_decode_status",
+        "kind": "function",
+        "code": "bool wire_decode_status("
+      },
+      {
+        "name": "wire_encode_map_cleared",
+        "kind": "function",
+        "code": "uint32_t wire_encode_map_cleared("
+      },
+      {
+        "name": "wire_move_kind_t",
+        "kind": "type",
+        "code": "} wire_move_kind_t;"
+      },
+      {
+        "name": "wire_move_start_t",
+        "kind": "type",
+        "code": "} wire_move_start_t;"
+      },
+      {
+        "name": "wire_encode_move_start",
+        "kind": "function",
+        "code": "uint32_t wire_encode_move_start("
+      },
+      {
+        "name": "wire_decode_move_start",
+        "kind": "function",
+        "code": "bool wire_decode_move_start("
+      },
+      {
+        "name": "wire_move_end_t",
+        "kind": "type",
+        "code": "} wire_move_end_t;"
+      },
+      {
+        "name": "wire_encode_move_end",
+        "kind": "function",
+        "code": "uint32_t wire_encode_move_end("
+      },
+      {
+        "name": "wire_decode_move_end",
+        "kind": "function",
+        "code": "bool wire_decode_move_end("
+      },
+      {
+        "name": "wire_imu_batch_t",
+        "kind": "type",
+        "code": "} wire_imu_batch_t;",
+        "bytes": 184
+      },
+      {
+        "name": "wire_encode_imu_batch",
+        "kind": "function",
+        "code": "uint32_t wire_encode_imu_batch("
+      },
+      {
+        "name": "wire_decode_imu_batch",
+        "kind": "function",
+        "code": "bool wire_decode_imu_batch("
+      },
+      {
+        "name": "wire_encode_tof",
+        "kind": "function",
+        "code": "uint32_t wire_encode_tof("
+      },
+      {
+        "name": "wire_encode_snapshot_part",
+        "kind": "function",
+        "code": "uint32_t wire_encode_snapshot_part("
+      },
+      {
+        "name": "wire_command_t",
+        "kind": "type",
+        "code": "} wire_command_t;",
+        "bytes": 52
+      },
+      {
+        "name": "wire_encode_command",
+        "kind": "function",
+        "code": "uint32_t wire_encode_command("
+      },
+      {
+        "name": "wire_decode_command",
+        "kind": "function",
+        "code": "bool wire_decode_command("
+      },
+      {
+        "name": "wire_encode_heartbeat",
+        "kind": "function",
+        "code": "uint32_t wire_encode_heartbeat("
+      },
+      {
+        "name": "wire_type",
+        "kind": "function",
+        "code": "static inline uint8_t wire_type("
+      }
+    ]
+  },
+  {
+    "id": "picoA.link_pc",
+    "name": "link_pc",
+    "origin": "picoA",
+    "path": "picoA/app/link_pc.h",
+    "members": [
+      {
+        "name": "link_pc_start",
+        "kind": "function",
+        "code": "void link_pc_start("
+      },
+      {
+        "name": "link_pc_update",
+        "kind": "function",
+        "code": "void link_pc_update("
+      },
+      {
+        "name": "link_pc_connected",
+        "kind": "function",
+        "code": "bool link_pc_connected("
+      },
+      {
+        "name": "link_pc_settled",
+        "kind": "function",
+        "code": "bool link_pc_settled("
+      },
+      {
+        "name": "link_pc_print_status",
+        "kind": "function",
+        "code": "void link_pc_print_status("
+      },
+      {
+        "name": "link_pc_connection",
+        "kind": "function",
+        "code": "uint32_t link_pc_connection("
+      },
+      {
+        "name": "link_send_control",
+        "kind": "function",
+        "code": "bool link_send_control("
+      },
+      {
+        "name": "link_send_bulk",
+        "kind": "function",
+        "code": "bool link_send_bulk("
+      },
+      {
+        "name": "link_received",
+        "kind": "function",
+        "code": "bool link_received("
+      }
+    ]
+  },
+  {
+    "id": "picoA.commands",
+    "name": "commands",
+    "origin": "picoA",
+    "path": "picoA/app/commands.h",
+    "members": [
+      {
+        "name": "commands_update",
+        "kind": "function",
+        "code": "void commands_update("
+      },
+      {
+        "name": "commands_status",
+        "kind": "function",
+        "code": "void commands_status("
+      }
+    ]
+  },
+  {
+    "id": "picoA.behaviour",
+    "name": "behaviour",
+    "origin": "picoA",
+    "path": "picoA/app/behaviour.h",
+    "members": [
+      {
+        "name": "behaviour_move",
+        "kind": "function",
+        "code": "void behaviour_move("
+      },
+      {
+        "name": "behaviour_turn",
+        "kind": "function",
+        "code": "void behaviour_turn("
+      },
+      {
+        "name": "behaviour_watch",
+        "kind": "function",
+        "code": "void behaviour_watch("
+      },
+      {
+        "name": "behaviour_goto",
+        "kind": "function",
+        "code": "void behaviour_goto("
+      }
+    ]
+  },
+  {
+    "id": "picoA.cell_map",
+    "name": "cell_map",
+    "origin": "picoA",
+    "path": "picoA/app/cell_map.h",
+    "members": [
+      {
+        "name": "cell_state3_t",
+        "kind": "type",
+        "code": "} cell_state3_t;"
+      },
+      {
+        "name": "column_t",
+        "kind": "type",
+        "code": "} column_t;"
+      },
+      {
+        "name": "cell_map_clear",
+        "kind": "function",
+        "code": "void cell_map_clear("
+      },
+      {
+        "name": "cell_map_follow",
+        "kind": "function",
+        "code": "void cell_map_follow("
+      },
+      {
+        "name": "cell_map_window",
+        "kind": "function",
+        "code": "const uint8_t *cell_map_window("
+      },
+      {
+        "name": "cell_map_add",
+        "kind": "function",
+        "code": "void cell_map_add("
+      },
+      {
+        "name": "cell_map_cell",
+        "kind": "function",
+        "code": "cell_state3_t cell_map_cell("
+      },
+      {
+        "name": "cell_map_column",
+        "kind": "function",
+        "code": "column_t cell_map_column("
+      },
+      {
+        "name": "cell_map_obstacle_along",
+        "kind": "function",
+        "code": "float cell_map_obstacle_along("
+      },
+      {
+        "name": "cell_map_print",
+        "kind": "function",
+        "code": "void cell_map_print("
+      }
+    ]
+  },
+  {
+    "id": "picoA.watch",
+    "name": "watch",
+    "origin": "picoA",
+    "path": "picoA/app/watch.h",
+    "members": [
+      {
+        "name": "watch_init",
+        "kind": "function",
+        "code": "bool watch_init("
+      },
+      {
+        "name": "watch_add",
+        "kind": "function",
+        "code": "void watch_add("
+      },
+      {
+        "name": "watch_update",
+        "kind": "function",
+        "code": "void watch_update("
+      },
+      {
+        "name": "watch_strongest",
+        "kind": "function",
+        "code": "bool watch_strongest("
+      },
+      {
+        "name": "watch_watching",
+        "kind": "function",
+        "code": "bool watch_watching("
+      },
+      {
+        "name": "watch_still",
+        "kind": "function",
+        "code": "bool watch_still("
+      },
+      {
+        "name": "watch_log",
+        "kind": "function",
+        "code": "void watch_log("
+      },
+      {
+        "name": "watch_stamp",
+        "kind": "function",
+        "code": "void watch_stamp("
+      }
+    ]
+  },
+  {
+    "id": "picoA.snapshot",
+    "name": "snapshot",
+    "origin": "picoA",
+    "path": "picoA/app/snapshot.h",
+    "members": [
+      {
+        "name": "snapshot_why_t",
+        "kind": "type",
+        "code": "} snapshot_why_t;"
+      },
+      {
+        "name": "snapshot_init",
+        "kind": "function",
+        "code": "void snapshot_init("
+      },
+      {
+        "name": "snapshot_request",
+        "kind": "function",
+        "code": "void snapshot_request("
+      },
+      {
+        "name": "snapshot_sent_t",
+        "kind": "type",
+        "code": "} snapshot_sent_t;"
+      },
+      {
+        "name": "snapshot_sent",
+        "kind": "function",
+        "code": "bool snapshot_sent("
+      },
+      {
+        "name": "snapshot_update",
+        "kind": "function",
+        "code": "void snapshot_update("
+      },
+      {
+        "name": "snapshot_tof",
+        "kind": "function",
+        "code": "void snapshot_tof("
+      },
+      {
+        "name": "snapshot_print_status",
+        "kind": "function",
+        "code": "void snapshot_print_status("
+      }
+    ]
+  },
+  {
+    "id": "picoA.house_map",
+    "name": "house_map",
+    "origin": "picoA",
+    "path": "picoA/app/house_map.h",
+    "status": "leaving",
+    "plan": {
+      "path": "doc/DATA_FLOW_PLAN.md",
+      "code": "`house_map` leaves the robot"
+    },
+    "members": [
+      {
+        "name": "house_map_clear",
+        "kind": "function",
+        "code": "void house_map_clear("
+      },
+      {
+        "name": "house_map_get",
+        "kind": "function",
+        "code": "column_t house_map_get("
+      },
+      {
+        "name": "house_map_put",
+        "kind": "function",
+        "code": "bool house_map_put("
+      },
+      {
+        "name": "house_map_tile_of",
+        "kind": "function",
+        "code": "int house_map_tile_of("
+      },
+      {
+        "name": "house_map_tiles",
+        "kind": "function",
+        "code": "int house_map_tiles("
+      },
+      {
+        "name": "house_map_tile",
+        "kind": "function",
+        "code": "void house_map_tile("
+      },
+      {
+        "name": "house_map_next_dirty",
+        "kind": "function",
+        "code": "int house_map_next_dirty("
+      },
+      {
+        "name": "house_map_sent",
+        "kind": "function",
+        "code": "void house_map_sent("
+      },
+      {
+        "name": "house_map_all_dirty",
+        "kind": "function",
+        "code": "void house_map_all_dirty("
+      },
+      {
+        "name": "house_map_clears",
+        "kind": "function",
+        "code": "uint32_t house_map_clears("
+      }
+    ]
+  }
+]
