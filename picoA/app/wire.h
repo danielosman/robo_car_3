@@ -6,7 +6,8 @@
 // checked against the same bytes (picoA/app/test/data/wire_golden.hex).
 //
 // A message: [type u8][payload length u16][payload]. Little-endian. Floats are
-// IEEE-754 f32. Text is NUL-padded where its field is fixed.
+// IEEE-754 f32. Text is NUL-padded where its field is fixed. Times (t) are u64 µs
+// since PicoA's power-up (clock_since_start_of()): they never wrap.
 //
 // | type | name          | lane         | payload |
 // |------|---------------|--------------|---------|
@@ -15,27 +16,26 @@
 // | 0x03 | answer        | control      | command n u32; end u8 (wire_end_t); has u8 (WIRE_HAS_*); x, y f32 m; yaw f32 rad; moved f32 m; rotated f32 rad; goal f32 m; snapshot u32 (34 B) |
 // | 0x04 | status        | control      | x, y f32 m; yaw f32 rad (not wrapped); mode char[8]; action char[12] ("" none); WiFi signal i8 dBm (0 unknown) (33 B) |
 // | 0x05 | map cleared   | control      | none |
-// | 0x06 | move start    | control      | move n u32; command n u32; kind u8 (wire_move_kind_t); param f32 (drive m, turn rad, go to: m to the goal, watch s); t_us u32; pre_ms u16; post_ms u16; flags u8 (bit 0 refused: it ends at once, a running move goes on) (22 B) |
-// | 0x07 | move end      | control      | move n u32; end u8 (wire_end_t); t_us u32; frames sent u32; frames dropped u32; first, last frame number u32 (0: none sent); moved f32 m; rotated f32 rad; imu batches sent u32; imu batches dropped u32 (41 B) |
+// | 0x06 | move start    | control      | move n u32; command n u32; kind u8 (wire_move_kind_t); param f32 (drive m, turn rad, go to: m to the goal, watch s); t u64; pre_ms u16; post_ms u16; flags u8 (bit 0 refused: it ends at once, a running move goes on) (26 B) |
+// | 0x07 | move end      | control      | move n u32; end u8 (wire_end_t); t u64; frames sent u32; frames dropped u32; moved f32 m; rotated f32 rad; imu batches sent u32; imu batches dropped u32 (37 B) |
 // | 0x10 | snapshot part | bulk         | the next 1-1400 bytes of a snapshot (snapshot.h); a snapshot's parts in order |
-// | 0x11 | imu batch     | bulk         | move n u32; first record's t_us u32 (PicoA); period u16 µs; count u8 (1-10); then per record accel x, y, z, gyro x, y, z i16 (raw counts, link_msgs.h) (11 + 12 × count B); only during a move (move.h) |
-// | 0x40 | tof compact   | bulk         | a compact tof frame (tof_format.h; its types come from tof_format_message_type()); only during a move (move.h) |
+// | 0x11 | imu batch     | bulk         | move n u32; first record's t u64; period u16 µs; count u8 (1-10); then per record accel x, y, z, gyro x, y, z i16 (raw counts, link_msgs.h) (15 + 12 × count B); only during a move (move.h) |
+// | 0x40 | tof compact   | bulk         | move n u32; t u64 (the frame's middle); then a compact tof frame (tof_format.h; its types come from tof_format_message_type()) (12 + 277 B); only during a move (move.h) |
 // | 0x20 | command       | to the robot | command n u32; the command's text, 1-46 printable ASCII (commands.h) |
 // | 0x21 | heartbeat     | to the robot | none (every 2 s: the robot closes after 30 s of nothing) |
 //
-// Lanes (link_pc.h): control is small and never dropped; console lines and status
-// are the messages it may drop to make room. Bulk is a queue; tof frames and imu
-// batches are dropped and counted when it is full, a snapshot waits.
+// Lanes (link_pc.h): control goes first; bulk is a queue behind it.
 //
-// An imu batch's records are evenly spaced: record i was measured at first + i ×
-// period (the encoder takes the period from the first and last record's times). The
-// move number files it on the PC, however late it comes.
+// Every tof frame and imu batch names its move: the PC files it by that number,
+// however late it comes. An imu batch's records are evenly spaced: record i was
+// measured at t + i × period (the encoder takes the period from the first and last
+// record's times).
 #include <stdbool.h>
 #include <stdint.h>
 #include "link_msgs.h"
 #include "tof_format.h"
 
-#define WIRE_VERSION 3 // up when any payload or the table changes; the PC refuses another
+#define WIRE_VERSION 4 // up when any payload or the table changes; the PC refuses another
 
 #define WIRE_HEADER      3
 #define WIRE_PAYLOAD_MAX 1400 // the longest payload of any message (a snapshot part)
@@ -60,9 +60,10 @@ enum {
 #define WIRE_CONSOLE_MAX   240
 #define WIRE_ANSWER_SIZE   34
 #define WIRE_STATUS_SIZE   33
-#define WIRE_MOVE_START_SIZE 22
-#define WIRE_MOVE_END_SIZE 41
-#define WIRE_IMU_BATCH_HEADER 11
+#define WIRE_MOVE_START_SIZE 26
+#define WIRE_MOVE_END_SIZE 37
+#define WIRE_IMU_BATCH_HEADER 15
+#define WIRE_TOF_HEADER    12 // move n, t; the packed frame follows
 #define WIRE_IMU_RECORD    12
 #define WIRE_IMU_BATCH_MAX 10 // records in a batch (~0.1 s)
 #define WIRE_MODE_LEN      8
@@ -75,7 +76,6 @@ typedef enum { WIRE_LANE_CONTROL, WIRE_LANE_BULK, WIRE_LANE_TO_ROBOT } wire_lane
 typedef struct {
     wire_lane_t lane;
     uint16_t min, max;  // payload length
-    bool droppable;     // control: may go to make room (console, status); bulk: dropped and counted when full (tof frames, imu batches)
 } wire_type_info_t;
 
 // What the table says of a type; false for a type it doesn't know.
@@ -155,7 +155,7 @@ typedef struct {
     uint32_t command;      // the number of the command that started it (0: typed on USB without one)
     uint8_t kind;          // wire_move_kind_t
     float param;           // drive: m (+ = forward); turn: rad (+ = left); go to: m to the goal; watch: s
-    uint32_t t_us;         // when it started (PicoA's clock)
+    uint64_t t_us;         // when it started (since power-up)
     uint16_t pre_ms, post_ms; // the still times it stands before and after
     uint8_t flags;         // WIRE_MOVE_REFUSED
 } wire_move_start_t;
@@ -166,31 +166,34 @@ bool wire_decode_move_start(const wire_msg_t *m, wire_move_start_t *s);
 typedef struct {
     uint32_t move;
     uint8_t end;           // wire_end_t, as its command's answer
-    uint32_t t_us;         // when it ended
+    uint64_t t_us;         // when it ended (since power-up)
     uint32_t frames_sent;  // tof frames handed to the bulk lane during the move
     uint32_t frames_dropped; // ...and refused by it (full, or no server)
-    uint32_t first_frame, last_frame; // the frame numbers of the first and last sent; 0 if none
     float moved_m, rotated_rad; // as the answer's
     uint32_t imu_sent, imu_dropped; // imu batches handed to the bulk lane during the move, and refused by it
 } wire_move_end_t;
 uint32_t wire_encode_move_end(const wire_move_end_t *e, uint8_t *out);
 bool wire_decode_move_end(const wire_msg_t *m, wire_move_end_t *e);
 
-// Up to WIRE_IMU_BATCH_MAX imu records of a move, oldest first, t_us on PicoA's clock.
+// Up to WIRE_IMU_BATCH_MAX imu records of a move, oldest first, their t_us on PicoA's
+// clock (time_us_32()).
 typedef struct {
     uint32_t move;
+    uint64_t t_us;         // the first record's time, since power-up
+    uint16_t period_us;    // decoded only: the encoder takes it from the records' times
     uint8_t n;             // records, 1-WIRE_IMU_BATCH_MAX
     imu_record_t records[WIRE_IMU_BATCH_MAX];
 } wire_imu_batch_t;
 // 0 if n is out of range. The period is the first to the last record's time over
 // n - 1 (rounded to µs; IMU_RECORD_PERIOD_US for one record).
 uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out);
-// The records' times: first + i × period.
+// The records' t_us are left 0: record i was measured at t_us + i × period_us.
 bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b);
 
-// A tof frame packed for `use` (tof_format.h) in its message (room for WIRE_HEADER +
-// TOF_FORMAT_MAX).
-uint32_t wire_encode_tof(tof_use_t use, const posed_frame_t *f, uint8_t *out);
+// A tof frame of a move, packed for `use` (tof_format.h), in its message (room for
+// WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX). t_us: the frame's middle, since
+// power-up.
+uint32_t wire_encode_tof(tof_use_t use, uint32_t move, uint64_t t_us, const posed_frame_t *f, uint8_t *out);
 
 // n bytes of a snapshot (1-WIRE_PART_MAX); 0 if n is out of range.
 uint32_t wire_encode_snapshot_part(const uint8_t *bytes, uint32_t n, uint8_t *out);

@@ -9,8 +9,9 @@
 // each, then only when changed, all again for a new server; more than fit go with
 // the next snapshot. The camera features of the frame in the snapshot: it waits for
 // vision to process that frame (asking it to), at most 0.3 s.
-// The parts go to the bulk lane (snapshot part messages), wait for room there, and a
-// snapshot cut by a lost connection goes again whole. The test plays body.h, the
+// The parts go to the bulk lane (snapshot part messages) and wait for room there; a
+// snapshot has gone once its last part is in the lane; one cut by a lost connection
+// is not sent again (its command is still told; the new server gets its own). The test plays body.h, the
 // stamped ToF frame, the camera, the colour sensor, move and the bulk lane; the
 // snapshots go to build/test_snapshot.snap for the PC's parser test. Run from the
 // repo root:
@@ -76,25 +77,18 @@ const char *move_running(void) { return running; }
 static uint32_t conn;
 static uint8_t sent[1 << 20];         // the snapshot parts' bytes, one after another
 static uint32_t sent_len;
-static uint32_t queued, gone_upto;    // tickets given; the lane has sent up to this one
 static uint32_t room = 1000000;       // parts the lane takes before it is full
 uint32_t link_pc_connection(void) { return conn; }
-link_ticket_t link_send_bulk(const uint8_t *msg, uint32_t len) {
+bool link_send_bulk(const uint8_t *msg, uint32_t len) {
     wire_msg_t m;
     assert(conn && wire_take(msg, len, &m) == (int32_t)len && m.type == WIRE_SNAPSHOT_PART);
-    if (!room) return (link_ticket_t){conn, 0};
+    if (!room) return false;
     room--;
     assert(sent_len + m.len <= sizeof sent);
     memcpy(sent + sent_len, m.payload, m.len);
     sent_len += m.len;
-    return (link_ticket_t){conn, ++queued};
+    return true;
 }
-// As link_pc's: lost once its connection is gone, sent once the lane has sent it.
-link_bulk_state_t link_bulk_state(link_ticket_t t) {
-    if (!t.n || t.connection != conn) return LINK_BULK_LOST;
-    return t.n <= gone_upto ? LINK_BULK_SENT : LINK_BULK_QUEUED;
-}
-static void all_gone(void) { gone_upto = queued; } // the lane has sent everything
 
 // The whole snapshots in the stream.
 static uint32_t sent_count(void) {
@@ -166,7 +160,7 @@ int main(void) {
     // Nothing without a server, even when asked.
     snapshot_request(SNAP_COMMAND, 0);
     loop_ms(1000);
-    assert(n_sent == 0 && queued == 0);
+    assert(n_sent == 0 && sent_len == 0);
 
     // A server: one snapshot at once.
     conn = 1;
@@ -237,24 +231,20 @@ int main(void) {
         fclose(checks);
     }
 
-    // An action ending asks for nothing. While one goes out, nothing else; asked for
-    // meanwhile: built when it has gone; its command told only once it has wholly gone.
+    // An action ending asks for nothing. Asked for by a command: built, its command
+    // told once it has gone (every part in the lane).
     snapshot_sent_t told;
     endings = 1; // an action ended
     running = "";
     loop_ms(100);
     assert(n_sent == 1);
     snapshot_request(SNAP_COMMAND, 17);
-    loop_ms(100);
-    assert(n_sent == 1 && !snapshot_sent(&told));
-    all_gone();
     loop_ms(1);
-    assert(n_sent == 2 && !snapshot_sent(&told));
+    assert(n_sent == 2);
     p = nth(1);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
     assert(h.seq == 2 && h.why == SNAP_COMMAND && strcmp(h.action, "drive") == 0 && h.end_reason == WIRE_END_OBSTACLE);
     assert(tiles_in(&p) == 0); // all sent already
-    all_gone();
     assert(snapshot_sent(&told) && told.command == 17 && told.seq == 2 && told.x_m == 1.25f && told.yaw_rad == 0.75f);
     assert(!snapshot_sent(&told));
     // Asked again, with a tile changed and the robot driving now.
@@ -267,19 +257,16 @@ int main(void) {
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
     assert(n_sent == 3 && h.why == SNAP_COMMAND && strcmp(h.running, "goto") == 0 && h.mode == MODE_IDLE);
     assert(tiles_in(&p) == 1);
-    all_gone();
     assert(snapshot_sent(&told) && told.command == 18 && told.seq == 3);
-    printf("ok: on a command, one at a time, the command told once it has gone; a changed tile goes again\n");
+    printf("ok: on a command, the command told once it has gone; a changed tile goes again\n");
 
     // A new server: all the tiles again. More dirty tiles than fit: the rest next time.
-    all_gone();
     for (int t = 0; t < 40; t++) house_map_put(t * 20, 0, COLUMN_DRIVABLE);
     conn = 2;
     loop_ms(1);
     p = nth(3);
     int first = tiles_in(&p);
     assert(n_sent == 4 && first < house_map_tiles() && p.total <= SNAP_MAX);
-    all_gone();
     snapshot_request(SNAP_COMMAND, 0);
     loop_ms(1);
     p = nth(4);
@@ -296,7 +283,6 @@ int main(void) {
     // Vision behind the camera's frame: the snapshot waits for it (asking for that
     // frame), then goes; without vision catching up, after 0.3 s.
     uint32_t before = n_sent;
-    all_gone();
     vis.camera_number = 76;
     snapshot_request(SNAP_COMMAND, 0);
     loop_ms(100);
@@ -304,7 +290,6 @@ int main(void) {
     vis.camera_number = 77;
     loop_ms(1);
     assert(n_sent == before + 1);
-    all_gone();
     vis.camera_number = 70;
     snapshot_request(SNAP_COMMAND, 0);
     loop_ms(250);
@@ -312,72 +297,47 @@ int main(void) {
     loop_ms(100);
     assert(n_sent == before + 2);
     printf("ok: a snapshot waits for the features of its frame, at most 0.3 s\n");
-    all_gone();
 
     // The lane full: the parts wait for room, none dropped; the snapshot has gone
-    // once the lane has sent its last part.
+    // once its last part is in the lane, and only then is asked for one built.
     uint32_t start = sent_len;
     vis.camera_number = 77; // vision has caught up
     room = 5;
     snapshot_request(SNAP_COMMAND, 21);
     loop_ms(1);
     assert(sent_len == start + 5 * WIRE_PART_MAX && !snapshot_sent(&told));
+    snapshot_request(SNAP_COMMAND, 0); // asked while it goes out: waits
     loop_ms(10);
     assert(sent_len == start + 5 * WIRE_PART_MAX); // still full
     room = 1000000;
     loop_ms(1);
     uint32_t total;
     memcpy(&total, sent + start + 5, 4);
-    assert(sent_len == start + total && memcmp(sent + start, "SNAP", 4) == 0 && !snapshot_sent(&told));
-    all_gone();
-    loop_ms(1);
+    assert(memcmp(sent + start, "SNAP", 4) == 0 && sent_len == start + total);
     assert(snapshot_sent(&told) && told.command == 21);
-    printf("ok: parts wait for room in the bulk lane, none dropped\n");
+    loop_ms(1);
+    assert(sent_len > start + total); // then the next one
+    printf("ok: parts wait for room in the bulk lane, none dropped; the next waits for it\n");
 
-    // The connection lost half-way: on the next, the snapshot again whole from its
-    // start (then the new server's own).
+    // The connection lost half-way: not sent again; its command is told (the PC's
+    // runner says it wasn't stored); the new server gets its own snapshot.
     room = 3;
     snapshot_request(SNAP_COMMAND, 22);
     loop_ms(1);
     assert(!snapshot_sent(&told));
     conn = 0;
     loop_ms(10);
+    assert(snapshot_sent(&told) && told.command == 22);
     room = 1000000;
     conn = 3;
     sent_len = 0; // a new connection: the PC's stream starts again
     loop_ms(1);
     memcpy(&total, sent + 5, 4);
-    assert(memcmp(sent, "SNAP", 4) == 0 && sent_len >= total && parse(sent).total == total);
+    assert(memcmp(sent, "SNAP", 4) == 0 && sent_len == total && parse(sent).total == total);
     snap_head_t again;
     memcpy(&again, parse(sent).at[SEC_HEAD], sizeof again);
-    assert(again.why == SNAP_COMMAND);
-    all_gone();
-    loop_ms(1);
-    assert(snapshot_sent(&told) && told.command == 22);
-    all_gone();
-    loop_ms(1);
-    assert(n_sent == 2);
-    printf("ok: a snapshot cut by a lost connection goes again whole on the next\n");
-
-    // Every part in TCP, but the connection lost before the snapshot counted as sent:
-    // its tickets are lost, so it goes again whole on the next, then it is answered.
-    all_gone();          // the new server's own snapshot has gone
-    loop_ms(1);
-    snapshot_request(SNAP_COMMAND, 23);
-    loop_ms(1);
-    assert(sent_len > 0);
-    all_gone();          // every part handed to TCP...
-    conn = 4;            // ...but that connection is gone (and a new one is up) before snapshot_update()
-    sent_len = 0;
-    assert(!snapshot_sent(&told));
-    loop_ms(1);
-    memcpy(&total, sent + 5, 4);
-    assert(memcmp(sent, "SNAP", 4) == 0 && parse(sent).total == total);
-    memcpy(&again, parse(sent).at[SEC_HEAD], sizeof again);
-    assert(again.why == SNAP_COMMAND);
-    all_gone();
-    assert(snapshot_sent(&told) && told.command == 23);
-    printf("ok: its parts in TCP but the connection lost before it counted: sent again whole, then answered\n");
+    assert(again.why == SNAP_SERVER && !snapshot_sent(&told));
+    printf("ok: a snapshot cut by a lost connection isn't sent again; the new server gets its own\n");
     printf("snapshot: all tests passed\n");
     return 0;
 }

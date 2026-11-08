@@ -1,6 +1,6 @@
 // What the robot sends (link.ts events), stored in the order it came (doc/ARCHITECTURE.md,
-// the PC): hello opens its boot in the store (boot.ts: its own mounting, clock and
-// moves), then each move start and end, tof frame, imu batch, status and snapshot is
+// the PC): hello opens its boot in the store (boot.ts: its own mounting and message
+// count), then each move start and end, tof frame, imu batch, status and snapshot is
 // stamped by the boot and written (store.ts); a snapshot's picture goes to recordings/camera/.
 // Everything waits for its boot, which the store opens in a moment. main.ts and the
 // fake robot's replay test use it.
@@ -8,8 +8,7 @@ import type { RobotLink, LivePose } from "./link.ts";
 import type { Store } from "./store.ts";
 import type { Boot } from "./boot.ts";
 import type { BootFolders } from "./boot_folders.ts";
-import type { Hello, ImuBatch, MoveEnd, MoveStart } from "./wire.ts";
-import type { PosedFrame } from "./tof_format.ts";
+import type { Hello, ImuBatch, MoveEnd, MoveFrame, MoveStart } from "./wire.ts";
 import { loadMounting, type Mounting } from "./mounting.ts";
 import { parseSnapshot, savePicture, type Snapshot } from "./snapshot.ts";
 
@@ -34,7 +33,7 @@ export function ingest(robot: RobotLink, store: Store, o: IngestOptions): { idle
   });
   robot.on("moveStart", (m: MoveStart) => inOrder(`move ${m.move}`, b => { void store.moveStart(b, b.moveStart(m)); }));
   robot.on("moveEnd", (m: MoveEnd) => inOrder(`move ${m.move}`, b => { void store.moveEnd(b, b.moveEnd(m)); }));
-  robot.on("frame", (format: string, f: PosedFrame) => inOrder(`frame ${f.number}`, b => { void store.frame(b, b.frame(format, f)); }));
+  robot.on("frame", (f: MoveFrame) => inOrder(`frame ${f.frame.number}`, b => { void store.frame(b, b.frame(f.format, f.move, f.tUs, f.frame)); }));
   robot.on("imu", (batch: ImuBatch) => inOrder(`an imu batch of move ${batch.move}`, b => { void store.imu(b, b.imu(batch)); }));
   robot.on("pose", (p: LivePose) => inOrder("a status", b => { void store.status(b, b.status(p)); }));
   robot.on("snapshot", (bytes: Buffer) => {

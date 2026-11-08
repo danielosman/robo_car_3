@@ -15,7 +15,7 @@ import { RobotLink, type DoneRecord, type LivePose, type RobotStatus } from "./l
 import { packTof, unpackTof, type PosedFrame } from "./tof_format.ts";
 import {
   HAS, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole, encodeHello, encodeMapCleared, encodeMoveEnd, encodeMoveStart,
-  encodeImuBatch, encodeSnapshotPart, encodeStatus, encodeTof, type ImuBatch, type Message, type MoveEnd, type MoveStart,
+  encodeImuBatch, encodeSnapshotPart, encodeStatus, encodeTof, type ImuBatch, type Message, type MoveEnd, type MoveFrame, type MoveStart,
 } from "./wire.ts";
 
 async function startLink(quietMs = 3000, dropMs = 6000) {
@@ -91,7 +91,7 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
     let cleared = 0;
     link.on("moveStart", m => { starts.push(m); events.push(`start ${m.move}`); });
     link.on("moveEnd", m => { ends.push(m); events.push(`end ${m.move}`); });
-    link.on("frame", (format: string, f: PosedFrame) => { frames.push(f); events.push(`${format} ${f.number}`); });
+    link.on("frame", (f: MoveFrame) => { frames.push(f.frame); events.push(`${f.format} ${f.frame.number} of ${f.move}`); });
     link.on("snapshot", b => snaps.push(b));
     link.on("pose", p => poses.push(p));
     link.on("done", d => dones.push(d));
@@ -101,16 +101,16 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
     snap.write("SNAP", 0, "latin1");
     snap.writeUInt32LE(snap.length, 5);
     const start: MoveStart = { move: 3, command: 4, kind: "goto", param: 4.25, tUs: 0xfffffff0, preMs: 200, postMs: 300, refused: false };
-    const end: MoveEnd = { move: 3, end: "obstacle", tUs: 25, framesSent: 2, framesDropped: 0, firstFrame: 50, lastFrame: 51, moved: 1.25, rotated: 0.5,
+    const end: MoveEnd = { move: 3, end: "obstacle", tUs: 25, framesSent: 2, framesDropped: 0, moved: 1.25, rotated: 0.5,
                           imuSent: 1, imuDropped: 0 };
-    const imu: ImuBatch = { move: 3, records: [0, 1, 2].map(i => ({ tUs: (0xffffe000 + i * 9615) % 2 ** 32, accel: [i, -i - 1, 16384], gyro: [-32768, 32767, i] })) };
+    const imu: ImuBatch = { move: 3, records: [0, 1, 2].map(i => ({ tUs: (0xffffe000 + i * 9615), accel: [i, -i - 1, 16384], gyro: [-32768, 32767, i] })) };
     const batches: ImuBatch[] = [];
     link.on("imu", (b: ImuBatch) => { batches.push(b); events.push(`imu ${b.move}`); });
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 10 * k, signal: k, sigmaMm: 2, kind: k ? "sure" as const : "nothing" as const, targets: k ? 1 : 0 }));
     const tof = (number: number): PosedFrame => ({ number, tUs: 100 * number, periodUs: 100000, x: 1.5, y: -0.25, yaw: 0.5, pitch: 0, turn: 0,
                                                     still: false, poseKnown: true, beyondMm: 2550, zones });
     const stream = Buffer.concat([
-      encodeMoveStart(start), encodeTof("compact", tof(50)), encodeMoveEnd(end), encodeTof("compact", tof(51)), encodeImuBatch(imu),
+      encodeMoveStart(start), encodeTof("compact", 3, 5000, tof(50)), encodeMoveEnd(end), encodeTof("compact", 3, 5100, tof(51)), encodeImuBatch(imu),
       encodeConsole("Go to: ..."),
       encodeAnswer({ n: 4, end: "obstacle", has: HAS.MOVE | HAS.GOAL, x: 1.2, y: -0.35, yaw: -0.25, moved: 1.25, rotated: Math.PI / 2, goal: 4.2, snapshot: 0 }),
       encodeSnapshotPart(snap.subarray(0, 1400)), status(), encodeSnapshotPart(snap.subarray(1400, 2800)), encodeMapCleared(),
@@ -129,7 +129,7 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
       await until(() => dones.length === 2 && snaps.length === 1 && poses.length === 1 && cleared === 1);
       assert.deepEqual(snaps[0], snap);
       assert.deepEqual(text, ["Go to: ...\n"]);
-      assert.deepEqual(events, ["start 3", "compact 50", "end 3", "compact 51", "imu 3"]); // in the order they came
+      assert.deepEqual(events, ["start 3", "compact 50 of 3", "end 3", "compact 51 of 3", "imu 3"]); // in the order they came
       assert.deepEqual(batches, [imu]); // the imu batch's records as they went (times evenly spaced: exact)
       assert.deepEqual(starts, [start]);
       assert.deepEqual(ends, [end]);

@@ -1,11 +1,10 @@
 // The one store (doc/ARCHITECTURE.md, the PC): DuckDB, a file of its own
 // (recordings/robot2.duckdb, or ROBOT_DB; the old recordings/robot.duckdb is never
 // opened). What the robot sends is written as it arrives, one row per message:
-//   boots      one per power-up: its build, its copy of the mounting (JSON), where its
-//              clock and its moves were (boot.ts), so a restarted server goes on
+//   boots      one per power-up: its build, its copy of the mounting (JSON), how many
+//              messages it sent (boot.ts), so a restarted server numbers on
 //   moves      one per move: its start (command, kind, parameter, still times) and its
-//              end (how, frames sent and dropped, first and last frame number, moved,
-//              imu batches sent and dropped)
+//              end (how, frames sent and dropped, moved, imu batches sent and dropped)
 //   frames     one per tof frame: its number, move, time, pose, period, turn, flags
 //   zones      one per zone of each frame: row, col 1-8 (README), distance, kind,
 //              signal, sigma, targets
@@ -26,10 +25,10 @@ import { DuckDBInstance, timestampValue, type DuckDBAppender, type DuckDBConnect
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { snapId, type Snapshot } from "./snapshot.ts";
-import { Boot, type BootState, type FrameRow, type ImuRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
+import { Boot, type FrameRow, type ImuRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
 import type { Mounting } from "./mounting.ts";
 import { KINDS, isValid, rowCol, type Kind, type PosedFrame } from "./tof_format.ts";
-import { IMU_RECORD_PERIOD_US, type Hello, type ImuBatch, type ImuRecord, type Vec3 } from "./wire.ts";
+import { IMU_RECORD_PERIOD_US, type Hello, type ImuBatch, type ImuRecord, type MoveFrame, type Vec3 } from "./wire.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Where the recordings live (camera pictures, map pictures, boots.json) and the database.
@@ -41,20 +40,20 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS boots (
   boot_id VARCHAR PRIMARY KEY, first_seen TIMESTAMP, last_seen TIMESTAMP, build VARCHAR, wire_version INTEGER,
   mounting VARCHAR,                                    -- the boot's copy of common/mounting.json, when it was first seen
-  messages INTEGER, open_move INTEGER,                 -- where boot.ts left it
-  clock_raw UBIGINT, clock_us DOUBLE, clock_wall_ms DOUBLE);
+  messages INTEGER);                                   -- how many it sent that are stored (boot.ts numbers them)
 CREATE TABLE IF NOT EXISTS moves (
   boot_id VARCHAR, move INTEGER, command INTEGER, kind VARCHAR, param DOUBLE,  -- drive m, turn rad, goto m to the goal, watch s
   pre_ms INTEGER, post_ms INTEGER, refused BOOLEAN,   -- refused: it couldn't start (blocked, already there): no frames
-  start_msg INTEGER, start_at TIMESTAMP, start_t_us UBIGINT, start_t_s DOUBLE,
+  start_msg INTEGER, start_at TIMESTAMP, start_t_us UBIGINT, start_t_s DOUBLE,  -- t_us, t_s: since power-up
   end_msg INTEGER, end_at TIMESTAMP, end_t_us UBIGINT, end_t_s DOUBLE,
   "end" VARCHAR,                                       -- as the answer's end word (ok, obstacle, stopped, ...)
-  frames_sent INTEGER, frames_dropped INTEGER, first_frame UBIGINT, last_frame UBIGINT, moved DOUBLE, rotated DOUBLE,
+  frames_sent INTEGER, frames_dropped INTEGER, moved DOUBLE, rotated DOUBLE,
   imu_sent INTEGER, imu_dropped INTEGER,               -- imu batches (10 records each, the last fewer)
   PRIMARY KEY (boot_id, move));
 CREATE TABLE IF NOT EXISTS frames (
   boot_id VARCHAR, number UBIGINT, move INTEGER, msg INTEGER, arrived_at TIMESTAMP, format VARCHAR,
-  t_us UBIGINT, t_s DOUBLE, period_ms DOUBLE,          -- the middle of the measurement, and how long it took
+  t_us UBIGINT, t_s DOUBLE, period_ms DOUBLE,          -- the middle of the measurement (t_us: PicoA's 32-bit clock, as packed;
+                                                       -- t_s: since power-up), and how long it took
   x DOUBLE, y DOUBLE, yaw DOUBLE, pitch DOUBLE, turn DOUBLE,  -- m, rad (yaw wrapped); turn: during the frame
   still BOOLEAN, pose_known BOOLEAN, beyond_mm INTEGER);      -- beyond_mm: a distance this far is "at least"
 CREATE TABLE IF NOT EXISTS zones (                    -- row 1-8 top to bottom, col 1-8 left to right (README)
@@ -62,7 +61,7 @@ CREATE TABLE IF NOT EXISTS zones (                    -- row 1-8 top to bottom, 
   distance_mm SMALLINT, kind VARCHAR, signal SMALLINT, sigma_mm SMALLINT, targets TINYINT); -- kind: sure, less_sure, unsure, nothing
 CREATE TABLE IF NOT EXISTS imu (                      -- one per imu record (common/link_msgs.h): 4 IMU samples averaged
   boot_id VARCHAR, move INTEGER, msg INTEGER, n TINYINT,  -- msg: its batch's message; n: its place in the batch (0-9)
-  arrived_at TIMESTAMP, t_us UBIGINT, t_s DOUBLE,      -- when it was measured: the middle of its samples
+  arrived_at TIMESTAMP, t_us UBIGINT, t_s DOUBLE,      -- when it was measured (since power-up): the middle of its samples
   ax SMALLINT, ay SMALLINT, az SMALLINT,               -- raw counts in the sensor's axes, nothing taken out: accel 0.061 mg a count,
   gx SMALLINT, gy SMALLINT, gz SMALLINT);              -- gyro 8.75 mdps a count; the boot's mounting (imu.robot_from_sensor) turns them
 CREATE TABLE IF NOT EXISTS status (
@@ -134,11 +133,11 @@ const at = (ms: number) => timestampValue(localUs(ms));
 export interface MoveRow {
   move: number; command: number | null; kind: string | null; param: number | null; preMs: number | null; postMs: number | null; refused: boolean;
   startTS: number | null; endTS: number | null; end: string | null; framesSent: number | null; framesDropped: number | null;
-  firstFrame: number | null; lastFrame: number | null; moved: number | null; rotated: number | null;
+  moved: number | null; rotated: number | null;
   imuSent: number | null; imuDropped: number | null;
 }
 // A frame as stored, with its move and time since power-up.
-export interface StoredFrame { frame: PosedFrame; format: string; move: number | null; tS: number }
+export interface StoredFrame { frame: PosedFrame; format: string; move: number; tS: number }
 // An imu record as stored, with its time since power-up.
 export type StoredImu = ImuRecord & { tS: number }
 
@@ -146,7 +145,7 @@ export type StoredImu = ImuRecord & { tS: number }
 export type Replayed =
   | { msg: number; atMs: number; type: "move_start"; start: MoveStartRow }
   | { msg: number; atMs: number; type: "move_end"; end: MoveEndRow }
-  | { msg: number; atMs: number; type: "frame"; format: string; frame: PosedFrame }
+  | { msg: number; atMs: number; type: "frame"; frame: MoveFrame }
   | { msg: number; atMs: number; type: "imu"; batch: ImuBatch }
   | { msg: number; atMs: number; type: "status"; pose: StatusRow["pose"] }
   | { msg: number; atMs: number; type: "snapshot"; bytes: Buffer };
@@ -209,14 +208,7 @@ export class Store {
         return new Boot(hello.bootId, mountingNow);
       }
       await c.run("UPDATE boots SET last_seen = $2, build = $3 WHERE boot_id = $1", [hello.bootId, at(atMs), hello.build]);
-      const ended = (await c.runAndReadAll(`SELECT move, first_frame, last_frame FROM moves WHERE boot_id = $1 AND first_frame > 0
-        ORDER BY move DESC LIMIT 16`, [hello.bootId])).getRowObjects().reverse()
-        .map(r => ({ move: Number(r.move), first: Number(r.first_frame), last: Number(r.last_frame) }));
-      const state: BootState = {
-        clock: row.clock_raw === null ? null : { lastRaw: Number(row.clock_raw), lastUs: Number(row.clock_us), lastWallMs: Number(row.clock_wall_ms) },
-        messages: Number(row.messages ?? 0), openMove: num(row.open_move), ended,
-      };
-      return new Boot(hello.bootId, JSON.parse(String(row.mounting)) as Mounting, state);
+      return new Boot(hello.bootId, JSON.parse(String(row.mounting)) as Mounting, Number(row.messages ?? 0));
     });
   }
 
@@ -274,13 +266,12 @@ export class Store {
           [s.boot, s.move, s.command, s.kind, s.param, s.preMs, s.postMs, s.msg, at(s.atMs), s.tUs, s.tS, s.refused]);
       }
       for (const e of p.ends) {
-        await c.run(`INSERT INTO moves (boot_id, move, end_msg, end_at, end_t_us, end_t_s, "end", frames_sent, frames_dropped, first_frame,
-          last_frame, moved, rotated, imu_sent, imu_dropped) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        await c.run(`INSERT INTO moves (boot_id, move, end_msg, end_at, end_t_us, end_t_s, "end", frames_sent, frames_dropped,
+          moved, rotated, imu_sent, imu_dropped) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
           ON CONFLICT (boot_id, move) DO UPDATE SET end_msg = excluded.end_msg, end_at = excluded.end_at, end_t_us = excluded.end_t_us,
           end_t_s = excluded.end_t_s, "end" = excluded."end", frames_sent = excluded.frames_sent, frames_dropped = excluded.frames_dropped,
-          first_frame = excluded.first_frame, last_frame = excluded.last_frame, moved = excluded.moved, rotated = excluded.rotated,
-          imu_sent = excluded.imu_sent, imu_dropped = excluded.imu_dropped`,
-          [e.boot, e.move, e.msg, at(e.atMs), e.tUs, e.tS, e.end, e.framesSent, e.framesDropped, e.firstFrame, e.lastFrame, e.moved, e.rotated,
+          moved = excluded.moved, rotated = excluded.rotated, imu_sent = excluded.imu_sent, imu_dropped = excluded.imu_dropped`,
+          [e.boot, e.move, e.msg, at(e.atMs), e.tUs, e.tS, e.end, e.framesSent, e.framesDropped, e.moved, e.rotated,
            e.imuSent, e.imuDropped]);
       }
       if (p.frames.length) {
@@ -427,14 +418,15 @@ export class Store {
         if (m.end_msg !== null) {
           out.push({ msg: Number(m.end_msg), atMs: msOf(m.end_at), type: "move_end", end: {
             ...base, msg: Number(m.end_msg), atMs: msOf(m.end_at), end: String(m.end), tUs: Number(m.end_t_us),
-            framesSent: Number(m.frames_sent), framesDropped: Number(m.frames_dropped), firstFrame: Number(m.first_frame),
-            lastFrame: Number(m.last_frame), moved: Number(m.moved), rotated: Number(m.rotated), imuSent: Number(m.imu_sent ?? 0),
+            framesSent: Number(m.frames_sent), framesDropped: Number(m.frames_dropped),
+            moved: Number(m.moved), rotated: Number(m.rotated), imuSent: Number(m.imu_sent ?? 0),
             imuDropped: Number(m.imu_dropped ?? 0), tS: Number(m.end_t_s) } });
         }
       }
       const frames = await rows("SELECT * FROM frames WHERE boot_id = $1 ORDER BY number");
       const zones = await rows("SELECT * FROM zones WHERE boot_id = $1 ORDER BY number, row, col");
-      framesOf(frames, zones).forEach((f, k) => out.push({ msg: Number(frames[k].msg), atMs: msOf(frames[k].arrived_at), type: "frame", format: f.format, frame: f.frame }));
+      framesOf(frames, zones).forEach((f, k) => out.push({ msg: Number(frames[k].msg), atMs: msOf(frames[k].arrived_at), type: "frame",
+        frame: { format: f.format, move: f.move, tUs: Math.round(f.tS * 1e6), frame: f.frame } }));
       // An imu batch: its rows (one message), in their order.
       const batches = new Map<number, { atMs: number; batch: ImuBatch }>();
       for (const r of await rows("SELECT * FROM imu WHERE boot_id = $1 ORDER BY msg, n")) {
@@ -459,7 +451,7 @@ export class Store {
 function appendFrame(fa: DuckDBAppender, za: DuckDBAppender, r: FrameRow): void {
   const f = r.frame;
   fa.appendVarchar(r.boot); fa.appendUBigInt(BigInt(f.number));
-  if (r.move === null) fa.appendNull(); else fa.appendInteger(r.move);
+  fa.appendInteger(r.move);
   fa.appendInteger(r.msg); fa.appendTimestamp(at(r.atMs)); fa.appendVarchar(r.format);
   fa.appendUBigInt(BigInt(f.tUs)); fa.appendDouble(r.tS); fa.appendDouble(f.periodUs / 1000);
   for (const v of [f.x, f.y, f.yaw, f.pitch, f.turn]) fa.appendDouble(v);
@@ -512,9 +504,7 @@ function imuOf(r: Record<string, unknown>): StoredImu {
 }
 
 async function saveBootState(c: DuckDBConnection, b: Boot): Promise<void> {
-  const s = b.state;
-  await c.run(`UPDATE boots SET messages = $2, open_move = $3, clock_raw = $4, clock_us = $5, clock_wall_ms = $6 WHERE boot_id = $1`,
-    [b.id, s.messages, s.openMove, s.clock?.lastRaw ?? null, s.clock?.lastUs ?? null, s.clock?.lastWallMs ?? null]);
+  await c.run("UPDATE boots SET messages = $2 WHERE boot_id = $1", [b.id, b.messages]);
 }
 
 function moveRow(m: Record<string, unknown>): MoveRow {
@@ -522,7 +512,7 @@ function moveRow(m: Record<string, unknown>): MoveRow {
     move: Number(m.move), command: num(m.command), kind: m.kind === null ? null : String(m.kind), param: num(m.param),
     preMs: num(m.pre_ms), postMs: num(m.post_ms), refused: Boolean(m.refused), startTS: num(m.start_t_s), endTS: num(m.end_t_s),
     end: m.end === null ? null : String(m.end), framesSent: num(m.frames_sent), framesDropped: num(m.frames_dropped),
-    firstFrame: num(m.first_frame), lastFrame: num(m.last_frame), moved: num(m.moved), rotated: num(m.rotated),
+    moved: num(m.moved), rotated: num(m.rotated),
     imuSent: num(m.imu_sent), imuDropped: num(m.imu_dropped),
   };
 }
@@ -537,7 +527,7 @@ function framesOf(frames: Record<string, unknown>[], zones: Record<string, unkno
   return frames.map(f => {
     const n = Number(f.number);
     return {
-      format: String(f.format), move: num(f.move), tS: Number(f.t_s),
+      format: String(f.format), move: Number(f.move), tS: Number(f.t_s),
       frame: {
         number: n, tUs: Number(f.t_us), periodUs: Math.round(Number(f.period_ms) * 1000),
         x: Number(f.x), y: Number(f.y), yaw: Number(f.yaw), pitch: Number(f.pitch), turn: Number(f.turn),

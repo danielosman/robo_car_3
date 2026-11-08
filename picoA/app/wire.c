@@ -3,18 +3,18 @@
 
 // The table (wire.h); the ToF frames' types come from tof_format.
 static const struct { uint8_t type; wire_type_info_t info; } table[] = {
-    {WIRE_HELLO, {WIRE_LANE_CONTROL, 1, WIRE_PAYLOAD_MAX, false}}, // any length: another version's hello is read for its version
-    {WIRE_CONSOLE, {WIRE_LANE_CONTROL, 0, WIRE_CONSOLE_MAX, true}},
-    {WIRE_ANSWER, {WIRE_LANE_CONTROL, WIRE_ANSWER_SIZE, WIRE_ANSWER_SIZE, false}},
-    {WIRE_STATUS, {WIRE_LANE_CONTROL, WIRE_STATUS_SIZE, WIRE_STATUS_SIZE, true}},
-    {WIRE_MAP_CLEARED, {WIRE_LANE_CONTROL, 0, 0, false}},
-    {WIRE_MOVE_START, {WIRE_LANE_CONTROL, WIRE_MOVE_START_SIZE, WIRE_MOVE_START_SIZE, false}},
-    {WIRE_MOVE_END, {WIRE_LANE_CONTROL, WIRE_MOVE_END_SIZE, WIRE_MOVE_END_SIZE, false}},
-    {WIRE_SNAPSHOT_PART, {WIRE_LANE_BULK, 1, WIRE_PART_MAX, false}},
+    {WIRE_HELLO, {WIRE_LANE_CONTROL, 1, WIRE_PAYLOAD_MAX}}, // any length: another version's hello is read for its version
+    {WIRE_CONSOLE, {WIRE_LANE_CONTROL, 0, WIRE_CONSOLE_MAX}},
+    {WIRE_ANSWER, {WIRE_LANE_CONTROL, WIRE_ANSWER_SIZE, WIRE_ANSWER_SIZE}},
+    {WIRE_STATUS, {WIRE_LANE_CONTROL, WIRE_STATUS_SIZE, WIRE_STATUS_SIZE}},
+    {WIRE_MAP_CLEARED, {WIRE_LANE_CONTROL, 0, 0}},
+    {WIRE_MOVE_START, {WIRE_LANE_CONTROL, WIRE_MOVE_START_SIZE, WIRE_MOVE_START_SIZE}},
+    {WIRE_MOVE_END, {WIRE_LANE_CONTROL, WIRE_MOVE_END_SIZE, WIRE_MOVE_END_SIZE}},
+    {WIRE_SNAPSHOT_PART, {WIRE_LANE_BULK, 1, WIRE_PART_MAX}},
     {WIRE_IMU_BATCH, {WIRE_LANE_BULK, WIRE_IMU_BATCH_HEADER + WIRE_IMU_RECORD,
-                      WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD, true}},
-    {WIRE_COMMAND, {WIRE_LANE_TO_ROBOT, 5, 4 + WIRE_COMMAND_TEXT_MAX, false}},
-    {WIRE_HEARTBEAT, {WIRE_LANE_TO_ROBOT, 0, 0, false}},
+                      WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD}},
+    {WIRE_COMMAND, {WIRE_LANE_TO_ROBOT, 5, 4 + WIRE_COMMAND_TEXT_MAX}},
+    {WIRE_HEARTBEAT, {WIRE_LANE_TO_ROBOT, 0, 0}},
 };
 #define TABLE_N (sizeof table / sizeof table[0])
 
@@ -23,8 +23,8 @@ bool wire_info(uint8_t type, wire_type_info_t *info) {
         if (table[i].type == type) { *info = table[i].info; return true; }
     for (int f = 0; f < TOF_FORMATS; f++) {
         if (tof_format_message_type((tof_format_t)f) != type) continue;
-        uint16_t size = (uint16_t)tof_format_size((tof_format_t)f);
-        *info = (wire_type_info_t){WIRE_LANE_BULK, size, size, true};
+        uint16_t size = (uint16_t)(WIRE_TOF_HEADER + tof_format_size((tof_format_t)f));
+        *info = (wire_type_info_t){WIRE_LANE_BULK, size, size};
         return true;
     }
     return false;
@@ -36,7 +36,7 @@ bool wire_check(void) {
     for (uint32_t i = 0; i < TABLE_N; i++) types[n++] = table[i].type;
     for (int f = 0; f < TOF_FORMATS; f++) {
         types[n++] = tof_format_message_type((tof_format_t)f);
-        if (tof_format_size((tof_format_t)f) > WIRE_PAYLOAD_MAX) return false;
+        if (WIRE_TOF_HEADER + tof_format_size((tof_format_t)f) > WIRE_PAYLOAD_MAX) return false;
     }
     for (uint32_t i = 0; i < n; i++)
         for (uint32_t j = i + 1; j < n; j++)
@@ -48,9 +48,11 @@ bool wire_check(void) {
 
 static void set16(uint8_t *p, uint16_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 static void set32(uint8_t *p, uint32_t v) { set16(p, (uint16_t)v); set16(p + 2, (uint16_t)(v >> 16)); }
+static void set64(uint8_t *p, uint64_t v) { set32(p, (uint32_t)v); set32(p + 4, (uint32_t)(v >> 32)); }
 static void setf(uint8_t *p, float v) { uint32_t u; memcpy(&u, &v, 4); set32(p, u); }
 static uint16_t read16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
 static uint32_t read32(const uint8_t *p) { return read16(p) | (uint32_t)read16(p + 2) << 16; }
+static uint64_t read64(const uint8_t *p) { return read32(p) | (uint64_t)read32(p + 4) << 32; }
 static float readf(const uint8_t *p) { uint32_t u = read32(p); float v; memcpy(&v, &u, 4); return v; }
 static uint32_t text_len(const char *text, uint32_t size) {
     uint32_t n = 0;
@@ -186,10 +188,10 @@ uint32_t wire_encode_move_start(const wire_move_start_t *s, uint8_t *out) {
     set32(p + 4, s->command);
     p[8] = s->kind;
     setf(p + 9, s->param);
-    set32(p + 13, s->t_us);
-    set16(p + 17, s->pre_ms);
-    set16(p + 19, s->post_ms);
-    p[21] = s->flags;
+    set64(p + 13, s->t_us);
+    set16(p + 21, s->pre_ms);
+    set16(p + 23, s->post_ms);
+    p[25] = s->flags;
     return WIRE_HEADER + WIRE_MOVE_START_SIZE;
 }
 
@@ -197,7 +199,7 @@ bool wire_decode_move_start(const wire_msg_t *m, wire_move_start_t *s) {
     if (!is(m, WIRE_MOVE_START, WIRE_MOVE_START_SIZE)) return false;
     const uint8_t *p = m->payload;
     *s = (wire_move_start_t){.move = read32(p), .command = read32(p + 4), .kind = p[8], .param = readf(p + 9),
-                             .t_us = read32(p + 13), .pre_ms = read16(p + 17), .post_ms = read16(p + 19), .flags = p[21]};
+                             .t_us = read64(p + 13), .pre_ms = read16(p + 21), .post_ms = read16(p + 23), .flags = p[25]};
     return true;
 }
 
@@ -205,25 +207,22 @@ uint32_t wire_encode_move_end(const wire_move_end_t *e, uint8_t *out) {
     uint8_t *p = out + wire_header(out, WIRE_MOVE_END, WIRE_MOVE_END_SIZE);
     set32(p, e->move);
     p[4] = e->end;
-    set32(p + 5, e->t_us);
-    set32(p + 9, e->frames_sent);
-    set32(p + 13, e->frames_dropped);
-    set32(p + 17, e->first_frame);
-    set32(p + 21, e->last_frame);
-    setf(p + 25, e->moved_m);
-    setf(p + 29, e->rotated_rad);
-    set32(p + 33, e->imu_sent);
-    set32(p + 37, e->imu_dropped);
+    set64(p + 5, e->t_us);
+    set32(p + 13, e->frames_sent);
+    set32(p + 17, e->frames_dropped);
+    setf(p + 21, e->moved_m);
+    setf(p + 25, e->rotated_rad);
+    set32(p + 29, e->imu_sent);
+    set32(p + 33, e->imu_dropped);
     return WIRE_HEADER + WIRE_MOVE_END_SIZE;
 }
 
 bool wire_decode_move_end(const wire_msg_t *m, wire_move_end_t *e) {
     if (!is(m, WIRE_MOVE_END, WIRE_MOVE_END_SIZE)) return false;
     const uint8_t *p = m->payload;
-    *e = (wire_move_end_t){.move = read32(p), .end = p[4], .t_us = read32(p + 5), .frames_sent = read32(p + 9),
-                           .frames_dropped = read32(p + 13), .first_frame = read32(p + 17), .last_frame = read32(p + 21),
-                           .moved_m = readf(p + 25), .rotated_rad = readf(p + 29), .imu_sent = read32(p + 33),
-                           .imu_dropped = read32(p + 37)};
+    *e = (wire_move_end_t){.move = read32(p), .end = p[4], .t_us = read64(p + 5), .frames_sent = read32(p + 13),
+                           .frames_dropped = read32(p + 17), .moved_m = readf(p + 21), .rotated_rad = readf(p + 25),
+                           .imu_sent = read32(p + 29), .imu_dropped = read32(p + 33)};
     return true;
 }
 
@@ -231,12 +230,12 @@ uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out) {
     if (b->n < 1 || b->n > WIRE_IMU_BATCH_MAX) return 0;
     uint16_t len = (uint16_t)(WIRE_IMU_BATCH_HEADER + b->n * WIRE_IMU_RECORD);
     uint8_t *p = out + wire_header(out, WIRE_IMU_BATCH, len);
-    uint32_t first = b->records[0].t_us, span = b->records[b->n - 1].t_us - first;
+    uint32_t span = b->records[b->n - 1].t_us - b->records[0].t_us;
     uint32_t period = b->n > 1 ? (span + (b->n - 1) / 2u) / (b->n - 1u) : IMU_RECORD_PERIOD_US;
     set32(p, b->move);
-    set32(p + 4, first);
-    set16(p + 8, (uint16_t)(period > 0xffff ? 0xffff : period));
-    p[10] = b->n;
+    set64(p + 4, b->t_us);
+    set16(p + 12, (uint16_t)(period > 0xffff ? 0xffff : period));
+    p[14] = b->n;
     for (int i = 0; i < b->n; i++) {
         uint8_t *r = p + WIRE_IMU_BATCH_HEADER + i * WIRE_IMU_RECORD;
         for (int k = 0; k < 3; k++) {
@@ -250,14 +249,15 @@ uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out) {
 bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b) {
     if (m->type != WIRE_IMU_BATCH || m->len < WIRE_IMU_BATCH_HEADER) return false;
     const uint8_t *p = m->payload;
-    uint8_t n = p[10];
+    uint8_t n = p[14];
     if (n < 1 || n > WIRE_IMU_BATCH_MAX || m->len != WIRE_IMU_BATCH_HEADER + n * WIRE_IMU_RECORD) return false;
-    uint32_t first = read32(p + 4), period = read16(p + 8);
     b->move = read32(p);
+    b->t_us = read64(p + 4);
+    b->period_us = read16(p + 12);
     b->n = n;
     for (int i = 0; i < n; i++) {
         const uint8_t *r = p + WIRE_IMU_BATCH_HEADER + i * WIRE_IMU_RECORD;
-        b->records[i].t_us = first + (uint32_t)i * period;
+        b->records[i].t_us = 0;
         for (int k = 0; k < 3; k++) {
             b->records[i].accel[k] = (int16_t)read16(r + 2 * k);
             b->records[i].gyro[k] = (int16_t)read16(r + 6 + 2 * k);
@@ -266,8 +266,11 @@ bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b) {
     return true;
 }
 
-uint32_t wire_encode_tof(tof_use_t use, const posed_frame_t *f, uint8_t *out) {
-    uint32_t n = tof_pack(use, f, out + WIRE_HEADER);
+uint32_t wire_encode_tof(tof_use_t use, uint32_t move, uint64_t t_us, const posed_frame_t *f, uint8_t *out) {
+    uint8_t *p = out + WIRE_HEADER;
+    set32(p, move);
+    set64(p + 4, t_us);
+    uint32_t n = WIRE_TOF_HEADER + tof_pack(use, f, p + WIRE_TOF_HEADER);
     wire_header(out, tof_format_message_type(tof_format_of(use)), (uint16_t)n);
     return WIRE_HEADER + n;
 }

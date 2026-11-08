@@ -22,30 +22,34 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 | 4a Framed messages over TCP | done, reviewed |
 | 4b Moves, frames, new database | done, reviewed |
 | 4c Raw IMU at 104 Hz, peaks gone | done, reviewed, re-review fixes done (8 Nov) |
+| 4d Simpler: move number in frames, 64-bit times, simpler link | done (8 Nov), not reviewed |
 | 5 PC cell map | to do |
 | 6 Robot: window only, floor first | to do |
 | 7 Line map | to do |
 | 8 Map switch on the page | to do |
 | 9 Final docs, one flash, robot test list | to do |
 
-- **Nothing is committed.** Steps 1-4c are in the working tree on `main` (Daniel
-  commits when he says so). The tag `data-v1` marks the last commit before them.
-- All checks green on 8 Nov: `./run_tests.sh`, `tools/lint.sh`, `npm test` (77) and
+- Steps 1-4c are committed (`3f9f8b7`); step 4d is in the working tree. The tag
+  `data-v1` marks the last commit before step 1.
+- All checks green on 8 Nov: `./run_tests.sh`, `tools/lint.sh`, `npm test` (73) and
   `npm run typecheck` in `pc/robot`, `cmake --build build` (0 warnings).
+- **Docs behind:** ARCHITECTURE, CHANGELOG, README and TODO are not updated for step
+  4d; they are brought up to date once, in step 9.
 - **Nothing flashed, no robot tests run.** Both Picos are flashed once, in step 9
-  (link protocol 6, wire version 3: PicoA, PicoB and the server go together).
+  (link protocol 6, wire version 4: PicoA, PicoB and the server go together).
 - The robot tests for steps 1-4c are collected in the README section "Robot tests
   after the data-flow rework", to be run once after step 9.
 
 ## 2. How to continue
 
-- **Each step:** a fresh worker agent builds it from this plan. A fresh reviewer
-  checks it: features complete, deep modules, small interfaces, as many tests as make
-  sense. The same worker applies the fixes. A fresh reviewer checks the fixes. Then
-  the next step.
-- **Each step ends** green (the four checks above), with ARCHITECTURE, TODO, README
-  (its robot test added to the list) and CHANGELOG updated, and says which Picos
-  it changes.
+- **Each step:** built in the main session from this plan; one review pass after it
+  (no second review of the fixes). Then the next step.
+- **Simple first:** a rare case returns an error, is counted or is ignored; it isn't
+  handled unless a robot test shows it matters. Tests cover the promised behaviour,
+  not every corner.
+- **Each step ends** green (the four checks above) and says which Picos it changes.
+  The docs (ARCHITECTURE, TODO, README robot test list, CHANGELOG) are updated once,
+  in step 9; this plan's state table is kept current.
 - **No robot tests between steps.** Everything is checked by host tests, PC tests and
   review; the robot is flashed once at the end.
 - **To show a reviewer only one step's change:** before the step, save the tree with
@@ -163,13 +167,17 @@ Each name once; the same word in C (`snake_case_t`) and TS (`CamelCase`).
 | **move** | one command part with its still time: start → still → act → still → end | `move` | `link_pc` (bulk), the PC |
 | **message** | `[type 1 B][length 2 B][payload]` on the TCP connection | `wire` | `wire` |
 | **status** | pose, mode, action, WiFi signal; 4 a second | `commands_status()` via `link_pc` | the page |
-| **boot** | one power-up: id, clock unwrapping, the mounting copy, open move | PC `boot.ts` | `store` |
+| **boot** | one power-up: id, the mounting copy, its message count | PC `boot.ts` | `store` |
 
 Watching is called **watch** everywhere.
 
 ## 6. Data formats
 
 ### Compact tof format (uses: map, watch, snapshot)
+
+On the wire a tof frame comes after its **move number** (u32) and its **time** (u64,
+µs since power-up): 12 B, so a frame is filed by the move it names. The format itself
+(below) is the same for every use.
 
 Header 21 B: frame number 4, time 4 (PicoA µs, middle of the measurement), period 2
 (0.1 ms), pose 8 (x, y mm; yaw ±180° and pitch in 0.01°), turn 2 (0.01°), flags 1
@@ -182,7 +190,7 @@ Header 21 B: frame number 4, time 4 (PicoA µs, middle of the measurement), peri
 | sigma | 1 B | mm, capped at 255 |
 | kind + targets | 1 B | kind (2 bits); targets the sensor saw (3 bits) |
 
-- 277 B a frame, 2.8 KB/s at 10 Hz.
+- 277 B a frame (289 B with the move and time), 2.9 KB/s at 10 Hz.
 - "Beyond" unpacks as 2550 mm with a flag: the map treats it as free to 2.55 m, no hit.
 - Dropped: reflectance, ambient, SPAD count, temperature, the 2nd-4th targets.
 
@@ -192,14 +200,16 @@ Header 21 B: frame number 4, time 4 (PicoA µs, middle of the measurement), peri
   samples), accel x, y, z and gyro x, y, z as int16 raw counts (±2 g, ±250 °/s), gyro
   bias not removed. A skipped sample restarts the record, so every record is 4
   samples in a row and a skip shows as a gap. `body` turns the time into PicoA's.
-- **imu_batch** (PicoA → PC, bulk): move number 4, first time 4, period 2 (µs), count
-  1, then 12 B a record; up to 131 B. A gap or a step back in time starts a new batch;
+- **imu_batch** (PicoA → PC, bulk): move number 4, first time 8 (µs since power-up),
+  period 2 (µs), count 1, then 12 B a record; up to 135 B. A gap or a step back in time starts a new batch;
   a move's last batch goes at its end, however short.
 
 ### Time
 
-PicoA's clock wraps every 71.6 min (it starts 30 s before the wrap). The PC's `boot`
-turns every time into one that only grows during the boot.
+PicoA's clock (`time_us_32()`) wraps every 71.6 min (it starts 30 s before the wrap).
+Inside the robot it stays 32-bit. Every time sent to the PC is **u64 µs since
+power-up** (`clock_since_start_of()` in `common/clock_start.h`): it never wraps, so
+the PC only divides by 10^6.
 
 ## 7. The connection
 
@@ -208,16 +218,16 @@ turns every time into one that only grows during the boot.
 | control | hello (boot, build, wire version), console line, answer, status, move start, move end, map cleared | command, heartbeat (every 2 s) |
 | bulk | tof frame, imu batch, snapshot part | — |
 
-- **Control** never blocks the loop and is never dropped for answers; when full, the
-  oldest console lines and statuses make room.
-- **Bulk** (40 KB) goes only while control is empty, first in first out. Frames and
-  imu batches are dropped and counted when it is full; a snapshot waits, never dropped.
-- A bulk ticket holds its connection: `link_bulk_state()` says queued, sent or lost.
+- **Control** (16 KB) never blocks the loop; when full, its oldest messages go
+  (counted). Status goes only while control is empty, so it never piles up.
+- **Bulk** (40 KB) goes only while control is empty, first in first out. When full, a
+  message is refused (counted): frames and imu batches are dropped, a snapshot part
+  waits and tries again. A lost connection drops what bulk holds; a snapshot cut by it
+  isn't sent again (the new server gets its own).
 - The PC refuses a robot with another wire version (one note per address and version).
 - Move start: move and command number, kind, parameter, time, still times, a
   **refused** flag (a refused move doesn't close the running one on the PC). Move end:
-  how it ended, frames sent and dropped, first and last frame number (the PC files late
-  frames by number), moved, rotated, imu batches sent and dropped.
+  how it ended, frames sent and dropped, moved, rotated, imu batches sent and dropped.
 - Answers: each ended move is answered in order (`move_next_ended()` keeps the last 8).
 - The USB console stays plain text.
 
@@ -249,7 +259,7 @@ What each hides, and its interface. Built unless marked (step N).
 | `move` | the phases, counts, frame and imu batch sending | `move_start(kind, param, command, actor)`, `move_refused()`, `move_stop()`, `move_update()`, `move_tof()`, `move_imu()`, `move_next_ended()` |
 | `behaviour` | how each action drives | three functions per action (begin, step, end) for `move` |
 | `wire` | the envelope and payloads (ToF bytes from `tof_format`) | pure encode / decode |
-| `link_pc` | WiFi, finding the server, TCP, the two lanes, drop counts | `link_send_control()`, `link_send_bulk()`, `link_bulk_state()`, `link_received()` |
+| `link_pc` | WiFi, finding the server, TCP, the two lanes, drop counts | `link_send_control()`, `link_send_bulk()` (true or false), `link_pc_connection()`, `link_received()` |
 | `snapshot` | its layout (camera, colour, features, compact tof frame, map window and tiles until step 6) | `snapshot_request()`; parts to bulk |
 | `commands` | the command words | answers each ended move; `config pre_ms|post_ms`; `commands_status()` |
 | `house_map` | the whole-house tiles | goes to the PC helper in step 6 |
@@ -264,7 +274,7 @@ What each hides, and its interface. Built unless marked (step N).
 | `link.ts` | the TCP connection, messages | typed events in; commands out |
 | `wire.ts`, `tof_format.ts` | the bytes; twins of the C, checked against `picoA/app/test/data/wire_golden.hex` | decode / encode / pack / unpack |
 | `mounting.ts` | the file and its checks | `loadMounting()` |
-| `boot.ts` | boot id, clock unwrapping, mounting copy, open move, filing frames and batches | one per boot |
+| `boot.ts` | boot id, mounting copy, message numbering, µs → s | one per boot |
 | `ingest.ts` | link events into the store, in order | used by `main.ts` and tests |
 | `store.ts` | DuckDB `recordings/robot2.duckdb`: boots, moves, frames, zones, imu, status, snapshots (with bytes), objects | writes per message; reads for the page and CLI |
 | `api/frames.ts` | `robot frames`, `robot imu` text and JSON (stored of sent, dropped, lost, missing) | |
@@ -278,10 +288,10 @@ What each hides, and its interface. Built unless marked (step N).
 
 | Robot → PC while moving | KB/s |
 |---|---|
-| tof frames, 10 Hz | 2.8 |
+| tof frames, 10 Hz | 2.9 |
 | imu batches, 104 Hz | 1.4 |
 | status, 4 a second | 0.2 |
-| **Total** | **~4.4** |
+| **Total** | **~4.5** |
 
 Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.9 KB/s of
 ~100. PicoA: ~51 KB RAM free; core 0 stack worst case ~6.4 KB of 8. Step 6 frees ~31 KB
@@ -360,5 +370,5 @@ tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2
 
 ## 14. Open questions for Daniel
 
-1. **Commit:** steps 1-4c are a large uncommitted change. Commit them before step 5?
+1. **Commit:** step 4d (this simplification) before step 5?
 2. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).

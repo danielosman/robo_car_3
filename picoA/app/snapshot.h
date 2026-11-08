@@ -9,7 +9,8 @@
 // into a static buffer; one asked for while the last is still going out is built
 // when it has gone (with what the robot knows then). Without a server nothing is
 // built: one is built when a server connects. A part the lane has no room for
-// waits; a snapshot cut by a lost connection goes again whole on the next.
+// waits; a snapshot cut by a lost connection is not sent again (the new
+// connection gets its own).
 //
 // Layout (little-endian, packed; the PC reads it in pc/robot/src/snapshot.ts):
 // "SNAP", version u8, total length u32, then sections [type u8][length u32][payload],
@@ -30,11 +31,9 @@ void snapshot_init(uint32_t boot_id, const char *build);
 // Asks for a snapshot. command: the number of the command asking (0: none), handed
 // back by snapshot_sent().
 void snapshot_request(snapshot_why_t why, uint32_t command);
-// A snapshot a command asked for has wholly gone to the connection: every part handed
-// to TCP, so its answer, written after this, follows it in the stream. A connection
-// lost before this sends it again whole on the next; lost after it (parts in TCP
-// but not delivered), the snapshot is gone and its answer arrives on the next
-// connection (the PC's runner then says the snapshot wasn't stored). Its command, its number and the robot's pose in
+// A snapshot a command asked for has gone: every part is in the bulk lane, or its
+// connection was lost (it isn't sent again; the PC's runner waits for it to be
+// stored and says so if it isn't). Its command, its number and the robot's pose in
 // it; true once per such snapshot.
 typedef struct {
     uint32_t command, seq;

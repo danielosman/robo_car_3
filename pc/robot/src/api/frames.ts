@@ -33,7 +33,6 @@ function moveLine(boot: string, folder: string | null, m: MoveRow, stored: numbe
     : `${m.refused ? "refused (didn't start), " : ""}ended ${m.end} after ${r1((m.endTS ?? 0) - (m.startTS ?? 0))} s; ` +
       `${stored} stored of ${m.framesSent} sent; ${m.framesDropped} dropped on the robot; ` +
       `${Math.max(0, (m.framesSent ?? 0) - stored)} lost (dropped connection)` +
-      (m.firstFrame ? ` (frames ${m.firstFrame}-${m.lastFrame})` : "") +
       `; moved ${Math.round((m.moved ?? 0) * 100)} cm, turned ${r1((m.rotated ?? 0) * DEG)}°`;
   return `${head}\n${end}\n${imuLine(m, imu)}`;
 }

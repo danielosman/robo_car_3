@@ -148,12 +148,13 @@ bool link_send_control(const uint8_t *msg, uint32_t len) {
     }
     return true;
 }
-link_ticket_t link_send_bulk(const uint8_t *msg, uint32_t len) {
+bool link_send_bulk(const uint8_t *msg, uint32_t len) {
     wire_msg_t m;
     assert(wire_take(msg, len, &m) == (int32_t)len && move_open); // frames only during a move
+    assert(read32(m.payload) == last_start.move);                  // under the running move's number
     frames_in_move++;
     frames_sent++;
-    return (link_ticket_t){1, (uint32_t)frames_sent};
+    return true;
 }
 
 // The ToF pipeline into the map, as main.c runs it (watch is faked above).
@@ -393,10 +394,8 @@ int main(void) {
     move_record_t ended;
     assert(move_endings(&ended) == 1 && ended.command == 7 && ended.how == MOVE_END_DONE && ended.moved_m < 0.03f);
     // Its frames: every one while it ran (~10 a second), none dropped; none while idle.
-    printf("scan: %lu ToF frames sent (frames %lu-%lu), none dropped\n", (unsigned long)last_end.frames_sent,
-           (unsigned long)last_end.first_frame, (unsigned long)last_end.last_frame);
+    printf("scan: %lu ToF frames sent, none dropped\n", (unsigned long)last_end.frames_sent);
     assert(last_end.frames_sent >= (uint32_t)(seconds * TOF_HZ) - 2 && last_end.frames_sent <= (uint32_t)(seconds * TOF_HZ) + 2);
-    assert(last_end.last_frame - last_end.first_frame + 1 == last_end.frames_sent);
     int sent_before = frames_sent;
     run(2);
     assert(frames_sent == sent_before);

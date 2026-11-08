@@ -29,12 +29,12 @@ bool link_send_control(const uint8_t *msg, uint32_t len) {
     if (m.type == WIRE_MOVE_END) { assert(wire_decode_move_end(&m, &move_end)); ended_seen = true; }
     return true;
 }
-link_ticket_t link_send_bulk(const uint8_t *msg, uint32_t len) {
+bool link_send_bulk(const uint8_t *msg, uint32_t len) {
     wire_msg_t m;
     assert(wire_take(msg, len, &m) == (int32_t)len && m.type == WIRE_IMU_BATCH && n_batches < 256);
     assert(wire_decode_imu_batch(&m, &batches[n_batches]));
     n_batches++;
-    return (link_ticket_t){1, (uint32_t)n_batches};
+    return true;
 }
 
 // --- the action: stands still 2 s ---
@@ -95,7 +95,6 @@ int main(void) {
     assert(n_batches > 20 && (uint32_t)n_batches == move_end.imu_sent && move_end.imu_dropped == 0);
     int records = 0;
     float worst_ms = 0;
-    bool wrapped = false;
     int32_t prev = -1;
     for (int b = 0; b < n_batches; b++) {
         assert(batches[b].move == 1);
@@ -105,20 +104,17 @@ int main(void) {
             assert(prev < 0 || j == prev + 1);
             prev = j;
             assert(r->accel[1] == -j && r->accel[2] == 16384 && r->gyro[0] == -32768 && r->gyro[1] == 32767 && r->gyro[2] == j % 7);
-            float err_ms = (float)(int32_t)(r->t_us - (uint32_t)record_mid_us[j]) * 1e-3f;
+            uint64_t t_us = batches[b].t_us + (uint64_t)i * batches[b].period_us; // since power-up
+            float err_ms = (float)((int64_t)t_us - (int64_t)(record_mid_us[j] - CLOCK_START_US)) * 1e-3f;
             if (err_ms < 0) err_ms = -err_ms;
             if (err_ms > worst_ms) worst_ms = err_ms;
-            if (i && r->t_us < batches[b].records[i - 1].t_us) wrapped = true;
             records++;
         }
-        if (batches[b].n > 1) {
-            uint32_t period = (batches[b].records[1].t_us - batches[b].records[0].t_us);
-            assert(period >= 9612 && period <= 9620); // 4 samples of 2404 µs
-        }
+        if (batches[b].n > 1) assert(batches[b].period_us >= 9612 && batches[b].period_us <= 9620); // 4 samples of 2404 µs
     }
     // The move: ~0.2 s start, 0.2 s still, 2 s acting, 0.2 s still: ~2.6 s, ~270 records.
-    printf("imu path: %d records in %d batches, all in order and unchanged, times within %.2f ms on PicoA's clock%s\n",
-           records, n_batches, (double)worst_ms, wrapped ? " (across its wrap)" : "");
+    printf("imu path: %d records in %d batches, all in order and unchanged, times since power-up within %.2f ms\n",
+           records, n_batches, (double)worst_ms);
     assert(records > 230 && records < 300 && worst_ms < 1.5f);
     assert(body_imu_lost() == 0 && n_batches == (records + 9) / 10);
     printf("OK: the IMU from PicoB's odometry to the PC's batches\n");

@@ -3,8 +3,8 @@
 // here gives its line's bytes and each line decodes to its sample, so what the robot
 // makes is what this server reads and the reverse; the table and the version are
 // the robot's; the compact tof frame at its limits as the robot packs it, unpacked
-// and packed again to the same bytes; the imu batches (10 records across the clock's
-// wrap, one record). Then every message encoded and decoded again, and the envelope: a
+// and packed again to the same bytes, after its move and time; the imu batches (10
+// records, one record; times past 2^32 µs). Then every message encoded and decoded again, and the envelope: a
 // stream cut anywhere, unknown types, too long, too short. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -21,12 +21,12 @@ import { KINDS, TOF_COMPACT_BYTES, packTof, unpackTof } from "./tof_format.ts";
 const GOLDEN = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../picoA/app/test/data/wire_golden.hex");
 const f = Math.fround;
 
-// test_wire.c's sample_batch(n): records 9615 µs apart from 2^32 - 12288 µs (across
-// the wrap), counts i × 1000 - 7k and -i × 300 + k; 1 g up on the first, the int16
-// limits on the last.
+// test_wire.c's sample_batch(n): records 9615 µs apart from 5000000123 µs after
+// power-up (past 2^32), counts i × 1000 - 7k and -i × 300 + k; 1 g up on the first,
+// the int16 limits on the last.
 function sampleBatch(n: number): ImuBatch {
   const records = Array.from({ length: n }, (_, i): ImuRecord => ({
-    tUs: (0xffffd000 + i * IMU_RECORD_PERIOD_US) % 2 ** 32,
+    tUs: 5000000123 + i * IMU_RECORD_PERIOD_US,
     accel: [0, 1, 2].map(k => i * 1000 - k * 7) as ImuRecord["accel"], gyro: [0, 1, 2].map(k => -i * 300 + k) as ImuRecord["gyro"],
   }));
   records[0].accel[2] = 16384;
@@ -58,13 +58,13 @@ const samples: Record<string, { bytes: Buffer; message: Message }> = {
   },
   map_cleared: { bytes: encodeMapCleared(), message: { type: "map_cleared" } },
   move_start: {
-    bytes: encodeMoveStart({ move: 12, command: 17, kind: "goto", param: 4.2, tUs: 0xfffffff0, preMs: 200, postMs: 300, refused: true }),
-    message: { type: "move_start", move: 12, command: 17, kind: "goto", param: f(4.2), tUs: 0xfffffff0, preMs: 200, postMs: 300, refused: true },
+    bytes: encodeMoveStart({ move: 12, command: 17, kind: "goto", param: 4.2, tUs: 4300000000, preMs: 200, postMs: 300, refused: true }),
+    message: { type: "move_start", move: 12, command: 17, kind: "goto", param: f(4.2), tUs: 4300000000, preMs: 200, postMs: 300, refused: true },
   },
   move_end: {
-    bytes: encodeMoveEnd({ move: 12, end: "tilt", tUs: 25, framesSent: 41, framesDropped: 2, firstFrame: 1000, lastFrame: 1042, moved: 0.31, rotated: -0.125,
+    bytes: encodeMoveEnd({ move: 12, end: "tilt", tUs: 0xffffffffffff, framesSent: 41, framesDropped: 2, moved: 0.31, rotated: -0.125,
                            imuSent: 44, imuDropped: 3 }),
-    message: { type: "move_end", move: 12, end: "tilt", tUs: 25, framesSent: 41, framesDropped: 2, firstFrame: 1000, lastFrame: 1042, moved: f(0.31), rotated: -0.125,
+    message: { type: "move_end", move: 12, end: "tilt", tUs: 0xffffffffffff, framesSent: 41, framesDropped: 2, moved: f(0.31), rotated: -0.125,
                imuSent: 44, imuDropped: 3 },
   },
   imu_batch: { bytes: encodeImuBatch(sampleBatch(10)), message: { type: "imu_batch", ...sampleBatch(10) } },
@@ -81,12 +81,12 @@ function decodeWhole(bytes: Buffer): Message {
   return decode(t.message);
 }
 
-// The table as test_wire.c writes it: each known type's number, lane, min, max, droppable.
+// The table as test_wire.c writes it: each known type's number, lane, min, max.
 function tableLine(): string {
   const out: string[] = [];
   for (let t = 0; t < 256; t++) {
     const i = typeInfo(t);
-    if (i) out.push(`${t.toString(16).padStart(2, "0")}:${i.lane}:${i.min}:${i.max}:${i.droppable ? 1 : 0}`);
+    if (i) out.push(`${t.toString(16).padStart(2, "0")}:${i.lane}:${i.min}:${i.max}`);
   }
   return out.join(" ");
 }
@@ -112,7 +112,7 @@ test("the golden bytes: the robot's encoding is ours, and its table and version"
 // beyond), signal 9k, sigma 5k (capped at 255), kind k % 4, targets k % 5.
 function checkTof(bytes: Buffer): void {
   const m = decodeWhole(bytes);
-  assert.ok(m.type === "tof" && m.format === "compact");
+  assert.ok(m.type === "tof" && m.format === "compact" && m.move === 12 && m.tUs === 4300000000);
   const t = m.frame;
   assert.deepEqual([t.number, t.tUs, t.periodUs, t.x, t.y, t.still, t.poseKnown], [4000000000, 0xfffffff0, 66700, -1.234, 32, true, true]);
   assert.ok(Math.abs(t.yaw - -3) < 1e-4 && Math.abs(t.pitch - -0.0157) < 1e-4 && Math.abs(t.turn - 0.1) < 1e-4);
@@ -120,20 +120,20 @@ function checkTof(bytes: Buffer): void {
     const kind = KINDS[k % 4], mm = kind === "nothing" ? 0 : k === 63 || 47 * k >= 2545 ? 2550 : Math.max(10, Math.floor((47 * k + 5) / 10) * 10);
     assert.deepEqual(z, { distanceMm: k === 0 ? 0 : mm, signal: Math.min(255, 9 * k), sigmaMm: Math.min(255, 5 * k), kind, targets: k % 5 }, `zone ${k}`);
   }
-  assert.deepEqual(packTof("compact", t), bytes.subarray(3), "packed again: the same bytes");
-  assert.deepEqual(encodeTof("compact", t), bytes);
-  assert.throws(() => unpackTof("compact", bytes.subarray(4)), /277 B/);
+  assert.deepEqual(packTof("compact", t), bytes.subarray(3 + 12), "packed again: the same bytes");
+  assert.deepEqual(encodeTof("compact", 12, 4300000000, t), bytes);
+  assert.throws(() => unpackTof("compact", bytes.subarray(3 + 12 + 1)), /277 B/);
 }
 
 test("the table: lanes, the ToF's type from tof_format, no collisions", () => {
   assert.ok(wireCheck());
   assert.equal(typeInfo(TYPE.ANSWER)!.lane, LANE.CONTROL);
   assert.equal(typeInfo(TYPE.SNAPSHOT_PART)!.lane, LANE.BULK);
-  assert.deepEqual(typeInfo(TYPE.MOVE_START), { lane: LANE.CONTROL, min: 22, max: 22, droppable: false });
-  assert.deepEqual(typeInfo(TYPE.MOVE_END), { lane: LANE.CONTROL, min: 41, max: 41, droppable: false });
-  assert.deepEqual(typeInfo(TYPE.STATUS), { lane: LANE.CONTROL, min: 33, max: 33, droppable: true }); // no peaks since step 4c
-  assert.deepEqual(typeInfo(TYPE.IMU_BATCH), { lane: LANE.BULK, min: 23, max: 131, droppable: true });
-  assert.deepEqual(typeInfo(0x40), { lane: LANE.BULK, min: TOF_COMPACT_BYTES, max: TOF_COMPACT_BYTES, droppable: true });
+  assert.deepEqual(typeInfo(TYPE.MOVE_START), { lane: LANE.CONTROL, min: 26, max: 26 });
+  assert.deepEqual(typeInfo(TYPE.MOVE_END), { lane: LANE.CONTROL, min: 37, max: 37 });
+  assert.deepEqual(typeInfo(TYPE.STATUS), { lane: LANE.CONTROL, min: 33, max: 33 });
+  assert.deepEqual(typeInfo(TYPE.IMU_BATCH), { lane: LANE.BULK, min: 27, max: 135 });
+  assert.deepEqual(typeInfo(0x40), { lane: LANE.BULK, min: 12 + TOF_COMPACT_BYTES, max: 12 + TOF_COMPACT_BYTES }); // move, time, frame
   assert.equal(typeInfo(0x99), null);
   assert.equal(typeInfo("W".charCodeAt(0)), null); // an old robot's text
 });
@@ -146,7 +146,7 @@ test("every message encoded and decoded again", () => {
     { type: "status", x: 0, y: 0, yaw: -12.5, mode: "idle", action: "", rssi: 0 },
     { type: "map_cleared" },
     { type: "move_start", move: 1, command: 0, kind: "watch", param: 60, tUs: 0, preMs: 0, postMs: 2000, refused: false },
-    { type: "move_end", move: 0xffffffff, end: "no_start", tUs: 0xffffffff, framesSent: 0, framesDropped: 9, firstFrame: 0, lastFrame: 0, moved: 0, rotated: -6.5,
+    { type: "move_end", move: 0xffffffff, end: "no_start", tUs: 0xffffffff, framesSent: 0, framesDropped: 9, moved: 0, rotated: -6.5,
       imuSent: 0, imuDropped: 0xffffffff },
     { type: "imu_batch", ...sampleBatch(7) },
     { type: "imu_batch", move: 1, records: [{ tUs: 0xffffffff, accel: [-32768, 0, 32767], gyro: [1, -1, 0] }] },
@@ -187,7 +187,7 @@ test("every message encoded and decoded again", () => {
   jitter.records[1].tUs += 40; jitter.records[2].tUs += 1;
   const back = decodeWhole(encodeImuBatch(jitter));
   assert.ok(back.type === "imu_batch");
-  assert.deepEqual(back.records.map(r => (r.tUs - jitter.records[0].tUs + 2 ** 32) % 2 ** 32), [0, 9616, 2 * 9616]);
+  assert.deepEqual(back.records.map(r => r.tUs - jitter.records[0].tUs), [0, 9616, 2 * 9616]);
   assert.throws(() => encodeMoveStart({ move: 1, command: 0, kind: "fly", param: 0, tUs: 0, preMs: 0, postMs: 0, refused: false }));
   assert.throws(() => encodeAnswer({ n: 1, end: "maybe", has: 0, x: 0, y: 0, yaw: 0, moved: 0, rotated: 0, goal: 0, snapshot: 0 }));
 });
@@ -209,9 +209,9 @@ test("the envelope: a stream cut anywhere, merged chunks; errors stop it", () =>
     [Buffer.from([0x03, 33, 0]), /too short/],                              // an answer of 33 B
     [Buffer.from([0x21, 1, 0]), /too long/],                                // a heartbeat with a payload
     [Buffer.from([0x04, 49, 0]), /too long/],                               // the old status, with PicoB's peaks
-    [Buffer.from([0x07, 33, 0]), /too short/],                              // the old move end, without the imu batches
-    [Buffer.from([0x11, 22, 0]), /too short/],                              // an imu batch without a record
-    [Buffer.from([0x11, 132, 0]), /too long/],                              // more than 10 records
+    [Buffer.from([0x07, 41, 0]), /too long/],                               // version 3's move end (frame numbers, a u32 time)
+    [Buffer.from([0x11, 26, 0]), /too short/],                              // an imu batch without a record
+    [Buffer.from([0x11, 136, 0]), /too long/],                              // more than 10 records
   ];
   for (const [bytes, error] of errors) {
     const r = new WireReader();
@@ -232,11 +232,11 @@ test("the envelope: a stream cut anywhere, merged chunks; errors stop it", () =>
 
 test("an imu batch whose count doesn't match its length, or is 0, is refused", () => {
   const bytes = Buffer.from(encodeImuBatch(sampleBatch(3)));
-  bytes[3 + 10] = 2;
+  bytes[3 + 14] = 2;
   const t = take(bytes);
   assert.ok("message" in t);
-  assert.throws(() => decode(t.message), /47 B, not 35/);
-  bytes[3 + 10] = 0;
+  assert.throws(() => decode(t.message), /51 B, not 39/);
+  bytes[3 + 14] = 0;
   assert.throws(() => decode((take(bytes) as { message: { type: number; payload: Buffer } }).message), /0 records/);
 });
 

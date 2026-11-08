@@ -17,3 +17,10 @@ static inline void clock_start(void) {
 
 // Time since power-up, for printing.
 static inline uint64_t clock_since_start_us(void) { return time_us_64() - CLOCK_START_US; }
+
+// A time_us_32() time (within ±35 min of now) as µs since power-up: the time the PC
+// gets (wire.h), which never wraps.
+static inline uint64_t clock_since_start_of(uint32_t t_us) {
+    uint64_t now = time_us_64();
+    return now + (int64_t)(int32_t)(t_us - (uint32_t)now) - CLOCK_START_US;
+}

@@ -100,11 +100,9 @@ static snapshot_sent_t going;     // the snapshot going out, if a command asked 
 static uint32_t seq, sent_bytes, last_len, tiles_sent, connection;
 static uint32_t wait_since_us;
 static bool waiting;
-// The snapshot going out: its parts handed to the bulk lane up to `at`; the last
-// one's ticket (link_pc.h).
+// The snapshot going out: its parts handed to the bulk lane up to `at`.
 static bool sending;
 static uint32_t at;
-static link_ticket_t last_ticket;
 
 // Starts a section: its header, and room for `size` bytes after it; NULL if it doesn't fit.
 static uint8_t *section(uint8_t type, uint32_t size) {
@@ -258,49 +256,36 @@ void snapshot_request(snapshot_why_t why, uint32_t command) {
     if (command) pending_command = command;
 }
 
-// The snapshot going out has wholly gone: every part handed to TCP, on a connection
-// that is still up. Its connection lost before that (even with every part in TCP):
-// it goes again whole on the next.
-static bool gone(void) {
-    if (sending && at == len) {
-        link_bulk_state_t state = link_bulk_state(last_ticket);
-        if (state == LINK_BULK_SENT) sending = false;
-        else if (state == LINK_BULK_LOST) at = 0;
-    }
-    return !sending;
-}
-
 bool snapshot_sent(snapshot_sent_t *s) {
-    if (!going.command || !gone()) return false;
+    if (!going.command || sending) return false;
     *s = going;
     going.command = 0;
     return true;
 }
 
 // Hands the bulk lane the next parts, as many as it takes now (a part it has no room
-// for waits); the snapshot has gone once every part has left the lane.
+// for waits); the snapshot has gone once every part is in the lane.
 static void send_parts(void) {
     static uint8_t part[WIRE_HEADER + WIRE_PART_MAX];
     while (at < len) {
         uint32_t n = len - at > WIRE_PART_MAX ? WIRE_PART_MAX : len - at;
         uint32_t n_part = wire_encode_snapshot_part(buf + at, n, part);
-        link_ticket_t ticket = link_send_bulk(part, n_part);
-        if (!ticket.n) break;
-        last_ticket = ticket;
+        if (!link_send_bulk(part, n_part)) return;
         at += n;
     }
+    sending = false;
 }
 
 void snapshot_update(void) {
     uint32_t now = link_pc_connection();
-    if (now != connection) { // a new server: it has none of the tiles
+    if (now != connection) { // a new server: it has none of the tiles; one cut by a lost connection isn't sent again
         connection = now;
-        at = 0;              // a snapshot cut by a lost connection goes again from its start
+        sending = false;
         if (now) { house_map_all_dirty(); snapshot_request(SNAP_SERVER, 0); }
     }
     if (!now) return;
-    if (sending && !gone()) send_parts();
-    if (pending && gone() && !going.command && !features_behind()) {
+    if (sending) send_parts();
+    if (pending && !sending && !going.command && !features_behind()) {
         pending = false;
         build(pending_why);
         if (pending_command) {

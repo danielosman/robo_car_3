@@ -10,10 +10,9 @@
 //   post   it stands still post_ms (default 200 ms), and until PicoB says still
 //          (at most 3 s); this is the settling after an action, not on top of it
 //   end    the motors go off; the last imu batch goes, however few records it has;
-//          the PC gets "move end": how it ended, the frames sent and dropped (the
-//          bulk lane full, or no server), the first and last frame number sent (the
-//          PC files late frames under their move by these), the imu batches sent
-//          and dropped (each batch carries its move's number)
+//          the PC gets "move end": how it ended, the frames and imu batches sent
+//          and dropped (the bulk lane full, or no server). Each frame and batch
+//          carries its move's number.
 // A stop (or PicoB lost, or PicoB's safety stop) ends it at once, in any phase; a
 // new move replaces the running one (the motors stay on). A move that can't start
 // (blocked, already there) ends at once, with no phases and no frames, so its

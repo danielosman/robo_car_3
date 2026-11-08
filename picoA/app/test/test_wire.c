@@ -34,23 +34,23 @@ static wire_msg_t take_whole(const uint8_t *msg, uint32_t len) {
 static void test_table(void) {
     assert(wire_check());
     wire_type_info_t i;
-    assert(wire_info(WIRE_HELLO, &i) && i.lane == WIRE_LANE_CONTROL && !i.droppable);
-    assert(wire_info(WIRE_CONSOLE, &i) && i.lane == WIRE_LANE_CONTROL && i.droppable && i.max == 240);
-    assert(wire_info(WIRE_ANSWER, &i) && !i.droppable && i.min == 34 && i.max == 34);
-    assert(wire_info(WIRE_STATUS, &i) && i.droppable && i.min == 33 && i.max == 33); // no peaks since step 4c
-    assert(wire_info(WIRE_MAP_CLEARED, &i) && !i.droppable && i.max == 0);
-    // A move's start and end: control, never dropped.
-    assert(wire_info(WIRE_MOVE_START, &i) && i.lane == WIRE_LANE_CONTROL && !i.droppable && i.min == 22 && i.max == 22);
-    assert(wire_info(WIRE_MOVE_END, &i) && i.lane == WIRE_LANE_CONTROL && !i.droppable && i.min == 41 && i.max == 41);
-    assert(wire_info(WIRE_SNAPSHOT_PART, &i) && i.lane == WIRE_LANE_BULK && !i.droppable && i.max == 1400);
-    // The imu batch: bulk, dropped when the lane is full; 1-10 records of 12 B after 11 B.
-    assert(wire_info(WIRE_IMU_BATCH, &i) && i.lane == WIRE_LANE_BULK && i.droppable && i.min == 23 && i.max == 131);
+    assert(wire_info(WIRE_HELLO, &i) && i.lane == WIRE_LANE_CONTROL);
+    assert(wire_info(WIRE_CONSOLE, &i) && i.lane == WIRE_LANE_CONTROL && i.max == 240);
+    assert(wire_info(WIRE_ANSWER, &i) && i.min == 34 && i.max == 34);
+    assert(wire_info(WIRE_STATUS, &i) && i.min == 33 && i.max == 33);
+    assert(wire_info(WIRE_MAP_CLEARED, &i) && i.max == 0);
+    // A move's start and end: control; their times u64.
+    assert(wire_info(WIRE_MOVE_START, &i) && i.lane == WIRE_LANE_CONTROL && i.min == 26 && i.max == 26);
+    assert(wire_info(WIRE_MOVE_END, &i) && i.lane == WIRE_LANE_CONTROL && i.min == 37 && i.max == 37);
+    assert(wire_info(WIRE_SNAPSHOT_PART, &i) && i.lane == WIRE_LANE_BULK && i.max == 1400);
+    // The imu batch: bulk; 1-10 records of 12 B after 15 B.
+    assert(wire_info(WIRE_IMU_BATCH, &i) && i.lane == WIRE_LANE_BULK && i.min == 27 && i.max == 135);
     assert(wire_info(WIRE_COMMAND, &i) && i.lane == WIRE_LANE_TO_ROBOT);
     assert(wire_info(WIRE_HEARTBEAT, &i) && i.lane == WIRE_LANE_TO_ROBOT);
-    // The ToF frame: its type and size are tof_format's; dropped when the lane is full.
+    // The ToF frame: its type and size are tof_format's, after the move and the time.
     uint8_t tof = tof_format_message_type(TOF_FORMAT_COMPACT);
-    assert(wire_info(tof, &i) && i.lane == WIRE_LANE_BULK && i.droppable && i.min == TOF_COMPACT_BYTES &&
-           i.max == TOF_COMPACT_BYTES);
+    assert(wire_info(tof, &i) && i.lane == WIRE_LANE_BULK && i.min == WIRE_TOF_HEADER + TOF_COMPACT_BYTES &&
+           i.max == WIRE_TOF_HEADER + TOF_COMPACT_BYTES);
     assert(!wire_info(0x00, &i) && !wire_info(0xff, &i) && !wire_info('W', &i)); // 'W': an old robot's text
     collide = true; // tof_format gives a type the table has
     assert(!wire_check());
@@ -71,9 +71,10 @@ static bool same_status(const wire_status_t *a, const wire_status_t *b) {
 }
 
 // The golden file's imu batches: ten records 9615 µs apart across the clock's wrap,
-// the int16 limits and both signs; and one record.
+// the first past 2^32 µs since power-up, the int16 limits and both signs; and one record.
+#define SAMPLE_T_US 5000000123ull
 static wire_imu_batch_t sample_batch(int n) {
-    wire_imu_batch_t b = {.move = 12, .n = (uint8_t)n};
+    wire_imu_batch_t b = {.move = 12, .t_us = SAMPLE_T_US, .n = (uint8_t)n};
     for (int i = 0; i < n; i++) {
         b.records[i].t_us = 0xffffd000u + (uint32_t)i * IMU_RECORD_PERIOD_US;
         for (int k = 0; k < 3; k++) {
@@ -127,49 +128,51 @@ static void test_round_trips(void) {
     m = take_whole(msg, wire_encode_map_cleared(msg));
     assert(m.type == WIRE_MAP_CLEARED && m.len == 0);
 
-    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .param = 4.2f, .t_us = 0xfffffff0u,
+    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .param = 4.2f, .t_us = 4300000000ull,
                             .pre_ms = 200, .post_ms = 2000, .flags = WIRE_MOVE_REFUSED}, ms2;
     m = take_whole(msg, wire_encode_move_start(&ms, msg));
     assert(wire_decode_move_start(&m, &ms2) && ms2.move == 12 && ms2.command == 17 && ms2.kind == WIRE_MOVE_GOTO &&
-           ms2.param == 4.2f && ms2.t_us == 0xfffffff0u && ms2.pre_ms == 200 && ms2.post_ms == 2000 && ms2.flags == WIRE_MOVE_REFUSED);
-    wire_move_end_t me = {.move = 12, .end = WIRE_END_TILT, .t_us = 25, .frames_sent = 41, .frames_dropped = 2,
-                          .first_frame = 1000, .last_frame = 1042, .moved_m = 0.31f, .rotated_rad = -0.125f,
-                          .imu_sent = 44, .imu_dropped = 0xffffffffu}, me2;
+           ms2.param == 4.2f && ms2.t_us == 4300000000ull && ms2.pre_ms == 200 && ms2.post_ms == 2000 && ms2.flags == WIRE_MOVE_REFUSED);
+    wire_move_end_t me = {.move = 12, .end = WIRE_END_TILT, .t_us = 0xffffffffffffull, .frames_sent = 41, .frames_dropped = 2,
+                          .moved_m = 0.31f, .rotated_rad = -0.125f, .imu_sent = 44, .imu_dropped = 0xffffffffu}, me2;
     m = take_whole(msg, wire_encode_move_end(&me, msg));
-    assert(wire_decode_move_end(&m, &me2) && me2.move == 12 && me2.end == WIRE_END_TILT && me2.t_us == 25 &&
-           me2.frames_sent == 41 && me2.frames_dropped == 2 && me2.first_frame == 1000 && me2.last_frame == 1042 &&
+    assert(wire_decode_move_end(&m, &me2) && me2.move == 12 && me2.end == WIRE_END_TILT && me2.t_us == 0xffffffffffffull &&
+           me2.frames_sent == 41 && me2.frames_dropped == 2 &&
            me2.moved_m == 0.31f && me2.rotated_rad == -0.125f && me2.imu_sent == 44 && me2.imu_dropped == 0xffffffffu);
     assert(!wire_decode_move_start(&m, &ms2)); // another type
 
-    // imu batches: 10 records evenly spaced (across the wrap) come back exactly; one
-    // record gets the nominal period; times off the even spacing come back on it.
+    // imu batches: 10 records evenly spaced (their PicoA times across the wrap) come
+    // back with the batch's time and period; one record gets the nominal period;
+    // times off the even spacing come back on it.
     for (int n = 1; n <= WIRE_IMU_BATCH_MAX; n += WIRE_IMU_BATCH_MAX - 1) {
         wire_imu_batch_t b = sample_batch(n), b2;
         m = take_whole(msg, wire_encode_imu_batch(&b, msg));
         assert(m.type == WIRE_IMU_BATCH && m.len == WIRE_IMU_BATCH_HEADER + n * WIRE_IMU_RECORD);
-        assert(wire_decode_imu_batch(&m, &b2) && b2.move == 12 && b2.n == n && !memcmp(b.records, b2.records, sizeof(imu_record_t) * (size_t)n));
-        assert(m.payload[8] + (m.payload[9] << 8) == IMU_RECORD_PERIOD_US);
+        assert(wire_decode_imu_batch(&m, &b2) && b2.move == 12 && b2.n == n && b2.t_us == SAMPLE_T_US &&
+               b2.period_us == IMU_RECORD_PERIOD_US);
+        for (int i = 0; i < n; i++)
+            assert(!memcmp(b.records[i].accel, b2.records[i].accel, 6) && !memcmp(b.records[i].gyro, b2.records[i].gyro, 6));
     }
     wire_imu_batch_t jitter = sample_batch(3), j2;
     jitter.records[1].t_us += 40;          // PicoB read it 40 µs late
     jitter.records[2].t_us += 1;           // the period: (2 × 9615 + 1) / 2, rounded: 9616
     m = take_whole(msg, wire_encode_imu_batch(&jitter, msg));
-    assert(wire_decode_imu_batch(&m, &j2) && j2.records[1].t_us == jitter.records[0].t_us + 9616 &&
-           j2.records[2].t_us == jitter.records[0].t_us + 2 * 9616);
+    assert(wire_decode_imu_batch(&m, &j2) && j2.period_us == 9616);
     wire_imu_batch_t none = {.n = 0}, many = {.n = WIRE_IMU_BATCH_MAX + 1};
     assert(wire_encode_imu_batch(&none, msg) == 0 && wire_encode_imu_batch(&many, msg) == 0);
 
-    // A tof frame in its message: tof_format's bytes after the header, read back whole.
+    // A tof frame in its message: its move and time, then tof_format's bytes, read back whole.
     static posed_frame_t f, back;
     f.frame.number = 77; f.frame.t_us = 123456; f.frame.period_us = 100000; f.frame.beyond_mm = TOF_EXACT;
     f.x_m = 1.5f; f.yaw_rad = 0.5f; f.pose_known = true;
     for (int z = 0; z < TOF_ZONES; z++) f.frame.zone[z] = (tof_zone_t){.distance_mm = (uint16_t)(100 + 10 * z), .signal = 30,
                                                                       .sigma_mm = 4, .kind = TOF_SURE, .targets = 1};
-    static uint8_t tof_msg[WIRE_HEADER + TOF_FORMAT_MAX];
-    uint32_t n = wire_encode_tof(TOF_USE_MAP, &f, tof_msg);
+    static uint8_t tof_msg[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX];
+    uint32_t n = wire_encode_tof(TOF_USE_MAP, 9, 4300000000ull, &f, tof_msg);
     m = take_whole(tof_msg, n);
-    assert(m.type == tof_format_message_type(tof_format_of(TOF_USE_MAP)) && m.len == TOF_COMPACT_BYTES);
-    assert(tof_unpack(TOF_FORMAT_COMPACT, m.payload, m.len, &back) && back.frame.number == 77 &&
+    assert(m.type == tof_format_message_type(tof_format_of(TOF_USE_MAP)) && m.len == WIRE_TOF_HEADER + TOF_COMPACT_BYTES);
+    assert(read32(m.payload) == 9 && read64(m.payload + 4) == 4300000000ull);
+    assert(tof_unpack(TOF_FORMAT_COMPACT, m.payload + WIRE_TOF_HEADER, TOF_COMPACT_BYTES, &back) && back.frame.number == 77 &&
            back.frame.zone[63].distance_mm == 730 && back.pose_known && back.x_m == 1.5f);
 
     uint8_t part[WIRE_PART_MAX];
@@ -215,11 +218,11 @@ static void test_envelope(void) {
     assert(wire_take(bad, 3, &m) == WIRE_TOO_SHORT);
     wire_header(bad, WIRE_STATUS, 49); // the old status, with PicoB's peaks
     assert(wire_take(bad, 3, &m) == WIRE_TOO_LONG);
-    wire_header(bad, WIRE_MOVE_END, 33); // the old move end, without the imu batches
+    wire_header(bad, WIRE_MOVE_END, 41); // version 3's move end, with frame numbers and a u32 time
+    assert(wire_take(bad, 3, &m) == WIRE_TOO_LONG);
+    wire_header(bad, WIRE_IMU_BATCH, 26); // no record
     assert(wire_take(bad, 3, &m) == WIRE_TOO_SHORT);
-    wire_header(bad, WIRE_IMU_BATCH, 22); // no record
-    assert(wire_take(bad, 3, &m) == WIRE_TOO_SHORT);
-    wire_header(bad, WIRE_IMU_BATCH, 132); // more than 10
+    wire_header(bad, WIRE_IMU_BATCH, 136); // more than 10
     assert(wire_take(bad, 3, &m) == WIRE_TOO_LONG);
     wire_header(bad, WIRE_HEARTBEAT, 1);
     assert(wire_take(bad, 3, &m) == WIRE_TOO_LONG);
@@ -240,10 +243,10 @@ static void test_envelope(void) {
     uint32_t nb = wire_encode_imu_batch(&b, batch);
     m = take_whole(batch, nb);
     assert(wire_decode_imu_batch(&m, &b2));
-    batch[WIRE_HEADER + 10] = 2;
+    batch[WIRE_HEADER + 14] = 2;
     m = take_whole(batch, nb);
     assert(!wire_decode_imu_batch(&m, &b2));
-    batch[WIRE_HEADER + 10] = 0;
+    batch[WIRE_HEADER + 14] = 0;
     m = take_whole(batch, nb);
     assert(!wire_decode_imu_batch(&m, &b2));
     // Decoders refuse another type or a wrong length; a command with a control character.
@@ -261,7 +264,7 @@ static void test_envelope(void) {
 
 // --- the golden bytes ---
 
-typedef struct { const char *name; uint8_t bytes[WIRE_HEADER + TOF_FORMAT_MAX]; uint32_t len; } sample_t;
+typedef struct { const char *name; uint8_t bytes[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX]; uint32_t len; } sample_t;
 
 static uint32_t samples(sample_t *out) {
     uint32_t n = 0;
@@ -280,12 +283,11 @@ static uint32_t samples(sample_t *out) {
     wire_status_t s = {.x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 7.0f, .mode = "manual", .action = "goto", .rssi_dbm = -61};
     out[n] = (sample_t){.name = "status"}; out[n].len = wire_encode_status(&s, out[n].bytes); n++;
     out[n] = (sample_t){.name = "map_cleared"}; out[n].len = wire_encode_map_cleared(out[n].bytes); n++;
-    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .param = 4.2f, .t_us = 0xfffffff0u,
+    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .param = 4.2f, .t_us = 4300000000ull,
                             .pre_ms = 200, .post_ms = 300, .flags = WIRE_MOVE_REFUSED};
     out[n] = (sample_t){.name = "move_start"}; out[n].len = wire_encode_move_start(&ms, out[n].bytes); n++;
-    wire_move_end_t me = {.move = 12, .end = WIRE_END_TILT, .t_us = 25, .frames_sent = 41, .frames_dropped = 2,
-                          .first_frame = 1000, .last_frame = 1042, .moved_m = 0.31f, .rotated_rad = -0.125f,
-                          .imu_sent = 44, .imu_dropped = 3};
+    wire_move_end_t me = {.move = 12, .end = WIRE_END_TILT, .t_us = 0xffffffffffffull, .frames_sent = 41, .frames_dropped = 2,
+                          .moved_m = 0.31f, .rotated_rad = -0.125f, .imu_sent = 44, .imu_dropped = 3};
     out[n] = (sample_t){.name = "move_end"}; out[n].len = wire_encode_move_end(&me, out[n].bytes); n++;
     wire_imu_batch_t ten = sample_batch(10), one = sample_batch(1);
     out[n] = (sample_t){.name = "imu_batch"}; out[n].len = wire_encode_imu_batch(&ten, out[n].bytes); n++;
@@ -299,7 +301,7 @@ static uint32_t samples(sample_t *out) {
         f.frame.zone[z] = (tof_zone_t){.distance_mm = (uint16_t)(z * 47), .signal = (uint16_t)(z * 9), .sigma_mm = (uint16_t)(z * 5),
                                        .kind = (uint8_t)(z % 4), .targets = (uint8_t)(z % 5)};
     f.frame.zone[63].distance_mm = 3000; // beyond 2.54 m
-    out[n] = (sample_t){.name = "tof_compact"}; out[n].len = wire_encode_tof(TOF_USE_MAP, &f, out[n].bytes); n++;
+    out[n] = (sample_t){.name = "tof_compact"}; out[n].len = wire_encode_tof(TOF_USE_MAP, 12, 4300000000ull, &f, out[n].bytes); n++;
     const uint8_t part[] = {'S', 'N', 'A', 'P', 1, 2, 0xfe, 0xff};
     out[n] = (sample_t){.name = "snapshot_part"}; out[n].len = wire_encode_snapshot_part(part, sizeof part, out[n].bytes); n++;
     wire_command_t c = {.n = 17, .text = "drive 50"};
@@ -308,14 +310,14 @@ static uint32_t samples(sample_t *out) {
     return n;
 }
 
-// The table as one line: each known type's number, lane, min and max length, droppable.
+// The table as one line: each known type's number, lane, min and max length.
 static void table_line(char *out, size_t size) {
     size_t at = 0;
     for (int t = 0; t < 256; t++) {
         wire_type_info_t i;
         if (!wire_info((uint8_t)t, &i)) continue;
-        at += (size_t)snprintf(out + at, size - at, "%s%02x:%d:%u:%u:%d", at ? " " : "", t, (int)i.lane, (unsigned)i.min,
-                               (unsigned)i.max, i.droppable ? 1 : 0);
+        at += (size_t)snprintf(out + at, size - at, "%s%02x:%d:%u:%u", at ? " " : "", t, (int)i.lane, (unsigned)i.min,
+                               (unsigned)i.max);
     }
 }
 

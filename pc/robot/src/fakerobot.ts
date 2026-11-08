@@ -116,7 +116,7 @@ export class FakeRobot {
       const m = list[i];
       if (m.type === "move_start") { this.moves = Math.max(this.moves, m.start.move); this.socket.write(encodeMoveStart(m.start)); }
       else if (m.type === "move_end") this.socket.write(encodeMoveEnd(m.end));
-      else if (m.type === "frame") this.socket.write(encodeTof(m.format, m.frame));
+      else if (m.type === "frame") this.socket.write(encodeTof(m.frame.format, m.frame.move, m.frame.tUs, m.frame.frame));
       else if (m.type === "imu") this.socket.write(encodeImuBatch(m.batch));
       else if (m.type === "status") {
         const p = m.pose;
@@ -144,15 +144,15 @@ export class FakeRobot {
     if (!a) return;
     this.action = null;
     const end = how === "done" ? "ok" : how, moved = Math.hypot(this.pose.x - a.start.x, this.pose.y - a.start.y), rotated = this.pose.yaw - a.start.yaw;
-    this.socket.write(encodeMoveEnd({ move: a.move, end, tUs: this.timeUs(), framesSent: 0, framesDropped: 0, firstFrame: 0, lastFrame: 0, moved, rotated,
+    this.socket.write(encodeMoveEnd({ move: a.move, end, tUs: this.timeUs(), framesSent: 0, framesDropped: 0, moved, rotated,
                                            imuSent: 0, imuDropped: 0 }));
     this.say(`${a.name} ${how}\n`);
     this.answer(a.n, end, { has: HAS.MOVE | (a.goal !== undefined ? HAS.GOAL : 0), moved, rotated, goal: a.goal ?? 0 });
   }
 
-  // PicoA's clock: started 30 s before the wrap (common/clock_start.h).
+  // µs since power-up, as the robot sends its times.
   private readonly bornMs = Date.now();
-  private timeUs(): number { return ((Date.now() - this.bornMs) * 1000 + 2 ** 32 - 30e6) % 2 ** 32; }
+  private timeUs(): number { return (Date.now() - this.bornMs) * 1000; }
 
   private turn(rad: number) {
     let left = Math.abs(rad);

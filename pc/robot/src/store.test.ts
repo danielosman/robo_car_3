@@ -1,11 +1,11 @@
 // Tests for store.ts: a zone's world position (hand-computed cases, the boot's
 // mounting); a boot's moves, frames and zones written as they arrive and read back
 // (robot frames' reading, the fake robot's replay in the order they came); a frame
-// that comes after its move's end filed under that move; each boot keeps its own copy
-// of the mounting, also when the server starts again (and the boot's clock and moves
-// go on); the imu records: written per batch, read back (robot imu, the counts for
-// robot frames, the replay as batches), a late batch under the move it names, times
-// across the clock's wrap, also with the server restarted; the status rows (no peaks)
+// that comes after its move's end under the move it names; each boot keeps its own
+// copy of the mounting, also when the server starts again (and its messages are
+// numbered on); the imu records: written per batch, read back (robot imu, the counts
+// for robot frames, the replay as batches), a late batch under the move it names,
+// also with the server restarted; the status rows (no peaks)
 // and the path driven; and the old database: the store's
 // file is robot2.duckdb, never robot.duckdb, and a store in a temp dir writes only
 // its own file there. Run with `npm test`.
@@ -54,51 +54,50 @@ const frame = (number: number, tUs: number, mm = 500): PosedFrame =>
 const pose = (x: number): LivePose => ({ x, y: 0, yaw: 0, mode: "manual", action: "drive", rssi: -60, at: 0 });
 // n imu records of move from PicoA's time t0, 9615 µs apart; counts from k (the int16 limits on the first).
 const imu = (move: number, t0: number, n: number, k = 0): ImuBatch => ({ move, records: Array.from({ length: n }, (_, i) => ({
-  tUs: (t0 + i * 9615) % 2 ** 32, accel: i === 0 ? [32767, -32768, 16384] : [k + i, -(k + i), 16384], gyro: [i, 0, 0 - k] })) }); // 0 - k: no -0
+  tUs: (t0 + i * 9615), accel: i === 0 ? [32767, -32768, 16384] : [k + i, -(k + i), 16384], gyro: [i, 0, 0 - k] })) }); // 0 - k: no -0
 
 test("a boot's moves, frames, zones and status: written as they come, read back, replayed in order; late frames under their move", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-store-"));
   try {
     const store = new Store(path.join(dir, DB_FILE));
     const boot = await store.openBoot({ version: WIRE_VERSION, bootId: "0badf00d", build: "test" }, now);
-    const t0 = 0xffffff00; // just before PicoA's clock wraps
+    const t0 = 5e9; // µs since power-up, past 2^32: nothing wraps
     await store.status(boot, boot.status(pose(0)));
     void store.moveStart(boot, boot.moveStart({ move: 1, command: 4, kind: "drive", param: 0.5, tUs: t0, preMs: 200, postMs: 300, refused: false }));
-    void store.frame(boot, boot.frame("compact", frame(11, (t0 + 50000) % 2 ** 32)));
-    void store.imu(boot, boot.imu(imu(1, t0 - 30000, 10)));            // across the wrap (at t0 + 256 µs)
+    void store.frame(boot, boot.frame("compact", 1, t0 + 50000, frame(11, (t0 + 50000))));
+    void store.imu(boot, boot.imu(imu(1, t0 - 30000, 10)));
     void store.status(boot, boot.status(pose(0.1)));
     // The move's end overtakes its last frame (control before bulk); the next move starts meanwhile.
-    void store.moveEnd(boot, boot.moveEnd({ move: 1, end: "obstacle", tUs: (t0 + 150000) % 2 ** 32, framesSent: 2, framesDropped: 1,
-                                            firstFrame: 11, lastFrame: 12, moved: 0.3, rotated: 0.01, imuSent: 2, imuDropped: 0 }));
-    void store.moveStart(boot, boot.moveStart({ move: 2, command: 5, kind: "watch", param: 60, tUs: (t0 + 200000) % 2 ** 32, preMs: 200, postMs: 300, refused: false }));
-    void store.frame(boot, boot.frame("compact", frame(12, (t0 + 150000) % 2 ** 32)));
-    void store.imu(boot, boot.imu(imu(1, (t0 + 66150) % 2 ** 32, 4, 100))); // move 1's last batch, late: after move 2's start
-    void store.imu(boot, boot.imu(imu(2, (t0 + 210000) % 2 ** 32, 10, 200)));
-    await store.frame(boot, boot.frame("compact", frame(13, (t0 + 250000) % 2 ** 32, 2600)));
+    void store.moveEnd(boot, boot.moveEnd({ move: 1, end: "obstacle", tUs: (t0 + 150000), framesSent: 2, framesDropped: 1,
+                                            moved: 0.3, rotated: 0.01, imuSent: 2, imuDropped: 0 }));
+    void store.moveStart(boot, boot.moveStart({ move: 2, command: 5, kind: "watch", param: 60, tUs: (t0 + 200000), preMs: 200, postMs: 300, refused: false }));
+    void store.frame(boot, boot.frame("compact", 1, t0 + 150000, frame(12, (t0 + 150000))));
+    void store.imu(boot, boot.imu(imu(1, (t0 + 66150), 4, 100))); // move 1's last batch, late: after move 2's start
+    void store.imu(boot, boot.imu(imu(2, (t0 + 210000), 10, 200)));
+    await store.frame(boot, boot.frame("compact", 2, t0 + 250000, frame(13, (t0 + 250000), 2600)));
     await store.flush();
 
     const one = (await store.moveFrames("0badf00d", 1))!;
     assert.deepEqual(one.move, { move: 1, command: 4, kind: "drive", param: 0.5, preMs: 200, postMs: 300, refused: false, startTS: one.move.startTS,
-      endTS: one.move.endTS, end: "obstacle", framesSent: 2, framesDropped: 1, firstFrame: 11, lastFrame: 12, moved: 0.3, rotated: 0.01,
+      endTS: one.move.endTS, end: "obstacle", framesSent: 2, framesDropped: 1, moved: 0.3, rotated: 0.01,
       imuSent: 2, imuDropped: 0 });
     assert.deepEqual(one.imu, { records: 14, batches: 2, missing: 0 }); // its late batch too, right after the first
-    close(one.move.endTS! - one.move.startTS!, 0.15, 1e-6); // across the wrap
+    close(one.move.endTS! - one.move.startTS!, 0.15, 1e-6);
     assert.deepEqual(one.frames.map(f => f.frame.number), [11, 12]); // 12 came after the end: still move 1's
     const f11 = one.frames[0];
-    assert.deepEqual(f11.frame, frame(11, (t0 + 50000) % 2 ** 32)); // every field back as it went in
+    assert.deepEqual(f11.frame, frame(11, (t0 + 50000))); // every field back as it went in
     close(f11.tS - one.move.startTS!, 0.05, 1e-6);
     const two = (await store.moveFrames("0badf00d", 2))!;
     assert.deepEqual(two.frames.map(f => f.frame.number), [13]);
     assert.equal(two.move.end, null); // not ended yet
     assert.equal(await store.moveFrames("0badf00d", 3), null);
-    // robot imu's reading: every record back, oldest first, on the boot's time across the wrap.
+    // robot imu's reading: every record back, oldest first, in time since power-up.
     const oneImu = (await store.moveImu("0badf00d", 1))!;
     assert.equal(oneImu.frames, 2);
     assert.equal(oneImu.records.length, 14);
-    const sent = [...imu(1, t0 - 30000, 10).records, ...imu(1, (t0 + 66150) % 2 ** 32, 4, 100).records];
+    const sent = [...imu(1, t0 - 30000, 10).records, ...imu(1, (t0 + 66150), 4, 100).records];
     assert.deepEqual(oneImu.records.map(r => ({ tUs: r.tUs, accel: r.accel, gyro: r.gyro })), sent);
-    oneImu.records.forEach((r, i) => close(r.tS - one.move.startTS!, -0.03 + i * 0.009615, 2e-6)); // even 9.6 ms steps, through the wrap
-    assert.ok(oneImu.records[9].tUs < oneImu.records[0].tUs); // the raw times wrapped
+    oneImu.records.forEach((r, i) => close(r.tS - one.move.startTS!, -0.03 + i * 0.009615, 2e-6)); // even 9.6 ms steps
     assert.deepEqual((await store.moveImu("0badf00d", 2))!.imu, { records: 10, batches: 1, missing: 0 });
     assert.equal(await store.moveImu("0badf00d", 3), null);
     assert.deepEqual(await store.query("SELECT ax, ay, az, gx, gy, gz FROM imu WHERE move = 1 AND n = 0 ORDER BY msg LIMIT 1"),
@@ -114,16 +113,16 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
       ["status", "move_start", "frame", "imu", "status", "move_end", "move_start", "frame", "imu", "imu", "frame"]);
     assert.deepEqual(replay.map(m => m.msg), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     const end = replay[5];
-    assert.ok(end.type === "move_end" && end.end.lastFrame === 12 && end.end.end === "obstacle" && end.end.imuSent === 2);
+    assert.ok(end.type === "move_end" && end.end.framesSent === 2 && end.end.end === "obstacle" && end.end.imuSent === 2);
     const st = replay[4];
     assert.ok(st.type === "status" && st.pose.x === 0.1 && st.pose.mode === "manual");
     const late = replay[8];
     assert.ok(late.type === "imu");
-    assert.deepEqual(late.batch, imu(1, (t0 + 66150) % 2 ** 32, 4, 100)); // a batch back as it came
+    assert.deepEqual(late.batch, imu(1, (t0 + 66150), 4, 100)); // a batch back as it came
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("each boot its own mounting; a restarted server goes on with the boot's clock and moves", async () => {
+test("each boot its own mounting; a restarted server numbers a boot's messages on", async () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-boots-"));
   try {
     const file = path.join(dir, DB_FILE);
@@ -132,8 +131,8 @@ test("each boot its own mounting; a restarted server goes on with the boot's clo
     const b = await store.openBoot({ version: WIRE_VERSION, bootId: "bbbbbbbb", build: "new" }, now);
     assert.equal(a.mounting.tof.z_m, 0.07);
     assert.equal(b.mounting.tof.z_m, now.tof.z_m);
-    await store.moveStart(a, a.moveStart({ move: 7, command: 1, kind: "turn", param: 1, tUs: 0xfffff000, preMs: 200, postMs: 200, refused: false }));
-    await store.moveEnd(a, a.moveEnd({ move: 7, end: "ok", tUs: 0x1000, framesSent: 3, framesDropped: 0, firstFrame: 100, lastFrame: 102, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }));
+    await store.moveStart(a, a.moveStart({ move: 7, command: 1, kind: "turn", param: 1, tUs: 1e6, preMs: 200, postMs: 200, refused: false }));
+    await store.moveEnd(a, a.moveEnd({ move: 7, end: "ok", tUs: 2e6, framesSent: 3, framesDropped: 0, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }));
     await store.flush();
     // The server starts again; boot a connects again: its own mounting, not the file's now.
     store = new Store(file);
@@ -141,13 +140,10 @@ test("each boot its own mounting; a restarted server goes on with the boot's clo
     assert.equal(again.mounting.tof.z_m, 0.07);
     assert.deepEqual(await store.mountingOf("aaaaaaaa"), before);
     assert.equal(await store.mountingOf("cccccccc"), null);
-    // Its clock goes on (0x2000 is 4 ms after the last time it saw), its messages are numbered on,
-    // and a late frame of move 7 is still filed under it.
-    const s = again.moveStart({ move: 8, command: 2, kind: "drive", param: 0.1, tUs: 0x2000, preMs: 200, postMs: 200, refused: false });
+    // Its messages are numbered on.
+    const s = again.moveStart({ move: 8, command: 2, kind: "drive", param: 0.1, tUs: 3e6, preMs: 200, postMs: 200, refused: false });
     assert.equal(s.msg, 3);
-    close(s.tS, (0x2000 + 30e6) / 1e6, 1e-9);
-    assert.equal(again.frame("compact", frame(101, 0x1800)).move, 7);
-    assert.equal(again.frame("compact", frame(103, 0x2800)).move, 8);
+    close(s.tS, 3, 1e-9);
     await store.setMounting("aaaaaaaa", now);
     assert.equal((await store.mountingOf("aaaaaaaa"))!.tof.z_m, now.tof.z_m);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -179,36 +175,35 @@ test("the old database is never opened: the store's own file, only it in a temp 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a boot's moves across the clock's wrap, the server restarted in the middle: t_s read back grows", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-wrap-"));
+test("the server restarted in the middle of a move: the boot goes on, its messages numbered on", async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-restart-"));
   try {
     const file = path.join(dir, DB_FILE), wall = Date.UTC(2026, 10, 7, 20);
     let store = new Store(file);
     const hello = { version: WIRE_VERSION, bootId: "0000aaaa", build: "test" };
     let boot = await store.openBoot(hello, now, wall);
-    const raw = (s: number) => (2 ** 32 - 30e6 + s * 1e6) % 2 ** 32; // PicoA's clock s seconds after power-up
+    const raw = (s: number) => s * 1e6; // µs since power-up, as the robot sends its times
     await store.moveStart(boot, boot.moveStart({ move: 1, command: 1, kind: "turn", param: 1, tUs: raw(28), preMs: 200, postMs: 200, refused: false }, wall + 28000));
-    await store.frame(boot, boot.frame("compact", frame(1, raw(29.5)), wall + 29500));
+    await store.frame(boot, boot.frame("compact", 1, raw(29.5), frame(1, raw(29.5)), wall + 29500));
     await store.imu(boot, boot.imu(imu(1, raw(29.9), 10), wall + 29950));
     await store.flush();
-    // The server stops just before the wrap and starts again after it: the boot is opened from the store.
+    // The server stops and starts again: the boot is opened from the store.
     store = new Store(file);
     boot = await store.openBoot(hello, now, wall + 40000);
-    await store.frame(boot, boot.frame("compact", frame(2, raw(30.5)), wall + 40000));
+    await store.frame(boot, boot.frame("compact", 1, raw(30.5), frame(2, raw(30.5)), wall + 40000));
     await store.imu(boot, boot.imu(imu(1, raw(30.5), 3), wall + 40000));
-    await store.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: raw(31), framesSent: 2, framesDropped: 0, firstFrame: 1, lastFrame: 2,
-                                             moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }, wall + 41000));
+    await store.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: raw(31), framesSent: 2, framesDropped: 0, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }, wall + 41000));
     await store.flush();
     const m = (await store.moveFrames("0000aaaa", 1))!;
     assert.deepEqual(m.frames.map(f => Math.round(f.tS * 10) / 10), [29.5, 30.5]);
     close(m.move.startTS!, 28, 1e-6);
     close(m.move.endTS!, 31, 1e-6);
-    assert.ok(raw(30.5) < raw(29.5)); // the raw times wrapped
+    assert.deepEqual(await store.query("SELECT messages FROM boots"), [{ messages: 6 }]);
     const ts = (await store.moveImu("0000aaaa", 1))!.records.map(r => r.tS);
     assert.equal(ts.length, 13);
     close(ts[0], 29.9, 1e-6);
     close(ts[12], 30.5 + 2 * 0.009615, 1e-6);
-    assert.ok(ts.every((t, i) => i === 0 || t > ts[i - 1])); // grows through the wrap and the restart
+    assert.ok(ts.every((t, i) => i === 0 || t > ts[i - 1])); // grows through the restart
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -217,9 +212,9 @@ test("imu records missing: counted from the gaps in the stored times", async () 
   try {
     const store = new Store(path.join(dir, DB_FILE));
     const boot = await store.openBoot({ version: WIRE_VERSION, bootId: "0000cafe", build: "test" }, now);
-    const t0 = 2 ** 32 - 40_000; // across the wrap
+    const t0 = 30e6;
     const at = (move: number, ks: number[], jitterUs = 0) => ({ move, records: ks.map((k, i) =>
-      ({ tUs: (t0 + k * 9615 + (i % 2) * jitterUs) % 2 ** 32, accel: [k, 0, 16384] as [number, number, number], gyro: [0, 0, 0] as [number, number, number] })) });
+      ({ tUs: (t0 + k * 9615 + (i % 2) * jitterUs), accel: [k, 0, 16384] as [number, number, number], gyro: [0, 0, 0] as [number, number, number] })) });
     for (const move of [1, 2, 3]) {
       await store.moveStart(boot, boot.moveStart({ move, command: move, kind: "turn", param: 1, tUs: t0, preMs: 200, postMs: 200, refused: false }));
     }

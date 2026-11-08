@@ -5,11 +5,11 @@
 // refused), a stop in pre or post, a new move replacing one, PicoB's safety stop,
 // PicoB lost, a move that doesn't start, one refused before it starts (a running
 // one goes on), a watch as a move; the move start and move end messages (number,
-// command, kind, parameter, times, still times; how it ended, the frames sent and
-// dropped, the first and last frame number, how far it went; a refused move's flag;
-// each safety stop named by its reason); tof frames go to the bulk lane only during
-// a move (start, act and post), in the map use's format, counted, and dropped and
-// counted when the lane is full; imu records go in batches of 10 only during a move,
+// command, kind, parameter, times since power-up, still times; how it ended, the
+// frames sent and dropped, how far it went; a refused move's flag; each safety stop
+// named by its reason); tof frames go to the bulk lane only during a move (start,
+// act and post), in the map use's format, under their move's number and with their
+// time since power-up, counted, and dropped and counted when the lane is full; imu records go in batches of 10 only during a move,
 // each batch under its move's number, the last (partial) batch before the move end,
 // a gap or a step back in time starting a new batch, batches dropped and counted, the
 // counts in the move end. The test plays body.h, link_pc.h and the action.
@@ -39,6 +39,7 @@ static int n_control;
 static int bulk_room = 1000;  // messages the bulk lane still takes
 static int n_bulk;
 static uint8_t last_bulk[WIRE_MSG_MAX];
+static uint32_t last_tof_move;       // the move number the last tof frame went under
 static wire_imu_batch_t batches[64]; // the imu batches the lane took
 static int n_batches;
 bool link_send_control(const uint8_t *msg, uint32_t len) {
@@ -47,18 +48,20 @@ bool link_send_control(const uint8_t *msg, uint32_t len) {
     memcpy(control[n_control++], msg, len);
     return true;
 }
-link_ticket_t link_send_bulk(const uint8_t *msg, uint32_t len) {
+bool link_send_bulk(const uint8_t *msg, uint32_t len) {
     wire_msg_t m;
     assert(wire_take(msg, len, &m) == (int32_t)len);
-    if (bulk_room <= 0) return (link_ticket_t){1, 0};
+    if (bulk_room <= 0) return false;
     bulk_room--;
+    n_bulk++;
     if (m.type == WIRE_IMU_BATCH) {
         assert(n_batches < 64 && wire_decode_imu_batch(&m, &batches[n_batches]));
         n_batches++;
-        return (link_ticket_t){1, (uint32_t)++n_bulk};
+        return true;
     }
     memcpy(last_bulk, msg, len);
-    return (link_ticket_t){1, (uint32_t)++n_bulk};
+    last_tof_move = read32(m.payload);
+    return true;
 }
 static wire_msg_t control_msg(int i) { wire_msg_t m; assert(i < n_control && wire_take(control[i], WIRE_MSG_MAX, &m) > 0); return m; }
 static wire_move_start_t start_msg(int i) {
@@ -120,7 +123,7 @@ static void test_phases(void) {
     move_start(MOVE_DRIVE, 0.5f, 17, &fake_actor);
     assert(motors && move_busy() && !strcmp(move_running(), "drive") && n_control == 1);
     wire_move_start_t s = start_msg(0);
-    assert(s.move == 1 && s.command == 17 && s.kind == WIRE_MOVE_DRIVE && s.param == 0.5f && s.t_us == time_us_32() &&
+    assert(s.move == 1 && s.command == 17 && s.kind == WIRE_MOVE_DRIVE && s.param == 0.5f && s.t_us == clock_since_start_us() &&
            s.pre_ms == 200 && s.post_ms == 200);
     frame(2); // from the start on, frames go
     assert(n_bulk == 1);
@@ -158,15 +161,18 @@ static void test_phases(void) {
            move_wire_end(&r) == WIRE_END_OK && r.frames_sent == 4 && r.frames_dropped == 0 && r.goal_m == 0);
     assert(r.moved_m > 0.29f && r.moved_m < 0.31f && r.rotated_rad > 0.099f && r.rotated_rad < 0.101f);
     wire_move_end_t e = end_msg(1);
-    assert(n_control == 2 && e.move == 1 && e.end == WIRE_END_OK && e.t_us == time_us_32() && e.frames_sent == 4 &&
-           e.frames_dropped == 0 && e.first_frame == 2 && e.last_frame == 5 && e.moved_m == r.moved_m);
+    assert(n_control == 2 && e.move == 1 && e.end == WIRE_END_OK && e.t_us == clock_since_start_us() && e.frames_sent == 4 &&
+           e.frames_dropped == 0 && e.moved_m == r.moved_m);
     frame(6); // ended: no more frames
     assert(n_bulk == 4 && strcmp(move_running(), "") == 0);
     // The frames went in the map use's format.
     wire_msg_t m;
     assert(wire_take(last_bulk, WIRE_MSG_MAX, &m) > 0 && m.type == tof_format_message_type(tof_format_of(TOF_USE_MAP)));
     posed_frame_t back;
-    assert(tof_unpack(tof_format_of(TOF_USE_MAP), m.payload, m.len, &back) && back.frame.number == 5);
+    assert(tof_unpack(tof_format_of(TOF_USE_MAP), m.payload + WIRE_TOF_HEADER, m.len - WIRE_TOF_HEADER, &back) &&
+           back.frame.number == 5);
+    // ... under the move's number, its time since power-up (the frame's own time_us_32()).
+    assert(read32(m.payload) == 1 && read64(m.payload + 4) == clock_since_start_of(back.frame.t_us));
     printf("ok: start, pre 200 ms still before it drives, act, post 200 ms (the only settling), end; frames only during it\n");
 
     // The robot still at once after the act: the post is exactly post_ms, not post + a settle.
@@ -304,7 +310,7 @@ static void test_refused(void) {
     loop_ms(300);
     result = MOVE_ACT_DONE;
     loop_ms(300);
-    assert(!move_busy() && end_msg(3).move == a.move && end_msg(3).frames_sent == 1 && end_msg(3).first_frame == 100);
+    assert(!move_busy() && end_msg(3).move == a.move && end_msg(3).frames_sent == 1 && last_tof_move == a.move);
     // Taken one by one, oldest first: the refused drive, then the turn (both in one loop for commands.c).
     move_record_t q;
     while (move_next_ended(&q) && q.command != 31) {}
@@ -332,7 +338,6 @@ static void test_frames_dropped(void) {
     move_endings(&r);
     wire_move_end_t e = end_msg(1);
     assert(r.frames_sent == 2 && r.frames_dropped == 3 && e.frames_sent == 2 && e.frames_dropped == 3);
-    assert(e.first_frame == 200 && e.last_frame == 201);
     bulk_room = 1000;
     printf("ok: the bulk lane full: frames dropped and counted per move\n");
 }
@@ -345,12 +350,14 @@ static imu_record_t imu_rec(uint32_t t0, int k) {
     return r;
 }
 
-// Checks batch b holds records first..first+n-1 of a run from t0 (times within 5 µs).
+// Checks batch b holds records first..first+n-1 of a run from t0 (times since
+// power-up within 5 µs).
 static void check_batch(int b, uint32_t move, uint32_t t0, int first, int n) {
     assert(b < n_batches && batches[b].move == move && batches[b].n == n);
     for (int i = 0; i < n; i++) {
         imu_record_t want = imu_rec(t0, first + i), got = batches[b].records[i];
-        assert(abs((int32_t)(got.t_us - want.t_us)) <= 5);
+        int64_t got_us = (int64_t)(batches[b].t_us + (uint64_t)i * batches[b].period_us);
+        assert(llabs(got_us - (int64_t)clock_since_start_of(want.t_us)) <= 5);
         assert(!memcmp(got.accel, want.accel, sizeof got.accel) && !memcmp(got.gyro, want.gyro, sizeof got.gyro));
     }
 }
@@ -456,7 +463,7 @@ static void test_imu(void) {
         move_imu(&r);
         loop_ms(9);
     }
-    assert(begins == 0 && n_batches == 1 && batches[0].n == 10 && batches[0].records[9].t_us - batches[0].records[0].t_us == 9 * 9807u);
+    assert(begins == 0 && n_batches == 1 && batches[0].n == 10 && batches[0].period_us == 9807);
     odom.stationary = true;
     move_stop();
     printf("ok: a sensor 2 %% slow stays one batch with its own period; records while starting go too\n");

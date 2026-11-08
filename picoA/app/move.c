@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdio.h>
 #include "pico/stdlib.h"
+#include "clock_start.h"
 #include "body.h"
 #include "link_pc.h"
 #include "move.h"
@@ -18,7 +19,7 @@ typedef struct {
     bool acted;                 // the act phase began (start is set)
     bool obstacle;              // the act phase ended before an obstacle
     odom_report_t start;        // the robot when the act phase began
-    uint32_t sent, dropped, first, last; // its frames
+    uint32_t sent, dropped;     // its frames
     uint32_t imu_sent, imu_dropped;      // its imu batches
 } move_t;
 
@@ -87,7 +88,7 @@ uint8_t move_wire_end(const move_record_t *r) { return (uint8_t)wire_end_of(r->h
 // A new move, numbered; the PC told (refused: it ends at once, a running move goes on).
 static move_t numbered_move(move_kind_t k, float p, uint32_t c, bool refused) {
     move_t m = {.number = ++numbered, .command = c, .kind = k, .param = p};
-    wire_move_start_t s = {.move = m.number, .command = c, .kind = (uint8_t)k, .param = p, .t_us = time_us_32(),
+    wire_move_start_t s = {.move = m.number, .command = c, .kind = (uint8_t)k, .param = p, .t_us = clock_since_start_us(),
                            .pre_ms = (uint16_t)pre_ms, .post_ms = (uint16_t)post_ms, .flags = refused ? WIRE_MOVE_REFUSED : 0};
     uint8_t msg[WIRE_HEADER + WIRE_MOVE_START_SIZE];
     uint32_t n = wire_encode_move_start(&s, msg);
@@ -108,9 +109,8 @@ static void ended(const move_t *m, move_end_t how) {
         .frames_sent = m->sent, .frames_dropped = m->dropped, .imu_sent = m->imu_sent, .imu_dropped = m->imu_dropped,
     };
     ended_queue[(endings - 1) % MOVE_ENDED_KEPT] = last;
-    wire_move_end_t e = {.move = m->number, .end = move_wire_end(&last), .t_us = time_us_32(), .frames_sent = m->sent,
-                         .frames_dropped = m->dropped, .first_frame = m->first, .last_frame = m->last,
-                         .moved_m = last.moved_m, .rotated_rad = last.rotated_rad, .imu_sent = m->imu_sent,
+    wire_move_end_t e = {.move = m->number, .end = move_wire_end(&last), .t_us = clock_since_start_us(), .frames_sent = m->sent,
+                         .frames_dropped = m->dropped, .moved_m = last.moved_m, .rotated_rad = last.rotated_rad, .imu_sent = m->imu_sent,
                          .imu_dropped = m->imu_dropped};
     uint8_t msg[WIRE_HEADER + WIRE_MOVE_END_SIZE];
     uint32_t n = wire_encode_move_end(&e, msg);
@@ -122,8 +122,9 @@ static void send_batch(void) {
     if (!batch.n) return;
     static uint8_t msg[WIRE_HEADER + WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD];
     batch.move = cur.number;
+    batch.t_us = clock_since_start_of(batch.records[0].t_us);
     uint32_t n = wire_encode_imu_batch(&batch, msg);
-    if (link_send_bulk(msg, n).n) cur.imu_sent++;
+    if (link_send_bulk(msg, n)) cur.imu_sent++;
     else cur.imu_dropped++;
     batch.n = 0;
 }
@@ -169,12 +170,10 @@ void move_stop(void) { end_now(MOVE_END_STOPPED, "by command", true); }
 
 void move_tof(const posed_frame_t *f) {
     if (phase == IDLE) return;
-    static uint8_t msg[WIRE_HEADER + TOF_FORMAT_MAX];
-    uint32_t n = wire_encode_tof(TOF_USE_MAP, f, msg);
-    if (!link_send_bulk(msg, n).n) { cur.dropped++; return; }
-    cur.sent++;
-    if (!cur.first) cur.first = f->frame.number;
-    cur.last = f->frame.number;
+    static uint8_t msg[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX];
+    uint32_t n = wire_encode_tof(TOF_USE_MAP, cur.number, clock_since_start_of(f->frame.t_us), f, msg);
+    if (link_send_bulk(msg, n)) cur.sent++;
+    else cur.dropped++;
 }
 
 void move_imu(const imu_record_t *r) {

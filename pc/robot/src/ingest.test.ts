@@ -1,9 +1,8 @@
 // Tests for ingest.ts end to end: a robot played on localhost sends its messages to
 // link.ts, ingest stores them (store.ts) as main.ts does: a refused move during a
-// running one leaves the running one open (its frames before and after are its); the
-// same boot saying hello again (a new connection, mid-move) goes on: its message
-// numbers and its open move; imu batches stored under the move they name, also one
-// that comes after its move's end on the new connection. Run with `npm test`.
+// running one; the same boot saying hello again (a new connection, mid-move) goes on
+// with its message numbers; frames and imu batches stored under the move they name,
+// also ones that come after a refused move or their move's end on the new connection. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import net from "node:net";
@@ -22,8 +21,8 @@ const frame = (number: number): PosedFrame => ({ number, tUs: number * 100000, p
                                                  still: true, poseKnown: true, beyondMm: 2550, zones });
 const start = (move: number, kind: string, refused: boolean): MoveStart =>
   ({ move, command: move, kind, param: 1, tUs: move * 1000, preMs: 200, postMs: 200, refused });
-const end = (move: number, how: string, first: number, last: number, sent: number) =>
-  encodeMoveEnd({ move, end: how, tUs: move * 1000 + 500, framesSent: sent, framesDropped: 0, firstFrame: first, lastFrame: last, moved: 0, rotated: 0, imuSent: 0, imuDropped: 0 });
+const end = (move: number, how: string, sent: number) =>
+  encodeMoveEnd({ move, end: how, tUs: move * 1000 + 500, framesSent: sent, framesDropped: 0, moved: 0, rotated: 0, imuSent: 0, imuDropped: 0 });
 
 // n imu records of move, PicoA's time from t0, 9615 µs apart.
 const imu = (move: number, t0: number, n: number) => encodeImuBatch({ move, records: Array.from({ length: n }, (_, i) =>
@@ -44,13 +43,13 @@ test("refused moves and a second hello of the same boot, stored as main.ts store
   try {
     const port = await link.start();
     let robot = await connect(port, "1234abcd");
-    robot.write(Buffer.concat([encodeMoveStart(start(1, "watch", false)), encodeTof("compact", frame(10)), imu(1, 1_000_000, 10),
-      encodeMoveStart(start(2, "drive", true)), end(2, "obstacle", 0, 0, 0), encodeTof("compact", frame(11))]));
+    robot.write(Buffer.concat([encodeMoveStart(start(1, "watch", false)), encodeTof("compact", 1, 1_000_000, frame(10)), imu(1, 1_000_000, 10),
+      encodeMoveStart(start(2, "drive", true)), end(2, "obstacle", 0), encodeTof("compact", 1, 1_100_000, frame(11))]));
     await new Promise(r => setTimeout(r, 200));
     // A new connection of the same boot, mid-move: it goes on.
     robot.destroy();
     robot = await connect(port, "1234abcd");
-    robot.write(Buffer.concat([encodeTof("compact", frame(12)), end(1, "ok", 10, 12, 3), imu(1, 1_096_150, 4)])); // its last batch after its end
+    robot.write(Buffer.concat([encodeTof("compact", 1, 1_200_000, frame(12)), end(1, "ok", 3), imu(1, 1_096_150, 4)])); // its last batch after its end
     await new Promise(r => setTimeout(r, 200));
     robot.destroy();
     await stored.idle();
@@ -61,6 +60,6 @@ test("refused moves and a second hello of the same boot, stored as main.ts store
       [{ move: 1, msg: 3, n: "10" }, { move: 1, msg: 9, n: "4" }]);
     const moves = await store.query(`SELECT move, kind, refused, "end" FROM moves ORDER BY move`);
     assert.deepEqual(moves, [{ move: 1, kind: "watch", refused: false, end: "ok" }, { move: 2, kind: "drive", refused: true, end: "obstacle" }]);
-    assert.deepEqual(await store.query("SELECT messages, open_move FROM boots"), [{ messages: 9, open_move: null }]);
+    assert.deepEqual(await store.query("SELECT messages FROM boots"), [{ messages: 9 }]);
   } finally { link.stop(); rmSync(dir, { recursive: true, force: true }); }
 });

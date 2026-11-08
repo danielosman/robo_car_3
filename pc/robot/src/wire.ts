@@ -5,9 +5,10 @@
 // test_wire.c on the robot's side).
 //
 // A message: [type u8][payload length u16][payload], little-endian, floats f32.
+// Times (tUs) are µs since PicoA's power-up (u64 on the wire): they never wrap.
 import { TOF_FORMATS, packTof, tofFormatOfType, unpackTof, type PosedFrame } from "./tof_format.ts";
 
-export const WIRE_VERSION = 3; // as picoA/app/wire.h; the server refuses a robot with another
+export const WIRE_VERSION = 4; // as picoA/app/wire.h; the server refuses a robot with another
 export const HEADER = 3;
 export const PAYLOAD_MAX = 1400;
 
@@ -19,10 +20,10 @@ export const TYPE = {
 
 export const LANE = { CONTROL: 0, BULK: 1, TO_ROBOT: 2 } as const;
 export type Lane = (typeof LANE)[keyof typeof LANE];
-export interface TypeInfo { lane: Lane; min: number; max: number; droppable: boolean }
+export interface TypeInfo { lane: Lane; min: number; max: number }
 
 const HELLO_SIZE = 29, BUILD_LEN = 24, CONSOLE_MAX = 240, ANSWER_SIZE = 34, STATUS_SIZE = 33, MODE_LEN = 8, ACTION_LEN = 12;
-const MOVE_START_SIZE = 22, MOVE_END_SIZE = 41, IMU_BATCH_HEADER = 11, IMU_RECORD = 12;
+const MOVE_START_SIZE = 26, MOVE_END_SIZE = 37, IMU_BATCH_HEADER = 15, IMU_RECORD = 12, TOF_HEADER = 12;
 export const PART_MAX = 1400, COMMAND_TEXT_MAX = 46;
 export const IMU_BATCH_MAX = 10;          // records in an imu batch
 export const IMU_RECORD_PERIOD_US = 9615; // 4 samples at 416 Hz (common/link_msgs.h)
@@ -30,17 +31,17 @@ export const IMU_RECORD_PERIOD_US = 9615; // 4 samples at 416 Hz (common/link_ms
 export const IMU_ACCEL_G_PER_COUNT = 0.000061, IMU_GYRO_DPS_PER_COUNT = 0.00875;
 
 const TABLE = new Map<number, TypeInfo>([
-  [TYPE.HELLO, { lane: LANE.CONTROL, min: 1, max: PAYLOAD_MAX, droppable: false }], // any length: another version's hello is read for its version
-  [TYPE.CONSOLE, { lane: LANE.CONTROL, min: 0, max: CONSOLE_MAX, droppable: true }],
-  [TYPE.ANSWER, { lane: LANE.CONTROL, min: ANSWER_SIZE, max: ANSWER_SIZE, droppable: false }],
-  [TYPE.STATUS, { lane: LANE.CONTROL, min: STATUS_SIZE, max: STATUS_SIZE, droppable: true }],
-  [TYPE.MAP_CLEARED, { lane: LANE.CONTROL, min: 0, max: 0, droppable: false }],
-  [TYPE.MOVE_START, { lane: LANE.CONTROL, min: MOVE_START_SIZE, max: MOVE_START_SIZE, droppable: false }],
-  [TYPE.MOVE_END, { lane: LANE.CONTROL, min: MOVE_END_SIZE, max: MOVE_END_SIZE, droppable: false }],
-  [TYPE.SNAPSHOT_PART, { lane: LANE.BULK, min: 1, max: PART_MAX, droppable: false }],
-  [TYPE.IMU_BATCH, { lane: LANE.BULK, min: IMU_BATCH_HEADER + IMU_RECORD, max: IMU_BATCH_HEADER + IMU_BATCH_MAX * IMU_RECORD, droppable: true }],
-  [TYPE.COMMAND, { lane: LANE.TO_ROBOT, min: 5, max: 4 + COMMAND_TEXT_MAX, droppable: false }],
-  [TYPE.HEARTBEAT, { lane: LANE.TO_ROBOT, min: 0, max: 0, droppable: false }],
+  [TYPE.HELLO, { lane: LANE.CONTROL, min: 1, max: PAYLOAD_MAX }], // any length: another version's hello is read for its version
+  [TYPE.CONSOLE, { lane: LANE.CONTROL, min: 0, max: CONSOLE_MAX }],
+  [TYPE.ANSWER, { lane: LANE.CONTROL, min: ANSWER_SIZE, max: ANSWER_SIZE }],
+  [TYPE.STATUS, { lane: LANE.CONTROL, min: STATUS_SIZE, max: STATUS_SIZE }],
+  [TYPE.MAP_CLEARED, { lane: LANE.CONTROL, min: 0, max: 0 }],
+  [TYPE.MOVE_START, { lane: LANE.CONTROL, min: MOVE_START_SIZE, max: MOVE_START_SIZE }],
+  [TYPE.MOVE_END, { lane: LANE.CONTROL, min: MOVE_END_SIZE, max: MOVE_END_SIZE }],
+  [TYPE.SNAPSHOT_PART, { lane: LANE.BULK, min: 1, max: PART_MAX }],
+  [TYPE.IMU_BATCH, { lane: LANE.BULK, min: IMU_BATCH_HEADER + IMU_RECORD, max: IMU_BATCH_HEADER + IMU_BATCH_MAX * IMU_RECORD }],
+  [TYPE.COMMAND, { lane: LANE.TO_ROBOT, min: 5, max: 4 + COMMAND_TEXT_MAX }],
+  [TYPE.HEARTBEAT, { lane: LANE.TO_ROBOT, min: 0, max: 0 }],
 ]);
 
 // What the table says of a type (the ToF frames' from tof_format.ts); null if it doesn't know it.
@@ -48,13 +49,13 @@ export function typeInfo(type: number): TypeInfo | null {
   const t = TABLE.get(type);
   if (t) return t;
   const f = tofFormatOfType(type);
-  return f ? { lane: LANE.BULK, min: f.size, max: f.size, droppable: true } : null;
+  return f ? { lane: LANE.BULK, min: TOF_HEADER + f.size, max: TOF_HEADER + f.size } : null;
 }
 
 // The table's types are all different (the ToF's included).
 export function wireCheck(): boolean {
   const types = [...TABLE.keys(), ...TOF_FORMATS.map(f => f.messageType)];
-  return new Set(types).size === types.length && TOF_FORMATS.every(f => f.size <= PAYLOAD_MAX);
+  return new Set(types).size === types.length && TOF_FORMATS.every(f => TOF_HEADER + f.size <= PAYLOAD_MAX);
 }
 
 // How a command ended (wire_end_t): the robot's end words, as api/answers.ts names them.
@@ -70,23 +71,24 @@ export interface Answer {
 }
 export interface Status { x: number; y: number; yaw: number; mode: string; action: string; rssi: number }
 // A move's start (picoA/app/move.h): its number, its command's, kind, parameter
-// (drive m, turn rad, goto m to the goal, watch s), PicoA's time, the still times;
+// (drive m, turn rad, goto m to the goal, watch s), its time, the still times;
 // refused: it can't start, its end follows at once and a running move goes on.
 export interface MoveStart { move: number; command: number; kind: string; param: number; tUs: number; preMs: number; postMs: number; refused: boolean }
-// A move's end: how (an end word), PicoA's time, its frames sent and dropped, the first
-// and last frame number sent (0: none), how far it went (m) and turned (rad), its imu
-// batches sent and dropped.
+// A move's end: how (an end word), its time, its frames sent and dropped, how far it
+// went (m) and turned (rad), its imu batches sent and dropped.
 export interface MoveEnd {
-  move: number; end: string; tUs: number; framesSent: number; framesDropped: number; firstFrame: number; lastFrame: number;
+  move: number; end: string; tUs: number; framesSent: number; framesDropped: number;
   moved: number; rotated: number; imuSent: number; imuDropped: number;
 }
-// The IMU as it measured (common/link_msgs.h, imu_record_t): PicoA's time (the middle
-// of its 4 samples), accel and gyro x, y, z as the sensor's raw counts in its own axes.
+// The IMU as it measured (common/link_msgs.h, imu_record_t): its time (the middle of
+// its 4 samples), accel and gyro x, y, z as the sensor's raw counts in its own axes.
 export type Vec3 = [number, number, number];
 export interface ImuRecord { tUs: number; accel: Vec3; gyro: Vec3 }
 // Up to 10 imu records of a move, measured one after the other, evenly spaced.
 export interface ImuBatch { move: number; records: ImuRecord[] }
 export interface Command { n: number; text: string }
+// A tof frame of a move, packed in a format (tof_format.ts); tUs: its middle.
+export interface MoveFrame { format: string; move: number; tUs: number; frame: PosedFrame }
 
 export type Message =
   | ({ type: "hello" } & Hello)
@@ -100,7 +102,7 @@ export type Message =
   | ({ type: "imu_batch" } & ImuBatch)
   | ({ type: "command" } & Command)
   | { type: "heartbeat" }
-  | { type: "tof"; format: string; frame: PosedFrame };
+  | ({ type: "tof" } & MoveFrame);
 
 // --- the envelope ---
 
@@ -150,6 +152,8 @@ function header(type: number, payload: Buffer): Buffer {
 // A fixed text field: NUL-padded, cut to size; read up to the first NUL.
 const textField = (text: string, size: number) => { const b = Buffer.alloc(size); b.write(text.slice(0, size), "latin1"); return b; };
 const readText = (b: Buffer) => { const z = b.indexOf(0); return b.subarray(0, z < 0 ? b.length : z).toString("latin1"); };
+const readTime = (b: Buffer, at: number) => Number(b.readBigUInt64LE(at));
+const writeTime = (b: Buffer, us: number, at: number) => b.writeBigUInt64LE(BigInt(Math.round(us)), at);
 
 // --- decoding: throws if the payload doesn't fit its type ---
 
@@ -175,23 +179,22 @@ export function decode(m: RawMessage): Message {
     case TYPE.MOVE_START:
       need(MOVE_START_SIZE);
       return { type: "move_start", move: p.readUInt32LE(0), command: p.readUInt32LE(4), kind: MOVE_KINDS[p[8]] ?? `kind ${p[8]}`,
-               param: p.readFloatLE(9), tUs: p.readUInt32LE(13), preMs: p.readUInt16LE(17), postMs: p.readUInt16LE(19),
-               refused: (p[21] & 1) !== 0 };
+               param: p.readFloatLE(9), tUs: readTime(p, 13), preMs: p.readUInt16LE(21), postMs: p.readUInt16LE(23),
+               refused: (p[25] & 1) !== 0 };
     case TYPE.MOVE_END:
       need(MOVE_END_SIZE);
-      return { type: "move_end", move: p.readUInt32LE(0), end: END_WORDS[p[4]] ?? `end ${p[4]}`, tUs: p.readUInt32LE(5),
-               framesSent: p.readUInt32LE(9), framesDropped: p.readUInt32LE(13), firstFrame: p.readUInt32LE(17),
-               lastFrame: p.readUInt32LE(21), moved: p.readFloatLE(25), rotated: p.readFloatLE(29), imuSent: p.readUInt32LE(33),
-               imuDropped: p.readUInt32LE(37) };
+      return { type: "move_end", move: p.readUInt32LE(0), end: END_WORDS[p[4]] ?? `end ${p[4]}`, tUs: readTime(p, 5),
+               framesSent: p.readUInt32LE(13), framesDropped: p.readUInt32LE(17), moved: p.readFloatLE(21), rotated: p.readFloatLE(25),
+               imuSent: p.readUInt32LE(29), imuDropped: p.readUInt32LE(33) };
     case TYPE.SNAPSHOT_PART: return { type: "snapshot_part", bytes: p };
     case TYPE.IMU_BATCH: {
-      const n = p[10];
+      const n = p[14];
       if (n < 1 || n > IMU_BATCH_MAX) throw new Error(`imu batch: ${n} records`);
       need(IMU_BATCH_HEADER + n * IMU_RECORD);
-      const first = p.readUInt32LE(4), period = p.readUInt16LE(8);
+      const first = readTime(p, 4), period = p.readUInt16LE(12);
       const records = Array.from({ length: n }, (_, i): ImuRecord => {
         const at = IMU_BATCH_HEADER + i * IMU_RECORD, v = (k: number) => p.readInt16LE(at + 2 * k);
-        return { tUs: (first + i * period) % 2 ** 32, accel: [v(0), v(1), v(2)], gyro: [v(3), v(4), v(5)] };
+        return { tUs: first + i * period, accel: [v(0), v(1), v(2)], gyro: [v(3), v(4), v(5)] };
       });
       return { type: "imu_batch", move: p.readUInt32LE(0), records };
     }
@@ -203,7 +206,10 @@ export function decode(m: RawMessage): Message {
     case TYPE.HEARTBEAT: need(0); return { type: "heartbeat" };
   }
   const f = tofFormatOfType(m.type);
-  if (f) { need(f.size); return { type: "tof", format: f.name, frame: unpackTof(f.name, p) }; }
+  if (f) {
+    need(TOF_HEADER + f.size);
+    return { type: "tof", format: f.name, move: p.readUInt32LE(0), tUs: readTime(p, 4), frame: unpackTof(f.name, p.subarray(TOF_HEADER)) };
+  }
   throw new Error(`unknown message type 0x${m.type.toString(16)}`);
 }
 
@@ -243,17 +249,17 @@ export function encodeMoveStart(s: MoveStart): Buffer {
   const p = Buffer.alloc(MOVE_START_SIZE), kind = MOVE_KINDS.indexOf(s.kind as (typeof MOVE_KINDS)[number]);
   if (kind < 0) throw new Error(`not a move kind: ${s.kind}`);
   p.writeUInt32LE(s.move >>> 0, 0); p.writeUInt32LE(s.command >>> 0, 4); p[8] = kind; p.writeFloatLE(s.param, 9);
-  p.writeUInt32LE(s.tUs >>> 0, 13); p.writeUInt16LE(s.preMs, 17); p.writeUInt16LE(s.postMs, 19); p[21] = s.refused ? 1 : 0;
+  writeTime(p, s.tUs, 13); p.writeUInt16LE(s.preMs, 21); p.writeUInt16LE(s.postMs, 23); p[25] = s.refused ? 1 : 0;
   return header(TYPE.MOVE_START, p);
 }
 
 export function encodeMoveEnd(e: MoveEnd): Buffer {
   const p = Buffer.alloc(MOVE_END_SIZE), end = END_WORDS.indexOf(e.end as (typeof END_WORDS)[number]);
   if (end < 0) throw new Error(`not an end word: ${e.end}`);
-  p.writeUInt32LE(e.move >>> 0, 0); p[4] = end; p.writeUInt32LE(e.tUs >>> 0, 5);
-  [e.framesSent, e.framesDropped, e.firstFrame, e.lastFrame].forEach((v, i) => p.writeUInt32LE(v >>> 0, 9 + 4 * i));
-  p.writeFloatLE(e.moved, 25); p.writeFloatLE(e.rotated, 29);
-  p.writeUInt32LE(e.imuSent >>> 0, 33); p.writeUInt32LE(e.imuDropped >>> 0, 37);
+  p.writeUInt32LE(e.move >>> 0, 0); p[4] = end; writeTime(p, e.tUs, 5);
+  p.writeUInt32LE(e.framesSent >>> 0, 13); p.writeUInt32LE(e.framesDropped >>> 0, 17);
+  p.writeFloatLE(e.moved, 21); p.writeFloatLE(e.rotated, 25);
+  p.writeUInt32LE(e.imuSent >>> 0, 29); p.writeUInt32LE(e.imuDropped >>> 0, 33);
   return header(TYPE.MOVE_END, p);
 }
 
@@ -262,19 +268,22 @@ export function encodeMoveEnd(e: MoveEnd): Buffer {
 export function encodeImuBatch(b: ImuBatch): Buffer {
   const n = b.records.length;
   if (n < 1 || n > IMU_BATCH_MAX) throw new Error(`an imu batch has 1-${IMU_BATCH_MAX} records, not ${n}`);
-  const p = Buffer.alloc(IMU_BATCH_HEADER + n * IMU_RECORD), first = b.records[0].tUs >>> 0;
-  const span = (b.records[n - 1].tUs - first) >>> 0;
+  const p = Buffer.alloc(IMU_BATCH_HEADER + n * IMU_RECORD), first = b.records[0].tUs;
+  const span = b.records[n - 1].tUs - first;
   const period = n > 1 ? Math.floor((span + Math.floor((n - 1) / 2)) / (n - 1)) : IMU_RECORD_PERIOD_US;
-  p.writeUInt32LE(b.move >>> 0, 0); p.writeUInt32LE(first, 4); p.writeUInt16LE(Math.min(0xffff, period), 8); p[10] = n;
+  p.writeUInt32LE(b.move >>> 0, 0); writeTime(p, first, 4); p.writeUInt16LE(Math.min(0xffff, period), 12); p[14] = n;
   b.records.forEach((r, i) => [...r.accel, ...r.gyro].forEach((v, k) => p.writeInt16LE(v, IMU_BATCH_HEADER + i * IMU_RECORD + 2 * k)));
   return header(TYPE.IMU_BATCH, p);
 }
 
-// A posed frame in its format's message (the fake robot's replay).
-export function encodeTof(format: string, frame: PosedFrame): Buffer {
+// A posed frame of a move in its format's message (the fake robot's replay); tUs: its middle.
+export function encodeTof(format: string, move: number, tUs: number, frame: PosedFrame): Buffer {
   const f = TOF_FORMATS.find(x => x.name === format);
   if (!f) throw new Error(`no ToF format ${format}`);
-  return header(f.messageType, packTof(format, frame));
+  const h = Buffer.alloc(TOF_HEADER);
+  h.writeUInt32LE(move >>> 0, 0);
+  writeTime(h, tUs, 4);
+  return header(f.messageType, Buffer.concat([h, packTof(format, frame)]));
 }
 
 export function encodeSnapshotPart(bytes: Buffer): Buffer {

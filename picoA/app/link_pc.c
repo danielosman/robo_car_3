@@ -39,7 +39,6 @@
 #define SILENCE_US         30000000 // nothing from the server (it sends a heartbeat every 2 s) for this long: it's gone
 #define CONTROL_SIZE       16384    // the control lane (link_pc.h)
 #define BULK_SIZE          40960    // the bulk lane: ~10 s of tof frames and imu batches (doc/DATA_FLOW_PLAN.md, budgets)
-#define BULK_RESERVE       (WIRE_MSG_MAX + 64) // droppable messages leave this free: a snapshot part always fits
 #define BULK_IN_FLIGHT     (4 * WIRE_MSG_MAX)  // bulk is handed to TCP only while less than this is unacknowledged
 #define IN_SIZE            256      // from the server: commands (≤ 53 B) and heartbeats
 
@@ -64,7 +63,7 @@ static link_pc_status_fn status_fn;
 // lock held (cyw43_arch_lwip_begin/end; callbacks already hold it).
 static struct udp_pcb *udp;
 static struct tcp_pcb *pcb;             // the connection to the server, NULL if none
-static bool up, lost, hello_refused; // hello_refused: TCP refused this connection's hello
+static bool up, lost;
 static uint32_t write_errors, output_errors; // tcp_write() / tcp_output() refused, since power-up (status)
 static bool announced;
 static ip_addr_t announced_ip;
@@ -78,10 +77,10 @@ static uint32_t in_len;
 static int32_t broken;                  // 0, or a wire_error_t (or WIRE_TOO_LONG when in overflowed)
 // The control lane: whole messages, oldest first.
 static uint8_t control[CONTROL_SIZE];
-static uint32_t control_len, control_dropped, control_refused;
-// The bulk lane: a ring of whole messages. queued / gone: tickets given / no longer queued.
+static uint32_t control_len, control_dropped;
+// The bulk lane: a ring of whole messages.
 static uint8_t bulk[BULK_SIZE];
-static uint32_t bulk_start, bulk_len, bulk_queued, bulk_gone, bulk_dropped;
+static uint32_t bulk_start, bulk_len, bulk_refused;
 // The console line being printed (main loop; under the lock with the rest).
 static char line[WIRE_CONSOLE_MAX];
 static uint32_t line_len;
@@ -89,30 +88,21 @@ static uint32_t line_len;
 // --- the lanes (lock held) ---
 
 static uint16_t payload_len(const uint8_t *msg) { return (uint16_t)(msg[1] | msg[2] << 8); }
-static bool droppable(uint8_t type) { wire_type_info_t i; return wire_info(type, &i) && i.droppable; }
 
-// Takes the message at control[at] out.
-static void control_remove(uint32_t at) {
-    uint32_t n = WIRE_HEADER + payload_len(control + at);
-    memmove(control + at, control + at + n, control_len - at - n);
+static void control_pop(uint32_t n) {
+    memmove(control, control + n, control_len - n);
     control_len -= n;
 }
 
-// Makes room by dropping the oldest console line or status; false if there is none.
-static bool control_drop_one(void) {
-    for (uint32_t at = 0; at < control_len; at += WIRE_HEADER + payload_len(control + at)) {
-        if (droppable(control[at])) { control_remove(at); control_dropped++; return true; }
-    }
-    return false;
-}
-
-static bool control_add(const uint8_t *msg, uint32_t len) {
+// Adds a message; the oldest ones go to make room, whatever their type (answers
+// too: decided, see link_pc.h).
+static void control_add(const uint8_t *msg, uint32_t len) {
     while (control_len + len > CONTROL_SIZE) {
-        if (!control_drop_one()) { control_refused++; return false; }
+        control_pop(WIRE_HEADER + payload_len(control));
+        control_dropped++;
     }
     memcpy(control + control_len, msg, len);
     control_len += len;
-    return true;
 }
 
 // The length of the whole messages at the start of control that fit in `room`.
@@ -132,15 +122,6 @@ static uint32_t bulk_next_len(void) { return WIRE_HEADER + (uint32_t)(bulk_at(1)
 static void bulk_pop(uint32_t n) {
     bulk_start = (bulk_start + n) % BULK_SIZE;
     bulk_len -= n;
-    bulk_gone++;
-}
-
-// Drops everything queued (the connection is lost): the droppable ones are counted.
-static void bulk_empty(void) {
-    while (bulk_len) {
-        if (droppable(bulk_at(0))) bulk_dropped++;
-        bulk_pop(bulk_next_len());
-    }
 }
 
 // Hands TCP what fits: control first, as many whole messages as fit; then bulk, one
@@ -154,8 +135,7 @@ static void send_out(void) {
     uint32_t n = control_fitting(tcp_sndbuf(pcb));
     if (n) {
         if (tcp_write(pcb, control, (u16_t)n, TCP_WRITE_FLAG_COPY) == ERR_OK) {
-            memmove(control, control + n, control_len - n);
-            control_len -= n;
+            control_pop(n);
             sent = true;
         } else write_errors++;
     }
@@ -195,9 +175,8 @@ static void on_announcement(void *arg, struct udp_pcb *p_udp, struct pbuf *p, co
 static err_t on_connected(void *arg, struct tcp_pcb *p, err_t err) {
     (void)arg; (void)err;
     last_heard = get_absolute_time();
-    // Hello first, before anything kept. If TCP refuses it (out of memory), the
-    // connection is no use: closed, and the server looked for again at once.
-    if (tcp_write(p, hello, (u16_t)hello_len, TCP_WRITE_FLAG_COPY) != ERR_OK) { write_errors++; hello_refused = lost = true; return ERR_OK; }
+    // Hello first, before anything kept. If TCP refuses it, the connection is no use.
+    if (tcp_write(p, hello, (u16_t)hello_len, TCP_WRITE_FLAG_COPY) != ERR_OK) { write_errors++; lost = true; return ERR_OK; }
     up = true;
     send_out();
     return ERR_OK;
@@ -230,7 +209,7 @@ static void on_error(void *arg, err_t err) {
 }
 
 // Closes the connection. Control keeps what waits; bulk is dropped (its messages
-// were for this connection; a snapshot sends itself again).
+// were for this connection).
 static void drop(void) {
     if (pcb) {
         tcp_err(pcb, NULL);
@@ -239,10 +218,10 @@ static void drop(void) {
         tcp_abort(pcb);
         pcb = NULL;
     }
-    up = lost = hello_refused = false;
+    up = lost = false;
     in_len = 0;
     broken = 0;
-    bulk_empty();
+    bulk_start = bulk_len = 0;
 }
 
 static bool connect_pcb(const ip_addr_t *ip, uint16_t port) {
@@ -346,7 +325,8 @@ static void update_joining(void) {
     else if (time_reached(deadline)) join_failed("no answer after 15 s");
 }
 
-// Status, if the robot gave a function for it: a newer one replaces one still waiting.
+// Status, if the robot gave a function for it and control is empty (so statuses
+// never pile up behind a slow link).
 static void send_status(void) {
     if (!status_fn) return;
     wire_status_t s;
@@ -356,18 +336,14 @@ static void send_status(void) {
     uint8_t msg[WIRE_HEADER + WIRE_STATUS_SIZE];
     uint32_t n = wire_encode_status(&s, msg);
     cyw43_arch_lwip_begin();
-    bool replaced = false;
-    for (uint32_t at = 0; at < control_len && !replaced; at += WIRE_HEADER + payload_len(control + at)) {
-        if (control[at] == WIRE_STATUS) { memcpy(control + at, msg, n); replaced = true; }
-    }
-    if (!replaced) control_add(msg, n);
+    if (control_len == 0) control_add(msg, n);
     send_out();
     cyw43_arch_lwip_end();
 }
 
 static void update_server(void) {
     cyw43_arch_lwip_begin();
-    bool found = announced, is_up = up, is_lost = lost, refused = hello_refused;
+    bool found = announced, is_up = up, is_lost = lost;
     int32_t why = broken;
     ip_addr_t found_ip = announced_ip;
     uint16_t found_port = announced_port;
@@ -389,10 +365,7 @@ static void update_server(void) {
             }
         }
     } else if (state == WIFI_CONNECTING) {
-        if (is_lost && refused) {
-            printf("Server: connected, but TCP refused the hello (out of memory): closing, looking again...\n");
-            look_for_server();
-        } else if (is_lost) { printf("Server: couldn't connect, looking again...\n"); look_for_server(); }
+        if (is_lost) { printf("Server: couldn't connect, looking again...\n"); look_for_server(); }
         else if (is_up) {
             state = WIFI_CONNECTED;
             settled = true;
@@ -474,12 +447,10 @@ void link_pc_print_status(void) {
     else if (state != WIFI_CONNECTED) printf("server %s:%u connecting...\n", ipaddr_ntoa(&server_ip), (unsigned)server_port);
     else printf("server %s:%u connected\n", ipaddr_ntoa(&server_ip), (unsigned)server_port);
     cyw43_arch_lwip_begin();
-    uint32_t c = control_len, cd = control_dropped, cr = control_refused, b = bulk_len, bd = bulk_dropped,
-             we = write_errors + output_errors;
+    uint32_t c = control_len, cd = control_dropped, b = bulk_len, br = bulk_refused, we = write_errors + output_errors;
     cyw43_arch_lwip_end();
-    printf("Link: control %lu B waiting (%lu console lines or status dropped, %lu refused); bulk %lu B waiting, "
-           "%lu frames dropped; TCP refused %lu writes\n", (unsigned long)c, (unsigned long)cd, (unsigned long)cr,
-           (unsigned long)b, (unsigned long)bd, (unsigned long)we);
+    printf("Link: control %lu B waiting (%lu dropped); bulk %lu B waiting (%lu refused); TCP refused %lu writes\n",
+           (unsigned long)c, (unsigned long)cd, (unsigned long)b, (unsigned long)br, (unsigned long)we);
 }
 
 bool link_send_control(const uint8_t *msg, uint32_t len) {
@@ -487,44 +458,25 @@ bool link_send_control(const uint8_t *msg, uint32_t len) {
     if (len < WIRE_HEADER || !wire_info(wire_type(msg), &info) || info.lane != WIRE_LANE_CONTROL) return false;
     if (state == WIFI_OFF || state == WIFI_UNAVAILABLE) return false;
     cyw43_arch_lwip_begin();
-    bool ok = control_add(msg, len);
+    control_add(msg, len);
     send_out();
     cyw43_arch_lwip_end();
-    return ok;
+    return true;
 }
 
-link_ticket_t link_send_bulk(const uint8_t *msg, uint32_t len) {
-    link_ticket_t ticket = {0, 0};
+bool link_send_bulk(const uint8_t *msg, uint32_t len) {
     wire_type_info_t info;
     if (len < WIRE_HEADER || len > WIRE_MSG_MAX || !wire_info(wire_type(msg), &info) || info.lane != WIRE_LANE_BULK)
-        return ticket;
+        return false;
     cyw43_arch_lwip_begin();
-    uint32_t need = len + (info.droppable ? BULK_RESERVE : 0);
-    if (state == WIFI_CONNECTED && bulk_len + need <= BULK_SIZE) {
+    bool ok = state == WIFI_CONNECTED && bulk_len + len <= BULK_SIZE;
+    if (ok) {
         for (uint32_t i = 0; i < len; i++) bulk[(bulk_start + bulk_len + i) % BULK_SIZE] = msg[i];
         bulk_len += len;
-        ticket = (link_ticket_t){.connection = connections, .n = ++bulk_queued};
         send_out();
-    } else if (info.droppable) bulk_dropped++;
+    } else bulk_refused++;
     cyw43_arch_lwip_end();
-    return ticket;
-}
-
-link_bulk_state_t link_bulk_state(link_ticket_t ticket) {
-    if (!ticket.n || ticket.connection != link_pc_connection()) return LINK_BULK_LOST;
-    cyw43_arch_lwip_begin();
-    bool gone = (int32_t)(bulk_gone - ticket.n) >= 0;
-    bool up_now = pcb && up && !lost;
-    cyw43_arch_lwip_end();
-    if (!up_now) return LINK_BULK_LOST; // lost, the main loop hasn't noticed yet
-    return gone ? LINK_BULK_SENT : LINK_BULK_QUEUED;
-}
-
-uint32_t link_bulk_dropped(void) {
-    cyw43_arch_lwip_begin();
-    uint32_t n = bulk_dropped;
-    cyw43_arch_lwip_end();
-    return n;
+    return ok;
 }
 
 bool link_received(wire_command_t *c) {

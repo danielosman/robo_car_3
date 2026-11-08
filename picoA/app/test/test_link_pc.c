@@ -1,10 +1,9 @@
 // Host test for picoA/app/link_pc.c: joining (and failing to join) the WiFi, finding
 // the server by its announcements, hello first on each connection, console lines
 // and status as messages, commands and heartbeats from the server, output kept
-// while no server listens (answers never dropped), the two lanes (control before
-// bulk, bulk first in first out and paced, frames dropped and counted when it is
-// full, a snapshot part always fits and is never dropped, bulk dropped with a lost
-// connection), console output under load, a server that sends something that
+// while no server listens (the newest 16 KB), the two lanes (control before bulk,
+// bulk first in first out and paced, refused and counted when full, bulk dropped
+// with a lost connection), console output under load, a server that sends something that
 // isn't a message, losing the server or the WiFi (a new connection number each time; an old
 // server's announcement with a second port still read),
 // against a fake WiFi chip and lwIP with the test playing the server. Every byte
@@ -134,9 +133,9 @@ static void assert_hello_first(void) {
     assert(count(WIRE_HELLO) == 1);
 }
 
-static uint8_t frame[WIRE_HEADER + TOF_COMPACT_BYTES]; // a tof frame message (its payload doesn't matter here)
-static link_ticket_t send_frame(void) { return link_send_bulk(frame, sizeof frame); }
-static link_ticket_t send_part(uint8_t fill, uint32_t n) {
+static uint8_t frame[WIRE_HEADER + WIRE_TOF_HEADER + TOF_COMPACT_BYTES]; // a tof frame message (its payload doesn't matter here)
+static bool send_frame(void) { return link_send_bulk(frame, sizeof frame); }
+static bool send_part(uint8_t fill, uint32_t n) {
     uint8_t bytes[WIRE_PART_MAX], msg[WIRE_MSG_MAX];
     memset(bytes, fill, n);
     uint32_t len = wire_encode_snapshot_part(bytes, n, msg);
@@ -254,13 +253,13 @@ static void test_server_silent(void) {
     run(24000);
     assert(state == WIFI_LOOKING && !fake_tcp.open);
     assert(!link_pc_connected() && link_pc_connection() == 0);
-    // While no server listens, the newest 16 KB are kept; an answer is never dropped.
-    assert(send_answer(41));
+    // While no server listens, the newest 16 KB are kept, the oldest dropped.
     char line[1001];
     memset(line, 'a', 999);
     line[999] = '\n';
     line[1000] = 0;
     for (int i = 0; i < 20; i++) { line[0] = (char)('A' + i); print(line); }
+    assert(send_answer(41));
     assert(control_len <= CONTROL_SIZE && control_dropped > 0);
     receive();
     server_connects(fake_ip(192, 168, 1, 11), 5000);
@@ -274,7 +273,7 @@ static void test_server_silent(void) {
     wire_answer_t a;
     for (uint32_t i = 0; i < n_got; i++) if (got[i].type == WIRE_ANSWER) assert(wire_decode_answer(&got[i], &a) && a.n == 41);
     assert(link_pc_connection() == 2);
-    printf("ok: silent server kept 30 s, then dropped; the newest 16 KB kept, the answer too\n");
+    printf("ok: silent server kept 30 s, then dropped; the newest 16 KB kept\n");
 }
 
 static void test_server_closes_or_fails(void) {
@@ -353,7 +352,7 @@ static void test_connection_numbers(void) {
 static void test_lanes(void) {
     receive();
     // Not a message of that lane: refused.
-    assert(!link_send_bulk((const uint8_t *)"\x03\x00\x00", 3).n);
+    assert(!link_send_bulk((const uint8_t *)"\x03\x00\x00", 3));
     uint8_t part_msg[WIRE_MSG_MAX] = {0};
     uint8_t one = 1;
     assert(!link_send_control(part_msg, wire_encode_snapshot_part(&one, 1, part_msg)));
@@ -362,31 +361,23 @@ static void test_lanes(void) {
     // Control before bulk: frames queued first, then a line, while TCP has no room;
     // when the server acknowledges, the line goes first.
     fake_sndbuf = 0;
-    link_ticket_t t1 = send_frame(), t2 = send_frame();
-    assert(t1.n && t2.n == t1.n + 1 && t1.connection == link_pc_connection() && link_bulk_state(t1) == LINK_BULK_QUEUED);
+    assert(send_frame() && send_frame());
     print("an answer would not wait\n");
     assert(send_answer(5));
     assert(fake_sent_len == 0);
     fake_server_acks();
     receive();
     assert(n_got == 4 && got[0].type == WIRE_CONSOLE && got[1].type == WIRE_ANSWER);
-    assert(got[2].type == frame[0] && got[3].type == frame[0] && link_bulk_state(t2) == LINK_BULK_SENT);
+    assert(got[2].type == frame[0] && got[3].type == frame[0] && bulk_len == 0);
 
     // Bulk is paced: at most BULK_IN_FLIGHT unacknowledged; first in, first out.
-    link_ticket_t last = {0, 0};
-    uint32_t first = 0;
-    for (int i = 0; i < 30; i++) {
-        link_ticket_t t = send_part((uint8_t)i, 400 + (uint32_t)i);
-        assert(t.n);
-        if (!first) first = t.n;
-        last = t;
-    }
-    assert(TCP_SND_BUF - fake_sndbuf <= BULK_IN_FLIGHT && fake_sent_len > 0 && link_bulk_state(last) == LINK_BULK_QUEUED);
+    for (int i = 0; i < 30; i++) assert(send_part((uint8_t)i, 400 + (uint32_t)i));
+    assert(TCP_SND_BUF - fake_sndbuf <= BULK_IN_FLIGHT && fake_sent_len > 0 && bulk_len > 0);
     print("between\n"); // control goes at once, past the bulk still queued
     assert(fake_sent_len <= BULK_IN_FLIGHT + 11);
-    for (int i = 0; i < 20 && link_bulk_state(last) != LINK_BULK_SENT; i++) fake_server_acks();
+    for (int i = 0; i < 20 && bulk_len; i++) fake_server_acks();
     receive();
-    assert(link_bulk_state(last) == LINK_BULK_SENT && count(WIRE_SNAPSHOT_PART) == 30 && count(WIRE_CONSOLE) == 1);
+    assert(bulk_len == 0 && count(WIRE_SNAPSHOT_PART) == 30 && count(WIRE_CONSOLE) == 1);
     uint32_t k = 0;
     for (uint32_t i = 0; i < n_got; i++) {
         if (got[i].type != WIRE_SNAPSHOT_PART) continue;
@@ -396,38 +387,28 @@ static void test_lanes(void) {
     assert(got[0].type == WIRE_SNAPSHOT_PART && got[n_got - 1].type == WIRE_SNAPSHOT_PART); // the line went among them
     printf("ok: control before bulk; bulk paced (%d B in flight) and first in, first out\n", BULK_IN_FLIGHT);
 
-    // A newer status replaces one still waiting.
+    // Status only while control is empty: a slow link doesn't pile them up.
     fake_sndbuf = 0;
-    status_calls = 0;
     run(1000);
-    assert(status_calls == 4);
     fake_server_acks();
     receive();
     assert(count(WIRE_STATUS) == 1);
-    printf("ok: a newer status replaces one still waiting\n");
+    printf("ok: status only while control is empty\n");
 
-    // Full: frames dropped and counted; they leave room for a snapshot part, which
-    // gets in; a part that doesn't fit is refused, not counted (its sender waits).
+    // Full: refused and counted, whatever the message; once it drains, all that got in goes.
     fake_sndbuf = 0; // nothing leaves
-    uint32_t dropped = link_bulk_dropped(), accepted = 0;
-    while (send_frame().n) accepted++;
-    assert(accepted == (BULK_SIZE - BULK_RESERVE) / sizeof frame);
-    assert(link_bulk_dropped() == dropped + 1);
-    for (int i = 0; i < 10; i++) assert(!send_frame().n);
-    assert(link_bulk_dropped() == dropped + 11);
-    link_ticket_t part = send_part(0xaa, WIRE_PART_MAX);
-    assert(part.n);
-    assert(!send_part(0xbb, WIRE_PART_MAX).n && link_bulk_dropped() == dropped + 11);
-    for (int i = 0; i < 40 && link_bulk_state(part) != LINK_BULK_SENT; i++) fake_server_acks();
+    uint32_t refused = bulk_refused, accepted = 0;
+    while (send_frame()) accepted++;
+    assert(accepted == BULK_SIZE / sizeof frame && bulk_refused == refused + 1);
+    assert(!send_part(0xaa, WIRE_PART_MAX) && bulk_refused == refused + 2);
+    for (int i = 0; i < 60 && bulk_len; i++) fake_server_acks();
     receive();
-    assert(link_bulk_state(part) == LINK_BULK_SENT && count(frame[0]) == accepted && count(WIRE_SNAPSHOT_PART) == 1);
-    assert(got[n_got - 1].type == WIRE_SNAPSHOT_PART && got[n_got - 1].payload[0] == 0xaa);
-    printf("ok: bulk full: %u frames in, the rest dropped and counted; the snapshot part got in, a second waits\n",
-           (unsigned)accepted);
+    assert(bulk_len == 0 && count(frame[0]) == accepted);
+    printf("ok: bulk full: %u frames in, the rest refused and counted\n", (unsigned)accepted);
 
     // The ring wraps: messages across its end go whole.
     for (int round = 0; round < 3; round++) {
-        for (int i = 0; i < 100; i++) assert(send_frame().n);
+        for (int i = 0; i < 100; i++) assert(send_frame());
         for (int i = 0; i < 60; i++) fake_server_acks();
         receive();
         assert(count(frame[0]) == 100 && bulk_len == 0);
@@ -438,17 +419,14 @@ static void test_lanes(void) {
 static void test_reconnect_mid_snapshot(void) {
     receive();
     fake_sndbuf = 2000; // a little goes, the rest waits
-    link_ticket_t t = {0, 0};
-    for (int i = 0; i < 20; i++) t = send_part((uint8_t)i, WIRE_PART_MAX);
-    assert(t.n && link_bulk_state(t) == LINK_BULK_QUEUED);
-    for (int i = 0; i < 5; i++) assert(send_frame().n);
-    uint32_t dropped = link_bulk_dropped(), conn = link_pc_connection();
+    for (int i = 0; i < 20; i++) assert(send_part((uint8_t)i, WIRE_PART_MAX));
+    for (int i = 0; i < 5; i++) assert(send_frame());
+    uint32_t conn = link_pc_connection();
     fake_tcp_fails();
     run(10);
-    // The queue for that connection is dropped (the frames counted); its tickets are
-    // gone, and the connection's number tells the sender it was lost.
-    assert(bulk_len == 0 && link_bulk_dropped() == dropped + 5 && link_bulk_state(t) == LINK_BULK_LOST && link_pc_connection() == 0);
-    assert(!send_part(1, 10).n && !send_frame().n && link_bulk_dropped() == dropped + 6); // no server: nothing queued
+    // The queue for that connection is dropped; nothing is queued without a server.
+    assert(bulk_len == 0 && link_pc_connection() == 0);
+    assert(!send_part(1, 10) && !send_frame());
     fake_sndbuf = FAKE_SNDBUF;
     fake_sent_len = 0;
     server_connects(fake_ip(192, 168, 1, 10), 4211);
@@ -456,11 +434,23 @@ static void test_reconnect_mid_snapshot(void) {
     receive();
     assert_hello_first();
     assert(count(WIRE_SNAPSHOT_PART) == 0);
-    printf("ok: a lost connection drops bulk (frames counted); hello first on the next\n");
+    // A clean close by the server (FIN), before the main loop has noticed: nothing
+    // more is handed to TCP.
+    fake_sndbuf = 0;
+    assert(send_part(2, 100));
+    fake_server_closes();
+    fake_sndbuf = FAKE_SNDBUF;
+    fake_server_acks();
+    assert(fake_sent_len == 0);
+    run(10);
+    assert(state == WIFI_LOOKING);
+    server_connects(fake_ip(192, 168, 1, 10), 4211);
+    receive();
+    printf("ok: a lost connection drops bulk; nothing goes on a closed one; hello first on the next\n");
 }
 
 // Console output under load on a slow server: printing never blocks, the oldest
-// console lines and status go to make room, every answer arrives, in order.
+// messages go to make room, the newest arrive in order.
 static void test_console_under_load(void) {
     receive();
     fake_sndbuf = 0;
@@ -472,84 +462,23 @@ static void test_console_under_load(void) {
         if (i % 100 == 0) assert(send_answer(1000 + (uint32_t)i));
         if (i % 10 == 0) run(1);
     }
-    assert(control_len <= CONTROL_SIZE && control_dropped > dropped && control_refused == 0);
+    assert(control_len <= CONTROL_SIZE && control_dropped > dropped);
     for (int i = 0; i < 10; i++) fake_server_acks();
     receive();
-    assert(count(WIRE_ANSWER) == 30);
-    uint32_t k = 0;
+    uint32_t last = 0, answers = 0;
     for (uint32_t i = 0; i < n_got; i++) {
         if (got[i].type != WIRE_ANSWER) continue;
         wire_answer_t a;
-        assert(wire_decode_answer(&got[i], &a) && a.n == 1000 + 100 * k);
-        k++;
+        assert(wire_decode_answer(&got[i], &a) && a.n > last);
+        last = a.n;
+        answers++;
     }
-    assert(strstr(console_text(), "line 2999 of"));
-    printf("ok: console under load: %u lines dropped to make room, every answer arrived, in order\n",
+    assert(answers > 0 && last == 3900 && strstr(console_text(), "line 2999 of"));
+    printf("ok: console under load: %u messages dropped to make room, the newest arrived in order\n",
            (unsigned)(control_dropped - dropped));
 }
 
-// The control lane full of answers only: a new one is refused and counted (they
-// never go to make room).
-static void test_control_full_of_answers(void) {
-    receive();
-    fake_sndbuf = 0;
-    uint32_t refused = control_refused, accepted = 0;
-    while (send_answer(500 + accepted)) accepted++;
-    assert(accepted == CONTROL_SIZE / (WIRE_HEADER + WIRE_ANSWER_SIZE) && control_refused == refused + 1);
-    print("a console line can't make room either\n");
-    assert(control_refused == refused + 2);
-    for (int i = 0; i < 10; i++) fake_server_acks();
-    receive();
-    assert(count(WIRE_ANSWER) == accepted && count(WIRE_CONSOLE) == 0);
-    printf("ok: control full of answers (%u): a new message refused and counted, none dropped\n", (unsigned)accepted);
-}
-
-// A command's snapshot answer: written once the last part is SENT (as snapshot.c
-// and commands.c do), so the PC gets it after every part.
-static void test_answer_after_snapshot(void) {
-    receive();
-    fake_sndbuf = 3000;
-    link_ticket_t last = {0, 0};
-    for (int i = 0; i < 25; i++) last = send_part((uint8_t)i, WIRE_PART_MAX);
-    for (int i = 0; i < 100 && link_bulk_state(last) != LINK_BULK_SENT; i++) {
-        assert(link_bulk_state(last) == LINK_BULK_QUEUED);
-        fake_server_acks();
-    }
-    assert(link_bulk_state(last) == LINK_BULK_SENT);
-    assert(send_answer(77));
-    fake_server_acks();
-    receive();
-    assert(count(WIRE_SNAPSHOT_PART) == 25 && got[n_got - 1].type == WIRE_ANSWER);
-    // Its connection lost after the last part reached TCP: lost, not sent.
-    link_ticket_t t = send_part(1, 100);
-    fake_server_acks();
-    assert(link_bulk_state(t) == LINK_BULK_SENT);
-    fake_tcp_fails();
-    assert(link_bulk_state(t) == LINK_BULK_LOST); // at once, before the main loop has noticed
-    run(10);
-    assert(link_bulk_state(t) == LINK_BULK_LOST);
-    fake_sndbuf = FAKE_SNDBUF;
-    server_connects(fake_ip(192, 168, 1, 10), 4211);
-    assert(link_bulk_state(t) == LINK_BULK_LOST); // a ticket of the old connection
-    // A clean close by the server (FIN), before the main loop has noticed: queued
-    // messages aren't handed to TCP and read lost, never sent.
-    receive();
-    fake_sndbuf = 0;
-    link_ticket_t q = send_part(2, 100);
-    assert(link_bulk_state(q) == LINK_BULK_QUEUED);
-    fake_server_closes();
-    assert(link_bulk_state(q) == LINK_BULK_LOST);
-    fake_sndbuf = FAKE_SNDBUF;
-    fake_server_acks(); // room again: nothing goes on the closed connection
-    assert(fake_sent_len == 0 && link_bulk_state(q) == LINK_BULK_LOST);
-    run(10);
-    assert(link_bulk_state(q) == LINK_BULK_LOST && state == WIFI_LOOKING);
-    server_connects(fake_ip(192, 168, 1, 10), 4211);
-    receive();
-    printf("ok: the answer after the snapshot's last part; a ticket is lost with its connection\n");
-}
-
-// TCP refuses hello (out of memory): the connection is closed, the server looked for again.
+// TCP refuses hello: the connection is no use, the server looked for again.
 static void test_hello_refused(void) {
     fake_server_closes();
     run(10);
@@ -563,7 +492,7 @@ static void test_hello_refused(void) {
     fake_tcp_write_err = ERR_OK;
     run(10);
     assert(write_errors == errors + 1 && state == WIFI_LOOKING && !fake_tcp.open && !link_pc_connected());
-    assert(strstr(log_text, "TCP refused the hello") && !strstr(log_text, "couldn't connect"));
+    assert(strstr(log_text, "couldn't connect"));
     fake_sent_len = 0;
     server_connects(fake_ip(192, 168, 1, 10), 4211);
     receive();
@@ -587,7 +516,7 @@ static void test_fallback_ip(void) {
 }
 
 int main(void) {
-    wire_header(frame, tof_format_message_type(TOF_FORMAT_COMPACT), TOF_COMPACT_BYTES);
+    wire_header(frame, tof_format_message_type(TOF_FORMAT_COMPACT), WIRE_TOF_HEADER + TOF_COMPACT_BYTES);
     test_join_fails_then_retries();
     test_finds_server_and_talks();
     test_full_send_buffer();
@@ -598,8 +527,6 @@ int main(void) {
     test_lanes();
     test_reconnect_mid_snapshot();
     test_console_under_load();
-    test_control_full_of_answers();
-    test_answer_after_snapshot();
     test_hello_refused();
     test_fallback_ip();
     printf("link_pc: all tests passed\n");
