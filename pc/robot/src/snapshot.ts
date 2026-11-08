@@ -25,16 +25,18 @@ export const TILE_BYTES = TILE_COLS * TILE_COLS / 2;
 // column_t (picoA/app/cell_map.h)
 export const COLUMN = { UNKNOWN: 0, BLOCKED: 1, OVERHANG: 2, NO_FLOOR: 3, DRIVABLE: 4, OPEN: 5 } as const;
 
-export interface SnapPose { tUs: number; x: number; y: number; yaw: number; pitch: number; roll: number; v: number; w: number; stationary: boolean; motorsOn: boolean; stopReason: number }
+// Times in a snapshot (robotClockUs) are PicoA's 32-bit clock, as the robot wrote
+// them: they wrap every 71.6 min. Order snapshots by seq or msg, not by these.
+export interface SnapPose { robotClockUs: number; x: number; y: number; yaw: number; pitch: number; roll: number; v: number; w: number; stationary: boolean; motorsOn: boolean; stopReason: number }
 export interface SnapCamera { number: number; lastRowUs: number; lineUs: number; exposureUs: number; gain: number; width: number; height: number; pixels: Buffer }
-export interface SnapColor { tUs: number; sequence: number; overload: boolean; raw: Buffer; lux: number | null; cie: { x: number; y: number } | null; xyz: { X: number; Y: number; Z: number } | null; channels: number[] }
+export interface SnapColor { robotClockUs: number; sequence: number; overload: boolean; raw: Buffer; lux: number | null; cie: { x: number; y: number } | null; xyz: { X: number; Y: number; Z: number } | null; channels: number[] }
 export interface SnapWindow { orgX: number; orgY: number; cellsX: number; cellsY: number; layers: number; cells: Buffer }
 export interface SnapTile { tx: number; ty: number; columns: Buffer }
 export interface SnapFeature { id: number; age: number; flags: number; x: number; y: number; dx: number; dy: number; strength: number; match: number }
 export interface SnapFeatures { seq: number; cameraNumber: number; features: SnapFeature[] }
 export interface Snapshot {
   version: number; length: number;
-  bootId: string; seq: number; tUs: number; why: string; action: string; endReason: string | null; actionsEnded: number;
+  bootId: string; seq: number; robotClockUs: number; why: string; action: string; endReason: string | null; actionsEnded: number;
   running: string; mode: string; mapClears: number; build: string;
   pose: SnapPose | null; tof: PosedFrame | null; camera: SnapCamera | null; color: SnapColor | null;
   window: SnapWindow | null; tiles: SnapTile[]; features: SnapFeatures | null;
@@ -62,7 +64,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
   if (zlib.crc32(b.subarray(0, length - 4)) !== b.readUInt32LE(length - 4)) throw new Error("snapshot: CRC error");
   if (b[4] !== SNAP_VERSION) throw new Error(`snapshot version ${b[4]}, this server reads ${SNAP_VERSION}`);
   const s: Snapshot = {
-    version: b[4], length, bootId: "", seq: 0, tUs: 0, why: "", action: "", endReason: null, actionsEnded: 0, running: "",
+    version: b[4], length, bootId: "", seq: 0, robotClockUs: 0, why: "", action: "", endReason: null, actionsEnded: 0, running: "",
     mode: "", mapClears: 0, build: "", pose: null, tof: null, camera: null, color: null, window: null, tiles: [],
     features: null,
   };
@@ -74,7 +76,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
       case SEC.HEAD:
         s.bootId = p.readUInt32LE(0).toString(16).padStart(8, "0");
         s.seq = p.readUInt32LE(4);
-        s.tUs = p.readUInt32LE(8);
+        s.robotClockUs = p.readUInt32LE(8);
         s.why = WHY[p[12]] ?? `why ${p[12]}`;
         s.action = text(p.subarray(13, 25));
         s.endReason = p[25] === 255 ? null : END_WORDS[p[25]] ?? `end ${p[25]}`;
@@ -86,7 +88,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
         break;
       case SEC.POSE: {
         const f = (i: number) => p.readFloatLE(4 + 4 * i);
-        s.pose = { tUs: p.readUInt32LE(0), x: f(0), y: f(1), yaw: f(2), pitch: f(3), roll: f(4), v: f(5), w: f(6),
+        s.pose = { robotClockUs: p.readUInt32LE(0), x: f(0), y: f(1), yaw: f(2), pitch: f(3), roll: f(4), v: f(5), w: f(6),
                    stationary: p[32] !== 0, motorsOn: p[33] !== 0, stopReason: p[34] };
         break;
       }
@@ -102,7 +104,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
       }
       case SEC.COLOR: {
         const raw = Buffer.from(p.subarray(9, 25)), overload = p[8] !== 0;
-        s.color = { tUs: p.readUInt32LE(0), sequence: p.readUInt32LE(4), overload, raw, ...colorOf(raw, overload) };
+        s.color = { robotClockUs: p.readUInt32LE(0), sequence: p.readUInt32LE(4), overload, raw, ...colorOf(raw, overload) };
         break;
       }
       case SEC.WINDOW: {

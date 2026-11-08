@@ -43,7 +43,8 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 ## 2. How to continue
 
 - **Each step:** built in the main session from this plan; one review pass after it
-  (no second review of the fixes). Then the next step.
+  (the guide in AGENTS.md, "Code review"; no second review of the fixes). Then the
+  next step.
 - **Simple first:** a rare case returns an error, is counted or is ignored; it isn't
   handled unless a robot test shows it matters. Tests cover the promised behaviour,
   not every corner.

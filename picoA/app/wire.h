@@ -28,8 +28,7 @@
 //
 // Every tof frame and imu batch names its move: the PC files it by that number,
 // however late it comes. An imu batch's records are evenly spaced: record i was
-// measured at t + i × period (the encoder takes the period from the first and last
-// record's times).
+// measured at t + i × period.
 #include <stdbool.h>
 #include <stdint.h>
 #include "link_msgs.h"
@@ -175,19 +174,17 @@ typedef struct {
 uint32_t wire_encode_move_end(const wire_move_end_t *e, uint8_t *out);
 bool wire_decode_move_end(const wire_msg_t *m, wire_move_end_t *e);
 
-// Up to WIRE_IMU_BATCH_MAX imu records of a move, oldest first, their t_us on PicoA's
-// clock (time_us_32()).
+// Up to WIRE_IMU_BATCH_MAX imu records of a move, oldest first, evenly spaced:
+// record i was measured at t_us + i × period_us. The records' own t_us is not on
+// the wire (the encoder ignores it, the decoder leaves it 0).
 typedef struct {
     uint32_t move;
     uint64_t t_us;         // the first record's time, since power-up
-    uint16_t period_us;    // decoded only: the encoder takes it from the records' times
+    uint16_t period_us;
     uint8_t n;             // records, 1-WIRE_IMU_BATCH_MAX
     imu_record_t records[WIRE_IMU_BATCH_MAX];
 } wire_imu_batch_t;
-// 0 if n is out of range. The period is the first to the last record's time over
-// n - 1 (rounded to µs; IMU_RECORD_PERIOD_US for one record).
-uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out);
-// The records' t_us are left 0: record i was measured at t_us + i × period_us.
+uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out); // 0 if n is out of range
 bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b);
 
 // A tof frame of a move, packed for `use` (tof_format.h), in its message (room for

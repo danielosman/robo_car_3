@@ -230,11 +230,9 @@ uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out) {
     if (b->n < 1 || b->n > WIRE_IMU_BATCH_MAX) return 0;
     uint16_t len = (uint16_t)(WIRE_IMU_BATCH_HEADER + b->n * WIRE_IMU_RECORD);
     uint8_t *p = out + wire_header(out, WIRE_IMU_BATCH, len);
-    uint32_t span = b->records[b->n - 1].t_us - b->records[0].t_us;
-    uint32_t period = b->n > 1 ? (span + (b->n - 1) / 2u) / (b->n - 1u) : IMU_RECORD_PERIOD_US;
     set32(p, b->move);
     set64(p + 4, b->t_us);
-    set16(p + 12, (uint16_t)(period > 0xffff ? 0xffff : period));
+    set16(p + 12, b->period_us);
     p[14] = b->n;
     for (int i = 0; i < b->n; i++) {
         uint8_t *r = p + WIRE_IMU_BATCH_HEADER + i * WIRE_IMU_RECORD;

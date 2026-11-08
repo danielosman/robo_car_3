@@ -121,8 +121,12 @@ static void ended(const move_t *m, move_end_t how) {
 static void send_batch(void) {
     if (!batch.n) return;
     static uint8_t msg[WIRE_HEADER + WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD];
+    // Evenly spaced (move_imu() starts a new batch at a gap): the period is the first
+    // to the last record's time over n - 1, rounded; the nominal one for one record.
+    uint32_t span = batch.records[batch.n - 1].t_us - batch.records[0].t_us;
     batch.move = cur.number;
     batch.t_us = clock_since_start_of(batch.records[0].t_us);
+    batch.period_us = (uint16_t)(batch.n > 1 ? (span + (batch.n - 1) / 2u) / (batch.n - 1u) : IMU_RECORD_PERIOD_US);
     uint32_t n = wire_encode_imu_batch(&batch, msg);
     if (link_send_bulk(msg, n)) cur.imu_sent++;
     else cur.imu_dropped++;

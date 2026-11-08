@@ -112,9 +112,9 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     await old.moveStart(boot, boot.moveStart({ move: 1, command: 3, kind: "drive", param: 0.25, tUs: 0xfffff000, preMs: 200, postMs: 200, refused: false }));
     const { packTof, unpackTof } = await import("./tof_format.ts");
     for (const n of [7, 8]) { // as the robot sends them: packed (yaw in 0.01°)
-      const f = unpackTof("compact", packTof("compact", { number: n, tUs: (0xfffff000 + n * 1000), periodUs: 100000, x: 1.25 + n / 100,
+      const f = unpackTof("compact", packTof("compact", { number: n, robotClockUs: (0xfffff000 + n * 1000) % 2 ** 32, periodUs: 100000, x: 1.25 + n / 100,
         y: -0.5, yaw: 0.75, pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones }));
-      await old.frame(boot, boot.frame("compact", 1, f.tUs, f));
+      await old.frame(boot, boot.frame({ format: "compact", move: 1, tUs: 30e6 + n * 1000, frame: f }));
     }
     // Its imu records: a batch of 10 and the last 3 (evenly spaced, as the wire carries them).
     const imu = (from: number, n: number) => ({ move: 1, records: Array.from({ length: n }, (_, i) => ({

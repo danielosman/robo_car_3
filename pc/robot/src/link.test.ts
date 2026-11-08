@@ -107,7 +107,7 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
     const batches: ImuBatch[] = [];
     link.on("imu", (b: ImuBatch) => { batches.push(b); events.push(`imu ${b.move}`); });
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 10 * k, signal: k, sigmaMm: 2, kind: k ? "sure" as const : "nothing" as const, targets: k ? 1 : 0 }));
-    const tof = (number: number): PosedFrame => ({ number, tUs: 100 * number, periodUs: 100000, x: 1.5, y: -0.25, yaw: 0.5, pitch: 0, turn: 0,
+    const tof = (number: number): PosedFrame => ({ number, robotClockUs: 100 * number, periodUs: 100000, x: 1.5, y: -0.25, yaw: 0.5, pitch: 0, turn: 0,
                                                     still: false, poseKnown: true, beyondMm: 2550, zones });
     const stream = Buffer.concat([
       encodeMoveStart(start), encodeTof("compact", 3, 5000, tof(50)), encodeMoveEnd(end), encodeTof("compact", 3, 5100, tof(51)), encodeImuBatch(imu),

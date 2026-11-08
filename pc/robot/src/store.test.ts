@@ -49,8 +49,10 @@ test("world points: the boot's mounting, the robot turned and moved", () => {
 
 const zones = (mm: number): Zone[] => Array.from({ length: 64 }, (_, k) =>
   ({ distanceMm: k % 9 ? mm + k : 0, signal: k, sigmaMm: 3, kind: k % 9 ? "sure" : "nothing", targets: k % 9 ? 1 : 0 }));
-const frame = (number: number, tUs: number, mm = 500): PosedFrame =>
-  ({ number, tUs, periodUs: 100000, x: 0.25, y: -0.5, yaw: 0.125, pitch: -0.015, turn: 0.01, still: false, poseKnown: true, beyondMm: 2550, zones: zones(mm) });
+// PicoA's 32-bit clock at a time since power-up (it starts 30 s before the wrap: common/clock_start.h).
+const robotClock = (sincePowerUpUs: number) => (2 ** 32 - 30e6 + sincePowerUpUs) % 2 ** 32;
+const frame = (number: number, robotClockUs: number, mm = 500): PosedFrame =>
+  ({ number, robotClockUs, periodUs: 100000, x: 0.25, y: -0.5, yaw: 0.125, pitch: -0.015, turn: 0.01, still: false, poseKnown: true, beyondMm: 2550, zones: zones(mm) });
 const pose = (x: number): LivePose => ({ x, y: 0, yaw: 0, mode: "manual", action: "drive", rssi: -60, at: 0 });
 // n imu records of move from PicoA's time t0, 9615 µs apart; counts from k (the int16 limits on the first).
 const imu = (move: number, t0: number, n: number, k = 0): ImuBatch => ({ move, records: Array.from({ length: n }, (_, i) => ({
@@ -64,17 +66,17 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     const t0 = 5e9; // µs since power-up, past 2^32: nothing wraps
     await store.status(boot, boot.status(pose(0)));
     void store.moveStart(boot, boot.moveStart({ move: 1, command: 4, kind: "drive", param: 0.5, tUs: t0, preMs: 200, postMs: 300, refused: false }));
-    void store.frame(boot, boot.frame("compact", 1, t0 + 50000, frame(11, (t0 + 50000))));
+    void store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: t0 + 50000, frame: frame(11, robotClock(t0 + 50000)) }));
     void store.imu(boot, boot.imu(imu(1, t0 - 30000, 10)));
     void store.status(boot, boot.status(pose(0.1)));
     // The move's end overtakes its last frame (control before bulk); the next move starts meanwhile.
     void store.moveEnd(boot, boot.moveEnd({ move: 1, end: "obstacle", tUs: (t0 + 150000), framesSent: 2, framesDropped: 1,
                                             moved: 0.3, rotated: 0.01, imuSent: 2, imuDropped: 0 }));
     void store.moveStart(boot, boot.moveStart({ move: 2, command: 5, kind: "watch", param: 60, tUs: (t0 + 200000), preMs: 200, postMs: 300, refused: false }));
-    void store.frame(boot, boot.frame("compact", 1, t0 + 150000, frame(12, (t0 + 150000))));
+    void store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: t0 + 150000, frame: frame(12, robotClock(t0 + 150000)) }));
     void store.imu(boot, boot.imu(imu(1, (t0 + 66150), 4, 100))); // move 1's last batch, late: after move 2's start
     void store.imu(boot, boot.imu(imu(2, (t0 + 210000), 10, 200)));
-    await store.frame(boot, boot.frame("compact", 2, t0 + 250000, frame(13, (t0 + 250000), 2600)));
+    await store.frame(boot, boot.frame({ format: "compact", move: 2, tUs: t0 + 250000, frame: frame(13, robotClock(t0 + 250000), 2600) }));
     await store.flush();
 
     const one = (await store.moveFrames("0badf00d", 1))!;
@@ -85,7 +87,7 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     close(one.move.endTS! - one.move.startTS!, 0.15, 1e-6);
     assert.deepEqual(one.frames.map(f => f.frame.number), [11, 12]); // 12 came after the end: still move 1's
     const f11 = one.frames[0];
-    assert.deepEqual(f11.frame, frame(11, (t0 + 50000))); // every field back as it went in
+    assert.deepEqual(f11.frame, frame(11, robotClock(t0 + 50000))); // every field back as it went in
     close(f11.tS - one.move.startTS!, 0.05, 1e-6);
     const two = (await store.moveFrames("0badf00d", 2))!;
     assert.deepEqual(two.frames.map(f => f.frame.number), [13]);
@@ -184,13 +186,13 @@ test("the server restarted in the middle of a move: the boot goes on, its messag
     let boot = await store.openBoot(hello, now, wall);
     const raw = (s: number) => s * 1e6; // µs since power-up, as the robot sends its times
     await store.moveStart(boot, boot.moveStart({ move: 1, command: 1, kind: "turn", param: 1, tUs: raw(28), preMs: 200, postMs: 200, refused: false }, wall + 28000));
-    await store.frame(boot, boot.frame("compact", 1, raw(29.5), frame(1, raw(29.5)), wall + 29500));
+    await store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: raw(29.5), frame: frame(1, robotClock(raw(29.5))) }, wall + 29500));
     await store.imu(boot, boot.imu(imu(1, raw(29.9), 10), wall + 29950));
     await store.flush();
     // The server stops and starts again: the boot is opened from the store.
     store = new Store(file);
     boot = await store.openBoot(hello, now, wall + 40000);
-    await store.frame(boot, boot.frame("compact", 1, raw(30.5), frame(2, raw(30.5)), wall + 40000));
+    await store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: raw(30.5), frame: frame(2, robotClock(raw(30.5))) }, wall + 40000));
     await store.imu(boot, boot.imu(imu(1, raw(30.5), 3), wall + 40000));
     await store.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: raw(31), framesSent: 2, framesDropped: 0, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }, wall + 41000));
     await store.flush();

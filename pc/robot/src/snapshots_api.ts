@@ -55,7 +55,7 @@ export async function listBoots(store: Store, bootFolders: BootFolders) {
 
 export async function listSnapshots(store: Store, boot: string) {
   if (!BOOT.test(boot)) throw new Error(`not a boot id: ${boot}`);
-  return store.query(`SELECT seq, strftime(arrived_at, '%H:%M:%S') AS arrived, t_us, why, action, end_reason, running, mode,
+  return store.query(`SELECT seq, strftime(arrived_at, '%H:%M:%S') AS arrived, robot_clock_us, why, action, end_reason, running, mode,
     round(x, 4) AS x, round(y, 4) AS y, round(yaw, 4) AS yaw, image IS NOT NULL AS has_image, round(lux, 1) AS lux, tiles
     FROM snapshots WHERE boot_id = '${boot}' ORDER BY seq`);
 }

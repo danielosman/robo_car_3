@@ -14,3 +14,14 @@ conventions"). These rules are about how to answer Daniel.
 - Numbers in a small table when there are several to compare.
 - End with what is open or what you need from Daniel, if anything.
 - Docs follow the same rules.
+
+## Code review
+
+- A code review follows Daniel's guide:
+  `~/code/home-page/sources/skills/strategic-code-review.md` (outside this repo).
+  Read it before any review.
+- In short: review as a long-term maintainer. Look at design first (deep modules,
+  small interfaces, one owner per rule), then correctness and whether the tests
+  check the promised behaviour.
+- Also flag overkill: code for rare cases that could just return an error, be
+  counted or be ignored (DATA_FLOW_PLAN.md, "Simple first").

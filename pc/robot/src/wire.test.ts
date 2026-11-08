@@ -114,7 +114,7 @@ function checkTof(bytes: Buffer): void {
   const m = decodeWhole(bytes);
   assert.ok(m.type === "tof" && m.format === "compact" && m.move === 12 && m.tUs === 4300000000);
   const t = m.frame;
-  assert.deepEqual([t.number, t.tUs, t.periodUs, t.x, t.y, t.still, t.poseKnown], [4000000000, 0xfffffff0, 66700, -1.234, 32, true, true]);
+  assert.deepEqual([t.number, t.robotClockUs, t.periodUs, t.x, t.y, t.still, t.poseKnown], [4000000000, 0xfffffff0, 66700, -1.234, 32, true, true]);
   assert.ok(Math.abs(t.yaw - -3) < 1e-4 && Math.abs(t.pitch - -0.0157) < 1e-4 && Math.abs(t.turn - 0.1) < 1e-4);
   for (const [k, z] of t.zones.entries()) {
     const kind = KINDS[k % 4], mm = kind === "nothing" ? 0 : k === 63 || 47 * k >= 2545 ? 2550 : Math.max(10, Math.floor((47 * k + 5) / 10) * 10);
@@ -185,9 +185,7 @@ test("every message encoded and decoded again", () => {
   // Times off the even spacing come back on it: the period from the first to the last.
   const jitter = sampleBatch(3);
   jitter.records[1].tUs += 40; jitter.records[2].tUs += 1;
-  const back = decodeWhole(encodeImuBatch(jitter));
-  assert.ok(back.type === "imu_batch");
-  assert.deepEqual(back.records.map(r => r.tUs - jitter.records[0].tUs), [0, 9616, 2 * 9616]);
+  assert.throws(() => encodeImuBatch(jitter), /evenly spaced/); // the robot rounds them (move.c), not the encoder
   assert.throws(() => encodeMoveStart({ move: 1, command: 0, kind: "fly", param: 0, tUs: 0, preMs: 0, postMs: 0, refused: false }));
   assert.throws(() => encodeAnswer({ n: 1, end: "maybe", has: 0, x: 0, y: 0, yaw: 0, moved: 0, rotated: 0, goal: 0, snapshot: 0 }));
 });

@@ -11,7 +11,7 @@ import type { ImuBatch } from "./wire.ts";
 const close = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
 
 const frame = (number: number): PosedFrame =>
-  ({ number, tUs: 0, periodUs: 100000, x: 0, y: 0, yaw: 0, pitch: 0, turn: 0, still: true, poseKnown: true, beyondMm: 2550, zones: [] });
+  ({ number, robotClockUs: 0, periodUs: 100000, x: 0, y: 0, yaw: 0, pitch: 0, turn: 0, still: true, poseKnown: true, beyondMm: 2550, zones: [] });
 
 test("messages numbered; times since power-up; frames under the move they name", () => {
   const b = new Boot("0badf00d", loadMounting());
@@ -21,11 +21,11 @@ test("messages numbered; times since power-up; frames under the move they name",
   close(start.tS, 29);
   b.moveEnd({ move: 1, end: "ok", tUs: 31e6, framesSent: 3, framesDropped: 0, moved: 0, rotated: 0.5, imuSent: 0, imuDropped: 0 });
   b.moveStart({ move: 2, command: 10, kind: "drive", param: 0.5, tUs: 31.5e6, preMs: 200, postMs: 200, refused: false });
-  const late = b.frame("compact", 1, 30.9e6, frame(7)); // move 1's, after its end and move 2's start
+  const late = b.frame({ format: "compact", move: 1, tUs: 30.9e6, frame: frame(7) }); // move 1's, after its end and move 2's start
   assert.equal(late.move, 1);
   close(late.tS, 30.9);
   // Past 2^32 µs (71.6 min): nothing wraps.
-  close(b.frame("compact", 2, 5000e6, frame(8)).tS, 5000);
+  close(b.frame({ format: "compact", move: 2, tUs: 5000e6, frame: frame(8) }).tS, 5000);
   assert.equal(b.messages, 6);
   // Seen again after a server restart: numbering goes on from the store's count.
   assert.equal(new Boot("0badf00d", loadMounting(), 6).stamp().msg, 7);

@@ -263,15 +263,17 @@ export function encodeMoveEnd(e: MoveEnd): Buffer {
   return header(TYPE.MOVE_END, p);
 }
 
-// The records' times go as the first and a period (from the first to the last, over
-// n - 1, rounded as the robot does): even spacing (the fake robot's replay, tests).
+// The records' times go as the first and the period between them, so they must be
+// evenly spaced, as decoded batches are (the fake robot's replay, tests); uneven ones
+// throw. The robot rounds an uneven batch to even spacing (picoA/app/move.c).
 export function encodeImuBatch(b: ImuBatch): Buffer {
   const n = b.records.length;
   if (n < 1 || n > IMU_BATCH_MAX) throw new Error(`an imu batch has 1-${IMU_BATCH_MAX} records, not ${n}`);
-  const p = Buffer.alloc(IMU_BATCH_HEADER + n * IMU_RECORD), first = b.records[0].tUs;
-  const span = b.records[n - 1].tUs - first;
-  const period = n > 1 ? Math.floor((span + Math.floor((n - 1) / 2)) / (n - 1)) : IMU_RECORD_PERIOD_US;
-  p.writeUInt32LE(b.move >>> 0, 0); writeTime(p, first, 4); p.writeUInt16LE(Math.min(0xffff, period), 12); p[14] = n;
+  const first = b.records[0].tUs, period = n > 1 ? b.records[1].tUs - first : IMU_RECORD_PERIOD_US;
+  if (!(period >= 0 && period <= 0xffff) || b.records.some((r, i) => r.tUs !== first + i * period))
+    throw new Error("an imu batch's records must be evenly spaced");
+  const p = Buffer.alloc(IMU_BATCH_HEADER + n * IMU_RECORD);
+  p.writeUInt32LE(b.move >>> 0, 0); writeTime(p, first, 4); p.writeUInt16LE(period, 12); p[14] = n;
   b.records.forEach((r, i) => [...r.accel, ...r.gyro].forEach((v, k) => p.writeInt16LE(v, IMU_BATCH_HEADER + i * IMU_RECORD + 2 * k)));
   return header(TYPE.IMU_BATCH, p);
 }

@@ -7,7 +7,7 @@
 // power-up, which never wrap: wire.ts). Frames and imu batches name their move
 // themselves.
 import type { Mounting } from "./mounting.ts";
-import type { ImuBatch, ImuRecord, MoveEnd, MoveStart } from "./wire.ts";
+import type { ImuBatch, ImuRecord, MoveEnd, MoveFrame, MoveStart } from "./wire.ts";
 import type { PosedFrame } from "./tof_format.ts";
 import type { LivePose } from "./link.ts";
 
@@ -42,8 +42,8 @@ export class Boot {
   moveStart(m: MoveStart, atMs = Date.now()): MoveStartRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }
   moveEnd(m: MoveEnd, atMs = Date.now()): MoveEndRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }
 
-  frame(format: string, move: number, tUs: number, frame: PosedFrame, atMs = Date.now()): FrameRow {
-    return { ...this.stamp(atMs), format, frame, move, tS: seconds(tUs) };
+  frame(f: MoveFrame, atMs = Date.now()): FrameRow {
+    return { ...this.stamp(atMs), format: f.format, frame: f.frame, move: f.move, tS: seconds(f.tUs) };
   }
 
   status(pose: LivePose, atMs = Date.now()): StatusRow { return { ...this.stamp(atMs), pose }; }

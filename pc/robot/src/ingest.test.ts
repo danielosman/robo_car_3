@@ -17,7 +17,7 @@ import { WIRE_VERSION, encodeHello, encodeImuBatch, encodeMoveEnd, encodeMoveSta
 import type { PosedFrame } from "./tof_format.ts";
 
 const zones = Array.from({ length: 64 }, () => ({ distanceMm: 500, signal: 9, sigmaMm: 3, kind: "sure" as const, targets: 1 }));
-const frame = (number: number): PosedFrame => ({ number, tUs: number * 100000, periodUs: 100000, x: 0, y: 0, yaw: 0, pitch: 0, turn: 0,
+const frame = (number: number): PosedFrame => ({ number, robotClockUs: number * 100000, periodUs: 100000, x: 0, y: 0, yaw: 0, pitch: 0, turn: 0,
                                                  still: true, poseKnown: true, beyondMm: 2550, zones });
 const start = (move: number, kind: string, refused: boolean): MoveStart =>
   ({ move, command: move, kind, param: 1, tUs: move * 1000, preMs: 200, postMs: 200, refused });

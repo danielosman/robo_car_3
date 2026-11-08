@@ -39,7 +39,7 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(first.mode, "manual");
   assert.equal(first.endReason, null);
   assert.equal(first.pose!.x, 1.25);
-  assert.equal(first.pose!.tUs, 4242);
+  assert.equal(first.pose!.robotClockUs, 4242);
   const tof = first.tof!;
   assert.ok(Math.abs(tof.x - 1.2) < 1e-6 && Math.abs(tof.yaw - 0.7) < 1e-4 && tof.poseKnown && tof.number === 1);
   assert.equal(tof.zones.length, 64);

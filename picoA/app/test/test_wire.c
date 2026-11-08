@@ -1,11 +1,11 @@
 // Host test for picoA/app/wire.c: the message table (every type's lane and lengths;
 // the ToF frames' types from tof_format, a collision found), every message encoded
 // and decoded again (move start and end, a tof frame in its message too, imu batches
-// of 1 and 10 records: the int16 limits, times across the wrap, the period from the
-// first and last record), the envelope's errors (not whole yet, unknown type, too long,
-// too short), what the encoders and decoders refuse, and the golden bytes both sides check
-// against (picoA/app/test/data/wire_golden.hex; pc/robot/src/wire.test.ts reads the
-// same file): each sample encoded here must give its line's bytes, and each line
+// of 1 and 10 records: the int16 limits, a time past 2^32 µs, the period), the
+// envelope's errors (not whole yet, unknown type, too long, too short), what the
+// encoders and decoders refuse, and the golden bytes both sides check against
+// (picoA/app/test/data/wire_golden.hex; pc/robot/src/wire.test.ts reads the same
+// file): each sample encoded here must give its line's bytes, and each line
 // must decode to its sample. After a change to the wire, write the file again with
 //   build/test_wire --write
 // (and raise WIRE_VERSION). Run from the repo root:
@@ -70,13 +70,12 @@ static bool same_status(const wire_status_t *a, const wire_status_t *b) {
            !strcmp(a->action, b->action) && a->rssi_dbm == b->rssi_dbm;
 }
 
-// The golden file's imu batches: ten records 9615 µs apart across the clock's wrap,
-// the first past 2^32 µs since power-up, the int16 limits and both signs; and one record.
+// The golden file's imu batches: ten records 9615 µs apart, the first past 2^32 µs
+// since power-up, the int16 limits and both signs; and one record.
 #define SAMPLE_T_US 5000000123ull
 static wire_imu_batch_t sample_batch(int n) {
-    wire_imu_batch_t b = {.move = 12, .t_us = SAMPLE_T_US, .n = (uint8_t)n};
+    wire_imu_batch_t b = {.move = 12, .t_us = SAMPLE_T_US, .period_us = IMU_RECORD_PERIOD_US, .n = (uint8_t)n};
     for (int i = 0; i < n; i++) {
-        b.records[i].t_us = 0xffffd000u + (uint32_t)i * IMU_RECORD_PERIOD_US;
         for (int k = 0; k < 3; k++) {
             b.records[i].accel[k] = (int16_t)(i * 1000 - k * 7);
             b.records[i].gyro[k] = (int16_t)(-i * 300 + k);
@@ -141,9 +140,7 @@ static void test_round_trips(void) {
            me2.moved_m == 0.31f && me2.rotated_rad == -0.125f && me2.imu_sent == 44 && me2.imu_dropped == 0xffffffffu);
     assert(!wire_decode_move_start(&m, &ms2)); // another type
 
-    // imu batches: 10 records evenly spaced (their PicoA times across the wrap) come
-    // back with the batch's time and period; one record gets the nominal period;
-    // times off the even spacing come back on it.
+    // imu batches of 1 and 10 records come back with their move, time, period and counts.
     for (int n = 1; n <= WIRE_IMU_BATCH_MAX; n += WIRE_IMU_BATCH_MAX - 1) {
         wire_imu_batch_t b = sample_batch(n), b2;
         m = take_whole(msg, wire_encode_imu_batch(&b, msg));
@@ -153,11 +150,6 @@ static void test_round_trips(void) {
         for (int i = 0; i < n; i++)
             assert(!memcmp(b.records[i].accel, b2.records[i].accel, 6) && !memcmp(b.records[i].gyro, b2.records[i].gyro, 6));
     }
-    wire_imu_batch_t jitter = sample_batch(3), j2;
-    jitter.records[1].t_us += 40;          // PicoB read it 40 µs late
-    jitter.records[2].t_us += 1;           // the period: (2 × 9615 + 1) / 2, rounded: 9616
-    m = take_whole(msg, wire_encode_imu_batch(&jitter, msg));
-    assert(wire_decode_imu_batch(&m, &j2) && j2.period_us == 9616);
     wire_imu_batch_t none = {.n = 0}, many = {.n = WIRE_IMU_BATCH_MAX + 1};
     assert(wire_encode_imu_batch(&none, msg) == 0 && wire_encode_imu_batch(&many, msg) == 0);
 

@@ -33,7 +33,7 @@ export function ingest(robot: RobotLink, store: Store, o: IngestOptions): { idle
   });
   robot.on("moveStart", (m: MoveStart) => inOrder(`move ${m.move}`, b => { void store.moveStart(b, b.moveStart(m)); }));
   robot.on("moveEnd", (m: MoveEnd) => inOrder(`move ${m.move}`, b => { void store.moveEnd(b, b.moveEnd(m)); }));
-  robot.on("frame", (f: MoveFrame) => inOrder(`frame ${f.frame.number}`, b => { void store.frame(b, b.frame(f.format, f.move, f.tUs, f.frame)); }));
+  robot.on("frame", (f: MoveFrame) => inOrder(`frame ${f.frame.number}`, b => { void store.frame(b, b.frame(f)); }));
   robot.on("imu", (batch: ImuBatch) => inOrder(`an imu batch of move ${batch.move}`, b => { void store.imu(b, b.imu(batch)); }));
   robot.on("pose", (p: LivePose) => inOrder("a status", b => { void store.status(b, b.status(p)); }));
   robot.on("snapshot", (bytes: Buffer) => {

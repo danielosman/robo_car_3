@@ -151,8 +151,8 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: k === 0 ? 0 : k === 1 ? 2550 : 300 + 10 * k, signal: k, sigmaMm: 5,
       kind: k === 0 ? "nothing" as const : k === 2 ? "unsure" as const : k === 3 ? "less_sure" as const : "sure" as const, targets: k ? 1 : 0 }));
     for (let n = 1; n <= 2; n++) {
-      await store.frame(boot, boot.frame("compact", 1, t0 + n * 100000, { number: 40 + n, tUs: (t0 + n * 100000), periodUs: 100000, x: 0.5, y: -0.25,
-        yaw: 0.1 * n, pitch: -0.01, turn: 0.02, still: n === 1, poseKnown: true, beyondMm: 2550, zones }));
+      await store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: t0 + n * 100000, frame: { number: 40 + n, robotClockUs: (t0 + n * 100000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25,
+        yaw: 0.1 * n, pitch: -0.01, turn: 0.02, still: n === 1, poseKnown: true, beyondMm: 2550, zones } }));
     }
     // Its imu records: a batch of 10 and its last 3.
     const records = (from: number, n: number) => Array.from({ length: n }, (_, i) =>
@@ -182,8 +182,8 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     // A move with frames dropped on the robot (the lane full) and lost with a dropped
     // connection (sent, never arrived): 1 stored of 3 sent, 2 dropped, 2 lost.
     await store.moveStart(boot, boot.moveStart({ move: 2, command: 8, kind: "drive", param: 0.5, tUs: t0 + 400000, preMs: 200, postMs: 200, refused: false }));
-    await store.frame(boot, boot.frame("compact", 2, t0 + 450000, { number: 50, tUs: t0 + 450000, periodUs: 100000, x: 0.5, y: -0.25, yaw: 0.2,
-      pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones }));
+    await store.frame(boot, boot.frame({ format: "compact", move: 2, tUs: t0 + 450000, frame: { number: 50, robotClockUs: (t0 + 450000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25, yaw: 0.2,
+      pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones } }));
     await store.moveEnd(boot, boot.moveEnd({ move: 2, end: "ok", tUs: t0 + 900000, framesSent: 3, framesDropped: 2, moved: 0.5, rotated: 0, imuSent: 3, imuDropped: 1 }));
     await store.imu(boot, boot.imu({ move: 2, records: records(40, 10) }));
     await store.imu(boot, boot.imu({ move: 2, records: records(53, 3) })); // 50-52 missing

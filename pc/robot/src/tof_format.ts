@@ -26,8 +26,11 @@ export type Kind = (typeof KINDS)[number];
 // One zone: its target (the first valid one), how sure, how many targets the sensor saw.
 export interface Zone { distanceMm: number; signal: number; sigmaMm: number; kind: Kind; targets: number }
 // A frame and where the robot was while it was measured (the map frame: m, rad).
+// robotClockUs: the middle of the measurement on PicoA's 32-bit clock, as packed; it
+// wraps every 71.6 min and is for the robot's own use. The PC times a frame by
+// MoveFrame.tUs (wire.ts: µs since power-up).
 export interface PosedFrame {
-  number: number; tUs: number; periodUs: number;
+  number: number; robotClockUs: number; periodUs: number;
   x: number; y: number; yaw: number; pitch: number; turn: number;
   still: boolean; poseKnown: boolean;
   beyondMm: number;  // a distance this far or farther is only "at least this far"
@@ -44,7 +47,7 @@ export function unpackTof(format: string, b: Buffer): PosedFrame {
   for (let i = 0, at = 21; i < TOF_ZONES; i++, at += 4)
     zones.push({ distanceMm: b[at] * 10, signal: b[at + 1], sigmaMm: b[at + 2], kind: KINDS[b[at + 3] & 3], targets: (b[at + 3] >> 2) & 7 });
   return {
-    number: b.readUInt32LE(0), tUs: b.readUInt32LE(4), periodUs: b.readUInt16LE(8) * 100,
+    number: b.readUInt32LE(0), robotClockUs: b.readUInt32LE(4), periodUs: b.readUInt16LE(8) * 100,
     x: b.readInt16LE(10) / 1000, y: b.readInt16LE(12) / 1000,
     yaw: b.readInt16LE(14) / CENTI_DEG, pitch: b.readInt16LE(16) / CENTI_DEG, turn: b.readInt16LE(18) / CENTI_DEG,
     poseKnown: (b[20] & FLAG_POSE_KNOWN) !== 0, still: (b[20] & FLAG_STILL) !== 0, beyondMm: COMPACT_BEYOND_MM, zones,
@@ -67,7 +70,7 @@ export function packTof(format: string, f: PosedFrame): Buffer {
   if (format !== "compact") throw new Error(`no ToF format ${format}`);
   const b = Buffer.alloc(TOF_COMPACT_BYTES);
   b.writeUInt32LE(f.number >>> 0, 0);
-  b.writeUInt32LE(f.tUs >>> 0, 4);
+  b.writeUInt32LE(f.robotClockUs >>> 0, 4);
   b.writeUInt16LE(Math.min(0xffff, Math.floor((f.periodUs + 50) / 100)), 8);
   b.writeInt16LE(i16(f.x * 1000), 10);
   b.writeInt16LE(i16(f.y * 1000), 12);

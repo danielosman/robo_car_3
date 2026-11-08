@@ -16,11 +16,13 @@
 //              world), snapshot_features, snapshot_tiles; the robot's map window as a
 //              BLOB (until step 6); the picture a PNG beside the database
 //   detect_runs, detections, map_objects, object_detections: objects (objects/db.ts)
-// Times: t_us is PicoA's clock as sent; t_s the boot's time since power-up (boot.ts);
-// arrived_at the PC's local time. msg numbers a boot's messages in the order they
-// came (the fake robot replays them in that order). The database is opened for each
-// operation and closed after it, so the duckdb command line can use it in between;
-// writes that come while one runs go together in the next.
+// Times: t_us and t_s are since power-up (µs as sent, s); robot_clock_us is PicoA's
+// 32-bit clock (it wraps every 71.6 min), kept only where the robot's own bytes hold
+// it (a packed frame, a snapshot); arrived_at the PC's local time. msg numbers a
+// boot's messages in the order they came (the fake robot replays them in that
+// order). The database is opened for each operation and closed after it, so the
+// duckdb command line can use it in between; writes that come while one runs go
+// together in the next.
 import { DuckDBInstance, timestampValue, type DuckDBAppender, type DuckDBConnection } from "@duckdb/node-api";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,8 +54,8 @@ CREATE TABLE IF NOT EXISTS moves (
   PRIMARY KEY (boot_id, move));
 CREATE TABLE IF NOT EXISTS frames (
   boot_id VARCHAR, number UBIGINT, move INTEGER, msg INTEGER, arrived_at TIMESTAMP, format VARCHAR,
-  t_us UBIGINT, t_s DOUBLE, period_ms DOUBLE,          -- the middle of the measurement (t_us: PicoA's 32-bit clock, as packed;
-                                                       -- t_s: since power-up), and how long it took
+  t_s DOUBLE, period_ms DOUBLE,                        -- the middle of the measurement (since power-up), how long it took
+  robot_clock_us UBIGINT,                              -- the middle on PicoA's 32-bit clock, as packed (wraps; the replay repacks it)
   x DOUBLE, y DOUBLE, yaw DOUBLE, pitch DOUBLE, turn DOUBLE,  -- m, rad (yaw wrapped); turn: during the frame
   still BOOLEAN, pose_known BOOLEAN, beyond_mm INTEGER);      -- beyond_mm: a distance this far is "at least"
 CREATE TABLE IF NOT EXISTS zones (                    -- row 1-8 top to bottom, col 1-8 left to right (README)
@@ -68,7 +70,7 @@ CREATE TABLE IF NOT EXISTS status (
   boot_id VARCHAR, msg INTEGER, arrived_at TIMESTAMP,
   x DOUBLE, y DOUBLE, yaw DOUBLE, mode VARCHAR, action VARCHAR, rssi INTEGER);
 CREATE TABLE IF NOT EXISTS snapshots (                -- picoA/app/snapshot.c
-  snap_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, msg INTEGER, t_us UBIGINT, arrived_at TIMESTAMP,
+  snap_id VARCHAR PRIMARY KEY, boot_id VARCHAR, seq INTEGER, msg INTEGER, robot_clock_us UBIGINT, arrived_at TIMESTAMP,
   why VARCHAR, action VARCHAR, end_reason VARCHAR, actions_ended INTEGER, running VARCHAR, mode VARCHAR,
   map_clears INTEGER, build VARCHAR, length INTEGER, bytes BLOB,  -- bytes: the snapshot as it came
   x DOUBLE, y DOUBLE, yaw DOUBLE, pitch DOUBLE, roll DOUBLE, v DOUBLE, w DOUBLE, stationary BOOLEAN, motors_on BOOLEAN,
@@ -309,7 +311,7 @@ export class Store {
       const d = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendDouble(v));
       const i = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendInteger(v));
       const t8 = (v: string | null) => (v === null ? a.appendNull() : a.appendVarchar(v));
-      a.appendVarchar(id); a.appendVarchar(s.bootId); a.appendInteger(s.seq); a.appendInteger(msg); a.appendUBigInt(BigInt(s.tUs));
+      a.appendVarchar(id); a.appendVarchar(s.bootId); a.appendInteger(s.seq); a.appendInteger(msg); a.appendUBigInt(BigInt(s.robotClockUs));
       a.appendTimestamp(at(arrivalMs));
       t8(s.why); t8(s.action); t8(s.endReason); a.appendInteger(s.actionsEnded); t8(s.running); t8(s.mode);
       a.appendInteger(s.mapClears); t8(s.build); a.appendInteger(s.length); a.appendBlob(new Uint8Array(bytes));
@@ -453,7 +455,7 @@ function appendFrame(fa: DuckDBAppender, za: DuckDBAppender, r: FrameRow): void 
   fa.appendVarchar(r.boot); fa.appendUBigInt(BigInt(f.number));
   fa.appendInteger(r.move);
   fa.appendInteger(r.msg); fa.appendTimestamp(at(r.atMs)); fa.appendVarchar(r.format);
-  fa.appendUBigInt(BigInt(f.tUs)); fa.appendDouble(r.tS); fa.appendDouble(f.periodUs / 1000);
+  fa.appendDouble(r.tS); fa.appendDouble(f.periodUs / 1000); fa.appendUBigInt(BigInt(f.robotClockUs));
   for (const v of [f.x, f.y, f.yaw, f.pitch, f.turn]) fa.appendDouble(v);
   fa.appendBoolean(f.still); fa.appendBoolean(f.poseKnown); fa.appendInteger(f.beyondMm);
   fa.endRow();
@@ -529,7 +531,7 @@ function framesOf(frames: Record<string, unknown>[], zones: Record<string, unkno
     return {
       format: String(f.format), move: Number(f.move), tS: Number(f.t_s),
       frame: {
-        number: n, tUs: Number(f.t_us), periodUs: Math.round(Number(f.period_ms) * 1000),
+        number: n, robotClockUs: Number(f.robot_clock_us), periodUs: Math.round(Number(f.period_ms) * 1000),
         x: Number(f.x), y: Number(f.y), yaw: Number(f.yaw), pitch: Number(f.pitch), turn: Number(f.turn),
         still: Boolean(f.still), poseKnown: Boolean(f.pose_known), beyondMm: Number(f.beyond_mm),
         zones: (byNumber.get(n) ?? []).map(z => ({ distanceMm: Number(z.distance_mm), signal: Number(z.signal), sigmaMm: Number(z.sigma_mm),

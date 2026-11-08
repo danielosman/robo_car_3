@@ -326,6 +326,20 @@ static void test_refused(void) {
     printf("ok: a move refused before it starts: start and end sent, a running move goes on\n");
 }
 
+// The time the PC gets: a time_us_32() time as µs since power-up, right across the
+// 32-bit wrap (before and after it), a little ahead of now, and after several wraps.
+static void test_since_start(void) {
+    uint64_t saved = fake_now_us;
+    fake_now_us = FAKE_CLOCK_WRAP_US + 1000;                                    // 1 ms after the wrap
+    assert(clock_since_start_of((uint32_t)(FAKE_CLOCK_WRAP_US - 2000)) == 30000000u - 2000);
+    assert(clock_since_start_of((uint32_t)fake_now_us) == 30000000u + 1000);
+    assert(clock_since_start_of((uint32_t)(fake_now_us + 500)) == 30000000u + 1500);
+    fake_now_us = FAKE_CLOCK_WRAP_US * 3 + 5;                                   // ~3.6 h after power-up
+    assert(clock_since_start_of((uint32_t)fake_now_us - 100) == fake_now_us - 100 - CLOCK_START_US);
+    fake_now_us = saved;
+    printf("ok: times to the PC: since power-up across the 32-bit wrap, slightly ahead, after several wraps\n");
+}
+
 static void test_frames_dropped(void) {
     reset();
     odom.stationary = true;
@@ -468,6 +482,25 @@ static void test_imu(void) {
     move_stop();
     printf("ok: a sensor 2 %% slow stays one batch with its own period; records while starting go too\n");
 
+    // Off the even spacing: the period from the first to the last record, rounded;
+    // one record gets the nominal period.
+    reset();
+    n_batches = 0;
+    move_start(MOVE_WATCH, 5, 58, &fake_actor);
+    t0 = time_us_32();
+    for (int k = 0; k < 3; k++) {
+        r = imu_rec(t0, k);
+        r.t_us += k == 1 ? 40u : (uint32_t)(k == 2); // PicoB read record 1 40 µs late, record 2 1 µs late
+        move_imu(&r);
+    }
+    move_stop();
+    move_start(MOVE_WATCH, 5, 59, &fake_actor);
+    r = imu_rec(t0, 5);
+    move_imu(&r);
+    move_stop();
+    assert(n_batches == 2 && batches[0].period_us == 9616 && batches[1].n == 1 && batches[1].period_us == IMU_RECORD_PERIOD_US);
+    printf("ok: the period: first to last over n - 1, rounded (9616 for 2 × 9615 + 1); the nominal for one record\n");
+
     // The bulk lane full: batches dropped and counted.
     reset();
     n_batches = 0;
@@ -489,6 +522,7 @@ int main(void) {
     test_still_settings();
     test_stops();
     test_refused();
+    test_since_start();
     test_frames_dropped();
     test_imu();
     printf("move: all tests passed\n");
