@@ -403,7 +403,7 @@ the action's own code (`behaviour`) runs inside the act phase, given to
   PC gets **move end**: how it ended (the answer's end word), the frames sent and
   dropped (the bulk lane full, or no server), the first and last frame number sent,
   how far it went and turned, the imu batches sent and dropped. The console says
-  "Move 12: 41 ToF frames sent, 0 dropped; 43 imu batches sent, 0 dropped".
+  "Drive 12: 41 ToF frames sent, 0 dropped; 43 imu batches sent, 0 dropped".
 
 A stop, PicoB lost or PicoB's safety stop ends a move at once, in any phase; a new
 move replaces the running one (the motors stay on). A move that can't start (blocked
@@ -423,15 +423,15 @@ the status.
 How each action drives, inside its move (above): one at a time, started by a command;
 a new one replaces the running one, `stop` stops it (`move_stop()`). When its move
 ends done or before an obstacle it prints what odometry measured. Kinds in the data:
-drive, turn, goto, watch.
+drive, rotate, goto, watch.
 
-- **Move** (`drive <cm>`): straight, negative = back, at ≤ 10 cm/s, slowing near
+- **Drive** (`drive <cm>`): straight, negative = back, at ≤ 10 cm/s, slowing near
   the end. **Stops 15 cm before an obstacle on the map:**
   from the front (back) edge to the nearest blocked or overhang cell on its path
   (the robot's 23.5 cm plus 5 cm each side), checked every loop while driving,
   slowing near the stop point; unknown cells count as free. Within 15 cm it doesn't
   start. Backwards only what the map already has stops it (the VL53 looks forward).
-- **Turn** (`rotate <deg>`): in place, + = left. A scan is `rotate 390` (the map is
+- **Rotate** (`rotate <deg>`): in place, + = left. A scan is `rotate 390` (the map is
   fed from every frame anyway).
 - **Watch** (`watch <s>`): turns towards the biggest VL53 movement and follows
   it: its angular speed (a line through the last 0.5 s) plus 2 × the angle still
@@ -453,7 +453,7 @@ yet: `behaviour` drives, and `commands` switches the motors off on stop.
 One command message from the PC each (its number and its text, `drive 50`; from the
 server's API, which numbers them), or one line `"<command> [#<n>]"` typed on USB
 (for debugging); nothing is done or printed by itself. `drive <cm>`, `rotate
-<deg>`, `goto <x cm> <y cm>`, `watch <s>`, `snapshot`, `clear_map`, `config pre_ms
+<deg>`, `goto <x cm> <y cm>`, `watch <s>`, `snap`, `clear_map`, `config pre_ms
 <ms>` and `config post_ms <ms>` (the moves' still times, 0-2000, from the next move
 on), `mode idle|manual`, `stop` (motors off, mode idle), `status` (pose, PicoB link,
 WiFi and the lanes, loop time over 10 s, RAM free, mode, snapshots, moves ended and
@@ -628,8 +628,8 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   colour reading as a swatch, the pose; the log; steering through the API: Idle /
   Manual, Stop (and space), drive, rotate and watch with a box for the number,
   snapshot, clear map, status. On the live view a click on the map
-  sends the robot there (`g<x>,<y>`). The old console page, `/console`, only shows
-  the log and the connection status.
+  sends the robot there (`g<x>,<y>`). (The old console page, `/console`, went on
+  8 Nov: the viewer shows everything it showed.)
 - **`snapshot.ts`, `snapshots_api.ts`**: a snapshot read (version 2; the ToF section a
   compact frame), stored with its bytes, each camera picture as
   `recordings/camera/<folder>/<seq>.png` (map pictures from `robot map --png` in

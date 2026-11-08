@@ -6,7 +6,7 @@
 //    faster), so the page shows that drive as it was;
 //  - takes command messages and answers each when it has ended, as a move with its
 //    start and end (no frames, no imu batches), sends its status 4 times a second and
-//    its console lines, and for `snapshot` the boot's next stored
+//    its console lines, and for `snap` the boot's next stored
 //    snapshot, one after another, in parts as the robot does. It drives its pose at
 //    the robot's speeds (10 cm/s, 29°/s); it knows no map, so it never meets an obstacle.
 //   npm run fakerobot -- <boot id> [--speed=<n>] [--no-replay]   (the database: ROBOT_DB, or recordings/robot2.duckdb)
@@ -22,7 +22,6 @@ import {
 } from "./wire.ts";
 
 const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, GOTO_MAX_M = 3, STILL_MS = 200;
-const KIND: Record<string, (typeof MOVE_KINDS)[number]> = { move: "drive", turn: "turn", goto: "goto", watch: "watch" };
 
 export interface FakeSnapshot { bytes: Buffer; seq: number; pose: { x: number; y: number; yaw: number } | null }
 
@@ -116,8 +115,8 @@ export class FakeRobot {
       const m = list[i];
       if (m.type === "move_start") { this.moves = Math.max(this.moves, m.start.move); this.socket.write(encodeMoveStart(m.start)); }
       else if (m.type === "move_end") this.socket.write(encodeMoveEnd(m.end));
-      else if (m.type === "frame") this.socket.write(encodeTof(m.frame.format, m.frame.move, m.frame.tUs, m.frame.frame));
-      else if (m.type === "imu") this.socket.write(encodeImuBatch(m.batch));
+      else if (m.type === "tof") this.socket.write(encodeTof(m.tof.format, m.tof.move, m.tof.tUs, m.tof.frame));
+      else if (m.type === "imu_batch") this.socket.write(encodeImuBatch(m.batch));
       else if (m.type === "status") {
         const p = m.pose;
         this.pose = { x: p.x, y: p.y, yaw: p.yaw };
@@ -171,10 +170,10 @@ export class FakeRobot {
   private wait(s: number) { let left = s; return () => (left -= STEP_S) <= 0; }
 
   // name as the robot prints it; a move: still STILL_MS before and after, as the robot's.
-  private begin(name: string, take: string, n: number, param: number, steps: (() => boolean)[], goal?: number): void {
+  private begin(name: string, kind: (typeof MOVE_KINDS)[number], n: number, param: number, steps: (() => boolean)[], goal?: number): void {
     this.end("replaced");
     if (this.mode === "idle") { this.mode = "manual"; this.say("Mode: manual\n"); }
-    const kind = KIND[take], move = ++this.moves;
+    const move = ++this.moves;
     this.socket.write(encodeMoveStart({ move, command: n, kind, param, tUs: this.timeUs(), preMs: STILL_MS, postMs: STILL_MS, refused: false }));
     this.action = { name, kind, n, move, steps: [this.wait(STILL_MS / 1000), ...steps, this.wait(STILL_MS / 1000)], start: { ...this.pose }, goal };
     this.say(`${name}: started\n`);
@@ -195,14 +194,14 @@ export class FakeRobot {
   private command(n: number, text: string): void {
     const num = (re: RegExp) => re.exec(text)?.slice(1).map(Number) ?? null;
     let v: number[] | null;
-    if ((v = num(/^drive (-?\d+)$/))) this.begin("Move", "move", n, v[0] / 100, [this.drive(v[0] / 100)]);
-    else if ((v = num(/^rotate (-?\d+)$/))) this.begin("Turn", "turn", n, v[0] * Math.PI / 180, [this.turn(v[0] * Math.PI / 180)]);
+    if ((v = num(/^drive (-?\d+)$/))) this.begin("Drive", "drive", n, v[0] / 100, [this.drive(v[0] / 100)]);
+    else if ((v = num(/^rotate (-?\d+)$/))) this.begin("Rotate", "rotate", n, v[0] * Math.PI / 180, [this.turn(v[0] * Math.PI / 180)]);
     else if ((v = num(/^watch (\d+)$/))) this.begin("Watch", "watch", n, v[0], [this.wait(v[0])]);
     else if ((v = num(/^goto (-?\d+) (-?\d+)$/))) {
       const dx = v[0] / 100 - this.pose.x, dy = v[1] / 100 - this.pose.y, d = Math.hypot(dx, dy), bearing = Math.atan2(dy, dx);
       const towards = Math.atan2(Math.sin(bearing - this.pose.yaw), Math.cos(bearing - this.pose.yaw));
       this.begin("Go to", "goto", n, d, [this.turn(towards), this.drive(Math.min(d, GOTO_MAX_M))], d);
-    } else if (text === "snapshot") this.sendSnapshot(n);
+    } else if (text === "snap") this.sendSnapshot(n);
     else if (text === "clear_map") { this.say("Map cleared\n"); this.socket.write(encodeMapCleared()); this.answer(n, "ok"); }
     else if (/^config (pre|post)_ms \d+$/.test(text)) { this.say(`Config: ${text.slice(7)}\n`); this.answer(n, "ok"); }
     else if (/^mode (idle|manual)$/.test(text)) {

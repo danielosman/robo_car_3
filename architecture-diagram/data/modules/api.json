@@ -1,0 +1,230 @@
+[
+  {
+    "id": "api.routes",
+    "name": "routes",
+    "origin": "api",
+    "path": "pc/robot/src/api/routes.ts",
+    "members": [
+      {
+        "name": "createApi",
+        "kind": "function",
+        "code": "function createApi("
+      },
+      {
+        "name": "POST /api/robot/:name",
+        "kind": "route",
+        "code": "app.post(\"/:name\", async c => {"
+      },
+      {
+        "name": "GET /api/robot/help/:name?",
+        "kind": "route",
+        "code": "app.get(\"/help/:name?\", c => {"
+      }
+    ]
+  },
+  {
+    "id": "api.queue",
+    "name": "queue",
+    "origin": "api",
+    "path": "pc/robot/src/api/queue.ts",
+    "members": [
+      {
+        "name": "QueueState",
+        "kind": "type",
+        "code": "interface QueueState"
+      },
+      {
+        "name": "CommandQueue",
+        "kind": "type",
+        "code": "class CommandQueue"
+      },
+      {
+        "name": "CommandQueue.submit",
+        "kind": "function",
+        "code": "submit(commands: Command[], sender: Sender, onAnswer: Tell): Promise<void> {"
+      },
+      {
+        "name": "CommandQueue.stop",
+        "kind": "function",
+        "code": "async stop(sender: Sender, onAnswer: Tell): Promise<void> {"
+      },
+      {
+        "name": "CommandQueue.state",
+        "kind": "function",
+        "code": "state(): QueueState {"
+      }
+    ]
+  },
+  {
+    "id": "api.runner",
+    "name": "runner",
+    "origin": "api",
+    "path": "pc/robot/src/api/runner.ts",
+    "members": [
+      {
+        "name": "RobotConnection",
+        "kind": "type",
+        "code": "interface RobotConnection"
+      },
+      {
+        "name": "Runner",
+        "kind": "type",
+        "code": "interface Runner"
+      },
+      {
+        "name": "StoredSnapshots",
+        "kind": "type",
+        "code": "class StoredSnapshots"
+      },
+      {
+        "name": "StoredSnapshots.add",
+        "kind": "function",
+        "code": "add(boot: string, seq: number): void {"
+      },
+      {
+        "name": "StoredSnapshots.newest",
+        "kind": "function",
+        "code": "newest(): number | null { return this.last; }"
+      },
+      {
+        "name": "StoredSnapshots.stored",
+        "kind": "function",
+        "code": "stored(seq: number, ms: number): Promise<boolean> {"
+      },
+      {
+        "name": "CommandRunner",
+        "kind": "type",
+        "code": "class CommandRunner"
+      },
+      {
+        "name": "CommandRunner.run",
+        "kind": "function",
+        "code": "async run(c: Command): Promise<Outcome> {"
+      }
+    ]
+  },
+  {
+    "id": "api.commands",
+    "name": "commands",
+    "origin": "api",
+    "path": "pc/robot/src/api/commands.ts",
+    "members": [
+      {
+        "name": "MoveName",
+        "kind": "type",
+        "code": "type MoveName"
+      },
+      {
+        "name": "CommandName",
+        "kind": "type",
+        "code": "type CommandName"
+      },
+      {
+        "name": "Command",
+        "kind": "type",
+        "code": "interface Command",
+        "bytes": 31
+      },
+      {
+        "name": "MoveSpec",
+        "kind": "type",
+        "code": "interface MoveSpec"
+      },
+      {
+        "name": "Parsed",
+        "kind": "type",
+        "code": "type Parsed"
+      },
+      {
+        "name": "parseSteer",
+        "kind": "function",
+        "code": "function parseSteer("
+      },
+      {
+        "name": "parseAction",
+        "kind": "function",
+        "code": "function parseAction("
+      },
+      {
+        "name": "commandText",
+        "kind": "function",
+        "code": "function commandText("
+      },
+      {
+        "name": "robotText",
+        "kind": "function",
+        "code": "function robotText("
+      },
+      {
+        "name": "isMove",
+        "kind": "function",
+        "code": "const isMove ="
+      },
+      {
+        "name": "withSnaps",
+        "kind": "function",
+        "code": "function withSnaps("
+      },
+      {
+        "name": "timeLimitMs",
+        "kind": "function",
+        "code": "function timeLimitMs("
+      }
+    ]
+  },
+  {
+    "id": "api.answers",
+    "name": "answers",
+    "origin": "api",
+    "path": "pc/robot/src/api/answers.ts",
+    "members": [
+      {
+        "name": "Sender",
+        "kind": "type",
+        "code": "type Sender"
+      },
+      {
+        "name": "Result",
+        "kind": "type",
+        "code": "type Result"
+      },
+      {
+        "name": "PoseOut",
+        "kind": "type",
+        "code": "interface PoseOut"
+      },
+      {
+        "name": "Answer",
+        "kind": "type",
+        "code": "interface Answer",
+        "bytes": 95
+      },
+      {
+        "name": "Outcome",
+        "kind": "type",
+        "code": "type Outcome",
+        "bytes": 80
+      },
+      {
+        "name": "failed",
+        "kind": "function",
+        "code": "const failed ="
+      },
+      {
+        "name": "yawDeg",
+        "kind": "function",
+        "code": "function yawDeg("
+      },
+      {
+        "name": "poseOut",
+        "kind": "function",
+        "code": "const poseOut ="
+      },
+      {
+        "name": "outcome",
+        "kind": "function",
+        "code": "function outcome("
+      }
+    ]
+  }
+]

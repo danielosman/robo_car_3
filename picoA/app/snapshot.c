@@ -29,7 +29,7 @@ typedef struct __attribute__((packed)) {
     uint32_t seq;           // counts the snapshots since power-up, from 1
     uint32_t t_us;          // when it was built
     uint8_t why;            // snapshot_why_t
-    char action[12];        // the move that ended last ("drive", "turn", "goto", "watch"), NUL-padded; "" if none yet
+    char action[12];        // the move that ended last ("drive", "rotate", "goto", "watch"), NUL-padded; "" if none yet
     uint8_t end_reason;     // how it ended (wire_end_t), 255 if none yet
     uint32_t actions_ended; // moves ended since power-up
     char running[12];       // the move running now, "" if none

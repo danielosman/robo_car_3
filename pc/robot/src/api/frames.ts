@@ -26,7 +26,7 @@ function imuLine(m: MoveRow, imu: ImuCount): string {
 }
 
 function moveLine(boot: string, folder: string | null, m: MoveRow, stored: number, imu: ImuCount): string {
-  const param = m.kind === "turn" ? `${r1((m.param ?? 0) * DEG)}°` : m.kind === "watch" ? `${m.param} s` : `${Math.round((m.param ?? 0) * 100)} cm`;
+  const param = m.kind === "rotate" ? `${r1((m.param ?? 0) * DEG)}°` : m.kind === "watch" ? `${m.param} s` : `${Math.round((m.param ?? 0) * 100)} cm`;
   const head = `boot ${boot}${folder ? ` (${folder})` : ""}, move ${m.move}: ${m.kind ?? "?"} ${param}, command ${m.command ?? "?"}, ` +
     `still ${m.preMs ?? "?"} ms before, ${m.postMs ?? "?"} ms after`;
   const end = m.end === null ? `not ended (yet); ${stored} frames stored`
@@ -70,7 +70,7 @@ export function framesJson(boot: string, folder: string | null, move: MoveRow, f
   return {
     boot, folder, frames_stored: frames.length, frames_lost: move.framesSent === null ? null : Math.max(0, move.framesSent - frames.length),
     imu_records_stored: imu.records, imu_records_missing: imu.missing, imu_batches_stored: imu.batches,
-    move: { ...move, units: "param: drive and goto m, turn rad, watch s; moved m, rotated rad; times s since power-up" },
+    move: { ...move, units: "param: drive and goto m, rotate rad, watch s; moved m, rotated rad; times s since power-up" },
     legend: "per frame 8 x 8 matrices, row 1 first, column 1 first; distance_mm (kind nothing: 0; beyond_mm or more: at least that far)",
     frames: frames.map(s => {
       const f = s.frame;
@@ -98,7 +98,7 @@ export function imuText(boot: string, folder: string | null, move: MoveRow, fram
 export function imuJson(boot: string, folder: string | null, move: MoveRow, imu: ImuCount, records: StoredImu[]) {
   return {
     boot, folder, imu_records_stored: imu.records, imu_records_missing: imu.missing, imu_batches_stored: imu.batches,
-    move: { ...move, units: "param: drive and goto m, turn rad, watch s; moved m, rotated rad; times s since power-up" },
+    move: { ...move, units: "param: drive and goto m, rotate rad, watch s; moved m, rotated rad; times s since power-up" },
     legend: IMU_LEGEND, records: records.map(r => ({ t_s: r.tS, t_us: r.tUs, accel: r.accel, gyro: r.gyro })),
   };
 }

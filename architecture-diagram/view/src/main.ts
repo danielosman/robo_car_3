@@ -39,15 +39,30 @@ function toHash(s: Selection): string {
   if (!s) return "";
   return s.kind === "node" ? `#node=${s.flow}/${s.step}` : `#${s.kind}=${s.id}`;
 }
+// A click on what is selected unselects it (the background doesn't).
 function select(s: Selection): void {
-  selection = s;
-  history.replaceState(null, "", toHash(s) || location.pathname);
+  selection = s && toHash(s) === toHash(selection) ? null : s;
+  history.replaceState(null, "", toHash(selection) || location.pathname);
   render();
 }
 function drag(id: string, x: number, y: number, done: boolean): void {
   positions.set(id, [x, y]);
   if (done) localStorage.setItem(STORE, JSON.stringify(Object.fromEntries(positions)));
   canvas.draw(layout(positions), selection, { select, drag });
+}
+
+// The side bars fold away; which are folded is kept in the browser.
+const FOLDED = "architecture-diagram/folded";
+function fold(which: "list" | "side", folded: boolean): void {
+  $("main").classList.toggle(`hide-${which}`, folded);
+  $(`fold-${which}`).textContent = `${folded ? "show" : "hide"} ${which === "list" ? "flows" : "details"}`;
+  const now = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? "[]") as string[]);
+  if (folded) now.add(which); else now.delete(which);
+  localStorage.setItem(FOLDED, JSON.stringify([...now]));
+}
+for (const which of ["list", "side"] as const) {
+  $(`fold-${which}`).addEventListener("click", () => fold(which, !$("main").classList.contains(`hide-${which}`)));
+  fold(which, (JSON.parse(localStorage.getItem(FOLDED) ?? "[]") as string[]).includes(which));
 }
 
 $("reset").addEventListener("click", () => {

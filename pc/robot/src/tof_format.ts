@@ -28,7 +28,7 @@ export interface Zone { distanceMm: number; signal: number; sigmaMm: number; kin
 // A frame and where the robot was while it was measured (the map frame: m, rad).
 // robotClockUs: the middle of the measurement on PicoA's 32-bit clock, as packed; it
 // wraps every 71.6 min and is for the robot's own use. The PC times a frame by
-// MoveFrame.tUs (wire.ts: µs since power-up).
+// TofMessage.tUs (wire.ts: µs since power-up).
 export interface PosedFrame {
   number: number; robotClockUs: number; periodUs: number;
   x: number; y: number; yaw: number; pitch: number; turn: number;

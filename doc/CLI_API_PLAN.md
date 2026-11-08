@@ -291,4 +291,5 @@ through the queue.
 21. `robot --help` and `robot <command> --help`, from the text the API serves.
 22. Recording and mode are set, not switched; the robot starts in manual; goto works in idle too.
 23. For safety, PicoB measures the largest jolt and tilt first; the stops are set from those numbers later.
-24. The old console page stays as it is for now.
+24. The old console page stays as it is for now. (Removed 8 Nov: the viewer at /
+    shows its log and status.)

@@ -7,11 +7,13 @@
 </head>
 <body>
   <header>
+    <button id="fold-list">hide flows</button>
     <b>RoboCar architecture</b>
     <span class="legend">ribbon width: bytes of one message (log scale) · circles: <span class="key pick"></span> pick (hollow) <span class="key turn"></span> turn (filled) <span class="key add"></span> add (dashed) · dashed: planned · grey: leaving</span>
     <button id="reset">reset layout</button>
+    <button id="fold-side">hide details</button>
   </header>
-  <main>
+  <main id="main">
     <aside id="list"></aside>
     <svg id="canvas"></svg>
     <aside id="side"></aside>

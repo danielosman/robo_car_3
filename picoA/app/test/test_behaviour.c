@@ -292,8 +292,8 @@ static float run(float seconds) {
 // Runs until the action ends (at most max_s); returns how long it ran (s).
 static float run_action(float max_s) {
     float seconds = 0;
-    while (move_busy() && seconds < max_s) { tick(); seconds += DT_US * 1e-6f; }
-    assert(!move_busy());
+    while (*move_running() && seconds < max_s) { tick(); seconds += DT_US * 1e-6f; }
+    assert(!*move_running());
     run(0.1f); // PicoB switches the motors off
     assert(!motors_wanted && !sim.motors_on && v == 0 && w == 0);
     return seconds;
@@ -309,7 +309,7 @@ static void watch_trial(unsigned seed, trial_t *t) {
     assert(move_open && last_start.kind == WIRE_MOVE_WATCH && last_start.param == 60); // a watch is a move
     float yaw = sim.yaw_rad;
     run(5);
-    assert(move_busy() && sim.yaw_rad == yaw && sim.motors_on && movement_log);
+    assert(*move_running() && sim.yaw_rad == yaw && sim.motors_on && movement_log);
     // Someone comes in on the right (-15 deg) walking right at 15 deg/s for 4 s, then
     // stops: the robot turns towards them and follows at their speed (one start, not
     // stop-and-go), lagging a few degrees; when they stop it doesn't run past them,
@@ -381,13 +381,13 @@ int main(void) {
 
     // Idle: nothing happens until asked, motors off.
     run(5);
-    assert(!move_busy() && !motors_wanted && !sim.motors_on && sim.yaw_rad == 0 && sim.x_m == 0);
+    assert(!*move_running() && !motors_wanted && !sim.motors_on && sim.yaw_rad == 0 && sim.x_m == 0);
     printf("ok: idle after start-up, motors off\n");
 
     // A scan: 390° left, then it stands still with the motors off (no turn to the
     // most open direction, no watching).
-    behaviour_turn(SCAN_RAD, 7);
-    assert(move_open && last_start.kind == WIRE_MOVE_TURN && last_start.command == 7 && fabsf(last_start.param - SCAN_RAD) < 1e-6f);
+    behaviour_rotate(SCAN_RAD, 7);
+    assert(move_open && last_start.kind == WIRE_MOVE_ROTATE && last_start.command == 7 && fabsf(last_start.param - SCAN_RAD) < 1e-6f);
     assert(last_start.pre_ms == 200 && last_start.post_ms == 200);
     float seconds = run_action(40);
     assert(!move_open && last_end.end == WIRE_END_OK && moves_started == 1);
@@ -445,18 +445,18 @@ int main(void) {
     // Turn 30° left and right, move 50 cm forward and back: on target, motors off after each.
     for (int k = 0; k < 2; k++) {
         float turn_rad = k ? -30 * RAD_PER_DEG : 30 * RAD_PER_DEG, before = sim.yaw_rad;
-        behaviour_turn(turn_rad, 0);
+        behaviour_rotate(turn_rad, 0);
         run_action(10);
         printf("turn %+.0f deg: turned %+.1f deg\n", (double)DEG(turn_rad), (double)DEG(sim.yaw_rad - before));
         assert(fabsf(DEG(sim.yaw_rad - before - turn_rad)) < 2);
     }
     // Face the right-hand wall (-y), away from the low box; 30 cm each way (the wall
     // is 80 cm away, and a move stops 15 cm before the first cell it shows in).
-    behaviour_turn(-wrap_pi(sim.yaw_rad) - 90 * RAD_PER_DEG, 0);
+    behaviour_rotate(-wrap_pi(sim.yaw_rad) - 90 * RAD_PER_DEG, 0);
     run_action(15);
     for (int k = 0; k < 2; k++) {
         float move_m = k ? -0.3f : 0.3f, x0 = sim.x_m, y0 = sim.y_m, c = cosf(sim.yaw_rad), sn = sinf(sim.yaw_rad);
-        behaviour_move(move_m, 0);
+        behaviour_drive(move_m, 0);
         run_action(15);
         float forward_m = c * (sim.x_m - x0) + sn * (sim.y_m - y0);
         printf("move %+.0f cm: moved %+.1f cm\n", (double)(move_m * 100), (double)(forward_m * 100));
@@ -469,7 +469,7 @@ int main(void) {
     // put down 45 cm ahead after the scan: the map finds it while driving.
     chair_there = true;
     float y0 = sim.y_m;
-    behaviour_move(0.5f, 0);
+    behaviour_drive(0.5f, 0);
     run_action(15);
     float gap_cm = (sim.y_m - EDGE_M - (CHAIR_Y + CHAIR_HALF)) * 100; // facing -y
     printf("move +50 cm towards a 20 cm box 45 cm ahead: moved %.1f cm, front edge %.1f cm from the box\n",
@@ -482,18 +482,18 @@ int main(void) {
     uint32_t endings_before = move_endings(NULL);
     float x0 = sim.x_m;
     y0 = sim.y_m;
-    behaviour_move(0.5f, 12);
-    assert(!move_busy() && !move_open && moves_started == moves_before + 1 && last_end.frames_sent == 0);
+    behaviour_drive(0.5f, 12);
+    assert(!*move_running() && !move_open && moves_started == moves_before + 1 && last_end.frames_sent == 0);
     assert(move_endings(&ended) == endings_before + 1 && ended.command == 12 && ended.how == MOVE_END_OBSTACLE);
     assert(ended.moved_m == 0 && ended.kind == MOVE_DRIVE && last_end.end == WIRE_END_OBSTACLE);
     run(1);
     assert(sim.x_m == x0 && sim.y_m == y0);
     // Back: only what the map has (the left-hand wall at +0.8 m, from the scan): the
     // first 50 cm is free, the second stops 15 cm (back edge to it) before the wall.
-    behaviour_move(-0.5f, 0);
+    behaviour_drive(-0.5f, 0);
     run_action(15);
     assert(last_end.end == WIRE_END_OK && fabsf(sim.y_m - y0 - 0.5f) < 0.02f);
-    behaviour_move(-0.5f, 0);
+    behaviour_drive(-0.5f, 0);
     run_action(15);
     gap_cm = (WALL_SIDE - sim.y_m - EDGE_M) * 100;
     printf("then back 50 cm twice: the second stopped with the back edge %.1f cm from the wall\n", (double)gap_cm);
@@ -505,20 +505,20 @@ int main(void) {
     // Stop ends a scan at once; a new action replaces the running one (the motors
     // stay on in between) and runs whole.
     yaw = sim.yaw_rad;
-    behaviour_turn(SCAN_RAD, 0);
+    behaviour_rotate(SCAN_RAD, 0);
     run(3);
     assert(sim.yaw_rad > yaw + 10 * RAD_PER_DEG);
     move_stop();
-    assert(!move_busy() && !motors_wanted && !move_open && last_end.end == WIRE_END_STOPPED);
+    assert(!*move_running() && !motors_wanted && !move_open && last_end.end == WIRE_END_STOPPED);
     run(1);
     assert(!sim.motors_on && w == 0);
     yaw = sim.yaw_rad;
-    behaviour_turn(30 * RAD_PER_DEG, 0);
+    behaviour_rotate(30 * RAD_PER_DEG, 0);
     run(0.5f);
     int before = moves_started;
-    behaviour_turn(-30 * RAD_PER_DEG, 0);
+    behaviour_rotate(-30 * RAD_PER_DEG, 0);
     assert(motors_wanted && last_end.end == WIRE_END_REPLACED && moves_started == before + 1 && move_open);
-    assert(last_start.kind == WIRE_MOVE_TURN && last_start.param < 0);
+    assert(last_start.kind == WIRE_MOVE_ROTATE && last_start.param < 0);
     run_action(10);
     assert(last_end.end == WIRE_END_OK);
     float after_replace = DEG(sim.yaw_rad - yaw);
@@ -596,7 +596,7 @@ int main(void) {
     moves_before = moves_started;
     endings_before = move_endings(NULL);
     behaviour_goto(sim.x_m + 0.02f, sim.y_m, 0, 30);
-    assert(!move_busy() && !move_open && moves_started == moves_before + 1 && last_end.frames_sent == 0);
+    assert(!*move_running() && !move_open && moves_started == moves_before + 1 && last_end.frames_sent == 0);
     assert(move_endings(&ended) == endings_before + 1 && ended.command == 30 && ended.how == MOVE_END_DONE);
     // Stopping before it: 50 cm short of the middle, measured along the way.
     behaviour_goto(0, -0.3f, 0.5f, 0);

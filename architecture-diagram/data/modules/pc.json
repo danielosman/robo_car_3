@@ -118,9 +118,9 @@
         "code": "interface Hello"
       },
       {
-        "name": "Answer",
+        "name": "RobotAnswer",
         "kind": "type",
-        "code": "interface Answer",
+        "code": "interface RobotAnswer",
         "bytes": 34
       },
       {
@@ -155,15 +155,15 @@
         "bytes": 135
       },
       {
-        "name": "Command",
+        "name": "RobotCommand",
         "kind": "type",
-        "code": "interface Command",
+        "code": "interface RobotCommand",
         "bytes": 26
       },
       {
-        "name": "MoveFrame",
+        "name": "TofMessage",
         "kind": "type",
-        "code": "interface MoveFrame",
+        "code": "interface TofMessage",
         "bytes": 289
       },
       {
@@ -366,9 +366,9 @@
         "code": "type MoveEndRow"
       },
       {
-        "name": "FrameRow",
+        "name": "TofRow",
         "kind": "type",
-        "code": "type FrameRow",
+        "code": "type TofRow",
         "bytes": 289
       },
       {
@@ -377,9 +377,9 @@
         "code": "type StatusRow"
       },
       {
-        "name": "ImuRow",
+        "name": "ImuBatchRow",
         "kind": "type",
-        "code": "type ImuRow",
+        "code": "type ImuBatchRow",
         "bytes": 135
       },
       {
@@ -403,9 +403,9 @@
         "code": "moveEnd(m: MoveEnd, atMs = Date.now()): MoveEndRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }"
       },
       {
-        "name": "Boot.frame",
+        "name": "Boot.tof",
         "kind": "function",
-        "code": "frame(f: MoveFrame, atMs = Date.now()): FrameRow {"
+        "code": "tof(f: TofMessage, atMs = Date.now()): TofRow {"
       },
       {
         "name": "Boot.status",
@@ -413,9 +413,9 @@
         "code": "status(pose: LivePose, atMs = Date.now()): StatusRow { return { ...this.stamp(atMs), pose }; }"
       },
       {
-        "name": "Boot.imu",
+        "name": "Boot.imuBatch",
         "kind": "function",
-        "code": "imu(batch: ImuBatch, atMs = Date.now()): ImuRow {"
+        "code": "imuBatch(batch: ImuBatch, atMs = Date.now()): ImuBatchRow {"
       }
     ]
   },
@@ -436,9 +436,9 @@
         "code": "const tofGeometry ="
       },
       {
-        "name": "Pose",
+        "name": "PitchedPose",
         "kind": "type",
-        "code": "interface Pose"
+        "code": "type PitchedPose"
       },
       {
         "name": "worldPoint",
@@ -511,14 +511,14 @@
         "code": "moveEnd(boot: Boot, row: MoveEndRow): Promise<void> { this.pending.ends.push(row); return this.queued(boot); }"
       },
       {
-        "name": "Store.frame",
+        "name": "Store.tof",
         "kind": "function",
-        "code": "frame(boot: Boot, row: FrameRow): Promise<void> { this.pending.frames.push(row); return this.queued(boot); }"
+        "code": "tof(boot: Boot, row: TofRow): Promise<void> {"
       },
       {
-        "name": "Store.imu",
+        "name": "Store.imuBatch",
         "kind": "function",
-        "code": "imu(boot: Boot, row: ImuRow): Promise<void> { this.pending.imu.push(row); return this.queued(boot); }"
+        "code": "imuBatch(boot: Boot, row: ImuBatchRow): Promise<void> {"
       },
       {
         "name": "Store.status",
@@ -607,234 +607,6 @@
         "name": "Log.tail",
         "kind": "function",
         "code": "tail(n: number): string[] {"
-      }
-    ]
-  },
-  {
-    "id": "pc.routes",
-    "name": "routes",
-    "origin": "pc",
-    "path": "pc/robot/src/api/routes.ts",
-    "members": [
-      {
-        "name": "createApi",
-        "kind": "function",
-        "code": "function createApi("
-      },
-      {
-        "name": "POST /api/robot/:name",
-        "kind": "route",
-        "code": "app.post(\"/:name\", async c => {"
-      },
-      {
-        "name": "GET /api/robot/help/:name?",
-        "kind": "route",
-        "code": "app.get(\"/help/:name?\", c => {"
-      }
-    ]
-  },
-  {
-    "id": "pc.queue",
-    "name": "queue",
-    "origin": "pc",
-    "path": "pc/robot/src/api/queue.ts",
-    "members": [
-      {
-        "name": "QueueState",
-        "kind": "type",
-        "code": "interface QueueState"
-      },
-      {
-        "name": "CommandQueue",
-        "kind": "type",
-        "code": "class CommandQueue"
-      },
-      {
-        "name": "CommandQueue.submit",
-        "kind": "function",
-        "code": "submit(commands: Command[], sender: Sender, onAnswer: Tell): Promise<void> {"
-      },
-      {
-        "name": "CommandQueue.stop",
-        "kind": "function",
-        "code": "async stop(sender: Sender, onAnswer: Tell): Promise<void> {"
-      },
-      {
-        "name": "CommandQueue.state",
-        "kind": "function",
-        "code": "state(): QueueState {"
-      }
-    ]
-  },
-  {
-    "id": "pc.runner",
-    "name": "runner",
-    "origin": "pc",
-    "path": "pc/robot/src/api/runner.ts",
-    "members": [
-      {
-        "name": "RobotConnection",
-        "kind": "type",
-        "code": "interface RobotConnection"
-      },
-      {
-        "name": "Runner",
-        "kind": "type",
-        "code": "interface Runner"
-      },
-      {
-        "name": "StoredSnapshots",
-        "kind": "type",
-        "code": "class StoredSnapshots"
-      },
-      {
-        "name": "StoredSnapshots.add",
-        "kind": "function",
-        "code": "add(boot: string, seq: number): void {"
-      },
-      {
-        "name": "StoredSnapshots.newest",
-        "kind": "function",
-        "code": "newest(): number | null { return this.last; }"
-      },
-      {
-        "name": "StoredSnapshots.stored",
-        "kind": "function",
-        "code": "stored(seq: number, ms: number): Promise<boolean> {"
-      },
-      {
-        "name": "CommandRunner",
-        "kind": "type",
-        "code": "class CommandRunner"
-      },
-      {
-        "name": "CommandRunner.run",
-        "kind": "function",
-        "code": "async run(c: Command): Promise<Outcome> {"
-      }
-    ]
-  },
-  {
-    "id": "pc.commands",
-    "name": "commands",
-    "origin": "pc",
-    "path": "pc/robot/src/api/commands.ts",
-    "members": [
-      {
-        "name": "MoveName",
-        "kind": "type",
-        "code": "type MoveName"
-      },
-      {
-        "name": "CommandName",
-        "kind": "type",
-        "code": "type CommandName"
-      },
-      {
-        "name": "Command",
-        "kind": "type",
-        "code": "interface Command",
-        "bytes": 31
-      },
-      {
-        "name": "MoveSpec",
-        "kind": "type",
-        "code": "interface MoveSpec"
-      },
-      {
-        "name": "Parsed",
-        "kind": "type",
-        "code": "type Parsed"
-      },
-      {
-        "name": "parseSteer",
-        "kind": "function",
-        "code": "function parseSteer("
-      },
-      {
-        "name": "parseAction",
-        "kind": "function",
-        "code": "function parseAction("
-      },
-      {
-        "name": "commandText",
-        "kind": "function",
-        "code": "function commandText("
-      },
-      {
-        "name": "robotText",
-        "kind": "function",
-        "code": "function robotText("
-      },
-      {
-        "name": "isMove",
-        "kind": "function",
-        "code": "const isMove ="
-      },
-      {
-        "name": "withSnaps",
-        "kind": "function",
-        "code": "function withSnaps("
-      },
-      {
-        "name": "timeLimitMs",
-        "kind": "function",
-        "code": "function timeLimitMs("
-      }
-    ]
-  },
-  {
-    "id": "pc.answers",
-    "name": "answers",
-    "origin": "pc",
-    "path": "pc/robot/src/api/answers.ts",
-    "members": [
-      {
-        "name": "Sender",
-        "kind": "type",
-        "code": "type Sender"
-      },
-      {
-        "name": "Result",
-        "kind": "type",
-        "code": "type Result"
-      },
-      {
-        "name": "PoseOut",
-        "kind": "type",
-        "code": "interface PoseOut"
-      },
-      {
-        "name": "Answer",
-        "kind": "type",
-        "code": "interface Answer",
-        "bytes": 95
-      },
-      {
-        "name": "Outcome",
-        "kind": "type",
-        "code": "type Outcome",
-        "bytes": 80
-      },
-      {
-        "name": "failed",
-        "kind": "function",
-        "code": "const failed ="
-      },
-      {
-        "name": "yawDeg",
-        "kind": "function",
-        "code": "function yawDeg("
-      },
-      {
-        "name": "poseOut",
-        "kind": "function",
-        "code": "const poseOut ="
-      },
-      {
-        "name": "outcome",
-        "kind": "function",
-        "code": "function outcome("
       }
     ]
   },

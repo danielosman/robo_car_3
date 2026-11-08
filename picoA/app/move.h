@@ -32,7 +32,7 @@
 #define MOVE_PRE_MS_DEFAULT  200
 #define MOVE_POST_MS_DEFAULT 200
 
-typedef enum { MOVE_DRIVE = WIRE_MOVE_DRIVE, MOVE_TURN = WIRE_MOVE_TURN, MOVE_GOTO = WIRE_MOVE_GOTO,
+typedef enum { MOVE_DRIVE = WIRE_MOVE_DRIVE, MOVE_ROTATE = WIRE_MOVE_ROTATE, MOVE_GOTO = WIRE_MOVE_GOTO,
                MOVE_WATCH = WIRE_MOVE_WATCH } move_kind_t;
 
 // How a move ended.
@@ -54,7 +54,7 @@ typedef struct {
     void (*end)(const odom_report_t *o, move_end_t how); // the move has ended, however; once
 } move_actor_t;
 
-// Starts a move: param is its parameter (drive: m, + = forward; turn: rad, + = left;
+// Starts a move: param is its parameter (drive: m, + = forward; rotate: rad, + = left;
 // go to: m to the goal; watch: s); command, the number of its command. A running
 // move ends first (replaced).
 void move_start(move_kind_t kind, float param, uint32_t command, const move_actor_t *actor);
@@ -62,7 +62,6 @@ void move_start(move_kind_t kind, float param, uint32_t command, const move_acto
 // reached): numbered, its start and end sent, nothing else; a running move goes on.
 void move_refused(move_kind_t kind, float param, uint32_t command, move_end_t how);
 void move_stop(void);   // ends the running move: the robot stands still, motors off
-bool move_busy(void);
 void move_update(void); // call every loop iteration, after the ToF pipeline
 // Every posed frame (main.c): during a move it goes to the PC, counted.
 void move_tof(const posed_frame_t *f);
@@ -98,5 +97,5 @@ uint32_t move_endings(move_record_t *last);
 bool move_next_ended(move_record_t *r);
 // How a move ended as the PC names it (wire_end_t; the safety stops by their reason).
 uint8_t move_wire_end(const move_record_t *r);
-const char *move_kind_name(move_kind_t kind); // "drive", "turn", "goto", "watch"
+const char *move_kind_name(move_kind_t kind); // "drive", "rotate", "goto", "watch"
 const char *move_running(void);               // the running move's kind name, "" if none

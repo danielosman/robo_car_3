@@ -21,7 +21,7 @@ the check and how to fill the data.
 |---|---|
 | **module** | C: a `.h` file and its `.c`, if any (`picoB/app/odometry.h`). TS: one `.ts` file. Browser: one `.js` file. One module, one box. |
 | **member** | a module's public functions and types. C: what the `.h` declares; TS: what the file exports, and a class's public methods (`RobotLink.sendCommand`); the HTTP routes and the WebSocket a TS file serves (kind `route`). Browser JS has no exports: its members are the top-level functions that talk to the server. A constant is a member only when a flow or a rate names it. |
-| **origin** | where a module runs: `picoB`, `common` (C in `common/`, built into both Picos), `picoA`, `pc` (the server and the CLI, `pc/robot/src`), `browser` (the two pages in `pc/robot/public`). |
+| **origin** | the area a module is drawn in: a program, or a part of one with its own interface. `picoB`, `common` (C in `common/`, built into both Picos), `picoA`, `pc` (the server, `pc/robot/src` outside `api/`), `api` (the command API in the server, `pc/robot/src/api`, reached over HTTP), `browser` (the viewer, `pc/robot/public`). |
 | **DTO** | the type of the data on a flow: a public type of some module (`odom_t`). A message's DTO is its payload type; the message constant (`MSG_LOG`) only when the payload has no type. |
 | **flow** | one piece of data's path through modules, as a list of steps. |
 | **change node** | a step where the data changes. Kinds: **pick** (keeps some fields), **turn** (changes the values or the type: a filter, a new clock, packing), **add** (joins other data in). |
@@ -34,8 +34,7 @@ is several boxes: watch is six (`watch`, `watch_tof`, `watch_camera`, `watch_obs
 ## In scope
 
 - The robot firmware (`picoA/app`, `picoB/app`, their `drivers/`, `common/`) and the
-  robot server and its two pages (`pc/robot`): the viewer at `/` (`app.js`) and the
-  console at `/console` (`console.js`, only shows the log and the status).
+  robot server and its page (`pc/robot`): the viewer at `/` (`app.js`).
 - `common/` holds the PicoA–PicoB link (`link.h`, `link_msgs.h`), the mounting, and
   helpers (`clock_start.h`, `crc32.h`, `geom.h`, `stamp.h`, `stats.h`, `units.h`).
 - Headers with only types (`tof_frame.h`, `watch_obs.h`) are boxes too.
@@ -167,7 +166,9 @@ Odometry on PicoB, and the tilt stop branching off it, as the code does it today
   and uses two fields gets a fat ribbon; the pick's node sits on its row.
 - From and to are the first and last step: not written twice.
 - `rate`: where the flow starts at a fixed rate, or where a step changes it;
-  `path` + `code` point at what sets it. Left out for flows on demand (a command).
+  `path` + `code` point at what sets it. An event can stand for a rate where it
+  replaces one ("when the window moves"), so a subflow doesn't show its parent's.
+  Left out for flows on demand (a command).
 - `parent`: the flow this one branches off. Its first step names a member the
   parent passes (a member step or a node's `at`), and carries what the parent
   carries after its last step there; a pick's `keeps` are fields of that type.
@@ -218,14 +219,18 @@ Found so far:
 | Date | Finding | Outcome |
 |---|---|---|
 | 8 Nov | `console.js` sent key presses over the WebSocket; the server ignored them since 14 Oct (`9b338ac`) | removed (Daniel's yes) |
-| 8 Nov | the console page at `/console` shows only what the viewer at `/` shows | open: remove the page? |
-| 8 Nov | names: two `Command` types on the PC (`wire.ts`: number and text; `api/commands.ts`: name and values), two `Answer` (`wire.ts`, `api/answers.ts`), two `Pose` (`link.ts` x, y, yaw; `store.ts` with pitch) | open |
+| 8 Nov | the console page at `/console` shows only what the viewer at `/` shows | removed (Daniel's yes) |
+| 8 Nov | names: two `Command` types on the PC (`wire.ts`: number and text; `api/commands.ts`: name and values), two `Answer` (`wire.ts`, `api/answers.ts`), two `Pose` (`link.ts` x, y, yaw; `store.ts` with pitch) | fixed: the wire's are `RobotCommand`, `RobotAnswer`; `store.ts`'s `PitchedPose` (`Pose` plus pitch) |
 | 8 Nov | the tilt check reads pitch and roll inside `drive_update`, which gets all of `odom_t` (it uses the speeds too) | none: the diagram shows it as it is |
-| 8 Nov | dead: `link_pc_settled` (`link_pc.h`) has no caller; `move_busy` (`move.h`) only tests call | open |
-| 8 Nov | built into PicoA but used only by host tests: the decoders of robot→PC messages (`wire_decode_hello`, `_console`, `_answer`, `_status`, `_move_start`, `_move_end`, `_imu_batch`) and `wire_encode_command`, `wire_encode_heartbeat`; on the PC `wireCheck` (tests only) | open: keep for the golden-bytes tests? |
-| 8 Nov | names: `rotate` (command word, PC `MoveName`) vs `turn` (move kind, `behaviour_turn`); `snap` (PC) vs `snapshot` (robot); a ToF message is `tof` (wire), `"frame"` (link event), `MoveFrame`, `FrameRow`; an imu batch is `imu_batch` (wire) vs `"imu"` (event); one command has two texts, `commandText` ("steer d50", log and answers) and `robotText` ("drive 50", the robot) | open |
-| 8 Nov | `odom_report_t.t_us` is stamped when the report is sent (`brain.c` `send_odom`), while `link_msgs.h` says "measured at t_us": the odometry is from the last IMU sample, up to ~2.4 ms earlier | open: to check |
+| 8 Nov | dead: `link_pc_settled` (`link_pc.h`) has no caller; `move_busy` (`move.h`) only tests call | removed (tests ask `move_running()`, "" when none runs) |
+| 8 Nov | built into PicoA but used only by host tests: the decoders of robot→PC messages (`wire_decode_hello`, `_console`, `_answer`, `_status`, `_move_start`, `_move_end`, `_imu_batch`) and `wire_encode_command`, `wire_encode_heartbeat`; on the PC `wireCheck` (tests only) | kept: one file owns the bytes both ways, and the linker leaves them out of the firmware (checked with `nm`; `wire.h` says so). The server now runs `wireCheck()` at start, as the robot runs `wire_check()` |
+| 8 Nov | names: `rotate` (command word, PC `MoveName`) vs `turn` (move kind, `behaviour_turn`); `snap` (PC) vs `snapshot` (robot); a ToF message is `tof` (wire), `"frame"` (link event), `MoveFrame`, `FrameRow`; an imu batch is `imu_batch` (wire) vs `"imu"` (event); one command has two texts, `commandText` ("steer d50", log and answers) and `robotText` ("drive 50", the robot) | fixed: the move kind is `rotate` everywhere (`MOVE_ROTATE`, `behaviour_rotate`; `behaviour_move` is `behaviour_drive`, its console lines "Drive:"); the robot's word is `snap`; the PC names messages as the wire does (`tof`, `imuBatch` events; `TofMessage`, `TofRow`, `ImuBatchRow`). The two texts stay: one echoes what was typed, one is the robot's words |
+| 8 Nov | `odom_report_t.t_us` is stamped when the report is sent (`brain.c` `send_odom`), while `link_msgs.h` says "measured at t_us": the odometry is from the last IMU sample, up to ~2.4 ms earlier | fixed in the comment: `t_us` is the send time (body.c learns the clocks from it); the ~2.4 ms age is ~0.1° at a fast turn, ignored |
 | 8 Nov | IMU records taken before PicoA's greeting are dropped and counted nowhere (`brain.c` `send_imu`; the comment says it is meant) | none: rare, at start-up |
+| 8 Nov | dead data: `odom_report_t.wheel_left_m`, `wheel_right_m` (8 B of 45, 50 a second) are sent to PicoA, which never reads them | planned: DATA_FLOW_PLAN.md step 4f |
+| 8 Nov | one rule in two places: IMU records PicoA can't place yet are held back by PicoB (`greeted`) and dropped by PicoA (`clock_known`) | planned: DATA_FLOW_PLAN.md step 4f (PicoA's rule only) |
+| 8 Nov | data: `house_map` had no flows; the odometry ribbon to `brain` said 416 Hz (brain reads at 50 Hz) | fixed in the data: flows `house-map`, `house-map-back`; the 50 Hz on `odom_get` |
+| 8 Nov | nothing checked that the PC's command words and move kinds match the robot's C (`commands.c`, `move.c` `kind_name`) | fixed: two tests in `pc/robot/src/api/commands.test.ts` read the C and compare |
 | 8 Nov | data: the `command` flow first went through `parseAction`; the viewer sends `steer`, which goes through `parseSteer` and `withSnaps` (auto snap) | fixed in the data |
 
 ## How to fill it

@@ -26,6 +26,11 @@
 //
 // Lanes (link_pc.h): control goes first; bulk is a queue behind it.
 //
+// Both directions are here, so one file owns the bytes: the robot uses the encoders
+// of its messages and the decoder of the command; the rest (the decoders of its own
+// messages, the encoders of command and heartbeat) are the PC's side, for the host
+// tests. The linker leaves those out of the firmware.
+//
 // Every tof frame and imu batch names its move: the PC files it by that number,
 // however late it comes. An imu batch's records are evenly spaced: record i was
 // measured at t + i × period.
@@ -148,12 +153,12 @@ bool wire_decode_status(const wire_msg_t *m, wire_status_t *s);
 uint32_t wire_encode_map_cleared(uint8_t *out);
 
 // A move (move.h): its start and its end.
-typedef enum { WIRE_MOVE_DRIVE, WIRE_MOVE_TURN, WIRE_MOVE_GOTO, WIRE_MOVE_WATCH, WIRE_MOVE_KINDS } wire_move_kind_t;
+typedef enum { WIRE_MOVE_DRIVE, WIRE_MOVE_ROTATE, WIRE_MOVE_GOTO, WIRE_MOVE_WATCH, WIRE_MOVE_KINDS } wire_move_kind_t;
 typedef struct {
     uint32_t move;         // counts the moves since power-up, from 1
     uint32_t command;      // the number of the command that started it (0: typed on USB without one)
     uint8_t kind;          // wire_move_kind_t
-    float param;           // drive: m (+ = forward); turn: rad (+ = left); go to: m to the goal; watch: s
+    float param;           // drive: m (+ = forward); rotate: rad (+ = left); go to: m to the goal; watch: s
     uint64_t t_us;         // when it started (since power-up)
     uint16_t pre_ms, post_ms; // the still times it stands before and after
     uint8_t flags;         // WIRE_MOVE_REFUSED

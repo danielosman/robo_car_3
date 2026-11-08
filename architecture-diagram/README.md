@@ -46,7 +46,8 @@ architecture-diagram/
   the box).
 - **Ribbon width:** the data's `bytes` (one message), on a log scale (from 8 B for
   pitch and roll to ~20 KB for a snapshot). Bytes, not bytes per second: the rate is
-  a label on the ribbon.
+  a label on the ribbon, where it starts or changes, on every ribbon from one
+  area into another, and on every ribbon of the selected flow.
 - **Change nodes:** small circles where the data changes; the ribbon after one has
   the new width. A node made by a member sits on that member's row.
 - **Subflows** start at the row where they leave the parent, beside its ribbon. A
@@ -55,6 +56,11 @@ architecture-diagram/
   roll inside (the pick's circle sits on its row).
 - **Built or planned:** planned things are dashed; ones the plan removes are greyed.
 - **A list of flows** (left): name, id, description, from → to.
+- **Selecting:** a click on a box, ribbon, circle or flow selects it; a second click
+  on it unselects it, and so does "unselect" at the top of the list. A click on the
+  background does nothing (a missed click doesn't lose the selection).
+- **Both side bars fold away** ("hide flows", "hide details" in the header; kept in
+  the browser).
 - **The side bar** (right), on a click:
   - a box: each member's declaration and comment, as in the code;
   - a ribbon or a flow in the list: description, rate, each step's type with its
@@ -83,9 +89,12 @@ architecture-diagram/
 
 ## Drawing
 
-- **Groups of boxes by origin**, left to right in `schema.ts`'s order: PicoB, common,
-  PicoA, PC, browser. common's boxes (C built into both Picos, among them the
-  PicoA–PicoB link) are drawn once, between the two Picos.
+- **Areas by origin**, left to right in `schema.ts`'s order: PicoB, common, PicoA,
+  PC server, PC command API, browser; each a dashed frame around its boxes, named at
+  its top (the frame follows a dragged box). common's boxes (C built into both
+  Picos, among them the PicoA–PicoB link) are drawn once, between the two Picos. The
+  command API (`pc/robot/src/api/`) runs in the server, but is its own area: its
+  interface is HTTP, the server's is the robot's link and the store.
 - **Inside a group**, boxes stack top to bottom in the order they first appear in
   `flows.json`; boxes on no flow go at the bottom. Dragging fixes the rest;
   positions are kept in the browser (localStorage), a button resets them.
@@ -117,6 +126,13 @@ npm run typecheck
 - `tools/lint.sh` runs the check and the typecheck: it needs `npm install` here too.
 - Libraries come from npm, none from a CDN: d3 (newest, 7.x now), TypeScript
   (newest, 7.x now), Vite.
+
+## Next (Daniel, 8 Nov)
+
+- **What a step carries, in full:** the side bar shows a type's declaration only on
+  the step that sets it (`dto`). Every step should show what it carries: the type's
+  fields and their types (from `carried`), not only its name. A step that carries
+  bytes says which format.
 
 ## Open
 

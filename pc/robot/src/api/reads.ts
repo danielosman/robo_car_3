@@ -88,7 +88,7 @@ const atMostOne = (args: string[], usage: string) => { if (args.length > 1) thro
 export const READS: Record<string, Read> = {
   status: {
     usage: "status",
-    help: "Shows the robot right now: where it is, its mode, the move running (moving: drive, turn, goto, watch),\n" +
+    help: "Shows the robot right now: where it is, its mode, the move running (moving: drive, rotate, goto, watch),\n" +
           "the WiFi signal, what runs and what waits in the queue, and the number of the newest snapshot.",
     async run({ live, queue, snapshots }) {
       const p = live.pose, q = queue.state();

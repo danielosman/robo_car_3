@@ -7,7 +7,7 @@
 // power-up, which never wrap: wire.ts). Frames and imu batches name their move
 // themselves.
 import type { Mounting } from "./mounting.ts";
-import type { ImuBatch, ImuRecord, MoveEnd, MoveFrame, MoveStart } from "./wire.ts";
+import type { ImuBatch, ImuRecord, MoveEnd, TofMessage, MoveStart } from "./wire.ts";
 import type { PosedFrame } from "./tof_format.ts";
 import type { LivePose } from "./link.ts";
 
@@ -15,10 +15,10 @@ import type { LivePose } from "./link.ts";
 export interface Stamp { boot: string; msg: number; atMs: number }
 export type MoveStartRow = Stamp & MoveStart & { tS: number };
 export type MoveEndRow = Stamp & MoveEnd & { tS: number };
-export type FrameRow = Stamp & { format: string; frame: PosedFrame; move: number; tS: number };
+export type TofRow = Stamp & { format: string; frame: PosedFrame; move: number; tS: number };
 export type StatusRow = Stamp & { pose: LivePose };
 // An imu batch: its move and its records, each with its time since power-up.
-export type ImuRow = Stamp & { move: number; records: (ImuRecord & { tS: number })[] };
+export type ImuBatchRow = Stamp & { move: number; records: (ImuRecord & { tS: number })[] };
 
 const seconds = (us: number) => us / 1e6;
 
@@ -42,13 +42,13 @@ export class Boot {
   moveStart(m: MoveStart, atMs = Date.now()): MoveStartRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }
   moveEnd(m: MoveEnd, atMs = Date.now()): MoveEndRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }
 
-  frame(f: MoveFrame, atMs = Date.now()): FrameRow {
+  tof(f: TofMessage, atMs = Date.now()): TofRow {
     return { ...this.stamp(atMs), format: f.format, frame: f.frame, move: f.move, tS: seconds(f.tUs) };
   }
 
   status(pose: LivePose, atMs = Date.now()): StatusRow { return { ...this.stamp(atMs), pose }; }
 
-  imu(batch: ImuBatch, atMs = Date.now()): ImuRow {
+  imuBatch(batch: ImuBatch, atMs = Date.now()): ImuBatchRow {
     return { ...this.stamp(atMs), move: batch.move, records: batch.records.map(r => ({ ...r, tS: seconds(r.tUs) })) };
   }
 }

@@ -28,7 +28,7 @@ import { ingest } from "./ingest.ts";
 import { BootFolders } from "./boot_folders.ts";
 import { Log } from "./log.ts";
 import { LiveRobot } from "./live.ts";
-import type { Hello, MoveStart } from "./wire.ts";
+import { wireCheck, type Hello, type MoveStart } from "./wire.ts";
 import { CommandRunner, StoredSnapshots } from "./api/runner.ts";
 import { CommandQueue } from "./api/queue.ts";
 import { createApi } from "./api/routes.ts";
@@ -76,14 +76,13 @@ async function main(): Promise<void> {
   const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true },
                                               recordingsDir: RECORDINGS_DIR, bootFolders, chat, modelName: MODEL }).fetch);
   await robot.start();
+  if (!wireCheck()) note("wire: the message table is wrong (two types share a number, or a ToF format is too big; wire.ts, tof_format.ts): the robot's messages can't be read");
   note(`server started; announcing on ${(announceTo.length ? announceTo : broadcastAddresses()).join(", ") || "no network"}; ` +
        `log ${path.relative(root, logPath)}; database ${path.relative(root, DB_PATH)}`);
 
   const files: Record<string, [string, string]> = {
     "/": ["app.html", "text/html"],
     "/app.js": ["app.js", "text/javascript"],
-    "/console": ["index.html", "text/html"],
-    "/console.js": ["console.js", "text/javascript"],
   };
   const server = http.createServer(async (req, res) => {
     if (/^\/api\/robot(\/|$|\?)/.test(req.url ?? "")) { await api(req, res); return; }

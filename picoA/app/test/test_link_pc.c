@@ -150,17 +150,17 @@ static bool send_answer(uint32_t n) {
 // --- the tests ---
 
 static void test_join_fails_then_retries(void) {
-    assert(!link_pc_connected() && !link_pc_settled());
+    assert(!link_pc_connected());
     assert(!send_answer(1) && control_len == 0); // WiFi off: there will be no server, nothing kept
     link_pc_start(BOOT, "Nov  7 2026", fill_status);
     assert(fake_inits == 1 && fake_joins == 1 && strcmp(fake_ssid, "TestNet") == 0);
     assert(fake_pm == CYW43_NONE_PM);
     assert(fake_udp.port == 4210 && fake_stdio && !fake_stdio->in_chars); // commands come as messages, not through stdin
     run(1000);
-    assert(state == WIFI_JOINING && !link_pc_settled());
+    assert(state == WIFI_JOINING);
     fake_link = CYW43_LINK_BADAUTH;
     run(10);
-    assert(state == WIFI_JOIN_FAILED && link_pc_settled() && fake_leaves == 1);
+    assert(state == WIFI_JOIN_FAILED && fake_leaves == 1);
     run(29 * 1000);
     assert(fake_joins == 1);
     run(1100);
@@ -188,7 +188,7 @@ static void test_finds_server_and_talks(void) {
     run(10);
     assert(state == WIFI_LOOKING && fake_tcp_connects == 0);
     server_connects(fake_ip(192, 168, 1, 10), 4211);
-    assert(link_pc_settled() && link_pc_connection() == 1);
+    assert(link_pc_connection() == 1);
     receive();
     assert_hello_first();
     assert(got[1].type == WIRE_CONSOLE && !strcmp(console_text(), "WiFi: before the server\na line in two prints\n"));

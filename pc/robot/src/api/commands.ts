@@ -36,11 +36,6 @@ export const MOVES: readonly MoveSpec[] = [
 export const ACTIONS: Record<Exclude<CommandName, MoveName>, readonly string[] | null> = {
   snap: null, stop: null, clear_map: null, mode: ["idle", "manual"], config: ["pre_ms", "post_ms"],
 };
-// The robot's word for each (picoA/app/commands.h).
-const ROBOT_NAME: Record<CommandName, string> = {
-  drive: "drive", rotate: "rotate", goto: "goto", watch: "watch",
-  snap: "snapshot", stop: "stop", clear_map: "clear_map", mode: "mode", config: "config",
-};
 
 const MOVE = new Map(MOVES.map(m => [m.name, m]));
 const isMoveName = (n: CommandName): n is MoveName => MOVE.has(n as MoveName);
@@ -100,11 +95,12 @@ export function commandText(c: Command): string {
 }
 
 // To the robot, in a command message with its number: "drive 50", "goto 120 40",
-// "mode idle", "config pre_ms 300", "snapshot".
+// "mode idle", "config pre_ms 300", "snap". The robot's words are the command names
+// (picoA/app/commands.h).
 export function robotText(c: Command): string {
   const words = isMoveName(c.name) ? null : ACTIONS[c.name];
   const values = words ? [words[c.values[0]], ...c.values.slice(1).map(String)] : c.values.map(String);
-  return [ROBOT_NAME[c.name], ...values].join(" ");
+  return [c.name, ...values].join(" ");
 }
 
 export const isMove = (c: Command) => isMoveName(c.name);

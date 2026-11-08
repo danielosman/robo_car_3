@@ -3,8 +3,10 @@
 // answers and to the robot, the snaps after moves, the time limits. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { commandText, parseAction, parseSteer, robotText, timeLimitMs, withSnaps, type Command } from "./commands.ts";
+import { readFileSync } from "node:fs";
+import { ACTIONS, MOVES, commandText, parseAction, parseSteer, robotText, timeLimitMs, withSnaps, type Command } from "./commands.ts";
 import { LIMITS } from "./firmware.ts";
+import { MOVE_KINDS } from "../wire.ts";
 
 const steer = (text: string) => {
   const p = parseSteer(text);
@@ -55,11 +57,30 @@ test("to the robot; a snap after each move; time limits", () => {
   const actions = [parseAction("config", "post_ms 500"), parseAction("mode", "idle"), parseAction("snap", "")]
     .map(p => (p as { commands: Command[] }).commands[0]);
   assert.deepEqual([...moves, ...actions].map(robotText),
-                   ["drive -40", "goto 120 40", "watch 60", "config post_ms 500", "mode idle", "snapshot"]);
+                   ["drive -40", "goto 120 40", "watch 60", "config post_ms 500", "mode idle", "snap"]);
   assert.equal(withSnaps(moves, true).map(commandText).join(" | "), "steer d-40 | snap | steer g120,40 | snap | steer w60 | snap");
   assert.ok(withSnaps(moves, true)[1].auto);
   assert.equal(withSnaps(moves, false).length, 3);
   assert.equal(timeLimitMs(commands("d100")[0]), (2 * 10 + 10) * 1000); // 1 m at 10 cm/s, twice, plus 10 s
   assert.equal(timeLimitMs(commands("w60")[0]), 130000);
   assert.equal(timeLimitMs({ name: "snap", values: [] }), 10000);
+});
+
+// The robot's C names the same things the PC sends (the PC sends its command names as
+// the robot's words, robotText): read from picoA/app, as firmware.ts reads the limits.
+const picoA = (file: string) => readFileSync(new URL(`../../../../picoA/app/${file}`, import.meta.url), "utf8");
+
+test("the robot's words: commands.c takes every command the PC sends, and only status besides (typed on USB)", () => {
+  const c = picoA("commands.c");
+  const robot = new Set([...c.matchAll(/IS\("(\w+)/g), ...c.matchAll(/IS_WORD\("(\w+)"\)/g)].map(m => m[1]));
+  const pc = [...MOVES.map(m => m.name), ...Object.keys(ACTIONS)];
+  assert.deepEqual([...robot].sort(), [...pc, "status"].sort());
+  // the words some commands take: mode idle|manual, config pre_ms|post_ms
+  const words = new Set([...c.matchAll(/strcmp\(word, "(\w+)"\)/g)].map(m => m[1]));
+  assert.deepEqual([...words].sort(), Object.values(ACTIONS).flatMap(w => w ?? []).sort());
+});
+
+test("the move kinds: move.c's kind_name is wire.ts's MOVE_KINDS, in order (the wire sends the index)", () => {
+  const names = /kind_name\[\] = \{([^}]*)\}/.exec(picoA("move.c"))![1].match(/"(\w+)"/g)!.map(s => s.slice(1, -1));
+  assert.deepEqual(names, [...MOVE_KINDS]);
 });

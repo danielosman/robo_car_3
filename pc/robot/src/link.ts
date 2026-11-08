@@ -82,8 +82,8 @@ export function broadcastAddresses(): string[] {
 // (number: a piece of the robot's stream arrived), "hello" (Hello), "text" (string:
 // a console line with its "\n"), "pose" (LivePose: a status), "done" (DoneRecord:
 // an answer), "mapCleared", "snapshot" (Buffer: one whole snapshot, not yet checked),
-// "moveStart" (MoveStart), "moveEnd" (MoveEnd), "frame" (MoveFrame: a tof frame),
-// "imu" (ImuBatch: up to 10 imu records); frames and imu batches are sent only during
+// "moveStart" (MoveStart), "moveEnd" (MoveEnd), "tof" (TofMessage: a tof frame),
+// "imuBatch" (ImuBatch: up to 10 imu records); frames and imu batches are sent only during
 // a move, each under its move's number. Each in the order it came.
 export class RobotLink extends EventEmitter {
   status: RobotStatus = { state: "waiting" };
@@ -202,8 +202,8 @@ export class RobotLink extends EventEmitter {
         case "map_cleared": this.emit("mapCleared"); break;
         case "move_start": this.emit("moveStart", withoutType(m)); break;
         case "move_end": this.emit("moveEnd", withoutType(m)); break;
-        case "tof": this.emit("frame", withoutType(m)); break;
-        case "imu_batch": this.emit("imu", withoutType(m)); break;
+        case "tof": this.emit("tof", withoutType(m)); break;
+        case "imu_batch": this.emit("imuBatch", withoutType(m)); break;
         case "snapshot_part":
           for (const snap of snapshots.push(m.bytes)) this.emit("snapshot", snap);
           if (snapshots.skipped) { this.emit("note", `snapshot parts: ${snapshots.skipped} bytes skipped (not a snapshot)`); snapshots.skipped = 0; }

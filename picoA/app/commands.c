@@ -26,7 +26,7 @@ static absolute_time_t greeting_time;
 
 static void greet(void) {
     printf("\nPicoA robot firmware. Commands, one per line: drive <cm>, rotate <deg>, goto <x cm> <y cm>,\n"
-           "watch <s>, snapshot, clear_map, config pre_ms|post_ms <ms>, mode idle|manual, stop, status\n");
+           "watch <s>, snap, clear_map, config pre_ms|post_ms <ms>, mode idle|manual, stop, status\n");
 }
 
 static void print_link(void) {
@@ -112,10 +112,10 @@ static void run(const char *line, uint32_t n) {
 #define IS_WORD(name) (strcmp(line, name) == 0)
     if (IS("drive %d", 1, &a) && within(a, -COMMAND_DRIVE_MAX_CM, COMMAND_DRIVE_MAX_CM)) {
         manual();
-        behaviour_move((float)a / 100, n);
+        behaviour_drive((float)a / 100, n);
     } else if (IS("rotate %d", 1, &a) && within(a, -COMMAND_ROTATE_MAX_DEG, COMMAND_ROTATE_MAX_DEG)) {
         manual();
-        behaviour_turn((float)a * RAD_PER_DEG, n);
+        behaviour_rotate((float)a * RAD_PER_DEG, n);
     } else if (IS("goto %d %d", 2, &a, &b) && within(a, -COMMAND_GOTO_MAX_CM, COMMAND_GOTO_MAX_CM) &&
                within(b, -COMMAND_GOTO_MAX_CM, COMMAND_GOTO_MAX_CM)) {
         manual();
@@ -123,7 +123,7 @@ static void run(const char *line, uint32_t n) {
     } else if (IS("watch %d", 1, &a) && within(a, COMMAND_WATCH_MIN_S, COMMAND_WATCH_MAX_S)) {
         manual();
         behaviour_watch((float)a, n);
-    } else if (IS_WORD("snapshot")) {
+    } else if (IS_WORD("snap")) {
         snapshot_request(SNAP_COMMAND, n);
     } else if (IS_WORD("clear_map")) {
         cell_map_clear();

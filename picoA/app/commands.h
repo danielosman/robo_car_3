@@ -6,7 +6,7 @@
 //   rotate <deg>           on the spot; + = left
 //   goto <x cm> <y cm>     a point on the map (its frame)
 //   watch <s>              turn towards movement for that long
-//   snapshot               one to the server (snapshot.h)
+//   snap                   a snapshot to the server (snapshot.h)
 //   clear_map
 //   config pre_ms <ms>     how long each move stands still before it acts (move.h), 0-2000
 //   config post_ms <ms>    ...and after; both 200 at power-up

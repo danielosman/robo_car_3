@@ -241,13 +241,13 @@ new database `pc/robot/recordings/robot2.duckdb`; `robot.duckdb` isn't touched).
 the server first. Robot on the floor, a room around it, the page open:
 1. `robot status`: note `"boot"`. The USB printout of `status` (or the log after
    `robot status`) ends with `Moves: 0 ended; still 200 ms before and 200 ms after each (config pre_ms, post_ms)`.
-2. `robot steer r90`: answered ok as before; the log shows `Turn 1: N ToF frames
+2. `robot steer r90`: answered ok as before; the log shows `Rotate 1: N ToF frames
    sent, 0 dropped` with N about 10 a second of the move (a 90° turn ~3-4 s: ~35).
    The turn starts ~0.2 s after the motors come on, and stops ~0.2 s before they go
    off. Then `robot steer d30 r-90`: two moves (2 and 3), each with its line.
 3. A watch: `robot steer w20`, walk across once: it turns towards you as before;
    then `Watch 4: ~200 ToF frames sent, 0 dropped`.
-4. `robot frames <boot> 1`: the turn: kind turn, `ended ok`, the frames sent and
+4. `robot frames <boot> 1`: the turn: kind rotate, `ended ok`, the frames sent and
    dropped (0), then each frame's pose (yaw growing) and its 8 × 8 distances; the
    bottom rows ~27 / 37 / 61 cm before the turn. `robot frames <boot> 4 --json |
    head -c 400`: the same as JSON. Paste the first 20 lines of each.
@@ -301,7 +301,7 @@ USB for PicoA's diagnostics: link, loop time, RAM), `m` → `robot map`, `z` →
 tof`, `v` → `robot features`, `5` (record 5 s) → `steer w5` with nothing moving. The
 prints `c` (camera blocks) and `o` / `k` (movement backgrounds) are gone: `robot
 camera` gives the picture; the backgrounds can't be seen any more. On USB, type the
-robot's own words (`drive 50`, `snapshot`).
+robot's own words (`drive 50`, `snap`).
 
 **Objects from the camera** (17 Oct; no robot needed: the model server on :8080
 (llama.cpp's router with `gemma-4-26b`, or `MODEL` in `pc/robot/.env`), `npm start` in `pc/robot/`, the page open;
@@ -491,7 +491,7 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
 2. Robot on USB, serial monitor open: the robot does nothing at start-up (motors
    off) and tries the WiFi.
 3. `npm ci` then `npm start` in `pc/robot/`; open **http://127.0.0.1:8081/** ("Waiting
-   for robot…"; the console alone is at /console). The first time, allow `node`
+   for robot…"). The first time, allow `node`
    to accept incoming connections.
 4. Expected ~3 s after power-up: "WiFi: connecting…", "WiFi: connected, IP …",
    "Server: found at …", "Server: connected" (`W` shows how it is connected). The
@@ -569,7 +569,7 @@ a piece of furniture 1-2 m away:
 **Thin legs on the map** (13 Oct; both Picos, the viewer open, manual mode). A chair
 or table with thin legs (2-4 cm) and a wall ~1 m behind them:
 1. Start 2 m from a leg, facing it, and `f` (or click just beyond the leg). Expected:
-   "Move stopped: obstacle N cm ahead (map)" with the front edge 15-25 cm from the
+   "Drive stopped: obstacle N cm ahead (map)" with the front edge 15-25 cm from the
    leg; the leg's column blocked (or an overhang) on the page.
 2. The same with the leg ~10 cm left or right of the robot's middle line: it still
    stops.
@@ -608,9 +608,9 @@ WiFi console, the server running). Paste the console log (or `pc/robot/logs/`):
 1. Flash `picoA_app`. Power up near the middle of the room (the map is 6 × 6 m
    around the power-up point), keep the robot still ~1 s.
 2. `s` (scan). Then turn (`t`) until it faces a piece of furniture 40-70 cm away
-   and `f`. Expected: "Move stopped: obstacle N cm ahead (map), moved M cm"; N is
+   and `f`. Expected: "Drive stopped: obstacle N cm ahead (map), moved M cm"; N is
    to the map's cell, so the real gap from the front edge is 15-25 cm. Measure it.
-3. `f` again: "Move: not moving: obstacle … closer than 15 cm", nothing moves.
+3. `f` again: "Drive: not moving: obstacle … closer than 15 cm", nothing moves.
 4. `r` (back), `f`: it backs off 50 cm ("the VL53 can't see behind…"). `r` again.
 5. Drive around the room with `t`, `f` and an `s` now and then; keep a finger on
    space for the first moves (thin legs and things under ~8 cm may be missed).

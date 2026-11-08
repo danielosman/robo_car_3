@@ -114,14 +114,14 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     for (const n of [7, 8]) { // as the robot sends them: packed (yaw in 0.01°)
       const f = unpackTof("compact", packTof("compact", { number: n, robotClockUs: (0xfffff000 + n * 1000) % 2 ** 32, periodUs: 100000, x: 1.25 + n / 100,
         y: -0.5, yaw: 0.75, pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones }));
-      await old.frame(boot, boot.frame({ format: "compact", move: 1, tUs: 30e6 + n * 1000, frame: f }));
+      await old.tof(boot, boot.tof({ format: "compact", move: 1, tUs: 30e6 + n * 1000, frame: f }));
     }
     // Its imu records: a batch of 10 and the last 3 (evenly spaced, as the wire carries them).
     const imu = (from: number, n: number) => ({ move: 1, records: Array.from({ length: n }, (_, i) => ({
       tUs: (0xfffff000 + (from + i) * 9615), accel: [from + i, -7, 16384] as [number, number, number],
       gyro: [32767, -32768, from] as [number, number, number] })) });
-    await old.imu(boot, boot.imu(imu(0, 10)));
-    await old.imu(boot, boot.imu(imu(10, 3)));
+    await old.imuBatch(boot, boot.imuBatch(imu(0, 10)));
+    await old.imuBatch(boot, boot.imuBatch(imu(10, 3)));
     await old.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: 0x5000, framesSent: 2, framesDropped: 0, moved: 0.25, rotated: 0, imuSent: 2, imuDropped: 0 })); // f32-exact, as the wire carries them
     await old.status(boot, boot.status(pose(1.55)));
     await old.flush();
@@ -156,7 +156,7 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     await new Promise(r => setTimeout(r, 100));
     await stored.idle();
     const own = (await store.moveFrames(boot.id, 2))!;
-    assert.deepEqual([own.move.kind, own.move.end, own.move.preMs], ["turn", "ok", 200]);
+    assert.deepEqual([own.move.kind, own.move.end, own.move.preMs], ["rotate", "ok", 200]);
     assert.equal(statSync(oldFile).mtimeMs, oldTime); // the old one only read
   } finally {
     robot?.stop();

@@ -8,6 +8,7 @@ export const ORIGINS = [
   { id: "common", label: "common (both Picos)" },
   { id: "picoA", label: "PicoA" },
   { id: "pc", label: "PC server" },
+  { id: "api", label: "PC command API" }, // pc/robot/src/api: runs in the server, its own interface (HTTP)
   { id: "browser", label: "Browser" },
 ] as const;
 export type Origin = (typeof ORIGINS)[number]["id"];

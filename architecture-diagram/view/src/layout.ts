@@ -4,14 +4,15 @@ import type { Flow, Module } from "../../data/schema.ts";
 import { carriedAlong, flows, isChange, memberById, modules, origins, rootFlow } from "./data.ts";
 
 export const BOX_W = 240, HEAD_H = 28, ROW_H = 16, PAD = 8;
-const COL_GAP = 70, GROUP_GAP = 160, MAX_COL_H = 1500, TOP = 40;
+const COL_GAP = 70, GROUP_GAP = 160, MAX_COL_H = 1500, TOP = 60, AREA_PAD = 18;
 
 export interface Box { module: Module; x: number; y: number; w: number; h: number; row: Map<string, number> }
 export interface End { box: Box; member: string; side: 1 | -1; x: number; y: number }
 export interface Ribbon { flow: Flow; root: Flow; from: End; to: End; bytes: number; rate?: string; showRate: boolean; width: number; stepIndex: number }
 export interface Node { flow: Flow; root: Flow; stepIndex: number; x: number; y: number }
-export interface GroupLabel { text: string; x: number; y: number }
-export interface Layout { boxes: Map<string, Box>; ribbons: Ribbon[]; nodes: Node[]; groups: GroupLabel[] }
+// An origin's area: a dashed frame around its boxes, its label at the top.
+export interface Area { text: string; x: number; y: number; w: number; h: number }
+export interface Layout { boxes: Map<string, Box>; ribbons: Ribbon[]; nodes: Node[]; areas: Area[] }
 
 export const boxHeight = (m: Module) => HEAD_H + m.members.length * ROW_H + PAD;
 export const rowY = (b: Box, member: string) => b.y + HEAD_H + (b.row.get(member) ?? 0) * ROW_H + ROW_H / 2;
@@ -59,10 +60,12 @@ export function layout(positions: Map<string, [number, number]>): Layout {
     const [x, y] = positions.get(m.id) ?? [0, 0];
     boxes.set(m.id, { module: m, x, y, w: BOX_W, h: boxHeight(m), row: new Map(m.members.map((mb, i) => [mb.name, i])) });
   }
-  const groups: GroupLabel[] = origins.flatMap(o => {
+  const areas: Area[] = origins.flatMap(o => {
     const mine = [...boxes.values()].filter(b => b.module.origin === o.id);
     if (!mine.length) return [];
-    return [{ text: o.label, x: Math.min(...mine.map(b => b.x)), y: Math.min(...mine.map(b => b.y)) - 14 }];
+    const x = Math.min(...mine.map(b => b.x)) - AREA_PAD, y = Math.min(...mine.map(b => b.y)) - AREA_PAD - 22;
+    const w = Math.max(...mine.map(b => b.x + b.w)) + AREA_PAD - x, h = Math.max(...mine.map(b => b.y + b.h)) + AREA_PAD - y;
+    return [{ text: o.label, x, y, w, h }];
   });
 
   const ribbons: Ribbon[] = [], nodes: Node[] = [];
@@ -97,7 +100,7 @@ export function layout(positions: Map<string, [number, number]>): Layout {
     });
   }
   spread(ribbons);
-  return { boxes, ribbons, nodes, groups };
+  return { boxes, ribbons, nodes, areas };
 }
 
 // Which side each end leaves from: the sides that face each other; both right when

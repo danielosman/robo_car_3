@@ -1,8 +1,8 @@
 #pragma once
 // What the robot does when a command asks for it (doc/ARCHITECTURE.md, actions): one
 // action at a time, nothing by itself.
-//   Move:  straight by distance_m (+ = forward, - = back), slowing down near the end.
-//   Turn:  in place by angle_rad (+ = left).
+//   Drive:  straight by distance_m (+ = forward, - = back), slowing down near the end.
+//   Rotate: in place by angle_rad (+ = left).
 //   Watch: for the given seconds, turn towards the biggest movement the VL53 sees
 //          (still or turning), following it at its own angular speed plus a
 //          correction, at most ~29°/s, never past where it was last seen; it starts
@@ -12,7 +12,7 @@
 //   Go to: a point on the map (its frame): turn in place towards it, then drive
 //          straight to it, steering a little to keep it ahead, and stop stop_m
 //          before it (measured along the way), or STOP_BEFORE_M before an obstacle
-//          on the map as Move does. At most GOTO_MAX_M at once: a goal farther away
+//          on the map as Drive does. At most GOTO_MAX_M at once: a goal farther away
 //          is gone towards. The turn and the distance come from the robot's own pose.
 // Each action is one move (move.h): the move switches the motors on and off, stands
 // still before and after, sends the move's start, end and frames, and ends it
@@ -30,8 +30,8 @@
 #define PATH_HALF_M      0.1675f   // HALF_WIDTH_M plus 5 cm: the path a move checks
 #define GOTO_MAX_M       3.0f      // a goal farther away: the robot goes this far towards it
 
-void behaviour_move(float distance_m, uint32_t command);
-void behaviour_turn(float angle_rad, uint32_t command);
+void behaviour_drive(float distance_m, uint32_t command);
+void behaviour_rotate(float angle_rad, uint32_t command);
 void behaviour_watch(float seconds, uint32_t command);
 void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t command);
 // Stopping, how it ended and what runs: move.h (move_stop(), move_endings(), move_running()).

@@ -25,13 +25,13 @@
 #define GOTO_STEER_RADPS 0.3f      // ...at most this
 // printf takes doubles; the (double) casts below are for printing only.
 
-typedef enum { DRIVE, TURN, WATCH, GOTO } action_t;
-static const char *const action_name[] = {"Move", "Turn", "Watch", "Go to"};
-static const move_kind_t kind_of[] = {MOVE_DRIVE, MOVE_TURN, MOVE_WATCH, MOVE_GOTO};
+typedef enum { DRIVE, ROTATE, WATCH, GOTO } action_t;
+static const char *const action_name[] = {"Drive", "Rotate", "Watch", "Go to"};
+static const move_kind_t kind_of[] = {MOVE_DRIVE, MOVE_ROTATE, MOVE_WATCH, MOVE_GOTO};
 
 // The action of the running move (its act phase: move.h).
 static action_t action;
-static float goal;              // DRIVE: metres (+ = forward); TURN: radians (+ = left); WATCH: seconds
+static float goal;              // DRIVE: metres (+ = forward); ROTATE: radians (+ = left); WATCH: seconds
 static odom_report_t start;     // the robot when the act phase began
 static absolute_time_t run_start;
 static bool following;          // watching: turning towards a movement
@@ -66,23 +66,23 @@ static float obstacle_gap_m(const odom_report_t *o, float dir, float look_m) {
                                    EDGE_M + STOP_BEFORE_M + look_m) - EDGE_M;
 }
 
-void behaviour_move(float distance_m, uint32_t number) {
+void behaviour_drive(float distance_m, uint32_t number) {
     const char *side = distance_m > 0 ? "ahead" : "behind";
     float gap_m = obstacle_gap_m(body_odom(), distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
     if (gap_m <= STOP_BEFORE_M + 0.01f) {
-        printf("Move: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
+        printf("Drive: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
                (double)(STOP_BEFORE_M * 100));
         move_refused(MOVE_DRIVE, distance_m, number, MOVE_END_OBSTACLE);
         return;
     }
     begin(DRIVE, distance_m, distance_m, number);
-    printf("Move: %.0f cm %s%s\n", (double)fabsf(distance_m * 100), distance_m > 0 ? "forward" : "back",
+    printf("Drive: %.0f cm %s%s\n", (double)fabsf(distance_m * 100), distance_m > 0 ? "forward" : "back",
            distance_m > 0 ? "" : " (the VL53 can't see behind: it stops only for what the map already has there)");
 }
 
-void behaviour_turn(float angle_rad, uint32_t number) {
-    begin(TURN, angle_rad, angle_rad, number);
-    printf("Turn: %.0f deg %s\n", (double)fabsf(angle_rad * DEG_PER_RAD), angle_rad > 0 ? "left" : "right");
+void behaviour_rotate(float angle_rad, uint32_t number) {
+    begin(ROTATE, angle_rad, angle_rad, number);
+    printf("Rotate: %.0f deg %s\n", (double)fabsf(angle_rad * DEG_PER_RAD), angle_rad > 0 ? "left" : "right");
 }
 
 void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t number) {
@@ -186,7 +186,7 @@ static void say_done(const odom_report_t *o) {
     float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
     if (action == DRIVE && obstacle_stop) {
         float dir = goal < 0 ? -1.0f : 1.0f;
-        printf("Move stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(obstacle_gap_m(o, dir, 0.1f) * 100),
+        printf("Drive stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(obstacle_gap_m(o, dir, 0.1f) * 100),
                dir > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
         return;
     }
@@ -240,7 +240,7 @@ static void act_begin(const odom_report_t *o) {
 // Runs the action; returns true when it is done.
 static bool step(const odom_report_t *o) {
     switch (action) {
-    case TURN: {
+    case ROTATE: {
         float dir = goal < 0 ? -1.0f : 1.0f;
         float remaining_rad = fabsf(goal) - dir * (o->yaw_rad - start.yaw_rad);
         if (remaining_rad <= 0) return true;

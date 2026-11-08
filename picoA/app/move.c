@@ -9,8 +9,8 @@
 #define START_TIMEOUT_US 3000000 // the motors switching on and the robot standing still
 #define POST_MAX_US      3000000 // post: PicoB not saying "still" after this long: it ends anyway
 
-static const char *const kind_name[] = {"drive", "turn", "goto", "watch"};  // in the data: status, snapshots, the PC
-static const char *const print_name[] = {"Move", "Turn", "Go to", "Watch"}; // in the console
+static const char *const kind_name[] = {"drive", "rotate", "goto", "watch"};  // in the data: status, snapshots, the PC
+static const char *const print_name[] = {"Drive", "Rotate", "Go to", "Watch"}; // in the console
 
 typedef struct {
     uint32_t number, command;
@@ -37,7 +37,6 @@ static uint32_t taken;
 
 const char *move_kind_name(move_kind_t k) { return (unsigned)k < WIRE_MOVE_KINDS ? kind_name[k] : "?"; }
 const char *move_running(void) { return phase == IDLE ? "" : kind_name[cur.kind]; }
-bool move_busy(void) { return phase != IDLE; }
 int move_pre_ms(void) { return pre_ms; }
 int move_post_ms(void) { return post_ms; }
 

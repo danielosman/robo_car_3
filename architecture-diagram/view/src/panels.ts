@@ -29,14 +29,16 @@ export function renderList(el: HTMLElement, colorOf: (f: Flow) => string, select
       <div class="ends">${esc(shortName(from))} → ${esc(shortName(to))}</div></li>`;
   };
   const children = (f: Flow): string => flows.filter(c => c.parent === f.id).map(c => item(c, true) + children(c)).join("");
-  el.innerHTML = h`<h2>Data flows</h2><ul>${tops.map(f => item(f, false) + children(f)).join("")}</ul>`;
+  el.innerHTML = h`<div class="list-head"><h2>Data flows</h2><button id="unselect" ${selected ? "" : "disabled"}>unselect</button></div>
+    <ul>${tops.map(f => item(f, false) + children(f)).join("")}</ul>`;
+  el.querySelector("#unselect")!.addEventListener("click", () => select(null));
   el.querySelectorAll<HTMLElement>("li[data-flow]").forEach(li => li.addEventListener("click", () => select({ kind: "flow", id: li.dataset.flow! })));
 }
 
 // --- the side bar ---
 export function renderSide(el: HTMLElement, s: Selection, errors: string[]): void {
   const problems = errors.length ? h`<div class="errors"><b>npm run resolve: ${errors.length} errors</b><ul>${errors.map(e => h`<li>${esc(e)}</li>`).join("")}</ul></div>` : "";
-  if (!s) { el.innerHTML = problems + `<p class="hint">Click a box, a ribbon, a circle or a flow. Drag boxes; scroll to zoom.</p>`; return; }
+  if (!s) { el.innerHTML = problems + `<p class="hint">Click a box, a ribbon, a circle or a flow; click it again to unselect. Drag boxes; scroll to zoom.</p>`; return; }
   if (s.kind === "module") el.innerHTML = problems + moduleHtml(moduleById.get(s.id) ?? null);
   else if (s.kind === "flow") el.innerHTML = problems + flowHtml(s.id);
   else el.innerHTML = problems + nodeHtml(s.flow, s.step);

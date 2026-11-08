@@ -254,11 +254,6 @@
         "code": "void move_stop("
       },
       {
-        "name": "move_busy",
-        "kind": "function",
-        "code": "bool move_busy("
-      },
-      {
         "name": "move_update",
         "kind": "function",
         "code": "void move_update("
@@ -554,11 +549,6 @@
         "code": "bool link_pc_connected("
       },
       {
-        "name": "link_pc_settled",
-        "kind": "function",
-        "code": "bool link_pc_settled("
-      },
-      {
         "name": "link_pc_print_status",
         "kind": "function",
         "code": "void link_pc_print_status("
@@ -610,14 +600,14 @@
     "path": "picoA/app/behaviour.h",
     "members": [
       {
-        "name": "behaviour_move",
+        "name": "behaviour_drive",
         "kind": "function",
-        "code": "void behaviour_move("
+        "code": "void behaviour_drive("
       },
       {
-        "name": "behaviour_turn",
+        "name": "behaviour_rotate",
         "kind": "function",
-        "code": "void behaviour_turn("
+        "code": "void behaviour_rotate("
       },
       {
         "name": "behaviour_watch",

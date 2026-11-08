@@ -37,7 +37,6 @@ typedef void (*link_pc_status_fn)(wire_status_t *s);
 void link_pc_start(uint32_t boot_id, const char *build, link_pc_status_fn status);
 void link_pc_update(void);       // call every loop iteration
 bool link_pc_connected(void);    // a server is listening
-bool link_pc_settled(void);      // the first attempt is over: connected, failed, or joined without finding a server for 5 s
 void link_pc_print_status(void); // the WiFi, the server, the lanes
 // The connection's number (counts up with each connection), 0 while there is none.
 // A different number means it was lost in between.

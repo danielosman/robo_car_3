@@ -15,7 +15,7 @@ import { RobotLink, type DoneRecord, type LivePose, type RobotStatus } from "./l
 import { packTof, unpackTof, type PosedFrame } from "./tof_format.ts";
 import {
   HAS, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole, encodeHello, encodeMapCleared, encodeMoveEnd, encodeMoveStart,
-  encodeImuBatch, encodeSnapshotPart, encodeStatus, encodeTof, type ImuBatch, type Message, type MoveEnd, type MoveFrame, type MoveStart,
+  encodeImuBatch, encodeSnapshotPart, encodeStatus, encodeTof, type ImuBatch, type Message, type MoveEnd, type TofMessage, type MoveStart,
 } from "./wire.ts";
 
 async function startLink(quietMs = 3000, dropMs = 6000) {
@@ -35,7 +35,7 @@ async function startLink(quietMs = 3000, dropMs = 6000) {
 }
 
 const hello = (version = WIRE_VERSION, bootId = "7a587226") => encodeHello({ version, bootId, build: "Nov  7 2026 18:00:00" });
-const status = (rssi = -60) => encodeStatus({ x: 0.01, y: 0.02, yaw: 0.5, mode: "manual", action: "turn", rssi });
+const status = (rssi = -60) => encodeStatus({ x: 0.01, y: 0.02, yaw: 0.5, mode: "manual", action: "rotate", rssi });
 
 // A robot: what it received from the server, as messages.
 async function robot(port: number, first: Buffer | null = hello()) {
@@ -69,7 +69,7 @@ test("announces itself; hello first; console lines, status, commands, heartbeats
     await until(() => link.status.state === "connected" && link.status.rssi === -60);
     assert.equal(poses.length, 1);
     const p = poses[0];
-    assert.deepEqual([p.x, p.y, p.mode, p.action, p.rssi], [Math.fround(0.01), Math.fround(0.02), "manual", "turn", -60]);
+    assert.deepEqual([p.x, p.y, p.mode, p.action, p.rssi], [Math.fround(0.01), Math.fround(0.02), "manual", "rotate", -60]);
     assert.deepEqual(Object.keys(p).sort(), ["action", "at", "mode", "rssi", "x", "y", "yaw"]); // no peaks since step 4c
     assert.ok(link.sendCommand(1, "status"));
     assert.throws(() => link.sendCommand(2, "goto\n1 2")); // one line of printable text only
@@ -91,7 +91,7 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
     let cleared = 0;
     link.on("moveStart", m => { starts.push(m); events.push(`start ${m.move}`); });
     link.on("moveEnd", m => { ends.push(m); events.push(`end ${m.move}`); });
-    link.on("frame", (f: MoveFrame) => { frames.push(f.frame); events.push(`${f.format} ${f.frame.number} of ${f.move}`); });
+    link.on("tof", (f: TofMessage) => { frames.push(f.frame); events.push(`${f.format} ${f.frame.number} of ${f.move}`); });
     link.on("snapshot", b => snaps.push(b));
     link.on("pose", p => poses.push(p));
     link.on("done", d => dones.push(d));
@@ -105,7 +105,7 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
                           imuSent: 1, imuDropped: 0 };
     const imu: ImuBatch = { move: 3, records: [0, 1, 2].map(i => ({ tUs: (0xffffe000 + i * 9615), accel: [i, -i - 1, 16384], gyro: [-32768, 32767, i] })) };
     const batches: ImuBatch[] = [];
-    link.on("imu", (b: ImuBatch) => { batches.push(b); events.push(`imu ${b.move}`); });
+    link.on("imuBatch", (b: ImuBatch) => { batches.push(b); events.push(`imu ${b.move}`); });
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 10 * k, signal: k, sigmaMm: 2, kind: k ? "sure" as const : "nothing" as const, targets: k ? 1 : 0 }));
     const tof = (number: number): PosedFrame => ({ number, robotClockUs: 100 * number, periodUs: 100000, x: 1.5, y: -0.25, yaw: 0.5, pitch: 0, turn: 0,
                                                     still: false, poseKnown: true, beyondMm: 2550, zones });

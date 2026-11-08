@@ -121,7 +121,7 @@ static void test_phases(void) {
     frame(1); // idle: nothing goes
     assert(n_bulk == 0);
     move_start(MOVE_DRIVE, 0.5f, 17, &fake_actor);
-    assert(motors && move_busy() && !strcmp(move_running(), "drive") && n_control == 1);
+    assert(motors && !strcmp(move_running(), "drive") && n_control == 1);
     wire_move_start_t s = start_msg(0);
     assert(s.move == 1 && s.command == 17 && s.kind == WIRE_MOVE_DRIVE && s.param == 0.5f && s.t_us == clock_since_start_us() &&
            s.pre_ms == 200 && s.post_ms == 200);
@@ -149,13 +149,13 @@ static void test_phases(void) {
     result = MOVE_ACT_DONE;
     loop_ms(1);
     uint64_t done_at = fake_now_us;
-    assert(drive_v == 0 && motors && move_busy());
+    assert(drive_v == 0 && motors && *move_running());
     frame(5); // during post: still the move's
     loop_ms(300);
-    assert(move_busy()); // not still yet
+    assert(*move_running()); // not still yet
     odom.stationary = true;
     loop_ms(1);
-    assert(!move_busy() && !motors && ends == 1 && ended_how == MOVE_END_DONE && fake_now_us - done_at == 301000);
+    assert(!*move_running() && !motors && ends == 1 && ended_how == MOVE_END_DONE && fake_now_us - done_at == 301000);
     move_record_t r;
     assert(move_endings(&r) == 1 && r.move == 1 && r.command == 17 && r.kind == MOVE_DRIVE && r.how == MOVE_END_DONE &&
            move_wire_end(&r) == WIRE_END_OK && r.frames_sent == 4 && r.frames_dropped == 0 && r.goal_m == 0);
@@ -177,7 +177,7 @@ static void test_phases(void) {
 
     // The robot still at once after the act: the post is exactly post_ms, not post + a settle.
     reset();
-    move_start(MOVE_TURN, 0.5f, 18, &fake_actor);
+    move_start(MOVE_ROTATE, 0.5f, 18, &fake_actor);
     loop_ms(1);
     assert(begins == 0);
     loop_ms(200);
@@ -186,9 +186,9 @@ static void test_phases(void) {
     loop_ms(1);
     done_at = fake_now_us;
     loop_ms(199);
-    assert(move_busy());
+    assert(*move_running());
     loop_ms(1);
-    assert(!move_busy() && fake_now_us - done_at == 200000);
+    assert(!*move_running() && fake_now_us - done_at == 200000);
     printf("ok: post_ms replaces the settle: ends %d ms after the action when still\n", move_post_ms());
 }
 
@@ -197,13 +197,13 @@ static void test_still_settings(void) {
     assert(!move_set_still(-1, 0) && !move_set_still(0, MOVE_STILL_MAX_MS + 1) && move_pre_ms() == 200);
     assert(move_set_still(0, 0) && move_pre_ms() == 0 && move_post_ms() == 0);
     odom.stationary = odom.motors_on = true;
-    move_start(MOVE_TURN, -0.5f, 19, &fake_actor);
+    move_start(MOVE_ROTATE, -0.5f, 19, &fake_actor);
     assert(start_msg(0).pre_ms == 0 && start_msg(0).post_ms == 0);
     loop_ms(1);
     assert(begins == 1); // pre 0: acts at once
     result = MOVE_ACT_OBSTACLE;
     loop_ms(2); // post 0: ends on the next loop
-    assert(!move_busy() && ended_how == MOVE_END_OBSTACLE && end_msg(1).end == WIRE_END_OBSTACLE);
+    assert(!*move_running() && ended_how == MOVE_END_OBSTACLE && end_msg(1).end == WIRE_END_OBSTACLE);
     assert(move_set_still(500, 1000));
     reset();
     move_start(MOVE_DRIVE, 1, 20, &fake_actor);
@@ -214,9 +214,9 @@ static void test_still_settings(void) {
     result = MOVE_ACT_DONE;
     loop_ms(1);
     loop_ms(999);
-    assert(move_busy());
+    assert(*move_running());
     loop_ms(1);
-    assert(!move_busy());
+    assert(!*move_running());
     assert(move_set_still(MOVE_PRE_MS_DEFAULT, MOVE_POST_MS_DEFAULT));
     printf("ok: the still times are settings (0 acts at once; 500 / 1000 ms; out of range refused)\n");
 }
@@ -228,7 +228,7 @@ static void test_stops(void) {
     move_start(MOVE_DRIVE, 0.5f, 21, &fake_actor);
     loop_ms(100);
     move_stop();
-    assert(!move_busy() && !motors && begins == 0 && ends == 1 && ended_how == MOVE_END_STOPPED);
+    assert(!*move_running() && !motors && begins == 0 && ends == 1 && ended_how == MOVE_END_STOPPED);
     move_record_t r;
     move_endings(&r);
     assert(r.how == MOVE_END_STOPPED && move_wire_end(&r) == WIRE_END_STOPPED && r.moved_m == 0 && end_msg(1).end == WIRE_END_STOPPED);
@@ -239,9 +239,9 @@ static void test_stops(void) {
     result = MOVE_ACT_DONE;
     odom.stationary = false;
     loop_ms(50);
-    assert(move_busy());
+    assert(*move_running());
     move_stop();
-    assert(!move_busy() && !motors && ended_how == MOVE_END_STOPPED);
+    assert(!*move_running() && !motors && ended_how == MOVE_END_STOPPED);
     move_stop(); // nothing runs: nothing happens
     assert(ends == 1 && n_control == 2);
     printf("ok: a stop in pre or post ends the move at once, motors off\n");
@@ -249,10 +249,10 @@ static void test_stops(void) {
     // A new move replaces the running one: the motors stay on.
     reset();
     odom.stationary = true;
-    move_start(MOVE_TURN, 1, 23, &fake_actor);
+    move_start(MOVE_ROTATE, 1, 23, &fake_actor);
     loop_ms(300);
     move_start(MOVE_WATCH, 60, 24, &fake_actor);
-    assert(motors && move_busy() && ended_how == MOVE_END_REPLACED && n_control == 3);
+    assert(motors && *move_running() && ended_how == MOVE_END_REPLACED && n_control == 3);
     assert(end_msg(1).end == WIRE_END_REPLACED && start_msg(2).kind == WIRE_MOVE_WATCH && start_msg(2).param == 60 &&
            start_msg(2).move == end_msg(1).move + 1);
     assert(!strcmp(move_running(), "watch")); // a watch is a move like the others
@@ -263,7 +263,7 @@ static void test_stops(void) {
     loop_ms(1);
     move_record_t t;
     move_endings(&t);
-    assert(!move_busy() && t.how == MOVE_END_SAFETY_STOP && t.stop_reason == STOP_TILT && move_wire_end(&t) == WIRE_END_TILT);
+    assert(!*move_running() && t.how == MOVE_END_SAFETY_STOP && t.stop_reason == STOP_TILT && move_wire_end(&t) == WIRE_END_TILT);
     // Each safety stop named by its reason.
     const struct { uint8_t stop; wire_end_t end; } named[] = {{STOP_TILT, WIRE_END_TILT}, {STOP_LEFT_WHEELS, WIRE_END_WHEELS},
         {STOP_RIGHT_WHEELS, WIRE_END_WHEELS}, {STOP_NO_DRIVE, WIRE_END_NO_DRIVE}, {STOP_NONE, WIRE_END_SAFETY}};
@@ -280,15 +280,15 @@ static void test_stops(void) {
     connected = false;
     loop_ms(1);
     connected = true;
-    assert(!move_busy() && !motors && ended_how == MOVE_END_PICOB_LOST && end_msg(1).end == WIRE_END_PICOB_LOST);
+    assert(!*move_running() && !motors && ended_how == MOVE_END_PICOB_LOST && end_msg(1).end == WIRE_END_PICOB_LOST);
     // Never still: no start after 3 s.
     reset();
     odom.stationary = false;
     move_start(MOVE_DRIVE, 0.2f, 26, &fake_actor);
     loop_ms(2999);
-    assert(move_busy());
+    assert(*move_running());
     loop_ms(1);
-    assert(!move_busy() && !motors && ended_how == MOVE_END_NO_START && end_msg(1).end == WIRE_END_NO_START);
+    assert(!*move_running() && !motors && ended_how == MOVE_END_NO_START && end_msg(1).end == WIRE_END_NO_START);
     odom.stationary = true;
     printf("ok: replaced (motors stay on), a watch is a move, safety stop named, PicoB lost, no start after 3 s\n");
 }
@@ -297,9 +297,9 @@ static void test_refused(void) {
     // Refused before it starts: numbered, start and end sent, no phases; a running move goes on.
     reset();
     uint32_t endings_before = move_endings(NULL);
-    move_start(MOVE_TURN, 1, 30, &fake_actor);
+    move_start(MOVE_ROTATE, 1, 30, &fake_actor);
     move_refused(MOVE_DRIVE, 0.5f, 31, MOVE_END_OBSTACLE);
-    assert(move_busy() && !strcmp(move_running(), "turn") && n_control == 3);
+    assert(!strcmp(move_running(), "rotate") && n_control == 3);
     wire_move_start_t a = start_msg(0), b = start_msg(1);
     wire_move_end_t e = end_msg(2);
     assert(a.flags == 0 && b.flags == WIRE_MOVE_REFUSED); // the PC keeps the turn as the open move
@@ -310,7 +310,7 @@ static void test_refused(void) {
     loop_ms(300);
     result = MOVE_ACT_DONE;
     loop_ms(300);
-    assert(!move_busy() && end_msg(3).move == a.move && end_msg(3).frames_sent == 1 && last_tof_move == a.move);
+    assert(!*move_running() && end_msg(3).move == a.move && end_msg(3).frames_sent == 1 && last_tof_move == a.move);
     // Taken one by one, oldest first: the refused drive, then the turn (both in one loop for commands.c).
     move_record_t q;
     while (move_next_ended(&q) && q.command != 31) {}
@@ -386,7 +386,7 @@ static void test_imu(void) {
     assert(n_batches == 0);
     // A move: 25 records make two batches of 10 while it runs, and the last 5 go
     // as a batch of their own when it ends, before the move end.
-    move_start(MOVE_TURN, 1, 50, &fake_actor);
+    move_start(MOVE_ROTATE, 1, 50, &fake_actor);
     uint32_t move = start_msg(0).move;
     t0 = time_us_32() + 0xfffff000u; // the records' times cross the clock's wrap
     for (int k = 0; k < 25; k++) {
@@ -397,7 +397,7 @@ static void test_imu(void) {
     loop_ms(250);
     result = MOVE_ACT_DONE;
     loop_ms(300);
-    assert(!move_busy() && n_batches == 3);
+    assert(!*move_running() && n_batches == 3);
     check_batch(0, move, t0, 0, 10);
     check_batch(1, move, t0, 10, 10);
     check_batch(2, move, t0, 20, 5);
@@ -440,7 +440,7 @@ static void test_imu(void) {
     uint32_t first = start_msg(0).move;
     t0 = time_us_32();
     for (int k = 0; k < 4; k++) { r = imu_rec(t0, k); move_imu(&r); }
-    move_start(MOVE_TURN, 1, 53, &fake_actor);
+    move_start(MOVE_ROTATE, 1, 53, &fake_actor);
     for (int k = 4; k < 6; k++) { r = imu_rec(t0, k); move_imu(&r); }
     move_refused(MOVE_DRIVE, 1, 54, MOVE_END_OBSTACLE); // a refused move: no batches, the turn goes on
     move_stop();
@@ -469,7 +469,7 @@ static void test_imu(void) {
     reset();
     n_batches = 0;
     odom.stationary = false;
-    move_start(MOVE_TURN, 1, 57, &fake_actor);
+    move_start(MOVE_ROTATE, 1, 57, &fake_actor);
     t0 = time_us_32();
     for (int k = 0; k < 10; k++) {
         r = imu_rec(t0, k);

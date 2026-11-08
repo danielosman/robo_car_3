@@ -3,7 +3,7 @@
 import * as d3 from "d3";
 import type { Flow } from "../../data/schema.ts";
 import { flows, isChange } from "./data.ts";
-import { HEAD_H, ROW_H, ribbonPath, type Box, type Layout, type Node, type Ribbon } from "./layout.ts";
+import { HEAD_H, ROW_H, ribbonPath, type Area, type Box, type Layout, type Node, type Ribbon } from "./layout.ts";
 import type { Selection } from "./panels.ts";
 
 export interface Handlers {
@@ -42,8 +42,10 @@ export function createCanvas(svgEl: SVGSVGElement) {
     const touched = new Set<string>();
     for (const f of flows) if (f.id === selFlow) for (const s of f.steps) if (s.at) touched.add(s.at);
 
-    layers.groups.selectAll<SVGTextElement, Layout["groups"][number]>("text").data(l.groups, g => g.text)
-      .join("text").attr("class", "group").attr("x", g => g.x).attr("y", g => g.y).text(g => g.text);
+    const area = layers.groups.selectAll<SVGGElement, Area>("g.area").data(l.areas, a => a.text)
+      .join(enter => { const g = enter.append("g").attr("class", "area"); g.append("rect"); g.append("text"); return g; });
+    area.select("rect").attr("x", a => a.x).attr("y", a => a.y).attr("width", a => a.w).attr("height", a => a.h).attr("rx", 8);
+    area.select("text").attr("x", a => a.x + 12).attr("y", a => a.y + 22).text(a => a.text);
 
     // ribbons: a visible path and a wider, invisible one to click
     const ribbonKey = (r: Ribbon) => `${r.flow.id}|${r.stepIndex}`;
@@ -62,24 +64,29 @@ export function createCanvas(svgEl: SVGSVGElement) {
     rib.select("path.hit").attr("d", ribbonPath).attr("stroke-width", r => Math.max(10, r.width));
     rib.select("title").text(r => `${r.flow.name} (${r.flow.id}): ${r.bytes} B${r.rate ? `, ${r.rate}` : ""}`);
 
-    // rate labels at the middle of the ribbon where a rate starts
+    // Rate labels at the middle of a ribbon: where a rate starts or changes, on every
+    // ribbon that goes from one area into another, and on every ribbon of the selected
+    // flow. One label per place and rate; labels at one place stack upwards.
     const mid = (r: Ribbon) => {
       const dx = Math.max(60, Math.abs(r.to.x - r.from.x) / 2);
       const x = (r.from.x + 3 * (r.from.x + r.from.side * dx) + 3 * (r.to.x + r.to.side * dx) + r.to.x) / 8;
       return [x, (r.from.y + r.to.y) / 2] as const;
     };
-    const seen = new Set<string>();
+    const rateKey = (r: Ribbon) => `${r.from.box.module.id}|${r.from.member}|${r.to.box.module.id}|${r.rate}`;
+    const crosses = (r: Ribbon) => r.from.box.module.origin !== r.to.box.module.origin;
+    const seen = new Set<string>(), stacked = new Map<string, number>(), lift = new Map<Ribbon, number>();
     const rated = l.ribbons.filter(r => {
-      const key = `${r.from.box.module.id}|${r.from.member}|${r.rate}`;
-      if (!r.showRate || seen.has(key)) return false;
-      seen.add(key);
+      if (!r.rate || !(r.showRate || crosses(r) || r.flow.id === selFlow) || seen.has(rateKey(r))) return false;
+      seen.add(rateKey(r));
+      const place = `${r.from.box.module.id}|${r.to.box.module.id}`, k = stacked.get(place) ?? 0;
+      stacked.set(place, k + 1);
+      lift.set(r, k * 18);
       return true;
     });
-    const rateKey = (r: Ribbon) => `${r.from.box.module.id}|${r.from.member}|${r.rate}`;
     const selectedRates = new Set(l.ribbons.filter(r => r.flow.id === selFlow).map(rateKey));
     layers.rates.selectAll<SVGTextElement, Ribbon>("text").data(rated, ribbonKey)
       .join("text").attr("class", "rate").classed("on", r => selectedRates.has(rateKey(r)))
-      .attr("x", r => mid(r)[0]).attr("y", r => mid(r)[1] - r.width / 2 - 3).text(r => r.rate ?? "");
+      .attr("x", r => mid(r)[0]).attr("y", r => mid(r)[1] - r.width / 2 - 3 - (lift.get(r) ?? 0)).text(r => r.rate ?? "");
 
     // boxes
     const box = layers.boxes.selectAll<SVGGElement, Box>("g.box").data([...l.boxes.values()], b => b.module.id)
@@ -124,7 +131,6 @@ export function createCanvas(svgEl: SVGSVGElement) {
         return isChange(s) ? `${s.change} "${s.name}" in ${n.flow.id}${s.what ? `: ${s.what}` : ""}` : "";
       });
 
-    svg.on("click", () => on.select(null));
     if (!fitted) { fit(l, selFlow); fitted = true; }
   }
   const refit = (l: Layout) => fit(l);

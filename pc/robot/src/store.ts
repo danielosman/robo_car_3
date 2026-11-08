@@ -27,10 +27,11 @@ import { DuckDBInstance, timestampValue, type DuckDBAppender, type DuckDBConnect
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { snapId, type Snapshot } from "./snapshot.ts";
-import { Boot, type FrameRow, type ImuRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
+import { Boot, type TofRow, type ImuBatchRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
+import type { Pose } from "./link.ts";
 import type { Mounting } from "./mounting.ts";
 import { KINDS, isValid, rowCol, type Kind, type PosedFrame } from "./tof_format.ts";
-import { IMU_RECORD_PERIOD_US, type Hello, type ImuBatch, type ImuRecord, type MoveFrame, type Vec3 } from "./wire.ts";
+import { IMU_RECORD_PERIOD_US, type Hello, type ImuBatch, type ImuRecord, type TofMessage, type Vec3 } from "./wire.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 // Where the recordings live (camera pictures, map pictures, boots.json) and the database.
@@ -44,7 +45,7 @@ CREATE TABLE IF NOT EXISTS boots (
   mounting VARCHAR,                                    -- the boot's copy of common/mounting.json, when it was first seen
   messages INTEGER);                                   -- how many it sent that are stored (boot.ts numbers them)
 CREATE TABLE IF NOT EXISTS moves (
-  boot_id VARCHAR, move INTEGER, command INTEGER, kind VARCHAR, param DOUBLE,  -- drive m, turn rad, goto m to the goal, watch s
+  boot_id VARCHAR, move INTEGER, command INTEGER, kind VARCHAR, param DOUBLE,  -- drive m, rotate rad, goto m to the goal, watch s
   pre_ms INTEGER, post_ms INTEGER, refused BOOLEAN,   -- refused: it couldn't start (blocked, already there): no frames
   start_msg INTEGER, start_at TIMESTAMP, start_t_us UBIGINT, start_t_s DOUBLE,  -- t_us, t_s: since power-up
   end_msg INTEGER, end_at TIMESTAMP, end_t_us UBIGINT, end_t_s DOUBLE,
@@ -113,13 +114,14 @@ export interface TofGeometry { sensorM: [number, number, number]; zoneRad: numbe
 export const tofGeometry = (m: Mounting): TofGeometry =>
   ({ sensorM: [m.tof.x_m, m.tof.y_m, m.tof.z_m], zoneRad: m.tof.zone_deg * Math.PI / 180, rows: 8, cols: 8 });
 
-export interface Pose { x: number; y: number; yaw: number; pitch: number }
+// A frame's pose: where the robot was, and its nose-up pitch.
+export type PitchedPose = Pose & { pitch: number };
 
 // Where a zone's reading is in the world, as the robot's code places it (tof_rays.c):
 // the ray at row, col (1-8) points (row - 4.5) zone angles below level (less the
 // robot's nose-up pitch) and (4.5 - col) to the left; the sensor sits at sensorM in
 // the robot frame; distance along the ray. (Step 5 moves this to the PC's helper.)
-export function worldPoint(g: TofGeometry, pose: Pose, row: number, col: number, distanceM: number): [number, number, number] {
+export function worldPoint(g: TofGeometry, pose: PitchedPose, row: number, col: number, distanceM: number): [number, number, number] {
   const down = (row - (g.rows + 1) / 2) * g.zoneRad - pose.pitch, left = ((g.cols + 1) / 2 - col) * g.zoneRad;
   const dx = Math.cos(down) * Math.cos(left), dy = Math.cos(down) * Math.sin(left), dz = -Math.sin(down);
   const rx = g.sensorM[0] + distanceM * dx, ry = g.sensorM[1] + distanceM * dy;
@@ -147,8 +149,8 @@ export type StoredImu = ImuRecord & { tS: number }
 export type Replayed =
   | { msg: number; atMs: number; type: "move_start"; start: MoveStartRow }
   | { msg: number; atMs: number; type: "move_end"; end: MoveEndRow }
-  | { msg: number; atMs: number; type: "frame"; frame: MoveFrame }
-  | { msg: number; atMs: number; type: "imu"; batch: ImuBatch }
+  | { msg: number; atMs: number; type: "tof"; tof: TofMessage }
+  | { msg: number; atMs: number; type: "imu_batch"; batch: ImuBatch }
   | { msg: number; atMs: number; type: "status"; pose: StatusRow["pose"] }
   | { msg: number; atMs: number; type: "snapshot"; bytes: Buffer };
 
@@ -164,7 +166,7 @@ const msOf = (v: unknown) => { // a TIMESTAMP read back (local time, as written)
 export class Store {
   private queue: Promise<unknown> = Promise.resolve();
   readonly dbPath: string;
-  private pending: { starts: MoveStartRow[]; ends: MoveEndRow[]; frames: FrameRow[]; imu: ImuRow[]; status: StatusRow[]; boots: Map<string, Boot> } =
+  private pending: { starts: MoveStartRow[]; ends: MoveEndRow[]; frames: TofRow[]; imu: ImuBatchRow[]; status: StatusRow[]; boots: Map<string, Boot> } =
     { starts: [], ends: [], frames: [], imu: [], status: [], boots: new Map() };
   private flushing: Promise<void> | null = null;
   onError: (err: Error) => void = () => {};
@@ -229,8 +231,8 @@ export class Store {
 
   moveStart(boot: Boot, row: MoveStartRow): Promise<void> { this.pending.starts.push(row); return this.queued(boot); }
   moveEnd(boot: Boot, row: MoveEndRow): Promise<void> { this.pending.ends.push(row); return this.queued(boot); }
-  frame(boot: Boot, row: FrameRow): Promise<void> { this.pending.frames.push(row); return this.queued(boot); }
-  imu(boot: Boot, row: ImuRow): Promise<void> { this.pending.imu.push(row); return this.queued(boot); }
+  tof(boot: Boot, row: TofRow): Promise<void> { this.pending.frames.push(row); return this.queued(boot); }
+  imuBatch(boot: Boot, row: ImuBatchRow): Promise<void> { this.pending.imu.push(row); return this.queued(boot); }
   status(boot: Boot, row: StatusRow): Promise<void> { this.pending.status.push(row); return this.queued(boot); }
 
   // Resolves once everything given so far is written.
@@ -427,8 +429,8 @@ export class Store {
       }
       const frames = await rows("SELECT * FROM frames WHERE boot_id = $1 ORDER BY number");
       const zones = await rows("SELECT * FROM zones WHERE boot_id = $1 ORDER BY number, row, col");
-      framesOf(frames, zones).forEach((f, k) => out.push({ msg: Number(frames[k].msg), atMs: msOf(frames[k].arrived_at), type: "frame",
-        frame: { format: f.format, move: f.move, tUs: Math.round(f.tS * 1e6), frame: f.frame } }));
+      framesOf(frames, zones).forEach((f, k) => out.push({ msg: Number(frames[k].msg), atMs: msOf(frames[k].arrived_at), type: "tof",
+        tof: { format: f.format, move: f.move, tUs: Math.round(f.tS * 1e6), frame: f.frame } }));
       // An imu batch: its rows (one message), in their order.
       const batches = new Map<number, { atMs: number; batch: ImuBatch }>();
       for (const r of await rows("SELECT * FROM imu WHERE boot_id = $1 ORDER BY msg, n")) {
@@ -437,7 +439,7 @@ export class Store {
         const { tUs, accel, gyro } = imuOf(r);
         b.batch.records.push({ tUs, accel, gyro });
       }
-      for (const [msg, b] of batches) out.push({ msg, atMs: b.atMs, type: "imu", batch: b.batch });
+      for (const [msg, b] of batches) out.push({ msg, atMs: b.atMs, type: "imu_batch", batch: b.batch });
       for (const s of await rows("SELECT * FROM status WHERE boot_id = $1")) {
         out.push({ msg: Number(s.msg), atMs: msOf(s.arrived_at), type: "status", pose: {
           x: Number(s.x), y: Number(s.y), yaw: Number(s.yaw), mode: String(s.mode), action: String(s.action), rssi: num(s.rssi), at: msOf(s.arrived_at) } });
@@ -450,7 +452,7 @@ export class Store {
   }
 }
 
-function appendFrame(fa: DuckDBAppender, za: DuckDBAppender, r: FrameRow): void {
+function appendFrame(fa: DuckDBAppender, za: DuckDBAppender, r: TofRow): void {
   const f = r.frame;
   fa.appendVarchar(r.boot); fa.appendUBigInt(BigInt(f.number));
   fa.appendInteger(r.move);
@@ -468,7 +470,7 @@ function appendFrame(fa: DuckDBAppender, za: DuckDBAppender, r: FrameRow): void 
   });
 }
 
-function appendImu(a: DuckDBAppender, r: ImuRow): void {
+function appendImu(a: DuckDBAppender, r: ImuBatchRow): void {
   r.records.forEach((rec, n) => {
     a.appendVarchar(r.boot); a.appendInteger(r.move); a.appendInteger(r.msg); a.appendTinyInt(n); a.appendTimestamp(at(r.atMs));
     a.appendUBigInt(BigInt(rec.tUs)); a.appendDouble(rec.tS);

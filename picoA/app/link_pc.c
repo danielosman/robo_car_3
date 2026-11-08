@@ -32,7 +32,7 @@
 #define ANNOUNCE_TEXT      "ROBOCAR-SERVER "
 #define JOIN_TIMEOUT_US    15000000
 #define JOIN_RETRY_US      30000000
-#define FIND_SERVER_US     5000000  // then link_pc_settled(), and WIFI_SERVER_IP is tried
+#define FIND_SERVER_US     5000000  // then WIFI_SERVER_IP is tried
 #define CONNECT_TIMEOUT_US 5000000
 #define SIGNAL_US          2000000  // the signal asked from the chip this often (~1 ms), for status
 #define STATUS_US          250000   // status this often while connected
@@ -53,7 +53,6 @@ static const char *unavailable_why;
 static absolute_time_t deadline; // what it means depends on the state
 static absolute_time_t next_signal, next_status;
 static int8_t signal_now_dbm;           // asked every SIGNAL_US while connected
-static bool settled;
 static ip_addr_t server_ip;
 static uint16_t server_port;
 static uint32_t connections;            // counts the connections that came up
@@ -282,7 +281,6 @@ static void join_failed(const char *why) {
     cyw43_wifi_leave(&cyw43_state, CYW43_ITF_STA);
     state = WIFI_JOIN_FAILED;
     deadline = make_timeout_time_us(JOIN_RETRY_US);
-    settled = true;
 }
 
 static void join(void) {
@@ -355,7 +353,6 @@ static void update_server(void) {
             printf("Server: found at %s:%u, connecting...\n", ipaddr_ntoa(&found_ip), (unsigned)found_port);
             connect_to(&found_ip, found_port);
         } else if (time_reached(deadline)) {
-            settled = true;
             ip_addr_t fallback;
             if (*WIFI_SERVER_IP && ipaddr_aton(WIFI_SERVER_IP, &fallback)) {
                 printf("Server: no announcement, trying WIFI_SERVER_IP %s:%d...\n", WIFI_SERVER_IP, SERVER_PORT);
@@ -368,7 +365,6 @@ static void update_server(void) {
         if (is_lost) { printf("Server: couldn't connect, looking again...\n"); look_for_server(); }
         else if (is_up) {
             state = WIFI_CONNECTED;
-            settled = true;
             next_signal = next_status = get_absolute_time();
             connections++;
             printf("Server: connected\n");
@@ -402,7 +398,6 @@ void link_pc_start(uint32_t boot_id, const char *build, link_pc_status_fn status
     hello_len = wire_encode_hello(&h, hello);
     status_fn = status;
     state = WIFI_UNAVAILABLE;
-    settled = true;
     if (!*WIFI_SSID) {
         unavailable_why = "no network set: copy picoA/app/wifi_config.example.h to wifi_config.h, fill it in and rebuild";
     } else if (cyw43_arch_init_with_country(WIFI_COUNTRY) != 0) {
@@ -418,7 +413,6 @@ void link_pc_start(uint32_t boot_id, const char *build, link_pc_status_fn status
         if (!listening) {
             unavailable_why = "can't listen for the server's announcements";
         } else {
-            settled = false;
             stdio_set_driver_enabled(&driver, true);
             join();
             return;
@@ -428,7 +422,6 @@ void link_pc_start(uint32_t boot_id, const char *build, link_pc_status_fn status
 }
 
 bool link_pc_connected(void) { return state == WIFI_CONNECTED; }
-bool link_pc_settled(void) { return settled; }
 uint32_t link_pc_connection(void) { return state == WIFI_CONNECTED ? connections : 0; }
 
 void link_pc_print_status(void) {

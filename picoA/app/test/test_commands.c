@@ -69,8 +69,8 @@ static move_record_t last_end;
 static const char *running = "";
 static int pre = 200, post = 200, stops;
 static void start(const char *what, float v, uint32_t n) { snprintf(started, sizeof started, "%s", what); started_value = v; started_n = n; }
-void behaviour_move(float m, uint32_t n) { start("move", m, n); }
-void behaviour_turn(float rad, uint32_t n) { start("turn", rad, n); }
+void behaviour_drive(float m, uint32_t n) { start("drive", m, n); }
+void behaviour_rotate(float rad, uint32_t n) { start("rotate", rad, n); }
 void behaviour_watch(float s, uint32_t n) { start("watch", s, n); }
 void behaviour_goto(float x, float y, float stop_m, uint32_t n) { (void)y; (void)stop_m; start("goto", x, n); }
 void move_stop(void) { stops++; }
@@ -128,7 +128,7 @@ int main(void) {
     out_n = 0;
     pc_sends(3, " drive 50 ");
     loop(1);
-    assert(!strcmp(started, "move") && started_value == 0.5f && started_n == 3 && out_n == 0);
+    assert(!strcmp(started, "drive") && started_value == 0.5f && started_n == 3 && out_n == 0);
     move_ended((move_record_t){.command = 3, .kind = MOVE_DRIVE, .how = MOVE_END_OBSTACLE, .moved_m = 0.31f, .rotated_rad = 0.01f},
                WIRE_END_OBSTACLE);
     loop(1);
@@ -161,7 +161,7 @@ int main(void) {
 
     // A snapshot: answered once it has gone, with its number and its pose.
     out_n = 0;
-    pc_sends(5, "snapshot");
+    pc_sends(5, "snap");
     loop(1);
     assert(snap_asked == 5 && out_n == 0);
     snap_gone = (snapshot_sent_t){.command = 5, .seq = 41, .x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 0.75f};
@@ -195,15 +195,15 @@ int main(void) {
     fake_usb_connected = true;
     fake_usb_type("rotate 30 #12\n");
     loop(1100); // a monitor connected: after the greeting
-    assert(!strcmp(started, "turn") && fabsf(started_value - 30 * RAD_PER_DEG) < 1e-6f && started_n == 12);
+    assert(!strcmp(started, "rotate") && fabsf(started_value - 30 * RAD_PER_DEG) < 1e-6f && started_n == 12);
     printf("ok: a line typed on USB is taken too\n");
 
     // The status the PC gets.
-    running = "turn";
+    running = "rotate";
     wire_status_t s;
     memset(&s, 0, sizeof s);
     commands_status(&s);
-    assert(s.x_m == 0.43f && s.y_m == -0.04f && s.yaw_rad == 0.5f && !strcmp(s.mode, "manual") && !strcmp(s.action, "turn"));
+    assert(s.x_m == 0.43f && s.y_m == -0.04f && s.yaw_rad == 0.5f && !strcmp(s.mode, "manual") && !strcmp(s.action, "rotate"));
     printf("ok: the status: pose, mode, the running move\n");
     printf("commands: all tests passed\n");
     return 0;

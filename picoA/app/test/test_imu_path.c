@@ -89,7 +89,7 @@ int main(void) {
 
     move_start(MOVE_WATCH, 2, 1, &actor);
     run_ms(3500, true);
-    assert(!move_busy() && ended_seen && move_end.end == WIRE_END_OK);
+    assert(!*move_running() && ended_seen && move_end.end == WIRE_END_OK);
 
     // Every batch is the move's, the records consecutive and unchanged.
     assert(n_batches > 20 && (uint32_t)n_batches == move_end.imu_sent && move_end.imu_dropped == 0);

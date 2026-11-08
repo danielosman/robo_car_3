@@ -30,7 +30,7 @@ class EchoRobot extends EventEmitter {
   sendCommand(n_: number, text: string): boolean {
     const line = `${text} #${n_}`;
     this.lines.push(line);
-    const n = Number(/#(\d+)$/.exec(line)![1]), snap = line.startsWith("snapshot") ? 5 : null;
+    const n = Number(/#(\d+)$/.exec(line)![1]), snap = line.startsWith("snap") ? 5 : null;
     setTimeout(() => this.emit("done", { n, end: line.startsWith("drive") ? this.end : "ok", pose: { x: 0.43, y: -0.04, yaw: 0 },
                                          movedM: 0.31, rotatedDeg: 0, goalM: null, snapshot: snap }), 5);
     return true;
@@ -69,7 +69,7 @@ test("steer and the actions: one JSON line per command as it ends; refused; stop
       `{"command":"snap","result":"ok",${AT},"snapshot":5}`,
       `{"command":"steer d50","result":"ok",${AT},"moved":31,"rotated":0}`,
       `{"command":"snap","result":"ok",${AT},"snapshot":5}`, ""].join("\n"));
-    assert.deepEqual(robot.lines, ["rotate 30 #1", "snapshot #2", "drive 50 #3", "snapshot #4"]);
+    assert.deepEqual(robot.lines, ["rotate 30 #1", "snap #2", "drive 50 #3", "snap #4"]);
     robot.end = "obstacle";
     r = await post("steer", "d50 r30", "?from=page");
     assert.equal(r.text, [
@@ -147,25 +147,25 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
   const { post, done, store, boot } = await setUp();
   try {
     const t0 = 5e9; // µs since power-up, past 2^32: nothing wraps
-    await store.moveStart(boot, boot.moveStart({ move: 1, command: 7, kind: "turn", param: Math.PI / 6, tUs: t0, preMs: 200, postMs: 200, refused: false }));
+    await store.moveStart(boot, boot.moveStart({ move: 1, command: 7, kind: "rotate", param: Math.PI / 6, tUs: t0, preMs: 200, postMs: 200, refused: false }));
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: k === 0 ? 0 : k === 1 ? 2550 : 300 + 10 * k, signal: k, sigmaMm: 5,
       kind: k === 0 ? "nothing" as const : k === 2 ? "unsure" as const : k === 3 ? "less_sure" as const : "sure" as const, targets: k ? 1 : 0 }));
     for (let n = 1; n <= 2; n++) {
-      await store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: t0 + n * 100000, frame: { number: 40 + n, robotClockUs: (t0 + n * 100000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25,
+      await store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: t0 + n * 100000, frame: { number: 40 + n, robotClockUs: (t0 + n * 100000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25,
         yaw: 0.1 * n, pitch: -0.01, turn: 0.02, still: n === 1, poseKnown: true, beyondMm: 2550, zones } }));
     }
     // Its imu records: a batch of 10 and its last 3.
     const records = (from: number, n: number) => Array.from({ length: n }, (_, i) =>
       ({ tUs: (t0 - 20000 + (from + i) * 9615), accel: [from + i, -1, 16384] as [number, number, number],
          gyro: [-32768, 32767, 0 - (from + i) % 10] as [number, number, number] }));
-    await store.imu(boot, boot.imu({ move: 1, records: records(0, 10) }));
-    await store.imu(boot, boot.imu({ move: 1, records: records(10, 3) }));
+    await store.imuBatch(boot, boot.imuBatch({ move: 1, records: records(0, 10) }));
+    await store.imuBatch(boot, boot.imuBatch({ move: 1, records: records(10, 3) }));
     await store.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: t0 + 300000, framesSent: 2, framesDropped: 0, moved: 0.01, rotated: Math.PI / 6, imuSent: 2, imuDropped: 0 }));
     await store.flush();
     const r = await post("frames", `${boot.id} 1`);
     assert.equal(r.status, 200);
     const lines = r.text.split("\n");
-    assert.match(lines[0], new RegExp(`^boot ${boot.id} \\(\\d{12}\\), move 1: turn 30°, command 7, still 200 ms before, 200 ms after$`));
+    assert.match(lines[0], new RegExp(`^boot ${boot.id} \\(\\d{12}\\), move 1: rotate 30°, command 7, still 200 ms before, 200 ms after$`));
     assert.match(lines[1], /^ended ok after 0.3 s; 2 stored of 2 sent; 0 dropped on the robot; 0 lost \(dropped connection\); moved 1 cm, turned 30°$/);
     assert.equal(lines[2], "imu: 13 records stored (0.1 s at 104 a second), 0 missing (gaps), 2 of 2 batches; 0 dropped on the robot; 0 lost (dropped connection)");
     assert.match(r.text, /frame 41 {2}t \d+\.\d{3} s {2}period 100 ms {2}x 50 cm {2}y -25 cm {2}yaw 5.73° {2}pitch -0.57° {2}turn 1.15° {2}still\n/);
@@ -182,11 +182,11 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     // A move with frames dropped on the robot (the lane full) and lost with a dropped
     // connection (sent, never arrived): 1 stored of 3 sent, 2 dropped, 2 lost.
     await store.moveStart(boot, boot.moveStart({ move: 2, command: 8, kind: "drive", param: 0.5, tUs: t0 + 400000, preMs: 200, postMs: 200, refused: false }));
-    await store.frame(boot, boot.frame({ format: "compact", move: 2, tUs: t0 + 450000, frame: { number: 50, robotClockUs: (t0 + 450000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25, yaw: 0.2,
+    await store.tof(boot, boot.tof({ format: "compact", move: 2, tUs: t0 + 450000, frame: { number: 50, robotClockUs: (t0 + 450000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25, yaw: 0.2,
       pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones } }));
     await store.moveEnd(boot, boot.moveEnd({ move: 2, end: "ok", tUs: t0 + 900000, framesSent: 3, framesDropped: 2, moved: 0.5, rotated: 0, imuSent: 3, imuDropped: 1 }));
-    await store.imu(boot, boot.imu({ move: 2, records: records(40, 10) }));
-    await store.imu(boot, boot.imu({ move: 2, records: records(53, 3) })); // 50-52 missing
+    await store.imuBatch(boot, boot.imuBatch({ move: 2, records: records(40, 10) }));
+    await store.imuBatch(boot, boot.imuBatch({ move: 2, records: records(53, 3) })); // 50-52 missing
     await store.flush();
     const lossy = (await post("frames", `${boot.id} 2`)).text.split("\n");
     assert.match(lossy[1], /^ended ok after 0.5 s; 1 stored of 3 sent; 2 dropped on the robot; 2 lost \(dropped connection\);/);

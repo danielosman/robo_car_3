@@ -63,15 +63,15 @@ export const END_WORDS = ["ok", "obstacle", "stopped", "replaced", "tilt", "whee
                           "refused", "safety", "ended"] as const;
 export const HAS = { MOVE: 1, GOAL: 2, SNAPSHOT: 4 } as const;
 // A move's kind (wire_move_kind_t; picoA/app/move.h).
-export const MOVE_KINDS = ["drive", "turn", "goto", "watch"] as const;
+export const MOVE_KINDS = ["drive", "rotate", "goto", "watch"] as const;
 
 export interface Hello { version: number; bootId: string; build: string } // bootId: 8 hex digits, as the snapshots'
-export interface Answer {
+export interface RobotAnswer {
   n: number; end: string; has: number; x: number; y: number; yaw: number; moved: number; rotated: number; goal: number; snapshot: number;
 }
 export interface Status { x: number; y: number; yaw: number; mode: string; action: string; rssi: number }
 // A move's start (picoA/app/move.h): its number, its command's, kind, parameter
-// (drive m, turn rad, goto m to the goal, watch s), its time, the still times;
+// (drive m, rotate rad, goto m to the goal, watch s), its time, the still times;
 // refused: it can't start, its end follows at once and a running move goes on.
 export interface MoveStart { move: number; command: number; kind: string; param: number; tUs: number; preMs: number; postMs: number; refused: boolean }
 // A move's end: how (an end word), its time, its frames sent and dropped, how far it
@@ -86,23 +86,23 @@ export type Vec3 = [number, number, number];
 export interface ImuRecord { tUs: number; accel: Vec3; gyro: Vec3 }
 // Up to 10 imu records of a move, measured one after the other, evenly spaced.
 export interface ImuBatch { move: number; records: ImuRecord[] }
-export interface Command { n: number; text: string }
+export interface RobotCommand { n: number; text: string }
 // A tof frame of a move, packed in a format (tof_format.ts); tUs: its middle.
-export interface MoveFrame { format: string; move: number; tUs: number; frame: PosedFrame }
+export interface TofMessage { format: string; move: number; tUs: number; frame: PosedFrame }
 
 export type Message =
   | ({ type: "hello" } & Hello)
   | { type: "console"; text: string }
-  | ({ type: "answer" } & Answer)
+  | ({ type: "answer" } & RobotAnswer)
   | ({ type: "status" } & Status)
   | { type: "map_cleared" }
   | ({ type: "move_start" } & MoveStart)
   | ({ type: "move_end" } & MoveEnd)
   | { type: "snapshot_part"; bytes: Buffer }
   | ({ type: "imu_batch" } & ImuBatch)
-  | ({ type: "command" } & Command)
+  | ({ type: "command" } & RobotCommand)
   | { type: "heartbeat" }
-  | ({ type: "tof" } & MoveFrame);
+  | ({ type: "tof" } & TofMessage);
 
 // --- the envelope ---
 
@@ -225,7 +225,7 @@ export function encodeHello(h: Hello): Buffer {
 
 export const encodeConsole = (text: string): Buffer => header(TYPE.CONSOLE, Buffer.from(text, "utf8").subarray(0, CONSOLE_MAX));
 
-export function encodeAnswer(a: Answer): Buffer {
+export function encodeAnswer(a: RobotAnswer): Buffer {
   const p = Buffer.alloc(ANSWER_SIZE), end = END_WORDS.indexOf(a.end as (typeof END_WORDS)[number]);
   if (end < 0) throw new Error(`not an end word: ${a.end}`);
   p.writeUInt32LE(a.n, 0); p[4] = end; p[5] = a.has;
@@ -295,7 +295,7 @@ export function encodeSnapshotPart(bytes: Buffer): Buffer {
 
 const commandTextOk = (text: string) => /^[\x20-\x7e]{1,46}$/.test(text);
 
-export function encodeCommand(c: Command): Buffer {
+export function encodeCommand(c: RobotCommand): Buffer {
   if (!commandTextOk(c.text)) throw new Error(`not a command: ${JSON.stringify(c.text)}`);
   const p = Buffer.alloc(4 + c.text.length);
   p.writeUInt32LE(c.n >>> 0, 0);

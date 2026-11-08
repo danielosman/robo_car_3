@@ -17,22 +17,44 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   framed messages over one TCP connection, moves, the new database, raw IMU at
   104 Hz, move numbers in frames, 64-bit times). Committed and pushed; the tag
   `data-v1` marks the last commit before them.
-- **Next: step 5**, the PC cell map (section 11).
+- **Next: step 4e**, discussions with Daniel (section 11): who reads the IMU, PicoA's
+  shape, PicoB's reflexes, the IMU's rate. Then 4f-4h (the link, interfaces, names)
+  and 4i, one measurement run on the robot; then step 5, the PC cell map.
 - **Then:** 6 the robot's map (window only, floor first), 7 line map, 8 map switch on
-  the page, 9 final docs, one flash, the robot test list.
+  the page, 9 final docs, the final flash, the robot test list. Versions: link 6 → 7
+  in 4f; if the IMU's rate changes after 4i, link 7 → 8 and wire 4 → 5.
 - **Checks** (all green now): `./run_tests.sh`, `tools/lint.sh`, `cmake --build
   build` (0 warnings); in `pc/robot`: `npm test`, `npm run typecheck`.
-- **Nothing flashed, no robot tests run.** Both Picos are flashed once, in step 9
-  (wire version 4: PicoA, PicoB and the server go together).
+- **Nothing flashed, no robot tests run.** Both Picos are flashed twice: for the
+  measurement run (4i) and at the end (9). PicoA, PicoB and the server always go
+  together.
 - **Docs behind the code:** ARCHITECTURE, README, TODO and CHANGELOG don't yet show
   the last simplification (move numbers in frames, 64-bit times, the simpler
-  `link_pc`). Where they disagree with this plan, this plan and the code are right.
+  `link_pc`) nor all of 8 Nov's clean-up (below). Where they disagree with this plan, this plan and the code are right.
   They are brought up to date once, in step 9.
+- **8 Nov, the architecture diagram** (`architecture-diagram/`, its README): the
+  modules and 11 flows as boxes and ribbons, checked against the code by `npm run
+  resolve` (in `tools/lint.sh`). Its findings (data/README.md, "Findings") led to
+  this session's clean-up: the `/console` page and two dead functions gone
+  (`link_pc_settled`, `move_busy`), PC types named as the wire names them, the
+  server checks the wire table at start, a test ties the PC's command words and
+  move kinds to the robot's C; and to steps 4e-4i. Its next change: the side bar
+  shows the fields of what each step carries (its README, "Next").
+- **8 Nov, names (from the architecture diagram's findings):** PicoA and the server
+  changed together, no wire bytes: the move kind is `rotate` (was `turn`) in status,
+  snapshots and the database; the robot's command word is `snap` (was `snapshot`);
+  console lines say "Drive:", "Rotate:". PicoB unchanged. Flash PicoA with the server
+  of the same commit (in step 9 anyway).
 
 ## 2. How to continue
 
 - **Read first:** this plan, AGENTS.md (how to answer Daniel; the code review guide),
   the README sections "How we work", "Conventions", "Git conventions".
+- **The architecture diagram** is how Daniel and an agent look at the design: `npm
+  run dev` in `architecture-diagram/` (http://127.0.0.1:5173/, `#flow=<id>` for one
+  flow). An agent reads only `architecture-diagram/data/` (its README first). After
+  a code change, `tools/lint.sh` lists stale references; while filling it, look for
+  dead code, flow errors and two names for one thing ("Findings").
 - **Each step:** built in the main session from this plan; one review pass after it
   (the guide in AGENTS.md, "Code review"); the fixes; then the next step.
 - **Simple first:** a rare case returns an error, is counted or is ignored; it isn't
@@ -41,8 +63,9 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 - **Each step ends** green (the checks above), with this plan's section 1 updated,
   and says which Picos it changes. The other docs wait for step 9: until then this
   overrides the README's "After a step" and robot-test rules.
-- **No robot tests between steps.** Everything is checked by host tests, PC tests and
-  review; the robot is flashed once at the end.
+- **No robot tests between steps** but one: the measurement run (4i) gathers every
+  unknown at once. Otherwise everything is checked by host tests, PC tests and
+  review, and the robot is flashed again only at the end (9).
 - **Commit only when Daniel says** (README). To review one step, diff against the
   last commit.
 - Long test runs: cap them with a time limit, and never read large generated data
@@ -296,6 +319,159 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.9 K
 
 ## 11. Steps left
 
+**4e. Discussions with Daniel, before any code** (no code; each ends in a decision
+written into this plan)
+1. **Who reads the IMU, and who hands its data on.** Today `odometry` is the IMU's
+   only reader, and besides the pose it makes the imu records for the PC, which
+   `brain` takes from it: odometry is the IMU's distributor. It has two jobs (the
+   pose; recording the IMU for the PC) and every IMU user goes through it. The case
+   to discuss: PicoB's main reads each sample once in an IMU pipeline (4g) and hands
+   it to odometry (the pose), to an IMU recorder (the records for the PC) and,
+   later, to bump detection; odometry then only makes the pose.
+2. **PicoA's shape: a world-model flow.** The robot should build an understanding of
+   its surroundings (the cell map), keep it up to date, and check each move against
+   it. Today the parts are there (frames → pose stamp → `cell_map`; `behaviour`
+   asks `cell_map_obstacle_along()`), but neither the code's layout nor the
+   diagram shows it. To discuss: PicoA's modules in layers, sense (`tof`, camera,
+   `body`) → world (`pose`, `cell_map`, `watch`) → decide (`commands`, `behaviour`,
+   `move`) → talk (`link_pc`, `wire`, `snapshot`); the flows each layer may have; the
+   missing flow in the diagram (a move checked against the map). Ends in a short
+   spec here, then 4g follows it.
+3. **PicoB's `drive`: reflexes.** `drive` does wheel control and two safety stops
+   (tilt, a wheel not following); `brain` does the third (no drive command for
+   250 ms) and turns drive's faults into stop reasons. So "why the motors went off"
+   has two owners today. To discuss: a `reflexes` module owning every safety stop
+   and its reason, and `drive` (or `wheels`) only following the speed it is given.
+4. **The IMU's rate** (PicoB; the PC's stored data changes with it).
+   - Today PicoB reads the IMU (ISM330DHCX) 416 times a second: odometry adds up every
+     sample (heading, tilt), and each 4 are averaged into a 104 Hz imu record for the
+     PC. The chip doesn't add them up into a heading: it gives turn rates and
+     accelerations, smoothed by its own filter; heading and tilt are PicoB's code at
+     any rate. (It has a small program unit and a buffer, but no heading output.)
+   - For 104 Hz: at the robot's speeds the heading's error comes from the gyro's small
+     steady error and its size error, not from the rate; drive control runs at 100 Hz;
+     the PC already gets 104 Hz records. The 4-sample averaging (`update_record`,
+     `IMU_RECORD_SAMPLES`) and the skipped-sample count (`imu_skipped` in STATUS) go.
+     The chip smooths before it slows down, so motor shaking is less of a risk than
+     reading every 4th sample would be.
+   - Bumps: the chip's own bump detection (wake-up, tap) runs on the accelerometer's
+     rate, and ST's note for the chip asks for ~417 Hz for taps (to check). The two
+     rates are set apart (`CTRL1_XL`, `CTRL2_G`), so one option is: accelerometer at
+     416 Hz for the chip's bump detection, gyro at 104 Hz, PicoB reading at 104 Hz.
+     The chip's interrupt pins: check how they reach PicoB on the PCB.
+   - What else changes at 104 Hz: `imu_calibrate_gyro(400)` counts samples (~1 s now,
+     ~4 s then: count by time); `SAMPLE_GAP_US` has 416 in it; the wheels are read at
+     each IMU sample, so drive's speeds update at 104 Hz. Stays: the still check, the
+     tilt filter and the bias tracking (they work in seconds); `IMU_RECORD_PERIOD_US`
+     and `wire.ts`. Keep polling (no chip buffer) unless a slow loop shows it matters.
+   - Decided by 4i's data, or by Daniel from the reasons alone. If it changes, it is
+     built right after 4i, before step 5, so the PC's maps start from the final
+     data: link 7 → 8 (STATUS, the records; 4i flashed 7), wire 4 → 5 (a record is
+     one sample, not 4; `boots.wire_version` tells which).
+
+**4f. The link: simplifications the architecture diagram found** (both Picos; link
+version 6 → 7, so PicoA and PicoB go together)
+1. **Wheel distances out of the odom report.** `odom_report_t` carries
+   `wheel_left_m` and `wheel_right_m` (8 of its 45 B, 50 times a second: 0.4 KB/s of
+   the UART); nothing on PicoA reads them. Drop them from the report, and from
+   `odom_t` too (only the report and `test_odometry.c` read them; `drive` uses the
+   speeds, `wheel_*_mps`). The test checks a side's distance through x instead.
+   The wheels aren't lost: every wheel step goes into x, y and the speeds on PicoB,
+   and the pose's changes are the training answer (IMU windows in, pose change out).
+   The totals would add only the wheels' own idea of the turn (left minus right,
+   against the gyro's yaw: skid), which nothing plans to use. `test_odometry.c`
+   already checks x and the side speeds; only its two distance asserts go. UART
+   PicoB → PicoA ~4.9 → ~4.5 KB/s (section 9); the glossary's odom_report too.
+2. **One rule for IMU records PicoA can't place yet.** PicoB holds them back until
+   PicoA has greeted it with the same link version (`brain.c` `send_imu`,
+   `greeted`), and PicoA drops them until it knows PicoB's clock (`body.c`,
+   `clock_known`: PicoB's first report, and again after PicoB restarts). One rule,
+   on PicoA: `body` keeps a record only when PicoB has greeted it with the same
+   version and its clock is known; PicoB sends from the start. Harmless at start-up:
+   PicoA doesn't read the link during its ~2 s start (the ToF's firmware), its 1 KB
+   receive buffer already overflows on reports alone (start-up `rx_bad`, `rx_lost`
+   grow), and PicoB never waits. `test_brain.c` and `test_imu_path_picob.c` change.
+
+Looked at and kept: `odom_report_t.t_us` is the send time, not when the odometry was
+measured (up to 2.4 ms earlier). PicoA learns the clocks' offset from the send time,
+so measuring time would need a second field; ~0.1° at a fast turn isn't worth it.
+
+Also looked at and kept: **one combined message from PicoB.** PicoB sends ODOM
+(50 Hz), IMU (104 Hz) and STATUS (2 Hz) as separate messages; PicoA sends DRIVE every
+50 ms (also PicoB's safety heartbeat: no DRIVE for 250 ms stops the motors) and
+MOTORS on a change. Folding the IMU records into the 50 Hz report would save 6 B of
+framing per record (~0.6 KB/s of the UART's ~100 KB/s; ~5 KB/s used), but makes the
+report variable in length and ties control data (odometry, read by `move` and
+`pose`) to training data (IMU, only passed on to the PC). Not worth it.
+
+**4g. Interfaces take what they use** (spec first; then PicoB, PicoA, the PC, one at a
+time)
+- The rule: a function takes either a named piece of data (section 5) that it reads
+  most of, or a small input its own header declares. When it would read only a few
+  fields of another module's struct, whether passed in or fetched with a getter
+  (`body_odom()`, `odom_get()`), a pipeline picks them for it.
+- A **pipeline** is the mapping for one data path: a function in the program's
+  `main` (a program is one executable: PicoB's firmware, PicoA's, the PC server). It
+  gets its own `.h` and `.c` only when `main` grows or it needs a host test of its
+  own. PicoA's `tof_pipeline()` and `imu_pipeline()` are pipelines already; on the
+  PC, `ingest.ts` is (link events into the boot and the store).
+- Not one big `main` with every mapping inside one function, and not a module per
+  pair of modules (a pass-through interface each).
+- In the architecture diagram: a pick circle on a box other than a pipeline is a
+  finding. (A fat ribbon alone is fine: a posed frame into `cell_map` is fat and
+  read almost whole.) A pipeline in `main.c` has no header, so the diagram draws it
+  once it has its own file; until then its pick shows on the receiver.
+- First, the spec: a section in this plan listing each case, from the diagram (pick
+  circles on receivers' rows) and a scan of the headers and getters: what it reads,
+  the input it would take, the pipeline that maps it; and the cases left as they
+  are (a module that reads most of a struct, e.g. `behaviour` of the odom report).
+  Daniel confirms it before any code changes.
+- Known cases:
+  - `drive_update(const odom_t *)` reads 9 of `odom_t`'s 17 values: pitch and roll
+    (the tilt stop), the turn rate, the two sides' speeds and the four wheels' (speed
+    control, the wheel-following stop). The tilt stop stays in drive: it sets
+    drive's fault, which `brain` reports as the stop reason, so one module owns "why
+    the motors went off". Drive takes `drive_input_t` (the 9 values, 36 B), declared
+    in `drive.h`, which then no longer needs `odometry.h`; PicoB's `main` fills it.
+  - `watch` reads only `stationary` of the odom report (`watch.c`, via `body_odom()`).
+
+**4h. Whole words in names, everywhere** (both Picos and the PC; mechanical; one step)
+- A module's prefix is its name, and names are whole words. Acronyms in the
+  glossary stay (IMU, ToF, PC, UART, CRC, COBS, VL53, ULD).
+- Found so far: `odom_` / `odom_t` / `odom_report_t` / `MSG_ODOM` / `body_odom*`
+  (module `odometry`: `odometry_`, `odometry_t`, `odometry_report_t`); `ENC_`
+  (`encoder`); `msg` (`link_msgs.h`, `MSG_`, `link_msg_t`, `wire_msg_t`: message);
+  `SNAP_` constants and `snap_*_t` / the PC's `Snap*` types (`snapshot`; the command
+  word `snap` stays); `obs` (`watch_obs.h`: observation); `link_pc`'s
+  `link_send_control`, `link_send_bulk`, `link_received` (prefix `link_pc_`: next to
+  common's `link_send`, `link_receive` they read as the PicoB link); `tof_format`'s
+  `tof_pack`, `tof_unpack`. Before the step, a scan lists the rest.
+- Kept: the acronyms IMU, ToF, PC, UART, CRC, COBS, VL53, ULD (4h adds them to the
+  glossary); unit endings (`_us`, `_mps`, `_px`); `init`, `n`, `len`, `min`, `max`,
+  `rx`, `tx`; local variables; the drivers' register names (the data sheets').
+- Size: `odom` alone is ~640 places in code and docs. The CHANGELOG and doc/archive
+  keep the old names (history). After 4f and 4g (so no line is touched twice) and
+  before step 5, so the new code (the PC's cell map compiles the robot's C) starts
+  with whole words.
+- The names table (section 5) and the architecture diagram's data change with the
+  code (`npm run resolve` lists every stale reference).
+
+**4i. One measurement run** (both Picos flashed once; Daniel runs it; the only robot
+test before step 9)
+- Everything 4f-4h changed, and every open question that needs the robot, in one
+  run: the README's robot tests for steps 1-4 (collected in "Robot tests after the
+  data-flow rework"), plus the data each unknown needs, listed here before the run:
+  - the IMU's rate (4e.4): turns and drives at different speeds; the decision adds
+    up the stored records' gyro over each turn (the bias from the 200 ms still start)
+    and compares it with odometry's yaw in the frames (416 Hz, every sample);
+  - bumps (4e.4): a few taps from the front during a drive (`robot imu` shows them);
+  - the floor rows at the ToF's 9 cm, the camera's tilt and f (section 14), the
+    worst WiFi spot (frames and imu batches dropped);
+  - anything 4e's discussions leave open.
+- The data stays in the database; each decision is written here and in the
+  CHANGELOG. Then steps 5-8 need no robot; step 9 is the final flash and the robot
+  test of what changed after 4i.
+
 **5. The PC cell map** (PC)
 
 Where to start: today the page and `robot map` draw the robot's map from snapshots
@@ -370,3 +546,8 @@ tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2
 
 1. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
 2. **Line map:** LINE_MAP_PLAN.md is a draft; confirm it before step 7.
+3. **Step 4e's four discussions** (who reads the IMU; PicoA's layers; PicoB's
+   reflexes, and whether the tilt stop stays in drive meanwhile; the IMU's rate,
+   decided by 4i's data or from the reasons). Decided 8 Nov: no abbreviations
+   anywhere (4h, snapshot's `snap_*` types too); one measurement run (4i), then the
+   final flash (9); PicoB's messages stay separate.

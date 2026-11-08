@@ -66,17 +66,17 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     const t0 = 5e9; // µs since power-up, past 2^32: nothing wraps
     await store.status(boot, boot.status(pose(0)));
     void store.moveStart(boot, boot.moveStart({ move: 1, command: 4, kind: "drive", param: 0.5, tUs: t0, preMs: 200, postMs: 300, refused: false }));
-    void store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: t0 + 50000, frame: frame(11, robotClock(t0 + 50000)) }));
-    void store.imu(boot, boot.imu(imu(1, t0 - 30000, 10)));
+    void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: t0 + 50000, frame: frame(11, robotClock(t0 + 50000)) }));
+    void store.imuBatch(boot, boot.imuBatch(imu(1, t0 - 30000, 10)));
     void store.status(boot, boot.status(pose(0.1)));
     // The move's end overtakes its last frame (control before bulk); the next move starts meanwhile.
     void store.moveEnd(boot, boot.moveEnd({ move: 1, end: "obstacle", tUs: (t0 + 150000), framesSent: 2, framesDropped: 1,
                                             moved: 0.3, rotated: 0.01, imuSent: 2, imuDropped: 0 }));
     void store.moveStart(boot, boot.moveStart({ move: 2, command: 5, kind: "watch", param: 60, tUs: (t0 + 200000), preMs: 200, postMs: 300, refused: false }));
-    void store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: t0 + 150000, frame: frame(12, robotClock(t0 + 150000)) }));
-    void store.imu(boot, boot.imu(imu(1, (t0 + 66150), 4, 100))); // move 1's last batch, late: after move 2's start
-    void store.imu(boot, boot.imu(imu(2, (t0 + 210000), 10, 200)));
-    await store.frame(boot, boot.frame({ format: "compact", move: 2, tUs: t0 + 250000, frame: frame(13, robotClock(t0 + 250000), 2600) }));
+    void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: t0 + 150000, frame: frame(12, robotClock(t0 + 150000)) }));
+    void store.imuBatch(boot, boot.imuBatch(imu(1, (t0 + 66150), 4, 100))); // move 1's last batch, late: after move 2's start
+    void store.imuBatch(boot, boot.imuBatch(imu(2, (t0 + 210000), 10, 200)));
+    await store.tof(boot, boot.tof({ format: "compact", move: 2, tUs: t0 + 250000, frame: frame(13, robotClock(t0 + 250000), 2600) }));
     await store.flush();
 
     const one = (await store.moveFrames("0badf00d", 1))!;
@@ -112,14 +112,14 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     // The replay: every message in the order it came, numbered from 1.
     const replay = await store.replay("0badf00d");
     assert.deepEqual(replay.map(m => m.type),
-      ["status", "move_start", "frame", "imu", "status", "move_end", "move_start", "frame", "imu", "imu", "frame"]);
+      ["status", "move_start", "tof", "imu_batch", "status", "move_end", "move_start", "tof", "imu_batch", "imu_batch", "tof"]);
     assert.deepEqual(replay.map(m => m.msg), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     const end = replay[5];
     assert.ok(end.type === "move_end" && end.end.framesSent === 2 && end.end.end === "obstacle" && end.end.imuSent === 2);
     const st = replay[4];
     assert.ok(st.type === "status" && st.pose.x === 0.1 && st.pose.mode === "manual");
     const late = replay[8];
-    assert.ok(late.type === "imu");
+    assert.ok(late.type === "imu_batch");
     assert.deepEqual(late.batch, imu(1, (t0 + 66150), 4, 100)); // a batch back as it came
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -133,7 +133,7 @@ test("each boot its own mounting; a restarted server numbers a boot's messages o
     const b = await store.openBoot({ version: WIRE_VERSION, bootId: "bbbbbbbb", build: "new" }, now);
     assert.equal(a.mounting.tof.z_m, 0.07);
     assert.equal(b.mounting.tof.z_m, now.tof.z_m);
-    await store.moveStart(a, a.moveStart({ move: 7, command: 1, kind: "turn", param: 1, tUs: 1e6, preMs: 200, postMs: 200, refused: false }));
+    await store.moveStart(a, a.moveStart({ move: 7, command: 1, kind: "rotate", param: 1, tUs: 1e6, preMs: 200, postMs: 200, refused: false }));
     await store.moveEnd(a, a.moveEnd({ move: 7, end: "ok", tUs: 2e6, framesSent: 3, framesDropped: 0, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }));
     await store.flush();
     // The server starts again; boot a connects again: its own mounting, not the file's now.
@@ -185,15 +185,15 @@ test("the server restarted in the middle of a move: the boot goes on, its messag
     const hello = { version: WIRE_VERSION, bootId: "0000aaaa", build: "test" };
     let boot = await store.openBoot(hello, now, wall);
     const raw = (s: number) => s * 1e6; // µs since power-up, as the robot sends its times
-    await store.moveStart(boot, boot.moveStart({ move: 1, command: 1, kind: "turn", param: 1, tUs: raw(28), preMs: 200, postMs: 200, refused: false }, wall + 28000));
-    await store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: raw(29.5), frame: frame(1, robotClock(raw(29.5))) }, wall + 29500));
-    await store.imu(boot, boot.imu(imu(1, raw(29.9), 10), wall + 29950));
+    await store.moveStart(boot, boot.moveStart({ move: 1, command: 1, kind: "rotate", param: 1, tUs: raw(28), preMs: 200, postMs: 200, refused: false }, wall + 28000));
+    await store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: raw(29.5), frame: frame(1, robotClock(raw(29.5))) }, wall + 29500));
+    await store.imuBatch(boot, boot.imuBatch(imu(1, raw(29.9), 10), wall + 29950));
     await store.flush();
     // The server stops and starts again: the boot is opened from the store.
     store = new Store(file);
     boot = await store.openBoot(hello, now, wall + 40000);
-    await store.frame(boot, boot.frame({ format: "compact", move: 1, tUs: raw(30.5), frame: frame(2, robotClock(raw(30.5))) }, wall + 40000));
-    await store.imu(boot, boot.imu(imu(1, raw(30.5), 3), wall + 40000));
+    await store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: raw(30.5), frame: frame(2, robotClock(raw(30.5))) }, wall + 40000));
+    await store.imuBatch(boot, boot.imuBatch(imu(1, raw(30.5), 3), wall + 40000));
     await store.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: raw(31), framesSent: 2, framesDropped: 0, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }, wall + 41000));
     await store.flush();
     const m = (await store.moveFrames("0000aaaa", 1))!;
@@ -218,16 +218,16 @@ test("imu records missing: counted from the gaps in the stored times", async () 
     const at = (move: number, ks: number[], jitterUs = 0) => ({ move, records: ks.map((k, i) =>
       ({ tUs: (t0 + k * 9615 + (i % 2) * jitterUs), accel: [k, 0, 16384] as [number, number, number], gyro: [0, 0, 0] as [number, number, number] })) });
     for (const move of [1, 2, 3]) {
-      await store.moveStart(boot, boot.moveStart({ move, command: move, kind: "turn", param: 1, tUs: t0, preMs: 200, postMs: 200, refused: false }));
+      await store.moveStart(boot, boot.moveStart({ move, command: move, kind: "rotate", param: 1, tUs: t0, preMs: 200, postMs: 200, refused: false }));
     }
     // Move 1: a batch of 10, then one record missing at the batch boundary.
-    await store.imu(boot, boot.imu(at(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])));
-    await store.imu(boot, boot.imu(at(1, [11, 12, 13])));
+    await store.imuBatch(boot, boot.imuBatch(at(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])));
+    await store.imuBatch(boot, boot.imuBatch(at(1, [11, 12, 13])));
     // Move 2: two missing inside the data, one more between its batches.
-    await store.imu(boot, boot.imu(at(2, [0, 1, 2, 5, 6])));
-    await store.imu(boot, boot.imu(at(2, [8, 9])));
+    await store.imuBatch(boot, boot.imuBatch(at(2, [0, 1, 2, 5, 6])));
+    await store.imuBatch(boot, boot.imuBatch(at(2, [8, 9])));
     // Move 3: steps of 1.4 and 0.6 periods (jitter) are not gaps.
-    await store.imu(boot, boot.imu(at(3, [0, 1, 2, 3], 0.4 * 9615)));
+    await store.imuBatch(boot, boot.imuBatch(at(3, [0, 1, 2, 3], 0.4 * 9615)));
     await store.flush();
     const count = async (move: number) => (await store.moveImu("0000cafe", move))!.imu;
     assert.deepEqual(await count(1), { records: 13, batches: 2, missing: 1 });

@@ -63,7 +63,9 @@ static inline const char *stop_reason_text(uint8_t reason) {
     }
 }
 
-// How PicoB has moved since it started, measured at t_us on PicoB's clock.
+// How PicoB has moved since it started. t_us: when PicoB sent it, on its clock (PicoA
+// learns the clocks' offset from it, body.c). The odometry in it is from PicoB's latest
+// IMU sample, up to one sample period (2.4 ms) earlier: ~0.1° at a fast turn, ignored.
 typedef struct __attribute__((packed)) {
     uint32_t t_us;
     float x_m, y_m;          // x = forward at PicoB's start
