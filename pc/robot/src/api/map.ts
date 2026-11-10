@@ -40,8 +40,8 @@ export class RobotMap {
   // The column at world cell (cx, cy): COLUMN.*.
   column(cx: number, cy: number): number {
     const w = this.view.window;
-    if (w && cx >= w.orgX && cx < w.orgX + w.cellsX && cy >= w.orgY && cy < w.orgY + w.cellsY)
-      return w.columns[(cx - w.orgX) * w.cellsY + (cy - w.orgY)];
+    if (w && cx >= w.originX && cx < w.originX + w.cellsX && cy >= w.originY && cy < w.originY + w.cellsY)
+      return w.columns[(cx - w.originX) * w.cellsY + (cy - w.originY)];
     const tx = tileOf(cx), ty = tileOf(cy), t = this.tiles.get(`${tx},${ty}`);
     return t ? t[(cx - (tx * TILE_COLS - TILE_COLS / 2)) * TILE_COLS + (cy - (ty * TILE_COLS - TILE_COLS / 2))] : COLUMN.UNKNOWN;
   }
@@ -87,7 +87,7 @@ export class RobotMap {
   grid(): { xTop: number; yLeft: number; rows: string[] } | null {
     const w = this.view.window;
     if (!w) return null;
-    return { xTop: (w.orgX + w.cellsX - 1) * 10, yLeft: (w.orgY + w.cellsY - 1) * 10, rows: this.cells().map(r => r.join("")) };
+    return { xTop: (w.originX + w.cellsX - 1) * 10, yLeft: (w.originY + w.cellsY - 1) * 10, rows: this.cells().map(r => r.join("")) };
   }
 
   // The window as an RGB PNG, scale pixels a column; null without a window.
@@ -99,7 +99,7 @@ export class RobotMap {
       if (px < 0 || py < 0 || px >= width || py >= height) return;
       pixels.set(rgb, (py * width + px) * 3);
     };
-    const toPx = (x: number, y: number) => [(w.orgY + w.cellsY - y / CELL_M) * scale, (w.orgX + w.cellsX - x / CELL_M) * scale];
+    const toPx = (x: number, y: number) => [(w.originY + w.cellsY - y / CELL_M) * scale, (w.originX + w.cellsX - x / CELL_M) * scale];
     for (let ix = 0; ix < w.cellsX; ix++)
       for (let iy = 0; iy < w.cellsY; iy++) {
         const rgb = COLORS[w.columns[ix * w.cellsY + iy]] ?? COLORS[COLUMN.UNKNOWN];
@@ -127,7 +127,7 @@ export class RobotMap {
     const grid = Array.from({ length: w.cellsX }, (_, r) => Array.from({ length: w.cellsY }, (__, c) =>
       MAP_CHARS[w.columns[(w.cellsX - 1 - r) * w.cellsY + (w.cellsY - 1 - c)]] ?? " "));
     const mark = (x: number, y: number, ch: string) => {
-      const r = w.orgX + w.cellsX - 1 - cellOf(x), c = w.orgY + w.cellsY - 1 - cellOf(y);
+      const r = w.originX + w.cellsX - 1 - cellOf(x), c = w.originY + w.cellsY - 1 - cellOf(y);
       if (r >= 0 && r < w.cellsX && c >= 0 && c < w.cellsY) grid[r][c] = ch;
     };
     const path = this.view.path;

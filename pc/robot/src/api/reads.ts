@@ -23,7 +23,7 @@ import { framesJson, framesText, imuJson, imuText } from "./frames.ts";
 
 export interface Config { autoSnap: boolean }
 export interface ApiContext {
-  store: Store; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDir: string;
+  store: Store; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDirectory: string;
   bootFolders: BootFolders;  // the robot's boot ids to our folder names (map --png)
   chat?: Chat; modelName?: string;  // the vision model for robot detect (objects/)
 }
@@ -47,30 +47,30 @@ export class ReadError extends Error {
   constructor(message: string, status = 404) { super(message); this.status = status; }
 }
 
-type SnapshotId = { boot: string; seq: number };
+type SnapshotId = { boot: string; sequence: number };
 
 export async function findSnapshot(store: Store, arg: string | undefined): Promise<SnapshotId> {
   if (arg !== undefined && !/^\d+$/.test(arg)) throw new ReadError(`${arg} is not a snapshot number`, 400);
   return store.read(async c => {
-    const newest = (await c.runAndReadAll("SELECT boot_id, seq FROM snapshots ORDER BY arrived_at DESC, seq DESC LIMIT 1")).getRowObjects()[0];
+    const newest = (await c.runAndReadAll("SELECT boot_id, sequence FROM snapshots ORDER BY arrived_at DESC, sequence DESC LIMIT 1")).getRowObjects()[0];
     if (!newest) throw new ReadError("no snapshots yet (robot snap takes one)");
     const boot = String(newest.boot_id);
-    if (arg === undefined) return { boot, seq: Number(newest.seq) };
-    const seq = Number(arg);
-    const found = (await c.runAndReadAll("SELECT 1 FROM snapshots WHERE boot_id = $1 AND seq = $2", [boot, seq])).getRowObjects();
-    if (!found.length) throw new ReadError(`no snapshot ${seq} (the newest is ${newest.seq})`);
-    return { boot, seq };
+    if (arg === undefined) return { boot, sequence: Number(newest.sequence) };
+    const sequence = Number(arg);
+    const found = (await c.runAndReadAll("SELECT 1 FROM snapshots WHERE boot_id = $1 AND sequence = $2", [boot, sequence])).getRowObjects();
+    if (!found.length) throw new ReadError(`no snapshot ${sequence} (the newest is ${newest.sequence})`);
+    return { boot, sequence };
   });
 }
 
 export async function mapOf(store: Store, id: SnapshotId): Promise<RobotMap> {
-  const view = await snapshotMap(store, id.boot, id.seq);
-  if (!view?.window) throw new ReadError(`snapshot ${id.seq} has no map`);
+  const view = await snapshotMap(store, id.boot, id.sequence);
+  if (!view?.window) throw new ReadError(`snapshot ${id.sequence} has no map`);
   return new RobotMap(view);
 }
 
 async function snapshotRow(store: Store, id: SnapshotId) {
-  const d = (await snapshotDetail(store, id.boot, id.seq))!;
+  const d = (await snapshotDetail(store, id.boot, id.sequence))!;
   return { ...d, row: d.snapshot as Record<string, unknown> };
 }
 
@@ -104,17 +104,17 @@ export const READS: Record<string, Read> = {
           "10 cm. The top row is the largest x (forward from where the robot started), the left column the largest\n" +
           "y (left). x_top and y_left say where the top-left cell is. --png writes the same as a picture and gives\n" +
           "its file.",
-    async run({ store, recordingsDir, bootFolders }, args, flags) {
+    async run({ store, recordingsDirectory, bootFolders }, args, flags) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), map = await mapOf(store, id);
       if (flags.has("png")) {
-        const file = path.join(recordingsDir, "map", bootFolders.folderForBoot(id.boot), `${id.seq}.png`);
+        const file = path.join(recordingsDirectory, "map", bootFolders.folderForBoot(id.boot), `${id.sequence}.png`);
         await mkdir(path.dirname(file), { recursive: true });
         await writeFile(file, map.png()!);
-        return { snapshot: id.seq, file };
+        return { snapshot: id.sequence, file };
       }
       const g = map.grid()!, r = map.view.robot;
-      return { snapshot: id.seq, pose: r && poseOut(r), x_top: g.xTop, y_left: g.yLeft, rows: g.rows, legend: MAP_LEGEND };
+      return { snapshot: id.sequence, pose: r && poseOut(r), x_top: g.xTop, y_left: g.yLeft, rows: g.rows, legend: MAP_LEGEND };
     },
   },
   tof: {
@@ -127,7 +127,7 @@ export const READS: Record<string, Read> = {
     async run({ store }, args) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), d = await snapshotRow(store, id);
-      if (!d.zones.length) throw new ReadError(`snapshot ${id.seq} has no ToF frame`);
+      if (!d.zones.length) throw new ReadError(`snapshot ${id.sequence} has no ToF frame`);
       const matrix = <T>(fill: T) => Array.from({ length: 8 }, () => Array<T>(8).fill(fill));
       const m = { distance: matrix<number | null>(null), kind: matrix("nothing"), signal: matrix(0), sigma: matrix(0), targets: matrix(0) };
       for (const z of d.zones) {
@@ -139,7 +139,7 @@ export const READS: Record<string, Read> = {
         m.sigma[r][c] = Number(z.sigma_mm);
         m.targets[r][c] = Number(z.targets);
       }
-      return { snapshot: id.seq, ...m };
+      return { snapshot: id.sequence, ...m };
     },
   },
   frames: {
@@ -160,7 +160,7 @@ export const READS: Record<string, Read> = {
   imu: {
     usage: "imu <boot> <move> [--json]",
     help: "Shows a move's imu records as the robot sent them, from the database (104 a second during a move): the move,\n" +
-          "then each record's time and the IMU's raw counts, accel and gyro x, y, z, in the sensor's own axes. boot and\n" +
+          "then each record's time and the IMU's raw counts, acceleration and gyro x, y, z, in the sensor's own axes. boot and\n" +
           "move as for robot frames. --json gives the same for a program.",
     async run({ store, bootFolders }, args, flags) {
       const { boot, folder } = await moveOf(store, bootFolders, args, this.usage);
@@ -173,11 +173,11 @@ export const READS: Record<string, Read> = {
   camera: {
     usage: "camera [n]",
     help: `Gives the file of the camera picture at snapshot n: a grey PNG, ${CAMERA.width} × ${CAMERA.height}, as the robot sees it.`,
-    async run({ store, recordingsDir }, args) {
+    async run({ store, recordingsDirectory }, args) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), { row } = await snapshotRow(store, id);
-      if (!row.image) throw new ReadError(`snapshot ${id.seq} has no picture`);
-      return { snapshot: id.seq, file: path.join(recordingsDir, String(row.image)) };
+      if (!row.image) throw new ReadError(`snapshot ${id.sequence} has no picture`);
+      return { snapshot: id.sequence, file: path.join(recordingsDirectory, String(row.image)) };
     },
   },
   light: {
@@ -187,8 +187,8 @@ export const READS: Record<string, Read> = {
     async run({ store }, args) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), { row } = await snapshotRow(store, id);
-      if (row.lux === null) throw new ReadError(`snapshot ${id.seq} has no colour reading`);
-      return { snapshot: id.seq, lux: round(Number(row.lux), 1), cie: { x: round(Number(row.cie_x), 4), y: round(Number(row.cie_y), 4) },
+      if (row.lux === null) throw new ReadError(`snapshot ${id.sequence} has no colour reading`);
+      return { snapshot: id.sequence, lux: round(Number(row.lux), 1), cie: { x: round(Number(row.cie_x), 4), y: round(Number(row.cie_y), 4) },
                rgb: displayRgb(Number(row.color_x), Number(row.color_y), Number(row.color_z)) };
     },
   },
@@ -201,7 +201,7 @@ export const READS: Record<string, Read> = {
       const id = await findSnapshot(store, args[0]), d = await snapshotRow(store, id);
       const state = (flags: number, age: number) => flags & FEATURE.LOST ? "lost" : flags & FEATURE.MISSED ? "missed"
         : flags & FEATURE.NEW || age === 0 ? "new" : "tracked";
-      return { snapshot: id.seq,
+      return { snapshot: id.sequence,
                features: d.features.map(f => ({ x: round(Number(f.x), 1), y: round(Number(f.y), 1), state: state(Number(f.flags), Number(f.age)) })) };
     },
   },

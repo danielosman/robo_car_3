@@ -14,23 +14,23 @@
 static float wheel_l, wheel_r;   // simulated wheel speeds
 static float left_gain = 1, right_gain = 1;
 static float rear_left_gain = 1; // on top of left_gain: 0 = the rear-left motor is stuck
-static odom_t odom;
+static odometry_t odometry;
 
 // One 10 ms step: the controller runs, then the simulated robot responds.
 static void step(void) {
     fake_now_us += (uint64_t)(DT_S * 1e6f);
-    drive_update(&odom);
+    drive_update(&odometry);
     float k = DT_S / (MOTOR_TAU_S + DT_S);
     wheel_l += k * (fake_left_power * left_gain * FULL_SPEED - wheel_l);
     wheel_r += k * (fake_right_power * right_gain * FULL_SPEED - wheel_r);
     // Each side's wheels roll together, except a stuck rear-left wheel, which skids.
-    odom.wheel_mps[ENC_LEFT_FRONT] = wheel_l;
-    odom.wheel_mps[ENC_LEFT_REAR] = wheel_l * rear_left_gain;
-    odom.wheel_mps[ENC_RIGHT_FRONT] = odom.wheel_mps[ENC_RIGHT_REAR] = wheel_r;
-    odom.wheel_left_mps = 0.5f * (odom.wheel_mps[ENC_LEFT_FRONT] + odom.wheel_mps[ENC_LEFT_REAR]);
-    odom.wheel_right_mps = wheel_r;
-    odom.v_mps = 0.5f * (wheel_l + wheel_r);
-    odom.w_radps = (wheel_r - wheel_l) / (TRACK_M * SKID);
+    odometry.wheel_mps[ENCODER_LEFT_FRONT] = wheel_l;
+    odometry.wheel_mps[ENCODER_LEFT_REAR] = wheel_l * rear_left_gain;
+    odometry.wheel_mps[ENCODER_RIGHT_FRONT] = odometry.wheel_mps[ENCODER_RIGHT_REAR] = wheel_r;
+    odometry.wheel_left_mps = 0.5f * (odometry.wheel_mps[ENCODER_LEFT_FRONT] + odometry.wheel_mps[ENCODER_LEFT_REAR]);
+    odometry.wheel_right_mps = wheel_r;
+    odometry.v_mps = 0.5f * (wheel_l + wheel_r);
+    odometry.w_radps = (wheel_r - wheel_l) / (TRACK_M * SKID);
 }
 
 static void run(float seconds) { for (int i = 0; i < (int)(seconds / DT_S + 0.5f); i++) step(); }
@@ -49,7 +49,7 @@ static void check_ramp(float seconds) {
 int main(void) {
     drive_init();
     fake_now_us = FAKE_CLOCK_WRAP_US - 7000000; // the clock wraps during the test
-    drive_update(&odom);
+    drive_update(&odometry);
     assert(fake_left_power == 0 && !fake_standby_off);     // starts off
 
     // Straight at 0.1 m/s: ramps up (0.1 m/s after 0.25 s), then holds the speed.
@@ -72,9 +72,9 @@ int main(void) {
     left_gain = 0.8f;
     drive_set(0.1f, 0);
     run(2);
-    assert(fabsf(odom.w_radps) < 0.02f && fabsf(wheel_l - 0.1f) < 0.01f);
+    assert(fabsf(odometry.w_radps) < 0.02f && fabsf(wheel_l - 0.1f) < 0.01f);
     printf("weak left motor: turn rate %.3f rad/s (target 0), wheels %.3f / %.3f\n",
-           (double)odom.w_radps, (double)wheel_l, (double)wheel_r);
+           (double)odometry.w_radps, (double)wheel_l, (double)wheel_r);
     left_gain = 1;
     drive_set(0, 0);
     run(1);
@@ -83,9 +83,9 @@ int main(void) {
     drive_set(0, 0.5f);
     check_ramp(0.2f);
     run(2.8f);
-    assert(fabsf(odom.w_radps - 0.5f) < 0.025f);
+    assert(fabsf(odometry.w_radps - 0.5f) < 0.025f);
     printf("turn with %.1fx skid: %.3f rad/s (target 0.500; untrimmed it would be %.3f)\n",
-           (double)SKID, (double)odom.w_radps, (double)(0.5f / SKID));
+           (double)SKID, (double)odometry.w_radps, (double)(0.5f / SKID));
 
     assert(drive_fault() == DRIVE_OK);   // no false stall alarms above
 
@@ -131,14 +131,14 @@ int main(void) {
     // Tilted past 15° (lifted, tipping over): motors off at once; 10° is fine.
     drive_set(0.1f, 0);
     run(1);
-    odom.roll_rad = -0.17f;
+    odometry.roll_rad = -0.17f;
     run(0.5f);
     assert(drive_enabled());
-    odom.pitch_rad = 0.27f;
+    odometry.pitch_rad = 0.27f;
     step();
     assert(!drive_enabled() && drive_fault() == DRIVE_TILTED && fake_left_power == 0);
     printf("tilted 15.5 deg: motors off\n");
-    odom.pitch_rad = odom.roll_rad = 0;
+    odometry.pitch_rad = odometry.roll_rad = 0;
     wheel_l = wheel_r = 0;
     drive_enable(true);
     assert(drive_fault() == DRIVE_OK);
@@ -151,7 +151,7 @@ int main(void) {
     run(0.5f);
     drive_enable(false);
     assert(fake_left_power == 0 && fake_right_power == 0 && !fake_standby_off);
-    drive_update(&odom);
+    drive_update(&odometry);
     assert(fake_left_power == 0);
     printf("OK: drive ramps, limits, controls speed and turn rate, stops\n");
     return 0;

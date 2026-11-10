@@ -50,7 +50,7 @@ int main(void) {
         printf("Tilt about IMU X axis: +Y up = right wheels, +Y down = left wheels (forward);\n"
                "dead zone +-%.0f deg, full power at +-%.0f deg\n", DEAD_ZONE_DEG, FULL_DEG);
         help();
-        printf("Units: tilt deg, accel g, gyro deg/s, L/R power; per wheel (LF LR RF RR = left/right front/rear)\n"
+        printf("Units: tilt deg, acceleration g, gyro deg/s, L/R power; per wheel (LF LR RF RR = left/right front/rear)\n"
                "output-shaft revolutions / rpm, + = forward\n");
         printf("Motors are STOPPED. Press g to enable.\n");
 
@@ -59,14 +59,14 @@ int main(void) {
         bool have_tilt = false;
         absolute_time_t last_sample = get_absolute_time();
         absolute_time_t next_print = make_timeout_time_us(PRINT_US);
-        int32_t last_count[ENC_COUNT];
-        for (int i = 0; i < ENC_COUNT; i++) last_count[i] = encoder_count(i);
+        int32_t last_count[ENCODER_COUNT];
+        for (int i = 0; i < ENCODER_COUNT; i++) last_count[i] = encoder_count(i);
 
         while (stdio_usb_connected()) {
             int c = getchar_timeout_us(0);
             if (c == 'g') { running = true; motor_enable(true); printf("Motors ENABLED\n"); }
             else if (c == 's') { running = false; motor_enable(false); printf("Motors STOPPED\n"); }
-            else if (c == 'z') { encoder_reset(); for (int i = 0; i < ENC_COUNT; i++) last_count[i] = 0; printf("Revolutions zeroed\n"); }
+            else if (c == 'z') { encoder_reset(); for (int i = 0; i < ENCODER_COUNT; i++) last_count[i] = 0; printf("Revolutions zeroed\n"); }
             else if (c == 'h' || c == '?') help();
 
             static imu_sample_t s;
@@ -75,15 +75,15 @@ int main(void) {
                 float dt = absolute_time_diff_us(last_sample, now) * 1e-6f;
                 last_sample = now;
                 // Gravity direction from the accelerometer (right-hand rotations about X and Y).
-                float accel_x = atan2f(s.ay, s.az) * RAD_TO_DEG;
-                float accel_y = atan2f(-s.ax, s.az) * RAD_TO_DEG;
+                float acceleration_x = atan2f(s.ay, s.az) * RAD_TO_DEG;
+                float acceleration_y = atan2f(-s.ax, s.az) * RAD_TO_DEG;
                 if (have_tilt) {
                     float w = dt / (FILTER_TAU_S + dt);
-                    tilt_x = (1 - w) * (tilt_x + s.gx * dt) + w * accel_x;
-                    tilt_y = (1 - w) * (tilt_y + s.gy * dt) + w * accel_y;
+                    tilt_x = (1 - w) * (tilt_x + s.gx * dt) + w * acceleration_x;
+                    tilt_y = (1 - w) * (tilt_y + s.gy * dt) + w * acceleration_y;
                 } else {
-                    tilt_x = accel_x;
-                    tilt_y = accel_y;
+                    tilt_x = acceleration_x;
+                    tilt_y = acceleration_y;
                 }
                 have_tilt = true;
             }
@@ -96,8 +96,8 @@ int main(void) {
 
             if (time_reached(next_print)) {
                 next_print = delayed_by_us(next_print, PRINT_US);
-                float revs[ENC_COUNT], rpm[ENC_COUNT];
-                for (int i = 0; i < ENC_COUNT; i++) {
+                float revs[ENCODER_COUNT], rpm[ENCODER_COUNT];
+                for (int i = 0; i < ENCODER_COUNT; i++) {
                     int32_t count = encoder_count(i);
                     revs[i] = count / ENCODER_COUNTS_PER_REV;
                     rpm[i] = (count - last_count[i]) / ENCODER_COUNTS_PER_REV * (60e6f / PRINT_US);
@@ -107,8 +107,8 @@ int main(void) {
                        "L %3.0f%% R %3.0f%%  LF %+5.0f/%+4.0f  LR %+5.0f/%+4.0f  RF %+5.0f/%+4.0f  RR %+5.0f/%+4.0f  %s\n",
                        tilt_x, tilt_y, s.ax, s.ay, s.az, s.gx, s.gy, s.gz,
                        left * 100, right * 100,
-                       revs[ENC_LEFT_FRONT], rpm[ENC_LEFT_FRONT], revs[ENC_LEFT_REAR], rpm[ENC_LEFT_REAR],
-                       revs[ENC_RIGHT_FRONT], rpm[ENC_RIGHT_FRONT], revs[ENC_RIGHT_REAR], rpm[ENC_RIGHT_REAR],
+                       revs[ENCODER_LEFT_FRONT], rpm[ENCODER_LEFT_FRONT], revs[ENCODER_LEFT_REAR], rpm[ENCODER_LEFT_REAR],
+                       revs[ENCODER_RIGHT_FRONT], rpm[ENCODER_RIGHT_FRONT], revs[ENCODER_RIGHT_REAR], rpm[ENCODER_RIGHT_REAR],
                        running ? "RUN" : "STOP");
             }
         }

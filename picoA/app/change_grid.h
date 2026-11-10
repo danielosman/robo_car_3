@@ -7,13 +7,13 @@
 // noise mostly doesn't). Moved cells that touch form blobs.
 #include <stdbool.h>
 #include <stdint.h>
-#include "watch_obs.h"
+#include "watch_observation.h"
 
 #define CHANGE_GRID_MAX_CELLS 300 // the camera's 20 x 15 blocks
 #define CHANGE_GRID_WINDOW 4
 
 typedef struct { // the fields are the grid's own: use the functions
-    int cols, rows;
+    int columns, rows;
     float threshold, neighbour_threshold;
     float score[CHANGE_GRID_WINDOW][CHANGE_GRID_MAX_CELLS];
     float sum[CHANGE_GRID_MAX_CELLS];
@@ -21,9 +21,9 @@ typedef struct { // the fields are the grid's own: use the functions
     int next;
 } change_grid_t;
 
-void change_grid_init(change_grid_t *g, int cols, int rows, float threshold, float neighbour_threshold);
+void change_grid_init(change_grid_t *g, int columns, int rows, float threshold, float neighbour_threshold);
 void change_grid_clear(change_grid_t *g); // forgets all scores: nothing has moved
-// One frame's scores, cols x rows, row by row (0 = as the reference, more = less like it).
+// One frame's scores, columns x rows, row by row (0 = as the reference, more = less like it).
 void change_grid_add(change_grid_t *g, const float *score);
 bool change_grid_moved(const change_grid_t *g, int cell);
 float change_grid_sum(const change_grid_t *g, int cell);     // its scores over the window
@@ -34,8 +34,8 @@ int change_grid_blobs(const change_grid_t *g, uint8_t *label);
 // (the mean of its cells' directions; direction() gives a cell's, unit length), its
 // leftmost and rightmost cell, cells and strength. range_m is −1, point and t_us 0:
 // the detector adds what it knows, using label. Returns the number of blobs.
-int change_grid_observations(const change_grid_t *g, void (*direction)(int cell, float dir[3]), uint8_t *label,
-                             watch_obs_t *all);
-// The biggest of all[0..blobs) (most cells first), at most max of them, into obs;
+int change_grid_observations(const change_grid_t *g, void (*direction_of)(int cell, float direction[3]), uint8_t *label,
+                             watch_observation_t *all);
+// The biggest of all[0..blobs) (most cells first), at most max of them, into observations;
 // returns how many. Reorders all.
-int change_grid_biggest(watch_obs_t *all, int blobs, watch_obs_t *obs, int max);
+int change_grid_biggest(watch_observation_t *all, int blobs, watch_observation_t *observations, int max);

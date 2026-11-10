@@ -62,9 +62,9 @@ static void fill_status(wire_status_t *s) {
 // --- the server's side ---
 
 // What the server received since the last call, as messages (all whole).
-#define MAX_MSGS 4096
+#define MAX_MESSAGES 4096
 static uint8_t got_bytes[sizeof fake_sent];
-static wire_msg_t got[MAX_MSGS];
+static wire_message_t got[MAX_MESSAGES];
 static uint32_t n_got;
 static void receive(void) {
     memcpy(got_bytes, fake_sent, fake_sent_len);
@@ -76,7 +76,7 @@ static void receive(void) {
         assert(n > 0); // whole messages, nothing but messages
         at += (uint32_t)n;
         n_got++;
-        assert(n_got < MAX_MSGS);
+        assert(n_got < MAX_MESSAGES);
     }
 }
 static uint32_t count(uint8_t type) {
@@ -97,14 +97,14 @@ static const char *console_text(void) {
     text[n] = 0;
     return text;
 }
-static void server_sends_msg(const uint8_t *msg, uint32_t len) { fake_server_sends((const char *)msg, (u16_t)len); }
+static void server_sends_message(const uint8_t *message, uint32_t len) { fake_server_sends((const char *)message, (u16_t)len); }
 static void server_command(uint32_t n, const char *text) {
     wire_command_t c = {.n = n};
     snprintf(c.text, sizeof c.text, "%s", text);
-    uint8_t msg[64] = {0};
-    server_sends_msg(msg, wire_encode_command(&c, msg));
+    uint8_t message[64] = {0};
+    server_sends_message(message, wire_encode_command(&c, message));
 }
-static void server_heartbeat(void) { uint8_t msg[3] = {0}; server_sends_msg(msg, wire_encode_heartbeat(msg)); }
+static void server_heartbeat(void) { uint8_t message[3] = {0}; server_sends_message(message, wire_encode_heartbeat(message)); }
 
 static void join_wifi(void) {
     fake_link = CYW43_LINK_UP;
@@ -134,17 +134,17 @@ static void assert_hello_first(void) {
 }
 
 static uint8_t frame[WIRE_HEADER + WIRE_TOF_HEADER + TOF_COMPACT_BYTES]; // a tof frame message (its payload doesn't matter here)
-static bool send_frame(void) { return link_send_bulk(frame, sizeof frame); }
+static bool send_frame(void) { return link_pc_send_bulk(frame, sizeof frame); }
 static bool send_part(uint8_t fill, uint32_t n) {
-    uint8_t bytes[WIRE_PART_MAX], msg[WIRE_MSG_MAX];
+    uint8_t bytes[WIRE_PART_MAX], message[WIRE_MESSAGE_MAX];
     memset(bytes, fill, n);
-    uint32_t len = wire_encode_snapshot_part(bytes, n, msg);
-    return link_send_bulk(msg, len);
+    uint32_t len = wire_encode_snapshot_part(bytes, n, message);
+    return link_pc_send_bulk(message, len);
 }
 static bool send_answer(uint32_t n) {
     wire_answer_t a = {.n = n, .end = WIRE_END_OK};
-    uint8_t msg[WIRE_HEADER + WIRE_ANSWER_SIZE] = {0};
-    return link_send_control(msg, wire_encode_answer(&a, msg));
+    uint8_t message[WIRE_HEADER + WIRE_ANSWER_SIZE] = {0};
+    return link_pc_send_control(message, wire_encode_answer(&a, message));
 }
 
 // --- the tests ---
@@ -210,27 +210,27 @@ static void test_finds_server_and_talks(void) {
 
     // Commands arrive as messages; heartbeats are taken and dropped.
     wire_command_t c;
-    assert(!link_received(&c));
+    assert(!link_pc_received(&c));
     server_heartbeat();
     server_command(7, "drive 50");
     server_heartbeat();
     server_command(8, "status");
-    assert(link_received(&c) && c.n == 7 && !strcmp(c.text, "drive 50"));
-    assert(link_received(&c) && c.n == 8 && !strcmp(c.text, "status"));
-    assert(!link_received(&c));
+    assert(link_pc_received(&c) && c.n == 7 && !strcmp(c.text, "drive 50"));
+    assert(link_pc_received(&c) && c.n == 8 && !strcmp(c.text, "status"));
+    assert(!link_pc_received(&c));
     // A command cut in two by TCP: whole once its second half is there.
-    uint8_t msg[64] = {0};
+    uint8_t message[64] = {0};
     wire_command_t cut = {.n = 9, .text = "rotate 30"};
-    uint32_t n = wire_encode_command(&cut, msg);
-    server_sends_msg(msg, 5);
-    assert(!link_received(&c));
-    server_sends_msg(msg + 5, n - 5);
-    assert(link_received(&c) && c.n == 9 && !strcmp(c.text, "rotate 30"));
+    uint32_t n = wire_encode_command(&cut, message);
+    server_sends_message(message, 5);
+    assert(!link_pc_received(&c));
+    server_sends_message(message + 5, n - 5);
+    assert(link_pc_received(&c) && c.n == 9 && !strcmp(c.text, "rotate 30"));
     assert(fake_recved > 0);
 
     // The server's heartbeat every 2 s keeps the connection; nothing is sent back for it.
     for (int i = 0; i < 20; i++) { run(1000); server_heartbeat(); }
-    assert(link_received(&c) == false && link_pc_connected());
+    assert(link_pc_received(&c) == false && link_pc_connected());
     receive();
     assert(n_got == count(WIRE_STATUS));
     printf("ok: announcement, connect, hello first, kept output, status, commands, heartbeats\n");
@@ -302,20 +302,20 @@ static void test_server_closes_or_fails(void) {
 static void test_server_sends_garbage(void) {
     fake_server_sends("drive 50 #3\n", 12); // an old server's command line
     wire_command_t c;
-    assert(!link_received(&c));
+    assert(!link_pc_received(&c));
     run(10);
     assert(state == WIFI_LOOKING && !fake_tcp.open);
     server_connects(fake_ip(192, 168, 1, 10), 4211);
-    uint8_t msg[64] = {0};
+    uint8_t message[64] = {0};
     wire_answer_t a = {.n = 1};
-    server_sends_msg(msg, wire_encode_answer(&a, msg)); // a message, but one the robot doesn't take
-    assert(!link_received(&c));
+    server_sends_message(message, wire_encode_answer(&a, message)); // a message, but one the robot doesn't take
+    assert(!link_pc_received(&c));
     run(10);
     assert(state == WIFI_LOOKING);
     server_connects(fake_ip(192, 168, 1, 10), 4211);
     uint8_t flood[IN_SIZE + 1] = {0};
     for (uint32_t i = 0; i + 3 <= sizeof flood; i += 3) wire_encode_heartbeat(flood + i);
-    server_sends_msg(flood, sizeof flood); // more than the robot keeps: not a real server
+    server_sends_message(flood, sizeof flood); // more than the robot keeps: not a real server
     run(10);
     assert(state == WIFI_LOOKING);
     server_connects(fake_ip(192, 168, 1, 10), 4211);
@@ -352,10 +352,10 @@ static void test_connection_numbers(void) {
 static void test_lanes(void) {
     receive();
     // Not a message of that lane: refused.
-    assert(!link_send_bulk((const uint8_t *)"\x03\x00\x00", 3));
-    uint8_t part_msg[WIRE_MSG_MAX] = {0};
+    assert(!link_pc_send_bulk((const uint8_t *)"\x03\x00\x00", 3));
+    uint8_t part_message[WIRE_MESSAGE_MAX] = {0};
     uint8_t one = 1;
-    assert(!link_send_control(part_msg, wire_encode_snapshot_part(&one, 1, part_msg)));
+    assert(!link_pc_send_control(part_message, wire_encode_snapshot_part(&one, 1, part_message)));
     receive();
 
     // Control before bulk: frames queued first, then a line, while TCP has no room;

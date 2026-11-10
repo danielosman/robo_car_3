@@ -12,7 +12,7 @@
 #include "cell_map.h"
 #include "link_pc.h"
 #include "wire.h"
-#include "loop_stats.h"
+#include "loop_statistics.h"
 #include "mode.h"
 #include "snapshot.h"
 #include "commands.h"
@@ -30,20 +30,20 @@ static void greet(void) {
 }
 
 static void print_link(void) {
-    link_stats_t s = link_stats();
-    printf("Link: rx %lu bytes, %lu msgs, %lu bad, %lu lost; tx %lu msgs, %lu dropped\n",
-           (unsigned long)s.rx_bytes, (unsigned long)s.rx_msgs, (unsigned long)s.rx_bad,
-           (unsigned long)s.rx_lost, (unsigned long)s.tx_msgs, (unsigned long)s.tx_dropped);
+    link_statistics_t s = link_statistics();
+    printf("Link: rx %lu bytes, %lu messages, %lu bad, %lu lost; tx %lu messages, %lu dropped\n",
+           (unsigned long)s.rx_bytes, (unsigned long)s.rx_messages, (unsigned long)s.rx_bad,
+           (unsigned long)s.rx_lost, (unsigned long)s.tx_messages, (unsigned long)s.tx_dropped);
 }
 
 static void print_body(void) {
     if (!body_connected()) {
-        link_stats_t s = link_stats();
+        link_statistics_t s = link_statistics();
         printf("PicoB not connected (received %lu bytes so far%s)\n", (unsigned long)s.rx_bytes,
                s.rx_bytes ? "" : ": check that PicoB runs picoB_app and the UART wiring");
         return;
     }
-    const odom_report_t *o = body_odom();
+    const odometry_report_t *o = body_odometry();
     printf("x %+6.1f cm  y %+6.1f cm  yaw %+7.1f deg  v %+5.1f cm/s  w %+6.1f deg/s  "
            "pitch %+5.1f  roll %+5.1f  bias %+.4f deg/s  %s  motors %s%s%s\n",
            (double)(o->x_m * 100), (double)(o->y_m * 100), (double)(o->yaw_rad * DEG_PER_RAD),
@@ -65,7 +65,7 @@ static void print_status(void) {
     print_body();
     print_link();
     link_pc_print_status();
-    loop_stats_print();
+    loop_statistics_print();
     printf("ToF: %d Hz set, %.1f frames a second\n", tof_hz(), (double)tof_frames_per_s());
     print_ram();
     printf("Mode: %s\n", mode_name(mode_get()));
@@ -80,13 +80,13 @@ static void print_status(void) {
 // The answer: how command n ended, where the robot is (x, y in m, yaw in rad);
 // for a move also how far it went, for a snapshot its number (a->has says which).
 static void answer_with(wire_answer_t *a) {
-    uint8_t msg[WIRE_HEADER + WIRE_ANSWER_SIZE];
-    uint32_t n = wire_encode_answer(a, msg);
-    link_send_control(msg, n);
+    uint8_t message[WIRE_HEADER + WIRE_ANSWER_SIZE];
+    uint32_t n = wire_encode_answer(a, message);
+    link_pc_send_control(message, n);
 }
 
 static void answer(uint32_t n, wire_end_t end) {
-    const odom_report_t *o = body_odom();
+    const odometry_report_t *o = body_odometry();
     wire_answer_t a = {.n = n, .end = (uint8_t)end, .x_m = o->x_m, .y_m = o->y_m, .yaw_rad = o->yaw_rad};
     answer_with(&a);
 }
@@ -124,13 +124,13 @@ static void run(const char *line, uint32_t n) {
         manual();
         behaviour_watch((float)a, n);
     } else if (IS_WORD("snap")) {
-        snapshot_request(SNAP_COMMAND, n);
+        snapshot_request(SNAPSHOT_COMMAND, n);
     } else if (IS_WORD("clear_map")) {
         cell_map_clear();
         printf("Map cleared\n");
-        uint8_t msg[WIRE_HEADER];
-        uint32_t n_msg = wire_encode_map_cleared(msg);
-        link_send_control(msg, n_msg);
+        uint8_t message[WIRE_HEADER];
+        uint32_t n_message = wire_encode_map_cleared(message);
+        link_pc_send_control(message, n_message);
         answer(n, WIRE_END_OK);
     } else if (IS("config %7s %d", 2, word, &a) && (!strcmp(word, "pre_ms") || !strcmp(word, "post_ms")) &&
                within(a, 0, COMMAND_STILL_MAX_MS)) {
@@ -179,7 +179,7 @@ static void line_done(char *line) {
 static void answer_ended(void) {
     move_record_t e;
     while (move_next_ended(&e)) { // every one, oldest first: a refused move and the running one can end together
-        const odom_report_t *o = body_odom();
+        const odometry_report_t *o = body_odometry();
         wire_answer_t a = {.n = e.command, .end = move_wire_end(&e), .has = WIRE_HAS_MOVE, .x_m = o->x_m, .y_m = o->y_m,
                            .yaw_rad = o->yaw_rad, .moved_m = e.moved_m, .rotated_rad = e.rotated_rad, .goal_m = e.goal_m};
         if (e.goal_m > 0) a.has |= WIRE_HAS_GOAL;
@@ -188,13 +188,13 @@ static void answer_ended(void) {
     snapshot_sent_t s;
     if (snapshot_sent(&s)) {
         wire_answer_t a = {.n = s.command, .end = WIRE_END_OK, .has = WIRE_HAS_SNAPSHOT, .x_m = s.x_m, .y_m = s.y_m,
-                           .yaw_rad = s.yaw_rad, .snapshot = s.seq};
+                           .yaw_rad = s.yaw_rad, .snapshot = s.sequence};
         answer_with(&a);
     }
 }
 
 void commands_status(wire_status_t *s) {
-    const odom_report_t *o = body_odom();
+    const odometry_report_t *o = body_odometry();
     s->x_m = o->x_m;
     s->y_m = o->y_m;
     s->yaw_rad = o->yaw_rad;
@@ -221,7 +221,7 @@ void commands_update(void) {
     }
     // The PC's commands, each a message.
     wire_command_t c;
-    while (link_received(&c)) {
+    while (link_pc_received(&c)) {
         run_text(c.text, c.n);
         answer_ended(); // each command's move answered before the next can end another
     }

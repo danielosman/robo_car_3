@@ -23,7 +23,7 @@
 //  8. One frame blurred: features MISSED, found again next frame with the move since
 //     their last measurement; three bad frames in a row: LOST.
 //  9. The record's promises: NEW has age 0 and no move, ages grow by 1, LOST once,
-//     seq by 1, region counts add up, the times from row 0 and the line time.
+//     sequence by 1, region counts add up, the times from row 0 and the line time.
 // And the time per frame on this computer (the robot's is measured with `v`).
 // Run from the repo root:
 //   cc -std=c11 -O2 -Wall -Wextra -IpicoA/app/test/stubs -IpicoA/drivers -Icommon/test/fakes -Icommon -o build/test_vision picoA/app/test/test_vision.c -lm && build/test_vision
@@ -369,15 +369,15 @@ static void test_blur(void) {
 static void test_record(void) {
     make_room(8);
     vision_reset();
-    uint32_t seq = 0;
+    uint32_t sequence = 0;
     static uint16_t last_age[65536];
     static uint8_t lost_seen[65536];
     memset(lost_seen, 0, sizeof lost_seen);
     for (int f = 0; f < 30; f++) {
         render(1.5f * (float)f, 0.5f * (float)f, 1, 0, sigma_at(6));
         const vision_frame_t *r = process(6);
-        if (f) assert(r->seq == seq + 1);
-        seq = r->seq;
+        if (f) assert(r->sequence == sequence + 1);
+        sequence = r->sequence;
         assert(r->t_us == r->row0_us + (uint32_t)(59.5f * r->line_us));
         int counted = 0;
         for (int y = 0; y < VISION_REGION_ROWS; y++)
@@ -396,7 +396,7 @@ static void test_record(void) {
         }
         assert(found == r->n_found);
     }
-    printf("ok: the record keeps its promises (ages, LOST once, seq, region counts, row times)\n");
+    printf("ok: the record keeps its promises (ages, LOST once, sequence, region counts, row times)\n");
 }
 
 int main(void) {

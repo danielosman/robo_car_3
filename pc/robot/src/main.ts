@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { getRequestListener } from "@hono/node-server";
 import { ROBOT_PORT, RobotLink, broadcastAddresses, type LivePose } from "./link.ts";
-import { DB_PATH, RECORDINGS_DIR, Store } from "./store.ts";
+import { DB_PATH, RECORDINGS_DIRECTORY, Store } from "./store.ts";
 import { handleSnapshotApi } from "./snapshots_api.ts";
 import { ingest } from "./ingest.ts";
 import { BootFolders } from "./boot_folders.ts";
@@ -39,19 +39,19 @@ const HTTP_PORT = Number(process.env.PORT ?? 8081);
 
 async function main(): Promise<void> {
   await mkdir(path.join(root, "logs"), { recursive: true });
-  await mkdir(RECORDINGS_DIR, { recursive: true });
+  await mkdir(RECORDINGS_DIRECTORY, { recursive: true });
   const stamp = new Date().toLocaleString("sv-SE").replace(/[ :]/g, "-"); // local time, sortable
   const logPath = path.join(root, "logs", `${stamp}.log`);
   const logFile = createWriteStream(logPath, { flags: "a" });
 
   const clients = new Set<WebSocket>();
-  const send = (ws: WebSocket, msg: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); };
-  const broadcast = (msg: unknown) => { for (const ws of clients) send(ws, msg); };
+  const send = (ws: WebSocket, message: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)); };
+  const broadcast = (message: unknown) => { for (const ws of clients) send(ws, message); };
   const log = new Log(logFile);
   log.on("item", item => broadcast({ type: item.kind, text: item.text, command: item.command }));
   const note = (text: string) => log.note(text);
 
-  const bootFolders = new BootFolders(RECORDINGS_DIR);  // the robot's boot ids to our folder names
+  const bootFolders = new BootFolders(RECORDINGS_DIRECTORY);  // the robot's boot ids to our folder names
   const store = new Store(DB_PATH);
   store.onError = err => note(`the robot's data NOT stored: ${err.message}`);
   const live = new LiveRobot();
@@ -60,9 +60,9 @@ async function main(): Promise<void> {
   const robot = new RobotLink({ robotPort: Number(process.env.ROBOT_PORT ?? ROBOT_PORT), announceTo });
 
   // What the robot sends, stored in the order it came (ingest.ts); the page and the API told.
-  ingest(robot, store, { recordingsDir: RECORDINGS_DIR, bootFolders, note, stored: s => {
-    stored.add(s.bootId, s.seq);
-    broadcast({ type: "snapshot", boot: s.bootId, seq: s.seq });
+  ingest(robot, store, { recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, note, stored: s => {
+    stored.add(s.bootId, s.sequence);
+    broadcast({ type: "snapshot", boot: s.bootId, sequence: s.sequence });
   } });
   robot.on("hello", (h: Hello) => live.setBoot(h.bootId));
   robot.on("moveStart", (m: MoveStart) => live.setStill(m.preMs, m.postMs));
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
   const chat = openAiChat(MODEL_API, MODEL, note);
   const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true },
-                                              recordingsDir: RECORDINGS_DIR, bootFolders, chat, modelName: MODEL }).fetch);
+                                              recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, chat, modelName: MODEL }).fetch);
   await robot.start();
   if (!wireCheck()) note("wire: the message table is wrong (two types share a number, or a ToF format is too big; wire.ts, tof_format.ts): the robot's messages can't be read");
   note(`server started; announcing on ${(announceTo.length ? announceTo : broadcastAddresses()).join(", ") || "no network"}; ` +
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
   };
   const server = http.createServer(async (req, res) => {
     if (/^\/api\/robot(\/|$|\?)/.test(req.url ?? "")) { await api(req, res); return; }
-    if (await handleSnapshotApi(req, res, store, RECORDINGS_DIR, bootFolders)) return;
+    if (await handleSnapshotApi(req, res, store, RECORDINGS_DIRECTORY, bootFolders)) return;
     const file = files[new URL(req.url ?? "/", "http://localhost").pathname];
     if (!file) { res.writeHead(404); res.end("not found"); return; }
     try {

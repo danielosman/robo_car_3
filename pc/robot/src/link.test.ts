@@ -29,9 +29,9 @@ async function startLink(quietMs = 3000, dropMs = 6000) {
   link.on("status", s => statuses.push(s));
   link.on("note", n => notes.push(n));
   const port = await link.start();
-  const [msg] = await once(listener, "message");
+  const [message] = await once(listener, "message");
   listener.close();
-  return { link, port, announcement: String(msg), statuses, notes };
+  return { link, port, announcement: String(message), statuses, notes };
 }
 
 const hello = (version = WIRE_VERSION, bootId = "7a587226") => encodeHello({ version, bootId, build: "Nov  7 2026 18:00:00" });
@@ -86,13 +86,13 @@ test("announces itself; hello first; console lines, status, commands, heartbeats
 test("answers, map cleared, moves, tof frames and snapshot parts, whatever the TCP chunks", async () => {
   const { link, port } = await startLink();
   try {
-    const snaps: Buffer[] = [], poses: LivePose[] = [], dones: DoneRecord[] = [], text: string[] = [];
+    const snapshots: Buffer[] = [], poses: LivePose[] = [], dones: DoneRecord[] = [], text: string[] = [];
     const events: string[] = [], starts: MoveStart[] = [], ends: MoveEnd[] = [], frames: PosedFrame[] = [];
     let cleared = 0;
     link.on("moveStart", m => { starts.push(m); events.push(`start ${m.move}`); });
     link.on("moveEnd", m => { ends.push(m); events.push(`end ${m.move}`); });
     link.on("tof", (f: TofMessage) => { frames.push(f.frame); events.push(`${f.format} ${f.frame.number} of ${f.move}`); });
-    link.on("snapshot", b => snaps.push(b));
+    link.on("snapshot", b => snapshots.push(b));
     link.on("pose", p => poses.push(p));
     link.on("done", d => dones.push(d));
     link.on("text", t => text.push(t));
@@ -100,10 +100,10 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
     const snap = Buffer.alloc(3000, 9);
     snap.write("SNAP", 0, "latin1");
     snap.writeUInt32LE(snap.length, 5);
-    const start: MoveStart = { move: 3, command: 4, kind: "goto", param: 4.25, tUs: 0xfffffff0, preMs: 200, postMs: 300, refused: false };
+    const start: MoveStart = { move: 3, command: 4, kind: "goto", parameter: 4.25, tUs: 0xfffffff0, preMs: 200, postMs: 300, refused: false };
     const end: MoveEnd = { move: 3, end: "obstacle", tUs: 25, framesSent: 2, framesDropped: 0, moved: 1.25, rotated: 0.5,
                           imuSent: 1, imuDropped: 0 };
-    const imu: ImuBatch = { move: 3, records: [0, 1, 2].map(i => ({ tUs: (0xffffe000 + i * 9615), accel: [i, -i - 1, 16384], gyro: [-32768, 32767, i] })) };
+    const imu: ImuBatch = { move: 3, records: [0, 1, 2].map(i => ({ tUs: (0xffffe000 + i * 9615), acceleration: [i, -i - 1, 16384], gyro: [-32768, 32767, i] })) };
     const batches: ImuBatch[] = [];
     link.on("imuBatch", (b: ImuBatch) => { batches.push(b); events.push(`imu ${b.move}`); });
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 10 * k, signal: k, sigmaMm: 2, kind: k ? "sure" as const : "nothing" as const, targets: k ? 1 : 0 }));
@@ -118,7 +118,7 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
       encodeAnswer({ n: 5, end: "ok", has: HAS.SNAPSHOT, x: 1, y: 2, yaw: 0, moved: 0, rotated: 0, goal: 0, snapshot: 41 }),
     ]);
     for (const size of [1, 2, 3, 7, 1000, stream.length]) {
-      snaps.length = poses.length = dones.length = text.length = cleared = 0;
+      snapshots.length = poses.length = dones.length = text.length = cleared = 0;
       events.length = starts.length = ends.length = frames.length = batches.length = 0;
       const r = await robot(port);
       await until(() => link.status.state === "connected");
@@ -126,8 +126,8 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
         r.socket.write(stream.subarray(at, at + size));
         if (size < 10 && at % 500 === 0) await new Promise(res => setImmediate(res)); // separate TCP chunks now and then
       }
-      await until(() => dones.length === 2 && snaps.length === 1 && poses.length === 1 && cleared === 1);
-      assert.deepEqual(snaps[0], snap);
+      await until(() => dones.length === 2 && snapshots.length === 1 && poses.length === 1 && cleared === 1);
+      assert.deepEqual(snapshots[0], snap);
       assert.deepEqual(text, ["Go to: ...\n"]);
       assert.deepEqual(events, ["start 3", "compact 50 of 3", "end 3", "compact 51 of 3", "imu 3"]); // in the order they came
       assert.deepEqual(batches, [imu]); // the imu batch's records as they went (times evenly spaced: exact)

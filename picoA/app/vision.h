@@ -68,7 +68,7 @@ typedef struct {     // the robot at the frame's rows, from pose_at()
 } vision_pose_t;
 
 typedef struct {
-    uint32_t seq;           // counts processed frames (readers see gaps)
+    uint32_t sequence;           // counts processed frames (readers see gaps)
     uint32_t camera_number; // the driver's frame number
     uint32_t row0_us;       // the middle of row 0's exposure
     float line_us;          // row r at row0_us + r * line_us
@@ -77,7 +77,7 @@ typedef struct {
     float exposure_us, gain;
     float brightness;       // mean over unsaturated samples, 0-255
     float saturated;        // share of samples >= 250
-    vision_pose_t pose, prev_pose; // the robot during this and the previous processed frame
+    vision_pose_t pose, previous_pose; // the robot during this and the previous processed frame
     uint8_t n_features, n_found;   // in the array; of which measured in this frame
     vision_feature_t features[VISION_MAX_FEATURES]; // NEW, MISSED and LOST included
     vision_region_t regions[VISION_REGION_ROWS][VISION_REGION_COLS];
@@ -100,7 +100,7 @@ typedef struct {
 } vision_status_t;
 
 void vision_reset(void);   // forgets every feature
-// The core, on one image (host tests call it directly); pose and prev_pose may be NULL.
+// The core, on one image (host tests call it directly); pose and previous_pose may be NULL.
 const vision_frame_t *vision_process(const vision_image_t *image, const vision_pose_t *pose);
 void vision_update(void);  // call every loop iteration, after watch (it takes the camera's frames)
 void vision_request(void); // process the next frame, whatever the rate (a snapshot wants its features)

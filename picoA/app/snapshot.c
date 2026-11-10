@@ -17,8 +17,8 @@
 #include "vision.h"
 #include "snapshot.h"
 
-#define SNAP_VERSION 2 // 2: the ToF section a compact frame, no geometry section, the end a wire_end_t
-#define SNAP_MAX     38912  // bytes: the fixed sections ~34.5 KB (with 96 features), the rest for tiles
+#define SNAPSHOT_VERSION 2 // 2: the ToF section a compact frame, no geometry section, the end a wire_end_t
+#define SNAPSHOT_MAX     38912  // bytes: the fixed sections ~34.5 KB (with 96 features), the rest for tiles
 #define FEATURES_WAIT_US 300000 // a snapshot waits this long at most for vision to process the frame it shows
 #define NO_REASON    255
 
@@ -26,7 +26,7 @@ enum { SEC_HEAD = 1, SEC_POSE, SEC_TOF = 4, SEC_CAMERA, SEC_COLOR, SEC_WINDOW, S
 
 typedef struct __attribute__((packed)) {
     uint32_t boot_id;       // as hello's
-    uint32_t seq;           // counts the snapshots since power-up, from 1
+    uint32_t sequence;           // counts the snapshots since power-up, from 1
     uint32_t t_us;          // when it was built
     uint8_t why;            // snapshot_why_t
     char action[12];        // the move that ended last ("drive", "rotate", "goto", "watch"), NUL-padded; "" if none yet
@@ -36,13 +36,13 @@ typedef struct __attribute__((packed)) {
     uint8_t mode;           // robot_mode_t
     uint32_t map_clears;    // the map was cleared this many times (C): the PC starts the whole-house map again
     char build[24];         // when the firmware was built
-} snap_head_t;
+} snapshot_head_t;
 
 typedef struct __attribute__((packed)) {
     uint32_t t_us;          // when PicoB measured it (PicoA's clock)
     float x_m, y_m, yaw_rad, pitch_rad, roll_rad, v_mps, w_radps;
     uint8_t stationary, motors_on, stop_reason, picob_connected;
-} snap_pose_t;
+} snapshot_pose_t;
 
 // The ToF section: the latest frame packed for the snapshot use (tof_format.h), its
 // pose in it.
@@ -53,33 +53,33 @@ typedef struct __attribute__((packed)) {
     uint32_t last_row_us;   // when its bottom row was read out
     float line_us, exposure_us, gain;
     uint16_t width, height;
-} snap_camera_t;
+} snapshot_camera_t;
 
 typedef struct __attribute__((packed)) {
     uint32_t t_us;          // when it was read
     uint32_t sequence;
     uint8_t overload;
     uint8_t raw[16];        // the OPT4048's registers 0x00-0x07 (pc/bringup/src/opt4048.ts)
-} snap_color_t;
+} snapshot_color_t;
 
 // Then layers x cells_x x cells_y bytes, [layer][x][y] (cell_map.h).
 typedef struct __attribute__((packed)) {
-    int16_t org_cx, org_cy; // the window's corner: world cell (10 cm) indexes
+    int16_t origin_cx, origin_cy; // the window's corner: world cell (10 cm) indexes
     uint8_t cells_x, cells_y, layers;
-} snap_window_t;
+} snapshot_window_t;
 
-// Then n x snap_tile_t.
+// Then n x snapshot_tile_t.
 typedef struct __attribute__((packed)) {
     int16_t tx, ty;
     uint8_t columns[HOUSE_TILE_BYTES]; // house_map.h's layout
-} snap_tile_t;
+} snapshot_tile_t;
 
-// The camera features of the frame in the snapshot (vision.h), then n x snap_feature_t.
+// The camera features of the frame in the snapshot (vision.h), then n x snapshot_feature_t.
 typedef struct __attribute__((packed)) {
-    uint32_t seq;           // vision's frame count
+    uint32_t sequence;           // vision's frame count
     uint32_t camera_number; // the frame they were found in: the camera section's
     uint8_t n;
-} snap_features_t;
+} snapshot_features_t;
 
 typedef struct __attribute__((packed)) {
     uint16_t id, age;
@@ -87,17 +87,17 @@ typedef struct __attribute__((packed)) {
     int16_t x16, y16;       // place, 1/16 px
     int16_t dx64, dy64;     // measured move, 1/64 px
     uint8_t strength, match; // 0-1 as 0-255
-} snap_feature_t;
+} snapshot_feature_t;
 
 static uint32_t boot_id;
 static const char *build_text = "";
-static uint8_t buf[SNAP_MAX];
+static uint8_t buf[SNAPSHOT_MAX];
 static uint32_t len;
 static bool pending;
 static snapshot_why_t pending_why;
 static uint32_t pending_command;  // the command asking for the pending snapshot, 0 if none
 static snapshot_sent_t going;     // the snapshot going out, if a command asked for it (command 0: none)
-static uint32_t seq, sent_bytes, last_len, tiles_sent, connection;
+static uint32_t sequence, sent_bytes, last_len, tiles_sent, connection;
 static uint32_t wait_since_us;
 static bool waiting;
 // The snapshot going out: its parts handed to the bulk lane up to `at`.
@@ -106,7 +106,7 @@ static uint32_t at;
 
 // Starts a section: its header, and room for `size` bytes after it; NULL if it doesn't fit.
 static uint8_t *section(uint8_t type, uint32_t size) {
-    if (len + 5 + size + 4 > SNAP_MAX) return NULL;
+    if (len + 5 + size + 4 > SNAPSHOT_MAX) return NULL;
     buf[len] = type;
     memcpy(buf + len + 1, &size, 4);
     len += 5;
@@ -124,7 +124,7 @@ static void add(uint8_t type, const void *payload, uint32_t size) {
 static uint8_t tof_bytes[TOF_FORMAT_MAX];
 static uint32_t tof_len;
 
-void snapshot_tof(const posed_frame_t *f) { tof_len = tof_pack(TOF_USE_SNAPSHOT, f, tof_bytes); }
+void snapshot_tof(const posed_frame_t *f) { tof_len = tof_format_pack(TOF_USE_SNAPSHOT, f, tof_bytes); }
 
 void snapshot_init(uint32_t boot, const char *build) {
     boot_id = boot;
@@ -134,7 +134,7 @@ void snapshot_init(uint32_t boot, const char *build) {
 static void add_camera(void) {
     camera_frame_t f;
     if (!camera_last_frame(&f)) return;
-    snap_camera_t c = {.number = f.number, .last_row_us = f.last_row_us, .line_us = f.line_us,
+    snapshot_camera_t c = {.number = f.number, .last_row_us = f.last_row_us, .line_us = f.line_us,
                        .exposure_us = f.exposure_us, .gain = f.gain, .width = CAMERA_WIDTH, .height = CAMERA_HEIGHT};
     uint8_t *out = section(SEC_CAMERA, sizeof c + CAMERA_WIDTH * CAMERA_HEIGHT);
     if (!out) return;
@@ -145,7 +145,7 @@ static void add_camera(void) {
 static void add_window(void) {
     int ox, oy;
     const uint8_t *cells = cell_map_window(&ox, &oy);
-    snap_window_t w = {.org_cx = (int16_t)ox, .org_cy = (int16_t)oy, .cells_x = CELL_MAP_GRID,
+    snapshot_window_t w = {.origin_cx = (int16_t)ox, .origin_cy = (int16_t)oy, .cells_x = CELL_MAP_GRID,
                        .cells_y = CELL_MAP_GRID, .layers = CELL_LAYERS};
     uint32_t n = CELL_LAYERS * CELL_MAP_GRID * CELL_MAP_GRID;
     uint8_t *out = section(SEC_WINDOW, sizeof w + n);
@@ -156,22 +156,22 @@ static void add_window(void) {
 
 // The dirty tiles, as many as fit; the others go with the next snapshot.
 static void add_tiles(void) {
-    uint32_t room = SNAP_MAX - len - 5 - 4 - 2;
+    uint32_t room = SNAPSHOT_MAX - len - 5 - 4 - 2;
     uint16_t n = 0;
     uint32_t at = len + 5 + 2; // past the section's header and the count
-    for (int i = house_map_next_dirty(0); i >= 0 && (uint32_t)(n + 1) * sizeof(snap_tile_t) <= room;
+    for (int i = house_map_next_dirty(0); i >= 0 && (uint32_t)(n + 1) * sizeof(snapshot_tile_t) <= room;
          i = house_map_next_dirty(i + 1)) {
         int16_t tx, ty;
         const uint8_t *columns;
         house_map_tile(i, &tx, &ty, &columns);
-        snap_tile_t t = {.tx = tx, .ty = ty};
+        snapshot_tile_t t = {.tx = tx, .ty = ty};
         memcpy(t.columns, columns, HOUSE_TILE_BYTES);
         memcpy(buf + at, &t, sizeof t);
         at += sizeof t;
         house_map_sent(i);
         n++;
     }
-    uint8_t *out = section(SEC_TILES, 2 + n * (uint32_t)sizeof(snap_tile_t));
+    uint8_t *out = section(SEC_TILES, 2 + n * (uint32_t)sizeof(snapshot_tile_t));
     memcpy(out, &n, 2);
     tiles_sent += n;
 }
@@ -184,14 +184,14 @@ static int16_t fixed(float v, float scale) {
 static void add_features(void) {
     const vision_frame_t *v = vision_latest();
     if (!v) return;
-    snap_features_t h = {.seq = v->seq, .camera_number = v->camera_number, .n = v->n_features};
-    uint8_t *out = section(SEC_FEATURES, sizeof h + v->n_features * (uint32_t)sizeof(snap_feature_t));
+    snapshot_features_t h = {.sequence = v->sequence, .camera_number = v->camera_number, .n = v->n_features};
+    uint8_t *out = section(SEC_FEATURES, sizeof h + v->n_features * (uint32_t)sizeof(snapshot_feature_t));
     if (!out) return;
     memcpy(out, &h, sizeof h);
     out += sizeof h;
     for (int k = 0; k < v->n_features; k++) {
         const vision_feature_t *f = &v->features[k];
-        snap_feature_t p = {.id = f->id, .age = f->age, .flags = f->flags, .x16 = fixed(f->x, 16), .y16 = fixed(f->y, 16),
+        snapshot_feature_t p = {.id = f->id, .age = f->age, .flags = f->flags, .x16 = fixed(f->x, 16), .y16 = fixed(f->y, 16),
                             .dx64 = fixed(f->dx, 64), .dy64 = fixed(f->dy, 64),
                             .strength = (uint8_t)(f->strength * 255 + 0.5f), .match = (uint8_t)(f->match * 255 + 0.5f)};
         memcpy(out, &p, sizeof p);
@@ -214,7 +214,7 @@ static bool features_behind(void) {
 
 static void build(snapshot_why_t why) {
     len = 9; // "SNAP", version, length
-    snap_head_t h = {.boot_id = boot_id, .seq = ++seq, .t_us = time_us_32(), .why = (uint8_t)why,
+    snapshot_head_t h = {.boot_id = boot_id, .sequence = ++sequence, .t_us = time_us_32(), .why = (uint8_t)why,
                      .end_reason = NO_REASON, .mode = (uint8_t)mode_get(), .map_clears = house_map_clears()};
     move_record_t last;
     h.actions_ended = move_endings(&last);
@@ -223,8 +223,8 @@ static void build(snapshot_why_t why) {
     snprintf(h.build, sizeof h.build, "%s", build_text);
     add(SEC_HEAD, &h, sizeof h);
     if (body_connected()) {
-        const odom_report_t *o = body_odom();
-        snap_pose_t p = {.t_us = body_odom_time_us(), .x_m = o->x_m, .y_m = o->y_m, .yaw_rad = o->yaw_rad,
+        const odometry_report_t *o = body_odometry();
+        snapshot_pose_t p = {.t_us = body_odometry_time_us(), .x_m = o->x_m, .y_m = o->y_m, .yaw_rad = o->yaw_rad,
                          .pitch_rad = o->pitch_rad, .roll_rad = o->roll_rad, .v_mps = o->v_mps, .w_radps = o->w_radps,
                          .stationary = o->stationary, .motors_on = o->motors_on, .stop_reason = o->stop_reason,
                          .picob_connected = 1};
@@ -235,14 +235,14 @@ static void build(snapshot_why_t why) {
     add_features();
     opt4048_reading_t r;
     if (opt4048_latest(&r)) {
-        snap_color_t c = {.t_us = r.t_us, .sequence = r.sequence, .overload = r.overload};
+        snapshot_color_t c = {.t_us = r.t_us, .sequence = r.sequence, .overload = r.overload};
         memcpy(c.raw, r.raw, sizeof c.raw);
         add(SEC_COLOR, &c, sizeof c);
     }
     add_window();
     add_tiles();
     memcpy(buf, "SNAP", 4);
-    buf[4] = SNAP_VERSION;
+    buf[4] = SNAPSHOT_VERSION;
     uint32_t total = len + 4;
     memcpy(buf + 5, &total, 4);
     uint32_t crc = crc32_of(buf, len);
@@ -270,7 +270,7 @@ static void send_parts(void) {
     while (at < len) {
         uint32_t n = len - at > WIRE_PART_MAX ? WIRE_PART_MAX : len - at;
         uint32_t n_part = wire_encode_snapshot_part(buf + at, n, part);
-        if (!link_send_bulk(part, n_part)) return;
+        if (!link_pc_send_bulk(part, n_part)) return;
         at += n;
     }
     sending = false;
@@ -281,7 +281,7 @@ void snapshot_update(void) {
     if (now != connection) { // a new server: it has none of the tiles; one cut by a lost connection isn't sent again
         connection = now;
         sending = false;
-        if (now) { house_map_all_dirty(); snapshot_request(SNAP_SERVER, 0); }
+        if (now) { house_map_all_dirty(); snapshot_request(SNAPSHOT_SERVER, 0); }
     }
     if (!now) return;
     if (sending) send_parts();
@@ -289,8 +289,8 @@ void snapshot_update(void) {
         pending = false;
         build(pending_why);
         if (pending_command) {
-            const odom_report_t *o = body_odom();
-            going = (snapshot_sent_t){.command = pending_command, .seq = seq, .x_m = o->x_m, .y_m = o->y_m,
+            const odometry_report_t *o = body_odometry();
+            going = (snapshot_sent_t){.command = pending_command, .sequence = sequence, .x_m = o->x_m, .y_m = o->y_m,
                                       .yaw_rad = o->yaw_rad};
             pending_command = 0;
         }
@@ -304,7 +304,7 @@ void snapshot_update(void) {
 
 void snapshot_print_status(void) {
     printf("Snapshots: %lu sent (the last %lu KB), %lu KB in all, %lu map tiles; %d tiles of the whole-house map%s\n",
-           (unsigned long)seq, (unsigned long)(last_len / 1024), (unsigned long)(sent_bytes / 1024),
+           (unsigned long)sequence, (unsigned long)(last_len / 1024), (unsigned long)(sent_bytes / 1024),
            (unsigned long)tiles_sent, house_map_tiles(),
            sending ? "; one going out" : "");
 }

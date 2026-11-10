@@ -5,8 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #define ENCODER_COUNTS_PER_REV (28.0f * 298.0f)
-typedef enum { ENC_LEFT_FRONT, ENC_RIGHT_FRONT, ENC_LEFT_REAR, ENC_RIGHT_REAR, ENC_COUNT } encoder_id_t;
-static int32_t fake_counts[ENC_COUNT];
+typedef enum { ENCODER_LEFT_FRONT, ENCODER_RIGHT_FRONT, ENCODER_LEFT_REAR, ENCODER_RIGHT_REAR, ENCODER_COUNT } encoder_id_t;
+static int32_t fake_counts[ENCODER_COUNT];
 static bool fake_encoders_started;
 static inline void encoder_init(void) { fake_encoders_started = true; }
 static inline int32_t encoder_count(encoder_id_t e) { assert(fake_encoders_started); return fake_counts[e]; }

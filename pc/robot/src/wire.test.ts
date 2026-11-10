@@ -27,10 +27,10 @@ const f = Math.fround;
 function sampleBatch(n: number): ImuBatch {
   const records = Array.from({ length: n }, (_, i): ImuRecord => ({
     tUs: 5000000123 + i * IMU_RECORD_PERIOD_US,
-    accel: [0, 1, 2].map(k => i * 1000 - k * 7) as ImuRecord["accel"], gyro: [0, 1, 2].map(k => -i * 300 + k) as ImuRecord["gyro"],
+    acceleration: [0, 1, 2].map(k => i * 1000 - k * 7) as ImuRecord["acceleration"], gyro: [0, 1, 2].map(k => -i * 300 + k) as ImuRecord["gyro"],
   }));
-  records[0].accel[2] = 16384;
-  records[n - 1].accel[0] = 32767; records[n - 1].gyro[1] = -32768;
+  records[0].acceleration[2] = 16384;
+  records[n - 1].acceleration[0] = 32767; records[n - 1].gyro[1] = -32768;
   return { move: 12, records };
 }
 
@@ -58,8 +58,8 @@ const samples: Record<string, { bytes: Buffer; message: Message }> = {
   },
   map_cleared: { bytes: encodeMapCleared(), message: { type: "map_cleared" } },
   move_start: {
-    bytes: encodeMoveStart({ move: 12, command: 17, kind: "goto", param: 4.2, tUs: 4300000000, preMs: 200, postMs: 300, refused: true }),
-    message: { type: "move_start", move: 12, command: 17, kind: "goto", param: f(4.2), tUs: 4300000000, preMs: 200, postMs: 300, refused: true },
+    bytes: encodeMoveStart({ move: 12, command: 17, kind: "goto", parameter: 4.2, tUs: 4300000000, preMs: 200, postMs: 300, refused: true }),
+    message: { type: "move_start", move: 12, command: 17, kind: "goto", parameter: f(4.2), tUs: 4300000000, preMs: 200, postMs: 300, refused: true },
   },
   move_end: {
     bytes: encodeMoveEnd({ move: 12, end: "tilt", tUs: 0xffffffffffff, framesSent: 41, framesDropped: 2, moved: 0.31, rotated: -0.125,
@@ -145,11 +145,11 @@ test("every message encoded and decoded again", () => {
     { type: "answer", n: 0xffffffff, end: "picob_lost", has: 7, x: -1.5, y: 2.25, yaw: -3, moved: 0.5, rotated: 6.25, goal: 3, snapshot: 123456 },
     { type: "status", x: 0, y: 0, yaw: -12.5, mode: "idle", action: "", rssi: 0 },
     { type: "map_cleared" },
-    { type: "move_start", move: 1, command: 0, kind: "watch", param: 60, tUs: 0, preMs: 0, postMs: 2000, refused: false },
+    { type: "move_start", move: 1, command: 0, kind: "watch", parameter: 60, tUs: 0, preMs: 0, postMs: 2000, refused: false },
     { type: "move_end", move: 0xffffffff, end: "no_start", tUs: 0xffffffff, framesSent: 0, framesDropped: 9, moved: 0, rotated: -6.5,
       imuSent: 0, imuDropped: 0xffffffff },
     { type: "imu_batch", ...sampleBatch(7) },
-    { type: "imu_batch", move: 1, records: [{ tUs: 0xffffffff, accel: [-32768, 0, 32767], gyro: [1, -1, 0] }] },
+    { type: "imu_batch", move: 1, records: [{ tUs: 0xffffffff, acceleration: [-32768, 0, 32767], gyro: [1, -1, 0] }] },
     { type: "snapshot_part", bytes: Buffer.alloc(1400, 7) },
     { type: "command", n: 3, text: "goto 120 -35" },
     { type: "heartbeat" },
@@ -186,7 +186,7 @@ test("every message encoded and decoded again", () => {
   const jitter = sampleBatch(3);
   jitter.records[1].tUs += 40; jitter.records[2].tUs += 1;
   assert.throws(() => encodeImuBatch(jitter), /evenly spaced/); // the robot rounds them (move.c), not the encoder
-  assert.throws(() => encodeMoveStart({ move: 1, command: 0, kind: "fly", param: 0, tUs: 0, preMs: 0, postMs: 0, refused: false }));
+  assert.throws(() => encodeMoveStart({ move: 1, command: 0, kind: "fly", parameter: 0, tUs: 0, preMs: 0, postMs: 0, refused: false }));
   assert.throws(() => encodeAnswer({ n: 1, end: "maybe", has: 0, x: 0, y: 0, yaw: 0, moved: 0, rotated: 0, goal: 0, snapshot: 0 }));
 });
 

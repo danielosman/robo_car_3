@@ -74,40 +74,40 @@
     "path": "picoB/app/odometry.h",
     "members": [
       {
-        "name": "odom_t",
+        "name": "odometry_t",
         "kind": "type",
-        "code": "} odom_t;",
+        "code": "} odometry_t;",
         "bytes": 68
       },
       {
-        "name": "odom_init",
+        "name": "odometry_init",
         "kind": "function",
-        "code": "bool odom_init("
+        "code": "bool odometry_init("
       },
       {
-        "name": "odom_update",
+        "name": "odometry_update",
         "kind": "function",
-        "code": "void odom_update("
+        "code": "void odometry_update("
       },
       {
-        "name": "odom_get",
+        "name": "odometry_get",
         "kind": "function",
-        "code": "const odom_t *odom_get("
+        "code": "const odometry_t *odometry_get("
       },
       {
-        "name": "odom_imu_take",
+        "name": "odometry_imu_take",
         "kind": "function",
-        "code": "bool odom_imu_take("
+        "code": "bool odometry_imu_take("
       },
       {
-        "name": "odom_imu_lost",
+        "name": "odometry_imu_lost",
         "kind": "function",
-        "code": "uint32_t odom_imu_lost("
+        "code": "uint32_t odometry_imu_lost("
       },
       {
-        "name": "odom_imu_skipped",
+        "name": "odometry_imu_skipped",
         "kind": "function",
-        "code": "uint32_t odom_imu_skipped("
+        "code": "uint32_t odometry_imu_skipped("
       }
     ]
   },

@@ -17,7 +17,7 @@
 #define CTRL4_C    0x13
 #define CTRL9_XL   0x18
 #define STATUS_REG 0x1E
-#define OUTX_L_G   0x22 // gyro X..Z, then accel X..Z at 0x28
+#define OUTX_L_G   0x22 // gyro X..Z, then acceleration X..Z at 0x28
 
 static float bias_x, bias_y, bias_z;
 
@@ -59,20 +59,20 @@ bool imu_init(void) {
     return true;
 }
 
-// The output registers: gyro x, y, z, then accel x, y, z, each little-endian int16.
+// The output registers: gyro x, y, z, then acceleration x, y, z, each little-endian int16.
 static void read_raw(imu_sample_t *s, imu_counts_t *c) {
     uint8_t b[12];
     read_regs(OUTX_L_G, b, sizeof b);
     for (int i = 0; i < 3; i++) {
         c->gyro[i] = (int16_t)(b[2 * i] | b[2 * i + 1] << 8);
-        c->accel[i] = (int16_t)(b[6 + 2 * i] | b[6 + 2 * i + 1] << 8);
+        c->acceleration[i] = (int16_t)(b[6 + 2 * i] | b[6 + 2 * i + 1] << 8);
     }
     s->gx = c->gyro[0] * IMU_GYRO_DPS_PER_LSB;
     s->gy = c->gyro[1] * IMU_GYRO_DPS_PER_LSB;
     s->gz = c->gyro[2] * IMU_GYRO_DPS_PER_LSB;
-    s->ax = c->accel[0] * IMU_ACCEL_G_PER_LSB;
-    s->ay = c->accel[1] * IMU_ACCEL_G_PER_LSB;
-    s->az = c->accel[2] * IMU_ACCEL_G_PER_LSB;
+    s->ax = c->acceleration[0] * IMU_ACCELERATION_G_PER_LSB;
+    s->ay = c->acceleration[1] * IMU_ACCELERATION_G_PER_LSB;
+    s->az = c->acceleration[2] * IMU_ACCELERATION_G_PER_LSB;
 }
 
 bool imu_read(imu_sample_t *s, imu_counts_t *counts) {

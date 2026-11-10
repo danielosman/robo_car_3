@@ -25,9 +25,9 @@ static uint8_t test_tof_type(tof_format_t f) { return collide ? WIRE_ANSWER : to
 
 #define GOLDEN "picoA/app/test/data/wire_golden.hex"
 
-static wire_msg_t take_whole(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len);
+static wire_message_t take_whole(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len);
     return m;
 }
 
@@ -77,64 +77,64 @@ static wire_imu_batch_t sample_batch(int n) {
     wire_imu_batch_t b = {.move = 12, .t_us = SAMPLE_T_US, .period_us = IMU_RECORD_PERIOD_US, .n = (uint8_t)n};
     for (int i = 0; i < n; i++) {
         for (int k = 0; k < 3; k++) {
-            b.records[i].accel[k] = (int16_t)(i * 1000 - k * 7);
+            b.records[i].acceleration[k] = (int16_t)(i * 1000 - k * 7);
             b.records[i].gyro[k] = (int16_t)(-i * 300 + k);
         }
     }
-    b.records[0].accel[2] = 16384;                       // 1 g up
-    b.records[n - 1].accel[0] = 32767; b.records[n - 1].gyro[1] = -32768;
+    b.records[0].acceleration[2] = 16384;                       // 1 g up
+    b.records[n - 1].acceleration[0] = 32767; b.records[n - 1].gyro[1] = -32768;
     return b;
 }
 
 static void test_round_trips(void) {
-    uint8_t msg[WIRE_MSG_MAX] = {0};
-    wire_msg_t m;
+    uint8_t message[WIRE_MESSAGE_MAX] = {0};
+    wire_message_t m;
 
     wire_hello_t h = {.version = WIRE_VERSION, .boot_id = 0x7a587226, .build = "Nov  7 2026 18:00:00"}, h2;
-    m = take_whole(msg, wire_encode_hello(&h, msg));
+    m = take_whole(message, wire_encode_hello(&h, message));
     assert(wire_decode_hello(&m, &h2) && h2.version == WIRE_VERSION && h2.boot_id == h.boot_id && !strcmp(h2.build, h.build));
     wire_hello_t long_build = {.version = 1, .build = "123456789012345678901234"}; // 24: fills the field, no NUL
-    m = take_whole(msg, wire_encode_hello(&long_build, msg));
+    m = take_whole(message, wire_encode_hello(&long_build, message));
     assert(wire_decode_hello(&m, &h2) && !strcmp(h2.build, long_build.build));
 
     char text[WIRE_CONSOLE_MAX + 1];
-    m = take_whole(msg, wire_encode_console("Map cleared", 11, msg));
+    m = take_whole(message, wire_encode_console("Map cleared", 11, message));
     assert(m.len == 11 && wire_decode_console(&m, text) && !strcmp(text, "Map cleared"));
-    m = take_whole(msg, wire_encode_console("", 0, msg));
+    m = take_whole(message, wire_encode_console("", 0, message));
     assert(m.len == 0 && wire_decode_console(&m, text) && !strcmp(text, ""));
     char longer[300];
     memset(longer, 'x', sizeof longer);
-    m = take_whole(msg, wire_encode_console(longer, sizeof longer, msg)); // cut at 240
+    m = take_whole(message, wire_encode_console(longer, sizeof longer, message)); // cut at 240
     assert(m.len == WIRE_CONSOLE_MAX && wire_decode_console(&m, text) && strlen(text) == WIRE_CONSOLE_MAX);
 
     wire_answer_t a = {.n = 17, .end = WIRE_END_OBSTACLE, .has = WIRE_HAS_MOVE | WIRE_HAS_GOAL, .x_m = 0.43f, .y_m = -0.04f,
                        .yaw_rad = 0.5236f, .moved_m = 0.31f, .rotated_rad = -0.125f, .goal_m = 4.2f}, a2;
-    m = take_whole(msg, wire_encode_answer(&a, msg));
+    m = take_whole(message, wire_encode_answer(&a, message));
     assert(wire_decode_answer(&m, &a2) && same_answer(&a, &a2));
     for (int end = 0; end < WIRE_ENDS; end++) {
         a.end = (uint8_t)end;
-        m = take_whole(msg, wire_encode_answer(&a, msg));
+        m = take_whole(message, wire_encode_answer(&a, message));
         assert(wire_decode_answer(&m, &a2) && a2.end == end);
     }
 
     wire_status_t s = {.x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 7.0f, .mode = "manual", .action = "goto", .rssi_dbm = -61}, s2;
-    m = take_whole(msg, wire_encode_status(&s, msg));
+    m = take_whole(message, wire_encode_status(&s, message));
     assert(wire_decode_status(&m, &s2) && same_status(&s, &s2));
     wire_status_t idle = {.mode = "idle", .action = ""};
-    m = take_whole(msg, wire_encode_status(&idle, msg));
+    m = take_whole(message, wire_encode_status(&idle, message));
     assert(wire_decode_status(&m, &s2) && !strcmp(s2.mode, "idle") && !strcmp(s2.action, "") && s2.rssi_dbm == 0);
 
-    m = take_whole(msg, wire_encode_map_cleared(msg));
+    m = take_whole(message, wire_encode_map_cleared(message));
     assert(m.type == WIRE_MAP_CLEARED && m.len == 0);
 
-    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .param = 4.2f, .t_us = 4300000000ull,
+    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .parameter = 4.2f, .t_us = 4300000000ull,
                             .pre_ms = 200, .post_ms = 2000, .flags = WIRE_MOVE_REFUSED}, ms2;
-    m = take_whole(msg, wire_encode_move_start(&ms, msg));
+    m = take_whole(message, wire_encode_move_start(&ms, message));
     assert(wire_decode_move_start(&m, &ms2) && ms2.move == 12 && ms2.command == 17 && ms2.kind == WIRE_MOVE_GOTO &&
-           ms2.param == 4.2f && ms2.t_us == 4300000000ull && ms2.pre_ms == 200 && ms2.post_ms == 2000 && ms2.flags == WIRE_MOVE_REFUSED);
+           ms2.parameter == 4.2f && ms2.t_us == 4300000000ull && ms2.pre_ms == 200 && ms2.post_ms == 2000 && ms2.flags == WIRE_MOVE_REFUSED);
     wire_move_end_t me = {.move = 12, .end = WIRE_END_TILT, .t_us = 0xffffffffffffull, .frames_sent = 41, .frames_dropped = 2,
                           .moved_m = 0.31f, .rotated_rad = -0.125f, .imu_sent = 44, .imu_dropped = 0xffffffffu}, me2;
-    m = take_whole(msg, wire_encode_move_end(&me, msg));
+    m = take_whole(message, wire_encode_move_end(&me, message));
     assert(wire_decode_move_end(&m, &me2) && me2.move == 12 && me2.end == WIRE_END_TILT && me2.t_us == 0xffffffffffffull &&
            me2.frames_sent == 41 && me2.frames_dropped == 2 &&
            me2.moved_m == 0.31f && me2.rotated_rad == -0.125f && me2.imu_sent == 44 && me2.imu_dropped == 0xffffffffu);
@@ -143,15 +143,15 @@ static void test_round_trips(void) {
     // imu batches of 1 and 10 records come back with their move, time, period and counts.
     for (int n = 1; n <= WIRE_IMU_BATCH_MAX; n += WIRE_IMU_BATCH_MAX - 1) {
         wire_imu_batch_t b = sample_batch(n), b2;
-        m = take_whole(msg, wire_encode_imu_batch(&b, msg));
+        m = take_whole(message, wire_encode_imu_batch(&b, message));
         assert(m.type == WIRE_IMU_BATCH && m.len == WIRE_IMU_BATCH_HEADER + n * WIRE_IMU_RECORD);
         assert(wire_decode_imu_batch(&m, &b2) && b2.move == 12 && b2.n == n && b2.t_us == SAMPLE_T_US &&
                b2.period_us == IMU_RECORD_PERIOD_US);
         for (int i = 0; i < n; i++)
-            assert(!memcmp(b.records[i].accel, b2.records[i].accel, 6) && !memcmp(b.records[i].gyro, b2.records[i].gyro, 6));
+            assert(!memcmp(b.records[i].acceleration, b2.records[i].acceleration, 6) && !memcmp(b.records[i].gyro, b2.records[i].gyro, 6));
     }
     wire_imu_batch_t none = {.n = 0}, many = {.n = WIRE_IMU_BATCH_MAX + 1};
-    assert(wire_encode_imu_batch(&none, msg) == 0 && wire_encode_imu_batch(&many, msg) == 0);
+    assert(wire_encode_imu_batch(&none, message) == 0 && wire_encode_imu_batch(&many, message) == 0);
 
     // A tof frame in its message: its move and time, then tof_format's bytes, read back whole.
     static posed_frame_t f, back;
@@ -159,31 +159,31 @@ static void test_round_trips(void) {
     f.x_m = 1.5f; f.yaw_rad = 0.5f; f.pose_known = true;
     for (int z = 0; z < TOF_ZONES; z++) f.frame.zone[z] = (tof_zone_t){.distance_mm = (uint16_t)(100 + 10 * z), .signal = 30,
                                                                       .sigma_mm = 4, .kind = TOF_SURE, .targets = 1};
-    static uint8_t tof_msg[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX];
-    uint32_t n = wire_encode_tof(TOF_USE_MAP, 9, 4300000000ull, &f, tof_msg);
-    m = take_whole(tof_msg, n);
+    static uint8_t tof_message[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX];
+    uint32_t n = wire_encode_tof(TOF_USE_MAP, 9, 4300000000ull, &f, tof_message);
+    m = take_whole(tof_message, n);
     assert(m.type == tof_format_message_type(tof_format_of(TOF_USE_MAP)) && m.len == WIRE_TOF_HEADER + TOF_COMPACT_BYTES);
     assert(read32(m.payload) == 9 && read64(m.payload + 4) == 4300000000ull);
-    assert(tof_unpack(TOF_FORMAT_COMPACT, m.payload + WIRE_TOF_HEADER, TOF_COMPACT_BYTES, &back) && back.frame.number == 77 &&
+    assert(tof_format_unpack(TOF_FORMAT_COMPACT, m.payload + WIRE_TOF_HEADER, TOF_COMPACT_BYTES, &back) && back.frame.number == 77 &&
            back.frame.zone[63].distance_mm == 730 && back.pose_known && back.x_m == 1.5f);
 
     uint8_t part[WIRE_PART_MAX];
     for (int i = 0; i < WIRE_PART_MAX; i++) part[i] = (uint8_t)(i * 7);
-    m = take_whole(msg, wire_encode_snapshot_part(part, WIRE_PART_MAX, msg));
+    m = take_whole(message, wire_encode_snapshot_part(part, WIRE_PART_MAX, message));
     assert(m.type == WIRE_SNAPSHOT_PART && m.len == WIRE_PART_MAX && !memcmp(m.payload, part, WIRE_PART_MAX));
-    assert(wire_encode_snapshot_part(part, 0, msg) == 0 && wire_encode_snapshot_part(part, WIRE_PART_MAX + 1, msg) == 0);
+    assert(wire_encode_snapshot_part(part, 0, message) == 0 && wire_encode_snapshot_part(part, WIRE_PART_MAX + 1, message) == 0);
 
     wire_command_t c = {.n = 17, .text = "drive 50"}, c2;
-    m = take_whole(msg, wire_encode_command(&c, msg));
+    m = take_whole(message, wire_encode_command(&c, message));
     assert(wire_decode_command(&m, &c2) && c2.n == 17 && !strcmp(c2.text, "drive 50"));
     wire_command_t longest = {.n = 0xffffffff};
     memset(longest.text, 'a', WIRE_COMMAND_TEXT_MAX);
-    m = take_whole(msg, wire_encode_command(&longest, msg));
+    m = take_whole(message, wire_encode_command(&longest, message));
     assert(wire_decode_command(&m, &c2) && c2.n == 0xffffffff && strlen(c2.text) == WIRE_COMMAND_TEXT_MAX);
     wire_command_t empty = {.n = 1, .text = ""}, newline = {.n = 1, .text = "drive\n1"};
-    assert(wire_encode_command(&empty, msg) == 0 && wire_encode_command(&newline, msg) == 0);
+    assert(wire_encode_command(&empty, message) == 0 && wire_encode_command(&newline, message) == 0);
 
-    m = take_whole(msg, wire_encode_heartbeat(msg));
+    m = take_whole(message, wire_encode_heartbeat(message));
     assert(m.type == WIRE_HEARTBEAT && m.len == 0);
     printf("ok: every message encoded and decoded again\n");
 }
@@ -192,7 +192,7 @@ static void test_envelope(void) {
     uint8_t stream[128];
     wire_answer_t a = {.n = 3};
     uint32_t n1 = wire_encode_answer(&a, stream), n2 = wire_encode_console("hi", 2, stream + n1);
-    wire_msg_t m;
+    wire_message_t m;
     for (uint32_t len = 0; len < n1; len++) assert(wire_take(stream, len, &m) == 0); // not whole yet
     assert(wire_take(stream, n1 + n2, &m) == (int32_t)n1 && m.type == WIRE_ANSWER && m.len == 34);
     assert(wire_take(stream + n1, n2, &m) == (int32_t)n2 && m.type == WIRE_CONSOLE && !memcmp(m.payload, "hi", 2));
@@ -275,7 +275,7 @@ static uint32_t samples(sample_t *out) {
     wire_status_t s = {.x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 7.0f, .mode = "manual", .action = "goto", .rssi_dbm = -61};
     out[n] = (sample_t){.name = "status"}; out[n].len = wire_encode_status(&s, out[n].bytes); n++;
     out[n] = (sample_t){.name = "map_cleared"}; out[n].len = wire_encode_map_cleared(out[n].bytes); n++;
-    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .param = 4.2f, .t_us = 4300000000ull,
+    wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .parameter = 4.2f, .t_us = 4300000000ull,
                             .pre_ms = 200, .post_ms = 300, .flags = WIRE_MOVE_REFUSED};
     out[n] = (sample_t){.name = "move_start"}; out[n].len = wire_encode_move_start(&ms, out[n].bytes); n++;
     wire_move_end_t me = {.move = 12, .end = WIRE_END_TILT, .t_us = 0xffffffffffffull, .frames_sent = 41, .frames_dropped = 2,
@@ -373,7 +373,7 @@ static void test_golden(void) {
         assert(found);
         // The command, as the PC encodes it, decodes here.
         if (!strcmp(name, "command")) {
-            wire_msg_t m = take_whole(bytes, len);
+            wire_message_t m = take_whole(bytes, len);
             wire_command_t c;
             assert(wire_decode_command(&m, &c) && c.n == 17 && !strcmp(c.text, "drive 50"));
         }

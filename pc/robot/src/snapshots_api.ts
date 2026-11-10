@@ -1,15 +1,15 @@
 // The viewer's snapshot data (doc/ARCHITECTURE.md, the PC; snapshot.ts):
 //   GET /api/boots                         each boot with snapshots: its folder name, how many, first and last
 //   GET /api/snapshots?boot=<id>           a boot's snapshots for the timeline: when, why, the action, the pose
-//   GET /api/snapshots/<boot>/<seq>        one snapshot: its row, the ToF frame (its 64 zones, each also in the world;
+//   GET /api/snapshots/<boot>/<sequence>        one snapshot: its row, the ToF frame (its 64 zones, each also in the world;
 //                                          the 8 x 8 grid), the camera features
-//   GET /api/snapshots/<boot>/<seq>/map    the robot's map then: the window's columns over the whole-house
+//   GET /api/snapshots/<boot>/<sequence>/map    the robot's map then: the window's columns over the whole-house
 //                                          map's tiles as they were (the newest of each tile up to this
 //                                          snapshot since the map was last cleared), where the robot was,
 //                                          and the path it drove since the map was last cleared
-//   GET /api/snapshots/<boot>/<seq>/objects  what robot detect found in its picture, and the boot's
+//   GET /api/snapshots/<boot>/<sequence>/objects  what robot detect found in its picture, and the boot's
 //                                          objects on the map up to it (objects/api.ts)
-//   GET /camera/<boot>/<seq>.png           the camera picture (its file: camera/<boot's folder>/)
+//   GET /camera/<boot>/<sequence>.png           the camera picture (its file: camera/<boot's folder>/)
 //   GET /api/mounting?boot=<id>            where the sensors sat for that boot: its own copy (boot.ts); without a
 //                                          boot (or one the store doesn't know), the file now (common/mounting.json)
 import type http from "node:http";
@@ -26,8 +26,8 @@ import { COMPACT_BEYOND_MM } from "./tof_format.ts";
 const BOOT = /^[0-9a-f]{8}$/;
 
 export interface MapView {
-  window: { orgX: number; orgY: number; cellsX: number; cellsY: number; columns: number[]; confidence: number[] } | null;
-  tiles: { tx: number; ty: number; seq: number; columns: number[] }[];
+  window: { originX: number; originY: number; cellsX: number; cellsY: number; columns: number[]; confidence: number[] } | null;
+  tiles: { tx: number; ty: number; sequence: number; columns: number[] }[];
   robot: Pose | null;          // the snapshot's pose
   path: { x: number; y: number }[];
 }
@@ -36,8 +36,8 @@ export interface MapView {
 export function mapViewOf(s: Snapshot): MapView {
   const w = s.window;
   return {
-    window: w && { orgX: w.orgX, orgY: w.orgY, cellsX: w.cellsX, cellsY: w.cellsY, ...windowColumns(w) },
-    tiles: s.tiles.map(t => ({ tx: t.tx, ty: t.ty, seq: s.seq, columns: tileColumns(t) })),
+    window: w && { originX: w.originX, originY: w.originY, cellsX: w.cellsX, cellsY: w.cellsY, ...windowColumns(w) },
+    tiles: s.tiles.map(t => ({ tx: t.tx, ty: t.ty, sequence: s.sequence, columns: tileColumns(t) })),
     robot: s.pose && { x: s.pose.x, y: s.pose.y, yaw: s.pose.yaw },
     path: [],
   };
@@ -55,19 +55,19 @@ export async function listBoots(store: Store, bootFolders: BootFolders) {
 
 export async function listSnapshots(store: Store, boot: string) {
   if (!BOOT.test(boot)) throw new Error(`not a boot id: ${boot}`);
-  return store.query(`SELECT seq, strftime(arrived_at, '%H:%M:%S') AS arrived, robot_clock_us, why, action, end_reason, running, mode,
+  return store.query(`SELECT sequence, strftime(arrived_at, '%H:%M:%S') AS arrived, robot_clock_us, why, action, end_reason, running, mode,
     round(x, 4) AS x, round(y, 4) AS y, round(yaw, 4) AS yaw, image IS NOT NULL AS has_image, round(lux, 1) AS lux, tiles
-    FROM snapshots WHERE boot_id = '${boot}' ORDER BY seq`);
+    FROM snapshots WHERE boot_id = '${boot}' ORDER BY sequence`);
 }
 
-export async function snapshotDetail(store: Store, boot: string, seq: number) {
-  if (!BOOT.test(boot) || !Number.isInteger(seq)) throw new Error("not a snapshot");
-  const id = `${boot}-${seq}`;
+export async function snapshotDetail(store: Store, boot: string, sequence: number) {
+  if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
+  const id = `${boot}-${sequence}`;
   const [row] = await store.query(`SELECT * EXCLUDE (map_cells, color_raw, bytes), strftime(arrived_at, '%Y-%m-%d %H:%M:%S') AS arrived
-    FROM snapshots WHERE snap_id = '${id}'`);
+    FROM snapshots WHERE snapshot_id = '${id}'`);
   if (!row) return null;
   const zones = await store.query(`SELECT row, col, distance_mm, kind, signal, sigma_mm, targets,
-    round(x, 3) AS x, round(y, 3) AS y, round(z, 3) AS z FROM snapshot_zones WHERE snap_id = '${id}' ORDER BY row, col`);
+    round(x, 3) AS x, round(y, 3) AS y, round(z, 3) AS z FROM snapshot_zones WHERE snapshot_id = '${id}' ORDER BY row, col`);
   // The grid as the robot sees it (row 1 at the top, column 1 on the left): each zone's
   // reading and how sure (sure, less_sure, unsure); null: nothing in range.
   const grid: ({ mm: number; kind: string; beyond: boolean } | null)[][] = Array.from({ length: 8 }, () => Array(8).fill(null));
@@ -77,28 +77,28 @@ export async function snapshotDetail(store: Store, boot: string, seq: number) {
     grid[r][c] = { mm, kind, beyond: kind !== "unsure" && mm >= COMPACT_BEYOND_MM };
   }
   const features = await store.query(`SELECT id, age, flags, x, y, dx, dy, round(strength, 2) AS strength, round(match, 3) AS match
-    FROM snapshot_features WHERE snap_id = '${id}' ORDER BY id`);
+    FROM snapshot_features WHERE snapshot_id = '${id}' ORDER BY id`);
   return { snapshot: row, zones, grid, features };
 }
 
-export async function snapshotMap(store: Store, boot: string, seq: number): Promise<MapView | null> {
-  if (!BOOT.test(boot) || !Number.isInteger(seq)) throw new Error("not a snapshot");
-  const path = await store.path(boot, seq);
+export async function snapshotMap(store: Store, boot: string, sequence: number): Promise<MapView | null> {
+  if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
+  const path = await store.path(boot, sequence);
   return store.read(async c => {
-    const head = (await c.runAndReadAll(`SELECT map_clears, map_org_cx, map_org_cy, map_cells_x, map_cells_y, map_cells, x, y, yaw
-      FROM snapshots WHERE boot_id = $1 AND seq = $2`, [boot, seq])).getRowObjects();
+    const head = (await c.runAndReadAll(`SELECT map_clears, map_origin_cx, map_origin_cy, map_cells_x, map_cells_y, map_cells, x, y, yaw
+      FROM snapshots WHERE boot_id = $1 AND sequence = $2`, [boot, sequence])).getRowObjects();
     if (!head.length) return null;
     const h = head[0];
-    const tiles = (await c.runAndReadAll(`SELECT tx, ty, arg_max(seq, seq) AS seq, arg_max(columns, seq) AS columns FROM snapshot_tiles
-      WHERE boot_id = $1 AND seq <= $2 AND map_clears = $3 GROUP BY tx, ty ORDER BY tx, ty`, [boot, seq, Number(h.map_clears)])).getRowObjects();
+    const tiles = (await c.runAndReadAll(`SELECT tx, ty, arg_max(sequence, sequence) AS sequence, arg_max(columns, sequence) AS columns FROM snapshot_tiles
+      WHERE boot_id = $1 AND sequence <= $2 AND map_clears = $3 GROUP BY tx, ty ORDER BY tx, ty`, [boot, sequence, Number(h.map_clears)])).getRowObjects();
     let window: MapView["window"] = null;
     if (h.map_cells !== null) {
-      const w = { orgX: Number(h.map_org_cx), orgY: Number(h.map_org_cy), cellsX: Number(h.map_cells_x), cellsY: Number(h.map_cells_y) };
+      const w = { originX: Number(h.map_origin_cx), originY: Number(h.map_origin_cy), cellsX: Number(h.map_cells_x), cellsY: Number(h.map_cells_y) };
       window = { ...w, ...windowColumns({ ...w, layers: 3, cells: bytes(h.map_cells) }) };
     }
     return {
       window,
-      tiles: tiles.map(t => ({ tx: Number(t.tx), ty: Number(t.ty), seq: Number(t.seq),
+      tiles: tiles.map(t => ({ tx: Number(t.tx), ty: Number(t.ty), sequence: Number(t.sequence),
                                columns: tileColumns({ tx: 0, ty: 0, columns: bytes(t.columns) }) })),
       robot: h.x === null ? null : { x: Number(h.x), y: Number(h.y), yaw: Number(h.yaw) },
       path,
@@ -106,8 +106,8 @@ export async function snapshotMap(store: Store, boot: string, seq: number): Prom
   });
 }
 
-// Answers the snapshot requests; false if the URL isn't one of them. dir: recordings/.
-export async function handleSnapshotApi(req: http.IncomingMessage, res: http.ServerResponse, store: Store, dir: string,
+// Answers the snapshot requests; false if the URL isn't one of them. directory: recordings/.
+export async function handleSnapshotApi(req: http.IncomingMessage, res: http.ServerResponse, store: Store, directory: string,
                                         bootFolders: BootFolders): Promise<boolean> {
   if (req.method !== "GET") return false;
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -125,9 +125,9 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     if (url.pathname === "/api/snapshots") { send(200, await listSnapshots(store, url.searchParams.get("boot") ?? "")); return true; }
     const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map|\/objects)?$/.exec(url.pathname);
     if (one) {
-      const boot = one[1], seq = Number(one[2]);
-      const body = one[3] === "/map" ? await snapshotMap(store, boot, seq) : one[3] === "/objects" ? await pageObjects(store, boot, seq)
-        : await snapshotDetail(store, boot, seq);
+      const boot = one[1], sequence = Number(one[2]);
+      const body = one[3] === "/map" ? await snapshotMap(store, boot, sequence) : one[3] === "/objects" ? await pageObjects(store, boot, sequence)
+        : await snapshotDetail(store, boot, sequence);
       if (body) send(200, body); else send(404, { error: "no such snapshot" });
       return true;
     }
@@ -135,9 +135,9 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     if (png) {
       try {
         // The URL has the boot id; the picture's file (in the boot's folder) is in its row.
-        const [row] = await store.query(`SELECT image FROM snapshots WHERE snap_id = '${png[1]}-${Number(png[2])}'`);
+        const [row] = await store.query(`SELECT image FROM snapshots WHERE snapshot_id = '${png[1]}-${Number(png[2])}'`);
         if (!row?.image) throw new Error("no picture");
-        const data = await readFile(path.join(dir, String(row.image)));
+        const data = await readFile(path.join(directory, String(row.image)));
         res.writeHead(200, { "content-type": "image/png", "cache-control": "max-age=86400" });
         res.end(data);
       } catch { res.writeHead(404); res.end("no picture"); }

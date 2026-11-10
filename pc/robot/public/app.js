@@ -31,7 +31,7 @@ const LABEL_COLORS = { chair: "#ff9f43", table: "#feca57", sofa: "#54a0ff", door
 
 // --- state ---
 let ws = null, robotStatus = { state: "waiting" }, livePose = null, poseFresh = 0, goal = null;
-let boots = [], boot = null, snaps = [], index = -1, detail = null, mapView = null, objects = null;
+let boots = [], boot = null, snapshots = [], index = -1, detail = null, mapView = null, objects = null;
 let image = null;
 const view = { cx: 0, cy: 0, scale: 80 }; // the map's centre (m) and pixels per metre
 let follow = true;
@@ -91,7 +91,7 @@ function draw() {
 
   if (mapView) {
     const w = mapView.window;
-    const inWindow = (cx, cy) => w && cx >= w.orgX && cx < w.orgX + w.cellsX && cy >= w.orgY && cy < w.orgY + w.cellsY;
+    const inWindow = (cx, cy) => w && cx >= w.originX && cx < w.originX + w.cellsX && cy >= w.originY && cy < w.originY + w.cellsY;
     const hide = $("hideweak").checked;
     const known = i => w.columns[i] && !(hide && w.confidence[i] < WEAK);
     // The whole-house map's columns: full where the window doesn't reach, dimmed under
@@ -103,7 +103,7 @@ function draw() {
         const cx = t.tx * TILE - TILE / 2 + ix, cy = t.ty * TILE - TILE / 2 + iy;
         let alpha = 1;
         if (inWindow(cx, cy)) {
-          if (known((cx - w.orgX) * w.cellsY + (cy - w.orgY))) continue;
+          if (known((cx - w.originX) * w.cellsY + (cy - w.originY))) continue;
           alpha = 0.35;
         }
         ctx.globalAlpha = alpha;
@@ -118,10 +118,10 @@ function draw() {
         if (!known(ix * w.cellsY + iy)) continue;
         ctx.globalAlpha = 0.45 + 0.55 * Math.min(1, w.confidence[ix * w.cellsY + iy] / 8);
         ctx.fillStyle = columnColor[c];
-        ctx.fillRect(...cellRect(w.orgX + ix, w.orgY + iy));
+        ctx.fillRect(...cellRect(w.originX + ix, w.originY + iy));
       }
       ctx.globalAlpha = 1;
-      const [ax, ay] = toScreen((w.orgX + w.cellsX) * CELL, (w.orgY + w.cellsY) * CELL), [bx, by] = toScreen(w.orgX * CELL, w.orgY * CELL);
+      const [ax, ay] = toScreen((w.originX + w.cellsX) * CELL, (w.originY + w.cellsY) * CELL), [bx, by] = toScreen(w.originX * CELL, w.originY * CELL);
       ctx.setLineDash([6 * dpr, 5 * dpr]);
       ctx.strokeStyle = "#556";
       ctx.strokeRect(Math.min(ax, bx), Math.min(ay, by), Math.abs(bx - ax), Math.abs(by - ay));
@@ -139,7 +139,7 @@ function draw() {
   ctx.beginPath();
   for (const p of mapView?.path ?? []) { const [px, py] = toScreen(p.x, p.y); ctx.lineTo(px, py); }
   ctx.stroke();
-  for (const s of snaps.slice(0, index + 1).filter(s => s.x !== null)) {
+  for (const s of snapshots.slice(0, index + 1).filter(s => s.x !== null)) {
     const [px, py] = toScreen(s.x, s.y);
     ctx.fillStyle = "#7aa7d9";
     ctx.beginPath(); ctx.arc(px, py, 2.5 * dpr, 0, 2 * Math.PI); ctx.fill();
@@ -196,7 +196,7 @@ function drawObjects() {
   for (const o of objects?.map ?? []) {
     const pts = objectCorners(o);
     if (!pts.length) continue;
-    const here = o.seq === Number(s?.seq), color = LABEL_COLORS[o.label] ?? "#fff";
+    const here = o.sequence === Number(s?.sequence), color = LABEL_COLORS[o.label] ?? "#fff";
     ctx.globalAlpha = here ? 1 : 0.45;
     ctx.strokeStyle = color;
     ctx.lineWidth = (o.kind === "line" ? 3 : 2) * dpr;
@@ -255,7 +255,7 @@ function centre() {
 }
 
 // Live: the newest snapshot of the newest boot (boots come newest first).
-const showingLive = () => boot === boots[0]?.boot_id && index === snaps.length - 1;
+const showingLive = () => boot === boots[0]?.boot_id && index === snapshots.length - 1;
 const canSteer = () => robotStatus.state === "connected" && showingLive();
 
 function toast(text) {
@@ -277,7 +277,7 @@ function clicked(x, y) {
   }
   // Not steering: pick the nearest snapshot within 15 px.
   let best = -1, bestD = 15 / view.scale;
-  snaps.forEach((s, i) => { if (s.x === null) return; const d = Math.hypot(s.x - x, s.y - y); if (d < bestD) { bestD = d; best = i; } });
+  snapshots.forEach((s, i) => { if (s.x === null) return; const d = Math.hypot(s.x - x, s.y - y); if (d < bestD) { bestD = d; best = i; } });
   if (best >= 0) { select(best); return; }
   if (robotStatus.state !== "connected") toast("The robot isn't connected");
   else toast("Showing an old snapshot: go to the newest (▶) to steer");
@@ -288,7 +288,7 @@ function showSnapshot() {
   const s = detail?.snapshot;
   if (!s) return;
   // One line on top; the rest (the boot, named by its date, is in the Boot dropdown) at the bottom.
-  $("snapno").textContent = `Snapshot #${s.seq}`;
+  $("snapshotNumber").textContent = `Snapshot #${s.sequence}`;
   // The camera picture, twice its size, and the features on it.
   const cam = $("camera"), c = cam.getContext("2d");
   c.imageSmoothingEnabled = false;
@@ -305,7 +305,7 @@ function showSnapshot() {
       drawFeatures(c, cam.width / img.width);
       drawBoxes(c, cam.width, cam.height);
     };
-    img.src = `/camera/${s.boot_id}/${s.seq}.png`;
+    img.src = `/camera/${s.boot_id}/${s.sequence}.png`;
   }
   // The ToF grid as the robot sees it.
   const rows = [];
@@ -332,10 +332,10 @@ function showSnapshot() {
   $("pose").innerHTML = s.x === null ? kv([["", "PicoB not connected"]]) : kv([
     ["x, y", `${(s.x * 100).toFixed(1)}, ${(s.y * 100).toFixed(1)} cm`], ["yaw", `${deg(s.yaw)}°`],
     ["pitch, roll", `${deg(s.pitch)}°, ${deg(s.roll)}°`], ["", `${s.stationary ? "still" : "moving"}, motors ${s.motors_on ? "on" : "off"}`],
-    ["map window", `from (${s.map_org_cx * 10}, ${s.map_org_cy * 10}) cm`], ["tiles sent", s.tiles],
+    ["map window", `from (${s.map_origin_cx * 10}, ${s.map_origin_cy * 10}) cm`], ["tiles sent", s.tiles],
   ]);
   const ended = s.action ? `${s.action} ${s.end_reason === "done" ? "done" : `ended: ${s.end_reason}`}` : "";
-  $("snapinfo").innerHTML = kv([
+  $("snapshotInfo").innerHTML = kv([
     ["why", s.why], ["last action", ended || "none"], ["mode", s.mode], ["running", s.running || "nothing"], ["arrived", s.arrived],
   ]);
 }
@@ -344,7 +344,7 @@ function showSnapshot() {
 // edge, which places the object, thicker; dashed when it wasn't placed on the floor.
 function drawBoxes(c, w, h) {
   const here = objects?.here ?? [], run = objects?.run;
-  $("objinfo").textContent = !run ? `no objects: robot detect ${detail?.snapshot?.seq ?? ""}`
+  $("objinfo").textContent = !run ? `no objects: robot detect ${detail?.snapshot?.sequence ?? ""}`
     : run.result !== "ok" ? `detect failed: ${run.why}`
     : run.seconds === null ? `${here.length} objects · by ${run.model} · ${run.ran_at}`  // detect_save from outside
     : `${here.length} objects · ${run.model}${run.thinking ? "" : " (no thinking)"} · ${run.seconds} s · ${run.ran_at}`;
@@ -384,9 +384,9 @@ $("showobjects").onchange = () => { showSnapshot(); draw(); };
 
 // What robot detect saved for the snapshot shown, again (after a detect ran on it).
 async function reloadObjects() {
-  const s = snaps[index];
+  const s = snapshots[index];
   if (!s) return;
-  objects = await getJson(`/api/snapshots/${boot}/${s.seq}/objects`);
+  objects = await getJson(`/api/snapshots/${boot}/${s.sequence}/objects`);
   showSnapshot();
   draw();
 }
@@ -420,22 +420,22 @@ $("boot").onchange = () => loadSnapshots($("boot").value);
 async function loadSnapshots(b) {
   if (b !== boot) loadMounting(b);
   boot = b;
-  snaps = (await getJson(`/api/snapshots?boot=${b}`)).map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) }));
-  $("timeline").max = Math.max(0, snaps.length - 1);
+  snapshots = (await getJson(`/api/snapshots?boot=${b}`)).map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), sequence: Number(s.sequence) }));
+  $("timeline").max = Math.max(0, snapshots.length - 1);
   // ?snapshot=<n> opens that snapshot of the newest boot (once), e.g. after robot detect n.
-  const asked = Number(new URL(location.href).searchParams.get("snapshot")), at = snaps.findIndex(s => s.seq === asked);
+  const asked = Number(new URL(location.href).searchParams.get("snapshot")), at = snapshots.findIndex(s => s.sequence === asked);
   if (at >= 0 && b === boots[0]?.boot_id && !loadSnapshots.opened) { loadSnapshots.opened = true; follow = true; await select(at); return; }
-  await select(snaps.length - 1);
+  await select(snapshots.length - 1);
 }
 
 let loading = 0;
 async function select(i) {
-  if (!snaps.length) return;
-  index = Math.max(0, Math.min(snaps.length - 1, i));
+  if (!snapshots.length) return;
+  index = Math.max(0, Math.min(snapshots.length - 1, i));
   $("timeline").value = index;
-  const s = snaps[index], mine = ++loading;
-  const [d, m, o] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.seq}`), getJson(`/api/snapshots/${boot}/${s.seq}/map`),
-                                       getJson(`/api/snapshots/${boot}/${s.seq}/objects`)]);
+  const s = snapshots[index], mine = ++loading;
+  const [d, m, o] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.sequence}`), getJson(`/api/snapshots/${boot}/${s.sequence}/map`),
+                                       getJson(`/api/snapshots/${boot}/${s.sequence}/objects`)]);
   if (mine !== loading) return;
   detail = d;
   mapView = m;
@@ -533,29 +533,29 @@ setInterval(() => { if (poseFresh > 0) poseFresh--; showLive(); }, 1000); // sta
 function connect() {
   ws = new WebSocket(`ws://${location.host}/`);
   ws.onmessage = e => {
-    const msg = JSON.parse(e.data);
-    if (msg.type === "backlog") { $("log").textContent = ""; chars = 0; for (const it of msg.items) append(it.text, it.kind, it.command); }
-    else if (msg.type === "text" || msg.type === "note" || msg.type === "answer") {
-      append(msg.text, msg.type, msg.command);
+    const message = JSON.parse(e.data);
+    if (message.type === "backlog") { $("log").textContent = ""; chars = 0; for (const it of message.items) append(it.text, it.kind, it.command); }
+    else if (message.type === "text" || message.type === "note" || message.type === "answer") {
+      append(message.text, message.type, message.command);
       // robot detect notes "--- <time> detect <n>: ... ---" when it has saved (objects/api.ts): show it if that's the snapshot shown.
-      const detected = msg.type === "note" && /^--- \S+ detect (\d+): /.exec(msg.text);
-      if (detected && boot === boots[0]?.boot_id && Number(detected[1]) === snaps[index]?.seq) reloadObjects();
+      const detected = message.type === "note" && /^--- \S+ detect (\d+): /.exec(message.text);
+      if (detected && boot === boots[0]?.boot_id && Number(detected[1]) === snapshots[index]?.sequence) reloadObjects();
     }
-    else if (msg.type === "status") { robotStatus = msg.status; showStatus(); }
-    else if (msg.type === "pose") {
-      livePose = msg.pose;
+    else if (message.type === "status") { robotStatus = message.status; showStatus(); }
+    else if (message.type === "pose") {
+      livePose = message.pose;
       poseFresh = 3;
       showLive();
       if (follow && showingLive()) centre();
       if (showingLive()) draw();
-    } else if (msg.type === "snapshot") {
+    } else if (message.type === "snapshot") {
       // A new boot (the robot started again) always takes over the page: its first
       // snapshot comes when it connects, and the old drive's map must not stay up.
       // Showing the newest snapshot (live), the page moves on to the one that came.
-      if (!boots.some(b => b.boot_id === msg.boot)) { follow = true; loadBoots(msg.boot); }
-      else if (msg.boot !== boot) return;
+      if (!boots.some(b => b.boot_id === message.boot)) { follow = true; loadBoots(message.boot); }
+      else if (message.boot !== boot) return;
       else if (showingLive()) loadSnapshots(boot);
-      else getJson(`/api/snapshots?boot=${boot}`).then(list => { snaps = list.map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), seq: Number(s.seq) })); $("timeline").max = snaps.length - 1; draw(); });
+      else getJson(`/api/snapshots?boot=${boot}`).then(list => { snapshots = list.map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), sequence: Number(s.sequence) })); $("timeline").max = snapshots.length - 1; draw(); });
     }
   };
   ws.onclose = () => {

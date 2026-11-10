@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 typedef struct { float ax, ay, az; float gx, gy, gz; } imu_sample_t;
-typedef struct { int16_t accel[3], gyro[3]; } imu_counts_t;
+typedef struct { int16_t acceleration[3], gyro[3]; } imu_counts_t;
 static imu_sample_t fake_imu = {0, 0, 1, 0, 0, 0};
 static imu_counts_t fake_imu_counts;
 static bool fake_imu_fresh, fake_imu_started;

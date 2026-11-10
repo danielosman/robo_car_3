@@ -95,14 +95,14 @@ static void unpack_compact(const uint8_t *b, posed_frame_t *f) {
                                   .kind = z[3] & 3, .targets = (uint8_t)(z[3] >> 2 & 7)};
 }
 
-uint32_t tof_pack(tof_use_t use, const posed_frame_t *f, uint8_t *bytes) {
+uint32_t tof_format_pack(tof_use_t use, const posed_frame_t *f, uint8_t *bytes) {
     switch (tof_format_of(use)) {
     case TOF_FORMAT_COMPACT: return pack_compact(f, bytes);
     default: return 0;
     }
 }
 
-bool tof_unpack(tof_format_t format, const uint8_t *bytes, uint32_t len, posed_frame_t *out) {
+bool tof_format_unpack(tof_format_t format, const uint8_t *bytes, uint32_t len, posed_frame_t *out) {
     if (format >= TOF_FORMATS || len != tof_format_size(format)) return false;
     switch (format) {
     case TOF_FORMAT_COMPACT: unpack_compact(bytes, out); return true;

@@ -33,19 +33,19 @@ const action = (name: string, value = "") => (parseAction(name, value) as { comm
 async function setUp() {
   const snapshots: FakeSnapshot[] = new SnapshotAssembler().push(readFileSync(FIRMWARE)).map(bytes => {
     const s = parseSnapshot(bytes);
-    return { bytes, seq: s.seq, pose: s.pose };
+    return { bytes, sequence: s.sequence, pose: s.pose };
   });
   const link = new RobotLink({ robotPort: 0, announceTo: ["127.0.0.1"], announcePort: 9, heartbeatEveryMs: 100 });
   const port = await link.start();
-  const stored = new StoredSnapshots(), notes: string[] = [], text: string[] = [], poses: LivePose[] = [], seqs: number[] = [];
+  const stored = new StoredSnapshots(), notes: string[] = [], text: string[] = [], poses: LivePose[] = [], sequences: number[] = [];
   let cleared = 0;
-  link.on("snapshot", (b: Buffer) => { const s = parseSnapshot(b); seqs.push(s.seq); stored.add(s.bootId, s.seq); });
+  link.on("snapshot", (b: Buffer) => { const s = parseSnapshot(b); sequences.push(s.sequence); stored.add(s.bootId, s.sequence); });
   link.on("note", n => notes.push(n));
   link.on("text", t => text.push(t));
   link.on("pose", p => poses.push(p));
   link.on("mapCleared", () => cleared++);
   const runner = new CommandRunner(link, stored);
-  return { link, port, snapshots, runner, notes, text, poses, seqs, cleared: () => cleared };
+  return { link, port, snapshots, runner, notes, text, poses, sequences, cleared: () => cleared };
 }
 
 test("the fake robot end to end: hello, commands, answers, snapshots, map cleared", { skip }, async () => {
@@ -53,8 +53,8 @@ test("the fake robot end to end: hello, commands, answers, snapshots, map cleare
   let robot = new FakeRobot({ port: t.port, snapshots: t.snapshots });
   try {
     await until(() => t.link.status.state === "connected");
-    await until(() => t.seqs.length === 1); // a server connected: a snapshot
-    assert.equal(t.seqs[0], t.snapshots[0].seq);
+    await until(() => t.sequences.length === 1); // a server connected: a snapshot
+    assert.equal(t.sequences[0], t.snapshots[0].sequence);
     await until(() => t.poses.length > 0);
     assert.equal(t.poses.at(-1)!.mode, "manual");
     assert.ok(t.text.join("").includes("Server: connected\n"));
@@ -63,7 +63,7 @@ test("the fake robot end to end: hello, commands, answers, snapshots, map cleare
     assert.equal(moved.result, "ok");
     assert.equal(moved.moved, 5);
     const snap = await t.runner.run(action("snap"));
-    assert.deepEqual([snap.result, snap.snapshot], ["ok", t.snapshots[1 % t.snapshots.length].seq]);
+    assert.deepEqual([snap.result, snap.snapshot], ["ok", t.snapshots[1 % t.snapshots.length].sequence]);
     assert.equal((await t.runner.run(action("clear_map"))).result, "ok");
     await until(() => t.cleared() === 1);
     const refused = new Promise<DoneRecord>(resolve => t.link.once("done", resolve));
@@ -75,7 +75,7 @@ test("the fake robot end to end: hello, commands, answers, snapshots, map cleare
     robot.stop();
     await until(() => t.link.status.state === "lost");
     robot = new FakeRobot({ port: t.port, snapshots: t.snapshots });
-    await until(() => t.link.status.state === "connected" && t.seqs.length === 3);
+    await until(() => t.link.status.state === "connected" && t.sequences.length === 3);
     assert.equal((await t.runner.run(action("mode", "idle"))).result, "ok");
   } finally { robot.stop(); t.link.stop(); }
 });
@@ -109,7 +109,7 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 400 + 10 * k, signal: k, sigmaMm: 4, kind: "sure" as const, targets: 1 }));
     const pose = (x: number) => ({ x, y: 0, yaw: 0, mode: "manual", action: "drive", rssi: -50, at: 0 });
     await old.status(boot, boot.status(pose(1.25)));
-    await old.moveStart(boot, boot.moveStart({ move: 1, command: 3, kind: "drive", param: 0.25, tUs: 0xfffff000, preMs: 200, postMs: 200, refused: false }));
+    await old.moveStart(boot, boot.moveStart({ move: 1, command: 3, kind: "drive", parameter: 0.25, tUs: 0xfffff000, preMs: 200, postMs: 200, refused: false }));
     const { packTof, unpackTof } = await import("./tof_format.ts");
     for (const n of [7, 8]) { // as the robot sends them: packed (yaw in 0.01°)
       const f = unpackTof("compact", packTof("compact", { number: n, robotClockUs: (0xfffff000 + n * 1000) % 2 ** 32, periodUs: 100000, x: 1.25 + n / 100,
@@ -118,7 +118,7 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     }
     // Its imu records: a batch of 10 and the last 3 (evenly spaced, as the wire carries them).
     const imu = (from: number, n: number) => ({ move: 1, records: Array.from({ length: n }, (_, i) => ({
-      tUs: (0xfffff000 + (from + i) * 9615), accel: [from + i, -7, 16384] as [number, number, number],
+      tUs: (0xfffff000 + (from + i) * 9615), acceleration: [from + i, -7, 16384] as [number, number, number],
       gyro: [32767, -32768, from] as [number, number, number] })) });
     await old.imuBatch(boot, boot.imuBatch(imu(0, 10)));
     await old.imuBatch(boot, boot.imuBatch(imu(10, 3)));
@@ -130,7 +130,7 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
 
     // The test server: its own database; the fake robot replays at once.
     const store = new Store(path.join(to, "robot2.duckdb")), notes: string[] = [];
-    const stored = ingest(link, store, { recordingsDir: to, bootFolders: new BootFolders(to), note: n => notes.push(n) });
+    const stored = ingest(link, store, { recordingsDirectory: to, bootFolders: new BootFolders(to), note: n => notes.push(n) });
     const port = await link.start();
     robot = new FakeRobot({ port, bootId: boot.id, snapshots: snapshotsOf(messages), replay: messages, speed: Infinity });
     await robot.replayed;
@@ -142,7 +142,7 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     for (const table of ["moves", "frames", "zones", "imu", "snapshots", "snapshot_zones"]) assert.equal(await count(store, table), await count(old, table), table);
     assert.equal(await count(store, "imu"), 13);
     const ia = (await old.moveImu(boot.id, 1))!, ib = (await store.moveImu(boot.id, 1))!;
-    const raw = (rs: typeof ia.records) => rs.map(r => ({ tUs: r.tUs, accel: r.accel, gyro: r.gyro }));
+    const raw = (rs: typeof ia.records) => rs.map(r => ({ tUs: r.tUs, acceleration: r.acceleration, gyro: r.gyro }));
     assert.deepEqual(raw(ib.records), raw(ia.records));
     assert.deepEqual(ib.imu, { records: 13, batches: 2, missing: 0 });
     assert.ok(await count(store, "status") >= 2);

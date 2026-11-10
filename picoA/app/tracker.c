@@ -1,6 +1,6 @@
 #include <math.h>
 #include "units.h"
-#include "geom.h"
+#include "geometry.h"
 #include "stamp.h"
 #include "tracker.h"
 
@@ -38,7 +38,7 @@ static float rate(void) {
     return (n * stb - st * sb) / (n * stt - st * st);
 }
 
-static void remember(const watch_obs_t *o, uint32_t t_us) {
+static void remember(const watch_observation_t *o, uint32_t t_us) {
     target.bearing_rad = bearing_rad(o->where);
     target.up_rad = asinf(o->where[2]);
     if (o->range_m >= 0) target.range_m = o->range_m;
@@ -52,7 +52,7 @@ static void remember(const watch_obs_t *o, uint32_t t_us) {
     target.rate_radps = rate();
 }
 
-track_event_t tracker_add(const watch_obs_t *obs, int n, uint32_t t_us) {
+track_event_t tracker_add(const watch_observation_t *observations, int n, uint32_t t_us) {
     lost = false;
     if (!active) {
         if (n == 0) return TRACK_NOTHING;
@@ -60,15 +60,15 @@ track_event_t tracker_add(const watch_obs_t *obs, int n, uint32_t t_us) {
         leaving_told = false;
         target.range_m = -1.0f;
         history_n = history_next = 0;
-        remember(&obs[0], t_us); // the biggest
+        remember(&observations[0], t_us); // the biggest
         return TRACK_NEW;
     }
     // The biggest blob that reaches where the target is expected (a person close by
     // is a big blob and pieces: its centre says little about where it reaches).
     float expected = target.bearing_rad + target.rate_radps * stamp_s(t_us, target.last_seen_us);
-    const watch_obs_t *best = 0;
+    const watch_observation_t *best = 0;
     for (int k = 0; k < n; k++) {
-        const watch_obs_t *o = &obs[k];
+        const watch_observation_t *o = &observations[k];
         if (expected > o->left_rad + REACH_RAD || expected < o->right_rad - REACH_RAD) continue;
         if (o->range_m >= 0 && target.range_m >= 0 && fabsf(o->range_m - target.range_m) > RANGE_M) continue;
         if (!best || o->cells > best->cells) best = o;

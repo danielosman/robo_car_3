@@ -22,22 +22,22 @@ the check and how to fill the data.
 | **module** | C: a `.h` file and its `.c`, if any (`picoB/app/odometry.h`). TS: one `.ts` file. Browser: one `.js` file. One module, one box. |
 | **member** | a module's public functions and types. C: what the `.h` declares; TS: what the file exports, and a class's public methods (`RobotLink.sendCommand`); the HTTP routes and the WebSocket a TS file serves (kind `route`). Browser JS has no exports: its members are the top-level functions that talk to the server. A constant is a member only when a flow or a rate names it. |
 | **origin** | the area a module is drawn in: a program, or a part of one with its own interface. `picoB`, `common` (C in `common/`, built into both Picos), `picoA`, `pc` (the server, `pc/robot/src` outside `api/`), `api` (the command API in the server, `pc/robot/src/api`, reached over HTTP), `browser` (the viewer, `pc/robot/public`). |
-| **DTO** | the type of the data on a flow: a public type of some module (`odom_t`). A message's DTO is its payload type; the message constant (`MSG_LOG`) only when the payload has no type. |
+| **DTO** | the type of the data on a flow: a public type of some module (`odometry_t`). A message's DTO is its payload type; the message constant (`MESSAGE_LOG`) only when the payload has no type. |
 | **flow** | one piece of data's path through modules, as a list of steps. |
 | **change node** | a step where the data changes. Kinds: **pick** (keeps some fields), **turn** (changes the values or the type: a filter, a new clock, packing), **add** (joins other data in). |
 
 Boxes are interfaces; nodes are changes. Every change is its own node: five changes
 inside one module are five nodes on that module's box. A module with several headers
-is several boxes: watch is six (`watch`, `watch_tof`, `watch_camera`, `watch_obs`,
+is several boxes: watch is six (`watch`, `watch_tof`, `watch_camera`, `watch_observation`,
 `tracker`, `change_grid`).
 
 ## In scope
 
 - The robot firmware (`picoA/app`, `picoB/app`, their `drivers/`, `common/`) and the
   robot server and its page (`pc/robot`): the viewer at `/` (`app.js`).
-- `common/` holds the PicoA–PicoB link (`link.h`, `link_msgs.h`), the mounting, and
-  helpers (`clock_start.h`, `crc32.h`, `geom.h`, `stamp.h`, `stats.h`, `units.h`).
-- Headers with only types (`tof_frame.h`, `watch_obs.h`) are boxes too.
+- `common/` holds the PicoA–PicoB link (`link.h`, `link_messages.h`), the mounting, and
+  helpers (`clock_start.h`, `crc32.h`, `geometry.h`, `stamp.h`, `statistics.h`, `units.h`).
+- Headers with only types (`tof_frame.h`, `watch_observation.h`) are boxes too.
 - `main.ts` is a module (it serves the pages, the API and the WebSocket). `main.c` on
   each Pico is not (no header): its pipelines are where data is handed over, and
   steps link to those lines.
@@ -62,7 +62,7 @@ of signatures, comments or line numbers.
   instead of `path` + `code`. A `leaving` thing has both.
 - What the side bar shows for a reference: the comment lines just above it, then
   the declaration up to its `;` or its closing brace. For a struct, the reference is
-  the line that names it (`} odom_t;`) and the text runs from its `typedef`. For a
+  the line that names it (`} odometry_t;`) and the text runs from its `typedef`. For a
   class, only its public method lines.
 
 ## A module
@@ -74,9 +74,9 @@ of signatures, comments or line numbers.
   "origin": "picoB",
   "path": "picoB/app/odometry.h",
   "members": [
-    { "name": "odom_update", "kind": "function", "code": "void odom_update(" },
-    { "name": "odom_get", "kind": "function", "code": "const odom_t *odom_get(" },
-    { "name": "odom_t", "kind": "type", "code": "} odom_t;", "bytes": 68 }
+    { "name": "odometry_update", "kind": "function", "code": "void odometry_update(" },
+    { "name": "odometry_get", "kind": "function", "code": "const odometry_t *odometry_get(" },
+    { "name": "odometry_t", "kind": "type", "code": "} odometry_t;", "bytes": 68 }
   ]
 }
 ```
@@ -91,8 +91,8 @@ of signatures, comments or line numbers.
 the ribbon's width, so two people must get the same number:
 
 - **C type:** its `sizeof` on the Pico (32-bit; padding counts). Get it from a small
-  program built with `cc` (as the host tests are), not by head. `odom_t` is 68,
-  `odom_report_t` 45 (packed).
+  program built with `cc` (as the host tests are), not by head. `odometry_t` is 68,
+  `odometry_report_t` 45 (packed).
 - **On the wire:** the message's payload. The packed compact ToF frame is 277
   (`TOF_COMPACT_BYTES`); the ToF wire message is 289 (12 B header + 277).
 - **Varying size:** the largest the code allows (an imu batch 135, a snapshot part
@@ -114,23 +114,23 @@ Odometry on PicoB, and the tilt stop branching off it, as the code does it today
     "steps": [
       { "at": "picoB.imu.imu_read", "dto": "picoB.imu.imu_sample_t",
         "rate": { "text": "416 Hz", "path": "picoB/drivers/imu.c", "code": "write_reg(CTRL2_G, 0x60)" } },
-      { "change": "turn", "name": "robot frame", "at": "picoB.odometry.odom_update",
+      { "change": "turn", "name": "robot frame", "at": "picoB.odometry.odometry_update",
         "what": "the sensor's axes into the robot's",
-        "path": "picoB/app/odometry.c", "code": "to_robot_frame(&s, accel_g, gyro_dps);" },
-      { "change": "turn", "name": "heading", "at": "picoB.odometry.odom_update",
+        "path": "picoB/app/odometry.c", "code": "to_robot_frame(&s, acceleration_g, gyro_dps);" },
+      { "change": "turn", "name": "heading", "at": "picoB.odometry.odometry_update",
         "what": "gyro z, less its bias, into the heading",
         "path": "picoB/app/odometry.c", "code": "update_heading(gyro_dps[2], dt);" },
-      { "change": "add", "name": "wheels", "at": "picoB.odometry.odom_update",
+      { "change": "add", "name": "wheels", "at": "picoB.odometry.odometry_update",
         "what": "the wheel counts (flow wheel-counts) into distance, speed and position",
         "path": "picoB/app/odometry.c", "code": "update_wheels(dt);" },
-      { "change": "turn", "name": "tilt", "at": "picoB.odometry.odom_update",
-        "what": "accel and gyro into pitch and roll (filter, 0.5 s)", "dto": "picoB.odometry.odom_t",
-        "path": "picoB/app/odometry.c", "code": "update_tilt(accel_g, gyro_dps, dt);" },
-      { "at": "picoB.odometry.odom_get" },
+      { "change": "turn", "name": "tilt", "at": "picoB.odometry.odometry_update",
+        "what": "acceleration and gyro into pitch and roll (filter, 0.5 s)", "dto": "picoB.odometry.odometry_t",
+        "path": "picoB/app/odometry.c", "code": "update_tilt(acceleration_g, gyro_dps, dt);" },
+      { "at": "picoB.odometry.odometry_get" },
       { "change": "turn", "name": "report", "at": "picoB.brain.brain_update",
-        "what": "the fields PicoA needs, plus the motors' state", "dto": "common.link_msgs.odom_report_t",
-        "rate": { "text": "50 Hz", "path": "picoB/app/brain.c", "code": "next_odom = make_timeout_time_us(LINK_ODOM_PERIOD_US);" },
-        "path": "picoB/app/brain.c", "code": "odom_report_t r = {" }
+        "what": "the fields PicoA needs, plus the motors' state", "dto": "common.link_messages.odometry_report_t",
+        "rate": { "text": "50 Hz", "path": "picoB/app/brain.c", "code": "next_odometry = make_timeout_time_us(LINK_ODOMETRY_PERIOD_US);" },
+        "path": "picoB/app/brain.c", "code": "odometry_report_t r = {" }
     ]
   },
   {
@@ -139,11 +139,11 @@ Odometry on PicoB, and the tilt stop branching off it, as the code does it today
     "description": "PicoB switches the motors off when pitch or roll passes 15°.",
     "parent": "odometry",
     "steps": [
-      { "at": "picoB.odometry.odom_get" },
+      { "at": "picoB.odometry.odometry_get" },
       { "change": "pick", "name": "pitch, roll", "at": "picoB.drive.drive_update",
         "keeps": ["pitch_rad", "roll_rad"], "bytes": 8,
         "rate": { "text": "100 Hz", "path": "picoB/app/main.c", "code": "#define CONTROL_PERIOD_US" },
-        "path": "picoB/app/drive.c", "code": "fabsf(odom->pitch_rad) > MAX_TILT_RAD" }
+        "path": "picoB/app/drive.c", "code": "fabsf(odometry->pitch_rad) > MAX_TILT_RAD" }
     ]
   }
 ]
@@ -221,15 +221,15 @@ Found so far:
 | 8 Nov | `console.js` sent key presses over the WebSocket; the server ignored them since 14 Oct (`9b338ac`) | removed (Daniel's yes) |
 | 8 Nov | the console page at `/console` shows only what the viewer at `/` shows | removed (Daniel's yes) |
 | 8 Nov | names: two `Command` types on the PC (`wire.ts`: number and text; `api/commands.ts`: name and values), two `Answer` (`wire.ts`, `api/answers.ts`), two `Pose` (`link.ts` x, y, yaw; `store.ts` with pitch) | fixed: the wire's are `RobotCommand`, `RobotAnswer`; `store.ts`'s `PitchedPose` (`Pose` plus pitch) |
-| 8 Nov | the tilt check reads pitch and roll inside `drive_update`, which gets all of `odom_t` (it uses the speeds too) | none: the diagram shows it as it is |
+| 8 Nov | the tilt check reads pitch and roll inside `drive_update`, which gets all of `odometry_t` (it uses the speeds too) | none: the diagram shows it as it is |
 | 8 Nov | dead: `link_pc_settled` (`link_pc.h`) has no caller; `move_busy` (`move.h`) only tests call | removed (tests ask `move_running()`, "" when none runs) |
 | 8 Nov | built into PicoA but used only by host tests: the decoders of robot→PC messages (`wire_decode_hello`, `_console`, `_answer`, `_status`, `_move_start`, `_move_end`, `_imu_batch`) and `wire_encode_command`, `wire_encode_heartbeat`; on the PC `wireCheck` (tests only) | kept: one file owns the bytes both ways, and the linker leaves them out of the firmware (checked with `nm`; `wire.h` says so). The server now runs `wireCheck()` at start, as the robot runs `wire_check()` |
 | 8 Nov | names: `rotate` (command word, PC `MoveName`) vs `turn` (move kind, `behaviour_turn`); `snap` (PC) vs `snapshot` (robot); a ToF message is `tof` (wire), `"frame"` (link event), `MoveFrame`, `FrameRow`; an imu batch is `imu_batch` (wire) vs `"imu"` (event); one command has two texts, `commandText` ("steer d50", log and answers) and `robotText` ("drive 50", the robot) | fixed: the move kind is `rotate` everywhere (`MOVE_ROTATE`, `behaviour_rotate`; `behaviour_move` is `behaviour_drive`, its console lines "Drive:"); the robot's word is `snap`; the PC names messages as the wire does (`tof`, `imuBatch` events; `TofMessage`, `TofRow`, `ImuBatchRow`). The two texts stay: one echoes what was typed, one is the robot's words |
-| 8 Nov | `odom_report_t.t_us` is stamped when the report is sent (`brain.c` `send_odom`), while `link_msgs.h` says "measured at t_us": the odometry is from the last IMU sample, up to ~2.4 ms earlier | fixed in the comment: `t_us` is the send time (body.c learns the clocks from it); the ~2.4 ms age is ~0.1° at a fast turn, ignored |
-| 8 Nov | IMU records taken before PicoA's greeting are dropped and counted nowhere (now in `body.c`, `MSG_IMU`: `greeted && clock_known`, since step 4f) | none: rare, at start-up |
-| 8 Nov | dead data: `odom_report_t.wheel_left_m`, `wheel_right_m` (8 B of 45, 50 a second) are sent to PicoA, which never reads them | fixed (step 4f): gone from the report and from `odom_t`; the report is 37 B |
+| 8 Nov | `odometry_report_t.t_us` is stamped when the report is sent (`brain.c` `send_odometry`), while `link_messages.h` says "measured at t_us": the odometry is from the last IMU sample, up to ~2.4 ms earlier | fixed in the comment: `t_us` is the send time (body.c learns the clocks from it); the ~2.4 ms age is ~0.1° at a fast turn, ignored |
+| 8 Nov | IMU records taken before PicoA's greeting are dropped and counted nowhere (now in `body.c`, `MESSAGE_IMU`: `greeted && clock_known`, since step 4f) | none: rare, at start-up |
+| 8 Nov | dead data: `odometry_report_t.wheel_left_m`, `wheel_right_m` (8 B of 45, 50 a second) are sent to PicoA, which never reads them | fixed (step 4f): gone from the report and from `odometry_t`; the report is 37 B |
 | 8 Nov | one rule in two places: IMU records PicoA can't place yet are held back by PicoB (`greeted`) and dropped by PicoA (`clock_known`) | fixed (step 4f): PicoB sends from its start; `body` keeps a record only when greeted with the same version and its clock is known |
-| 8 Nov | data: `house_map` had no flows; the odometry ribbon to `brain` said 416 Hz (brain reads at 50 Hz) | fixed in the data: flows `house-map`, `house-map-back`; the 50 Hz on `odom_get` |
+| 8 Nov | data: `house_map` had no flows; the odometry ribbon to `brain` said 416 Hz (brain reads at 50 Hz) | fixed in the data: flows `house-map`, `house-map-back`; the 50 Hz on `odometry_get` |
 | 8 Nov | nothing checked that the PC's command words and move kinds match the robot's C (`commands.c`, `move.c` `kind_name`) | fixed: two tests in `pc/robot/src/api/commands.test.ts` read the C and compare |
 | 8 Nov | data: the `command` flow first went through `parseAction`; the viewer sends `steer`, which goes through `parseSteer` and `withSnaps` (auto snap) | fixed in the data |
 

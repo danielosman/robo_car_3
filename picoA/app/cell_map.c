@@ -41,10 +41,10 @@ static uint16_t hit_w[CELL_LAYERS][GRID][GRID], pass_w[CELL_LAYERS][GRID][GRID];
 // a pass below it finds nothing), and in this frame (NO_HIT_Z: no detection marked
 // it): what stands there reaches at least that high.
 static uint8_t hit_z[CELL_LAYERS][GRID][GRID], frame_hit_z[CELL_LAYERS][GRID][GRID];
-// The window: GRID x GRID columns from world cell (org_x, org_y) on (cell (cx, cy)
+// The window: GRID x GRID columns from world cell (origin_x, origin_y) on (cell (cx, cy)
 // covers cx * 10 cm … (cx + 1) * 10 cm), the middle tile (tile_x, tile_y) of 3 x 3
 // tiles of the whole-house map. At power-up it is centred on the map's origin.
-static int tile_x, tile_y, org_x = -GRID / 2, org_y = -GRID / 2;
+static int tile_x, tile_y, origin_x = -GRID / 2, origin_y = -GRID / 2;
 
 void cell_map_clear(void) {
     memset(grid, 0, sizeof grid);
@@ -70,7 +70,7 @@ static float pass_limit_m(int layer, int ix, int iy) {
 }
 
 static int cell_of(float m) { return (int)floorf(m / GRID_M); } // the world cell
-static bool in_window(int cx, int cy) { return cx >= org_x && cx < org_x + GRID && cy >= org_y && cy < org_y + GRID; }
+static bool in_window(int cx, int cy) { return cx >= origin_x && cx < origin_x + GRID && cy >= origin_y && cy < origin_y + GRID; }
 static bool in_grid(int ix, int iy, int layer) { // window indexes
     return ix >= 0 && ix < GRID && iy >= 0 && iy < GRID && layer >= 0 && layer < CELL_LAYERS;
 }
@@ -111,7 +111,7 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
     for (;;) {
         int axis = t_max[0] < t_max[1] ? (t_max[0] < t_max[2] ? 0 : 2) : (t_max[1] < t_max[2] ? 1 : 2);
         bool last = t_max[axis] >= length_m;
-        int ix = c[0] - org_x, iy = c[1] - org_y, layer = c[2];
+        int ix = c[0] - origin_x, iy = c[1] - origin_y, layer = c[2];
         if (layer < 0 || (layer >= CELL_LAYERS && d[2] >= 0)) return;
         if (in_grid(ix, iy, layer)) {
             // The ground layer is passed only by going through it: a ray crossing its
@@ -162,7 +162,7 @@ static void around_the_robot(float x_m, float y_m) {
     for (int cx = cell_of(x_m - L2_BLIND_M); cx <= cell_of(x_m + L2_BLIND_M); cx++)
         for (int cy = cell_of(y_m - L2_BLIND_M); cy <= cell_of(y_m + L2_BLIND_M); cy++) {
             if (!in_window(cx, cy)) continue;
-            int ix = cx - org_x, iy = cy - org_y;
+            int ix = cx - origin_x, iy = cy - origin_y;
             float dx = ((float)cx + 0.5f) * GRID_M - x_m;
             float dy = ((float)cy + 0.5f) * GRID_M - y_m;
             float r = sqrtf(dx * dx + dy * dy);
@@ -187,7 +187,7 @@ static void detect(const float o[3], const float d[TOF_RAYS_N][3], float length_
     int n = 0;
     for (int k = 0; k < TOF_RAYS_N; k++) {
         float z = o[2] + length_m * d[k][2];
-        int ix = cell_of(o[0] + length_m * d[k][0]) - org_x, iy = cell_of(o[1] + length_m * d[k][1]) - org_y;
+        int ix = cell_of(o[0] + length_m * d[k][0]) - origin_x, iy = cell_of(o[1] + length_m * d[k][1]) - origin_y;
         int layer = (int)floorf((z - G_BOTTOM_M) / GRID_M);
         if (layer < 1) { layer = 1; z = G_TOP_M + 0.001f; }
         if (!in_grid(ix, iy, layer)) continue;
@@ -235,7 +235,7 @@ void cell_map_add(const posed_frame_t *f) {
         tof_rays_t r;
         tof_rays_of(f, i, length_m, &r);
         verdict[i] = r.verdict;
-        if (r.verdict == TOF_VERDICT_OBSTACLE) detect(r.origin, r.dir, length_m, f->frame.zone[i].kind == TOF_SURE ? 1.0f : 0.5f);
+        if (r.verdict == TOF_VERDICT_OBSTACLE) detect(r.origin, r.direction, length_m, f->frame.zone[i].kind == TOF_SURE ? 1.0f : 0.5f);
     }
     for (int i = 0; i < TOF_ZONES; i++) {
         float length_m;
@@ -248,8 +248,8 @@ void cell_map_add(const posed_frame_t *f) {
         for (int k = 0; k < TOF_RAYS_N; k++) {
             ray_end_t end = use == ZONE_PASS ? END_PASS : verdict[i] == TOF_VERDICT_FLOOR ? END_HIT
                           : verdict[i] == TOF_VERDICT_OBSTACLE ? END_NONE // detected above
-                          : r.origin[2] + length_m * r.dir[k][2] < G_TOP_M ? END_HIT : END_NONE; // unsure
-            walk_ray(r.origin, r.dir[k], length_m, end, v);
+                          : r.origin[2] + length_m * r.direction[k][2] < G_TOP_M ? END_HIT : END_NONE; // unsure
+            walk_ray(r.origin, r.direction[k], length_m, end, v);
         }
     }
     for (int l = 0; l < CELL_LAYERS; l++)
@@ -303,19 +303,19 @@ static void scroll(int dx, int dy) {
         for (int iy = 0; iy < GRID; iy++) {
             bool leaving = (dx > 0 && ix < TILE) || (dx < 0 && ix >= GRID - TILE) ||
                            (dy > 0 && iy < TILE) || (dy < 0 && iy >= GRID - TILE);
-            if (leaving) house_map_put(org_x + ix, org_y + iy, column_of(ix, iy, 0));
+            if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy, 0));
         }
     shift(grid, dx, dy, 0);
     shift(hit_z, dx, dy, NO_HIT_Z);
     tile_x += dx;
     tile_y += dy;
-    org_x = tile_x * TILE - GRID / 2;
-    org_y = tile_y * TILE - GRID / 2;
+    origin_x = tile_x * TILE - GRID / 2;
+    origin_y = tile_y * TILE - GRID / 2;
     for (int ix = 0; ix < GRID; ix++)
         for (int iy = 0; iy < GRID; iy++) {
             bool coming = (dx < 0 && ix < TILE) || (dx > 0 && ix >= GRID - TILE) ||
                           (dy < 0 && iy < TILE) || (dy > 0 && iy >= GRID - TILE);
-            if (coming) restore(ix, iy, house_map_get(org_x + ix, org_y + iy));
+            if (coming) restore(ix, iy, house_map_get(origin_x + ix, origin_y + iy));
         }
 }
 
@@ -327,14 +327,14 @@ void cell_map_follow(float x_m, float y_m) {
     while (y_m < ((float)tile_y - 0.5f) * TILE_M - FOLLOW_M) scroll(0, -1);
 }
 
-const uint8_t *cell_map_window(int *org_cx, int *org_cy) {
-    *org_cx = org_x;
-    *org_cy = org_y;
+const uint8_t *cell_map_window(int *origin_cx, int *origin_cy) {
+    *origin_cx = origin_x;
+    *origin_cy = origin_y;
     return &grid[0][0][0];
 }
 
 cell_state3_t cell_map_cell(float x_m, float y_m, int layer, float *confidence) {
-    int ix = cell_of(x_m) - org_x, iy = cell_of(y_m) - org_y;
+    int ix = cell_of(x_m) - origin_x, iy = cell_of(y_m) - origin_y;
     uint8_t c = in_grid(ix, iy, layer) ? grid[layer][ix][iy] : 0;
     if (confidence) *confidence = (float)C_CONF(c) / 15;
     return (cell_state3_t)C_STATE(c);
@@ -359,7 +359,7 @@ static column_t column_of(int ix, int iy, float min_confidence) {
 
 // A world column: the window's inside it, the whole-house map's outside.
 static column_t column_at(int cx, int cy, float min_confidence) {
-    return in_window(cx, cy) ? column_of(cx - org_x, cy - org_y, min_confidence) : house_map_get(cx, cy);
+    return in_window(cx, cy) ? column_of(cx - origin_x, cy - origin_y, min_confidence) : house_map_get(cx, cy);
 }
 
 column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m), 0); }

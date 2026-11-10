@@ -30,7 +30,7 @@ void tof_rays_set_floor_margin(float margin) { floor_margin = margin; }
 
 // Unit direction of a ray down_rad below level and left_rad to the left, with the
 // robot pitched nose up by pitch_rad.
-static void direction(float down_rad, float left_rad, float pitch_rad, float out[3]) {
+static void ray_direction(float down_rad, float left_rad, float pitch_rad, float out[3]) {
     float a = down_rad - pitch_rad;
     out[0] = cosf(a) * cosf(left_rad);
     out[1] = cosf(a) * sinf(left_rad);
@@ -44,14 +44,14 @@ void tof_rays_origin(float origin[3]) {
     origin[2] = mount.z_m;
 }
 
-void tof_rays_direction(int zone, float dir[3]) {
+void tof_rays_direction(int zone, float direction[3]) {
     assert(mounted);
-    direction(zone_down_rad[zone], zone_left_rad[zone], 0, dir);
+    ray_direction(zone_down_rad[zone], zone_left_rad[zone], 0, direction);
 }
 
-void tof_rays_sub_direction(int zone, float down_frac, float left_frac, float pitch_rad, float dir[3]) {
+void tof_rays_sub_direction(int zone, float down_fraction, float left_fraction, float pitch_rad, float direction[3]) {
     assert(mounted);
-    direction(zone_down_rad[zone] + down_frac * zone_rad, zone_left_rad[zone] + left_frac * zone_rad, pitch_rad, dir);
+    ray_direction(zone_down_rad[zone] + down_fraction * zone_rad, zone_left_rad[zone] + left_fraction * zone_rad, pitch_rad, direction);
 }
 
 float tof_rays_zone_rad(void) { return zone_rad; }
@@ -90,13 +90,13 @@ void tof_rays_of(const posed_frame_t *f, int zone, float length_m, tof_rays_t *o
     for (int k = 0; k < TOF_RAYS_N; k++) {
         float r[3];
         tof_rays_sub_direction(zone, third[k / 3], third[k % 3], f->pitch_rad, r);
-        out->dir[k][0] = c * r[0] - s * r[1];
-        out->dir[k][1] = s * r[0] + c * r[1];
-        out->dir[k][2] = r[2];
+        out->direction[k][0] = c * r[0] - s * r[1];
+        out->direction[k][1] = s * r[0] + c * r[1];
+        out->direction[k][2] = r[2];
         float z = mount.z_m + length_m * r[2];
         out->low_m = fminf(out->low_m, z);
         out->high_m = fmaxf(out->high_m, z);
     }
-    for (int a = 0; a < 3; a++) out->point[a] = out->origin[a] + length_m * out->dir[4][a];
+    for (int a = 0; a < 3; a++) out->point[a] = out->origin[a] + length_m * out->direction[4][a];
     out->verdict = verdict(zone, length_m, f->pitch_rad, out->high_m);
 }

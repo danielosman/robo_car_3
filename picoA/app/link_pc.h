@@ -22,7 +22,7 @@
 //   most that much. A message that doesn't fit is refused (counted); its sender
 //   decides (frames and imu batches are dropped, a snapshot part tries again).
 //   What is queued when the connection is lost is dropped.
-// - From the PC: commands (link_received()) and a heartbeat every 2 s. Nothing heard
+// - From the PC: commands (link_pc_received()) and a heartbeat every 2 s. Nothing heard
 //   for 30 s: the connection is closed and the server looked for again. Bytes that
 //   aren't messages (wire_take() fails): closed too.
 #include <stdbool.h>
@@ -30,11 +30,11 @@
 #include "wire.h"
 
 // Fills the status the PC gets 4 times a second (all but the WiFi signal).
-typedef void (*link_pc_status_fn)(wire_status_t *s);
+typedef void (*link_pc_status_function)(wire_status_t *s);
 
 // Starts connecting; if already started, prints the state. boot_id and build go in
 // hello; build is kept (a string that lives for ever).
-void link_pc_start(uint32_t boot_id, const char *build, link_pc_status_fn status);
+void link_pc_start(uint32_t boot_id, const char *build, link_pc_status_function status);
 void link_pc_update(void);       // call every loop iteration
 bool link_pc_connected(void);    // a server is listening
 void link_pc_print_status(void); // the WiFi, the server, the lanes
@@ -46,9 +46,9 @@ uint32_t link_pc_connection(void);
 // listens (joining, looking for it, reconnecting). False if it isn't a control
 // message, or WiFi is off or unavailable (no network set, no chip: there will never
 // be a server, so nothing is kept).
-bool link_send_control(const uint8_t *msg, uint32_t len);
+bool link_pc_send_control(const uint8_t *message, uint32_t len);
 // A whole bulk message to the PC: false (counted) if not connected or no room.
-bool link_send_bulk(const uint8_t *msg, uint32_t len);
+bool link_pc_send_bulk(const uint8_t *message, uint32_t len);
 
 // The next command from the PC; false if none is whole yet.
-bool link_received(wire_command_t *c);
+bool link_pc_received(wire_command_t *c);

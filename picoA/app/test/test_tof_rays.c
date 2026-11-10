@@ -14,10 +14,10 @@
 
 // Where a ray meets a flat floor, along the ray (m); 0 if it doesn't look down.
 static float floor_along_m(int ray) {
-    float dir[3], origin[3];
-    tof_rays_direction(ray, dir);
+    float direction[3], origin[3];
+    tof_rays_direction(ray, direction);
     tof_rays_origin(origin);
-    return dir[2] < 0 ? origin[2] / -dir[2] : 0;
+    return direction[2] < 0 ? origin[2] / -direction[2] : 0;
 }
 
 // Rows 5-8 (README: rows 1-8): where their centre rays meet the floor, cm.
@@ -91,11 +91,11 @@ static void geometry(void) {
     tof_rays_origin(origin);
     assert(origin[0] == 0.05f && origin[1] == 0.01f && origin[2] == 0.07f);
     assert(fabsf(tof_rays_zone_rad() - 6.0f * RAD_PER_DEG) < 1e-6f);
-    float dir[3];
-    tof_rays_direction(7 * 8 + 0, dir); // row 8, column 1: 3.5 zones down, 3.5 left
+    float direction[3];
+    tof_rays_direction(7 * 8 + 0, direction); // row 8, column 1: 3.5 zones down, 3.5 left
     float down = 21.0f * RAD_PER_DEG, left = 21.0f * RAD_PER_DEG;
-    assert(fabsf(dir[0] - cosf(down) * cosf(left)) < 1e-6f && fabsf(dir[1] - cosf(down) * sinf(left)) < 1e-6f);
-    assert(fabsf(dir[2] + sinf(down)) < 1e-6f);
+    assert(fabsf(direction[0] - cosf(down) * cosf(left)) < 1e-6f && fabsf(direction[1] - cosf(down) * sinf(left)) < 1e-6f);
+    assert(fabsf(direction[2] + sinf(down)) < 1e-6f);
     assert(fabsf(tof_rays_floor_limit_m(6 * 8 + 3) - 1.15f * 0.07f / sinf(12.0f * RAD_PER_DEG)) < 0.001f);
     printf("ok: the geometry follows the mounting\n");
 }
@@ -122,17 +122,17 @@ static void placed(void) {
     assert(near(r.origin[0], 1.0f - m->y_m) && near(r.origin[1], 2.0f + m->x_m) && near(r.origin[2], m->z_m));
     float d[3];
     tof_rays_direction(zone, d);
-    assert(near(r.dir[4][0], -d[1]) && near(r.dir[4][1], d[0]) && near(r.dir[4][2], d[2])); // turned 90° left
-    for (int k = 0; k < 3; k++) assert(near(r.point[k], r.origin[k] + r.dir[4][k]));
+    assert(near(r.direction[4][0], -d[1]) && near(r.direction[4][1], d[0]) && near(r.direction[4][2], d[2])); // turned 90° left
+    for (int k = 0; k < 3; k++) assert(near(r.point[k], r.origin[k] + r.direction[4][k]));
     assert(r.length_m == 1.0f);
     float half = 2.8125f * RAD_PER_DEG, third = 1.875f * RAD_PER_DEG; // its centre half a zone below level
     assert(near(r.high_m, m->z_m - sinf(half - third)) && near(r.low_m, m->z_m - sinf(half + third)));
-    for (int k = 0; k < TOF_RAYS_N; k++) assert(near(hypotf(hypotf(r.dir[k][0], r.dir[k][1]), r.dir[k][2]), 1));
+    for (int k = 0; k < TOF_RAYS_N; k++) assert(near(hypotf(hypotf(r.direction[k][0], r.direction[k][1]), r.direction[k][2]), 1));
     // Nose up 2°: every ray 2° higher.
     posed_frame_t up = at(1.0f, 2.0f, 90, 2);
     tof_rays_t ru;
     tof_rays_of(&up, zone, 1.0f, &ru);
-    assert(near(asinf(ru.dir[4][2]) - asinf(r.dir[4][2]), 2 * RAD_PER_DEG));
+    assert(near(asinf(ru.direction[4][2]) - asinf(r.direction[4][2]), 2 * RAD_PER_DEG));
     printf("ok: a zone's reading in the world: origin, rays, point, height span; pitch raises them\n");
 }
 

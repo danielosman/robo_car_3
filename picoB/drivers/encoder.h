@@ -5,7 +5,7 @@
 // (28 per motor turn), x 298:1 gearbox (nominal; to check with 10 wheel turns by hand)
 #define ENCODER_COUNTS_PER_REV (28.0f * 298.0f)
 
-typedef enum { ENC_LEFT_FRONT, ENC_RIGHT_FRONT, ENC_LEFT_REAR, ENC_RIGHT_REAR, ENC_COUNT } encoder_id_t;
+typedef enum { ENCODER_LEFT_FRONT, ENCODER_RIGHT_FRONT, ENCODER_LEFT_REAR, ENCODER_RIGHT_REAR, ENCODER_COUNT } encoder_id_t;
 
 void encoder_init(void);
 int32_t encoder_count(encoder_id_t e); // + = that wheel turning forward

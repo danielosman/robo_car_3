@@ -36,9 +36,9 @@ void cell_map_clear(void); // the window and the whole-house map; the window sta
 // of its middle tile (within ~1.5 m of its edge). cell_map_add() does it for each frame.
 void cell_map_follow(float x_m, float y_m);
 // The window's cells for a snapshot: [layer][ix][iy], cell (ix, iy) is world cell
-// (org_cx + ix, org_cy + iy); one byte each: state (bits 0-1, cell_state3_t), doubt
+// (origin_cx + ix, origin_cy + iy); one byte each: state (bits 0-1, cell_state3_t), doubt
 // (bits 2-3), confidence 0-15 (bits 4-7).
-const uint8_t *cell_map_window(int *org_cx, int *org_cy);
+const uint8_t *cell_map_window(int *origin_cx, int *origin_cy);
 // One frame (as unpacked for the map use), measured where the robot was then (its
 // pitch is used; the window follows it first). A frame without a pose is left out.
 // Each zone's reading as tof_rays places and judges it; unsure zones tell nothing,

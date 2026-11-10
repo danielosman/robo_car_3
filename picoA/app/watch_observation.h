@@ -11,4 +11,4 @@ typedef struct {
     float strength;  // share of the sensor's cells that moved
     int cells;
     uint32_t t_us;   // PicoA's clock
-} watch_obs_t;
+} watch_observation_t;

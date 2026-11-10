@@ -18,25 +18,25 @@
 #define DEG(r)  ((r) * DEG_PER_RAD)
 
 static float gyro_bias_dps;      // the real sensor's leftover bias
-static double count[ENC_COUNT];  // exact simulated encoder positions
+static double count[ENCODER_COUNT];  // exact simulated encoder positions
 static float rear_left_slip = 1; // the rear-left wheel turns this much faster than its side
 
 // Simulates the robot for `seconds`: wheel speeds in m/s, true turn rate in deg/s.
 static void simulate(float seconds, float left_mps, float right_mps, float turn_dps) {
     int n = (int)(seconds * RATE_HZ + 0.5f);
-    float wheel_mps[ENC_COUNT] = {
-        [ENC_LEFT_FRONT] = left_mps, [ENC_LEFT_REAR] = left_mps * rear_left_slip,
-        [ENC_RIGHT_FRONT] = right_mps, [ENC_RIGHT_REAR] = right_mps,
+    float wheel_mps[ENCODER_COUNT] = {
+        [ENCODER_LEFT_FRONT] = left_mps, [ENCODER_LEFT_REAR] = left_mps * rear_left_slip,
+        [ENCODER_RIGHT_FRONT] = right_mps, [ENCODER_RIGHT_REAR] = right_mps,
     };
     for (int i = 0; i < n; i++) {
         fake_now_us += (uint64_t)(1e6f / RATE_HZ);
-        for (int w = 0; w < ENC_COUNT; w++) {
+        for (int w = 0; w < ENCODER_COUNT; w++) {
             count[w] += (double)(wheel_mps[w] / RATE_HZ / M_PER_COUNT);
             fake_counts[w] = (int32_t)count[w];
         }
         fake_imu.gz = turn_dps + gyro_bias_dps;
         fake_imu_fresh = true;
-        odom_update();
+        odometry_update();
     }
 }
 
@@ -45,7 +45,7 @@ static void one_sample(const imu_counts_t *c, uint32_t step_us) {
     fake_now_us += step_us;
     fake_imu_counts = *c;
     fake_imu_fresh = true;
-    odom_update();
+    odometry_update();
 }
 
 // Takes every record waiting, then feeds samples until one more is made: the next
@@ -53,24 +53,24 @@ static void one_sample(const imu_counts_t *c, uint32_t step_us) {
 static void align_records(void) {
     imu_record_t r;
     const imu_counts_t zero = {{0}, {0}};
-    while (odom_imu_take(&r)) {}
-    while (!odom_imu_take(&r)) one_sample(&zero, 2404);
+    while (odometry_imu_take(&r)) {}
+    while (!odometry_imu_take(&r)) one_sample(&zero, 2404);
 }
 
-// The record made of four samples whose accel x and gyro z are v[0..3] (the other
+// The record made of four samples whose acceleration x and gyro z are v[0..3] (the other
 // axes fixed); checks the other axes kept their own counts.
 static int16_t average_of(int16_t v0, int16_t v1, int16_t v2, int16_t v3, int16_t *gyro_z) {
     const int16_t v[4] = {v0, v1, v2, v3};
     imu_record_t r;
     for (int k = 0; k < 4; k++) {
         imu_counts_t c = {{v[k], 100, -16384}, {-7, 32767, v[k]}};
-        assert(!odom_imu_take(&r));
+        assert(!odometry_imu_take(&r));
         one_sample(&c, 2404);
     }
-    assert(odom_imu_take(&r) && !odom_imu_take(&r));
-    assert(r.accel[1] == 100 && r.accel[2] == -16384 && r.gyro[0] == -7 && r.gyro[1] == 32767);
+    assert(odometry_imu_take(&r) && !odometry_imu_take(&r));
+    assert(r.acceleration[1] == 100 && r.acceleration[2] == -16384 && r.gyro[0] == -7 && r.gyro[1] == 32767);
     *gyro_z = r.gyro[2];
-    return r.accel[0];
+    return r.acceleration[0];
 }
 
 static void test_imu_records(void) {
@@ -106,7 +106,7 @@ static void test_imu_records(void) {
 
     // 416 samples a second make 104 records, 9.6 ms apart, each stamped with the
     // middle of its four samples' times (2404 µs apart: 1.5 steps after the first).
-    imu_record_t r[ODOM_IMU_KEPT];
+    imu_record_t r[ODOMETRY_IMU_KEPT];
     const imu_counts_t still = {{0, 0, 16384}, {3, -2, 1}};
     uint32_t first_sample_us = 0;
     int made = 0;
@@ -114,7 +114,7 @@ static void test_imu_records(void) {
         one_sample(&still, 2404);
         if (i % 4 == 0) first_sample_us = time_us_32();
         imu_record_t got;
-        if (odom_imu_take(&got)) {
+        if (odometry_imu_take(&got)) {
             assert(i % 4 == 3 && got.t_us == first_sample_us + 3606); // (0 + 2404 + 4808 + 7212) / 4
             if (made) assert(got.t_us - r[0].t_us == 4 * 2404);
             r[0] = got;
@@ -126,59 +126,59 @@ static void test_imu_records(void) {
     fake_now_us = FAKE_CLOCK_WRAP_US - 3000 - 2404;
     first_sample_us = (uint32_t)(fake_now_us + 2404);
     for (int k = 0; k < 4; k++) one_sample(&still, 2404);
-    assert(odom_imu_take(&r[0]) && r[0].t_us == first_sample_us + 3606 && r[0].t_us < 1000);
+    assert(odometry_imu_take(&r[0]) && r[0].t_us == first_sample_us + 3606 && r[0].t_us < 1000);
     printf("imu records: 104 a second, stamped with the middle of their samples, across the clock's wrap\n");
 
     // A skipped sample (a slow loop, 2 sample times without a read): the partial record
     // is dropped and a new one starts, so each record is 4 consecutive samples and
     // the skip shows as a gap between records.
     imu_counts_t one = {{1, 0, 0}, {0, 0, 0}}, nine = {{9, 0, 0}, {0, 0, 0}};
-    uint32_t skipped0 = odom_imu_skipped();
+    uint32_t skipped0 = odometry_imu_skipped();
     one_sample(&one, 2404);
     one_sample(&one, 2404);
     one_sample(&nine, 2 * 2404);                       // one sample missed before it
     first_sample_us = time_us_32();
     for (int k = 0; k < 3; k++) one_sample(&nine, 2404);
-    assert(odom_imu_take(&r[0]) && r[0].accel[0] == 9 && r[0].t_us == first_sample_us + 3606 && !odom_imu_take(&r[0]));
-    assert(odom_imu_skipped() == skipped0 + 1); // the dropped partial record is counted
+    assert(odometry_imu_take(&r[0]) && r[0].acceleration[0] == 9 && r[0].t_us == first_sample_us + 3606 && !odometry_imu_take(&r[0]));
+    assert(odometry_imu_skipped() == skipped0 + 1); // the dropped partial record is counted
     // Just under 1.5 sample times is still the next sample.
     one_sample(&one, 2404);
     one_sample(&one, 3600);
     one_sample(&nine, 2404);
     one_sample(&nine, 2404);
-    assert(odom_imu_take(&r[0]) && r[0].accel[0] == 5 && !odom_imu_take(&r[0]));
-    assert(odom_imu_skipped() == skipped0 + 1); // 3600 µs is no skip
+    assert(odometry_imu_take(&r[0]) && r[0].acceleration[0] == 5 && !odometry_imu_take(&r[0]));
+    assert(odometry_imu_skipped() == skipped0 + 1); // 3600 µs is no skip
     printf("imu records: a skipped sample starts a new record (a gap in the times)\n");
 
-    // Not taken: the newest ODOM_IMU_KEPT wait, oldest first; the older are lost, counted.
-    uint32_t lost0 = odom_imu_lost();
-    for (int n = 0; n < ODOM_IMU_KEPT + 3; n++) {
+    // Not taken: the newest ODOMETRY_IMU_KEPT wait, oldest first; the older are lost, counted.
+    uint32_t lost0 = odometry_imu_lost();
+    for (int n = 0; n < ODOMETRY_IMU_KEPT + 3; n++) {
         imu_counts_t c = {{(int16_t)n, 0, 0}, {0, 0, 0}};
         for (int k = 0; k < 4; k++) one_sample(&c, 2404);
     }
-    for (int n = 3; n < ODOM_IMU_KEPT + 3; n++) assert(odom_imu_take(&r[0]) && r[0].accel[0] == n);
-    assert(!odom_imu_take(&r[0]) && odom_imu_lost() == lost0 + 3);
-    printf("imu records: the newest %d kept until taken\n", ODOM_IMU_KEPT);
+    for (int n = 3; n < ODOMETRY_IMU_KEPT + 3; n++) assert(odometry_imu_take(&r[0]) && r[0].acceleration[0] == n);
+    assert(!odometry_imu_take(&r[0]) && odometry_imu_lost() == lost0 + 3);
+    printf("imu records: the newest %d kept until taken\n", ODOMETRY_IMU_KEPT);
 }
 
 int main(void) {
-    const odom_t *o = odom_get();
+    const odometry_t *o = odometry_get();
     fake_now_us = FAKE_CLOCK_START_US + 1000000;
     // The mounting's matrix is what turns the axes: here one turned 90° about z
     // (the sensor's x is the robot's y).
     imu_sample_t s = {.ax = 0.1f, .ay = 0.2f, .az = 0.9f, .gx = 1, .gy = 2, .gz = 3};
-    float accel_g[3], gyro_dps[3];
+    float acceleration_g[3], gyro_dps[3];
     mounting_t turned = ROBOT_MOUNTING;
     const int8_t quarter[3][3] = {{0, -1, 0}, {1, 0, 0}, {0, 0, 1}};
     memcpy(turned.imu.robot_from_sensor, quarter, sizeof quarter);
-    assert(odom_init(&turned));
-    to_robot_frame(&s, accel_g, gyro_dps);
-    assert(accel_g[0] == -0.2f && accel_g[1] == 0.1f && accel_g[2] == 0.9f);
+    assert(odometry_init(&turned));
+    to_robot_frame(&s, acceleration_g, gyro_dps);
+    assert(acceleration_g[0] == -0.2f && acceleration_g[1] == 0.1f && acceleration_g[2] == 0.9f);
     assert(gyro_dps[0] == -2 && gyro_dps[1] == 1 && gyro_dps[2] == 3);
-    assert(odom_init(&ROBOT_MOUNTING));
+    assert(odometry_init(&ROBOT_MOUNTING));
     // The breakout as built: turned 180° about z, its x and y point backward and right.
-    to_robot_frame(&s, accel_g, gyro_dps);
-    assert(accel_g[0] == -0.1f && accel_g[1] == -0.2f && accel_g[2] == 0.9f);
+    to_robot_frame(&s, acceleration_g, gyro_dps);
+    assert(acceleration_g[0] == -0.1f && acceleration_g[1] == -0.2f && acceleration_g[2] == 0.9f);
     assert(gyro_dps[0] == -1 && gyro_dps[1] == -2 && gyro_dps[2] == 3);
 
     simulate(1, 0, 0, 0);
@@ -189,7 +189,7 @@ int main(void) {
     assert(!o->stationary);
     assert(fabsf(o->x_m - 0.5f) < 0.005f && fabsf(o->y_m) < 0.001f);
     assert(fabsf(o->v_mps - 0.1f) < 0.002f);
-    assert(fabsf(o->wheel_mps[ENC_LEFT_REAR] - 0.1f) < 0.002f && fabsf(o->wheel_mps[ENC_RIGHT_REAR] - 0.1f) < 0.002f);
+    assert(fabsf(o->wheel_mps[ENCODER_LEFT_REAR] - 0.1f) < 0.002f && fabsf(o->wheel_mps[ENCODER_RIGHT_REAR] - 0.1f) < 0.002f);
     printf("straight 50 cm: x %.1f cm, y %.1f cm\n", (double)(o->x_m * 100), (double)(o->y_m * 100));
 
     // A side's distance is the average of its front and rear wheel: the rear-left
@@ -198,7 +198,7 @@ int main(void) {
     float x_before = o->x_m;
     rear_left_slip = 1.1f;
     simulate(1, 0.1f, 0.1f, 0);
-    assert(fabsf(o->wheel_left_mps - 0.105f) < 0.002f && fabsf(o->wheel_mps[ENC_LEFT_REAR] - 0.11f) < 0.002f);
+    assert(fabsf(o->wheel_left_mps - 0.105f) < 0.002f && fabsf(o->wheel_mps[ENCODER_LEFT_REAR] - 0.11f) < 0.002f);
     assert(fabsf(o->x_m - x_before - 0.1025f) < 0.001f);
     rear_left_slip = 1;
     printf("rear-left wheel 10 %% faster: moved %.2f cm for 10 cm\n", (double)((o->x_m - x_before) * 100));

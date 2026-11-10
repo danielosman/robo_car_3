@@ -1,7 +1,7 @@
 #include <math.h>
 #include <string.h>
 #include "units.h"
-#include "geom.h"
+#include "geometry.h"
 #include "change_grid.h"
 #include "tof_rays.h"
 #include "watch_tof.h"
@@ -69,9 +69,9 @@ void watch_tof_restart(void) {
     grid_ready = true;
     half_zone_rad = tof_rays_zone_rad() / 2;
     for (int i = 0; i < TOF_ZONES; i++) {
-        float dir[3];
-        tof_rays_direction(i, dir);
-        left_rad[i] = bearing_rad(dir);
+        float direction[3];
+        tof_rays_direction(i, direction);
+        left_rad[i] = bearing_rad(direction);
         floor_limit[i] = tof_rays_floor_limit_m(i) * 1000.0f;
     }
     forget_bins(0);
@@ -153,27 +153,27 @@ static void learn_bins(int row, float lo_rad, float hi_rad, float mm) {
 }
 
 // The blobs, with the nearest sure reading in each as its range.
-static int observations(const tof_frame_t *f, watch_obs_t *obs, int max) {
+static int find_observations(const tof_frame_t *f, watch_observation_t *observations, int max) {
     static uint8_t label[TOF_ZONES];
-    watch_obs_t all[TOF_ZONES];
+    watch_observation_t all[TOF_ZONES];
     int blobs = change_grid_observations(&grid, tof_rays_direction, label, all);
     for (int i = 0; i < TOF_ZONES; i++) {
         if (!label[i]) continue;
-        watch_obs_t *o = &all[label[i] - 1];
+        watch_observation_t *o = &all[label[i] - 1];
         float mm = reading(i, &f->zone[i]);
         if (mm >= 0 && mm < NOTHING && (o->range_m < 0 || mm / 1000.0f < o->range_m)) o->range_m = mm / 1000.0f;
     }
     float origin[3];
     tof_rays_origin(origin);
     for (int b = 0; b < blobs; b++) {
-        watch_obs_t *o = &all[b];
+        watch_observation_t *o = &all[b];
         for (int k = 0; k < 3; k++) o->point[k] = o->range_m >= 0 ? origin[k] + o->where[k] * o->range_m : 0.0f;
         o->t_us = f->t_us;
     }
-    return change_grid_biggest(all, blobs, obs, max);
+    return change_grid_biggest(all, blobs, observations, max);
 }
 
-int watch_tof_add(const tof_frame_t *f, const tof_view_t *view, watch_obs_t *obs, int max) {
+int watch_tof_add(const tof_frame_t *f, const tof_view_t *view, watch_observation_t *observations, int max) {
     if (!grid_ready) watch_tof_restart();
     if (hypotf(view->x_m - anchor_x_m, view->y_m - anchor_y_m) > MOVED_M) forget_bins(view);
     frames++;
@@ -226,7 +226,7 @@ int watch_tof_add(const tof_frame_t *f, const tof_view_t *view, watch_obs_t *obs
             learn_bins(row, core_lo[i], core_hi[i], mm[i]);
         }
     }
-    return observations(f, obs, max);
+    return find_observations(f, observations, max);
 }
 
 bool watch_tof_moved(int zone) { return change_grid_moved(&grid, zone); }

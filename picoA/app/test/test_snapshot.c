@@ -30,13 +30,13 @@
 #include "robot_mounting.h"
 
 // --- body.h, pose.h ---
-static odom_report_t odom = {.x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 0.75f, .pitch_rad = -0.01f, .stationary = true};
+static odometry_report_t odometry = {.x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 0.75f, .pitch_rad = -0.01f, .stationary = true};
 static status_report_t status;
 bool body_connected(void) { return true; }
-const odom_report_t *body_odom(void) { return &odom; }
-uint32_t body_odom_time_us(void) { return 4242; }
-uint32_t body_odom_count(void) { return 0; }
-bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) { (void)n; (void)r; (void)t_us; return false; }
+const odometry_report_t *body_odometry(void) { return &odometry; }
+uint32_t body_odometry_time_us(void) { return 4242; }
+uint32_t body_odometry_count(void) { return 0; }
+bool body_odometry_get(uint32_t n, odometry_report_t *r, uint32_t *t_us) { (void)n; (void)r; (void)t_us; return false; }
 const status_report_t *body_status(void) { return &status; }
 
 // --- the sensors ---
@@ -54,7 +54,7 @@ bool opt4048_latest(opt4048_reading_t *r) {
 }
 
 // --- vision: the features of a frame ---
-static vision_frame_t vis = {.seq = 5, .camera_number = 77, .n_features = 2,
+static vision_frame_t vis = {.sequence = 5, .camera_number = 77, .n_features = 2,
                              .features = {{.id = 9, .age = 3, .x = 12.5f, .y = 100.25f, .dx = -0.5f, .dy = 0.75f, .strength = 0.5f, .match = 0.9f},
                                           {.id = 10, .flags = FEATURE_NEW, .x = 150, .y = 9, .strength = 1, .match = 1}}};
 static bool have_vis = true;
@@ -79,9 +79,9 @@ static uint8_t sent[1 << 20];         // the snapshot parts' bytes, one after an
 static uint32_t sent_len;
 static uint32_t room = 1000000;       // parts the lane takes before it is full
 uint32_t link_pc_connection(void) { return conn; }
-bool link_send_bulk(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(conn && wire_take(msg, len, &m) == (int32_t)len && m.type == WIRE_SNAPSHOT_PART);
+bool link_pc_send_bulk(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(conn && wire_take(message, len, &m) == (int32_t)len && m.type == WIRE_SNAPSHOT_PART);
     if (!room) return false;
     room--;
     assert(sent_len + m.len <= sizeof sent);
@@ -103,7 +103,7 @@ typedef struct { const uint8_t *at[16]; uint32_t len[16]; uint32_t total; } pars
 
 static parsed_t parse(const uint8_t *s) {
     parsed_t p = {0};
-    assert(memcmp(s, "SNAP", 4) == 0 && s[4] == SNAP_VERSION);
+    assert(memcmp(s, "SNAP", 4) == 0 && s[4] == SNAPSHOT_VERSION);
     memcpy(&p.total, s + 5, 4);
     uint32_t crc;
     memcpy(&crc, s + p.total - 4, 4);
@@ -158,7 +158,7 @@ int main(void) {
     house_map_put(50, 50, COLUMN_DRIVABLE);
 
     // Nothing without a server, even when asked.
-    snapshot_request(SNAP_COMMAND, 0);
+    snapshot_request(SNAPSHOT_COMMAND, 0);
     loop_ms(1000);
     assert(n_sent == 0 && sent_len == 0);
 
@@ -167,19 +167,19 @@ int main(void) {
     loop_ms(1);
     assert(n_sent == 1);
     parsed_t p = nth(0);
-    snap_head_t h;
+    snapshot_head_t h;
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
-    assert(h.boot_id == BOOT_ID && h.seq == 1 && h.why == SNAP_SERVER && h.mode == MODE_MANUAL);
+    assert(h.boot_id == BOOT_ID && h.sequence == 1 && h.why == SNAPSHOT_SERVER && h.mode == MODE_MANUAL);
     assert(!strcmp(h.build, "Nov  7 2026 19:00:00"));
     assert(h.actions_ended == 0 && h.action[0] == 0 && h.end_reason == NO_REASON && h.running[0] == 0);
-    snap_pose_t pose;
+    snapshot_pose_t pose;
     memcpy(&pose, p.at[SEC_POSE], sizeof pose);
     assert(pose.x_m == 1.25f && pose.y_m == -0.5f && pose.yaw_rad == 0.75f && pose.t_us == 4242 && pose.stationary);
     assert(!p.at[3]); // no sensor geometry any more: the PC has the mounting
     // The ToF section: a compact frame (the snapshot use), its pose in it.
     static posed_frame_t tof;
     assert(p.len[SEC_TOF] == tof_format_size(tof_format_of(TOF_USE_SNAPSHOT)));
-    assert(tof_unpack(tof_format_of(TOF_USE_SNAPSHOT), p.at[SEC_TOF], p.len[SEC_TOF], &tof));
+    assert(tof_format_unpack(tof_format_of(TOF_USE_SNAPSHOT), p.at[SEC_TOF], p.len[SEC_TOF], &tof));
     assert(tof.frame.number == 1 && tof.pose_known && tof.x_m == 1.2f && tof.y_m == -0.45f && fabsf(tof.yaw_rad - 0.7f) < 1e-4f);
     for (int z = 0; z < 64; z++) {
         const tof_zone_t *zone = &tof.frame.zone[z];
@@ -188,26 +188,26 @@ int main(void) {
         assert(sz % 3 == 0 ? zone->kind == TOF_NOTHING && zone->distance_mm == 0
                            : zone->kind == TOF_SURE && zone->distance_mm == (100 * sz < 2545 ? 100 * sz : 2550)); // 2550: beyond
     }
-    snap_camera_t cam;
+    snapshot_camera_t cam;
     memcpy(&cam, p.at[SEC_CAMERA], sizeof cam);
     assert(cam.number == 77 && cam.width == 160 && cam.height == 120 && cam.gain == 2.5f);
     assert(memcmp(p.at[SEC_CAMERA] + sizeof cam, pixels, sizeof pixels) == 0);
-    snap_color_t color;
+    snapshot_color_t color;
     memcpy(&color, p.at[SEC_COLOR], sizeof color);
     assert(color.sequence == 9 && color.raw[15] == 0xaf);
-    snap_window_t win;
+    snapshot_window_t win;
     memcpy(&win, p.at[SEC_WINDOW], sizeof win);
-    assert(win.org_cx == -30 && win.org_cy == -30 && win.cells_x == 60 && win.cells_y == 60 && win.layers == 3);
+    assert(win.origin_cx == -30 && win.origin_cy == -30 && win.cells_x == 60 && win.cells_y == 60 && win.layers == 3);
     const uint8_t *cells = p.at[SEC_WINDOW] + sizeof win;
     assert(cells[(1 * 60 + 30) * 60 + 31] == C_PACK(CELL_STATE_OCCUPIED, 0, 12));
     assert(tiles_in(&p) == 2);
-    snap_tile_t tile;
+    snapshot_tile_t tile;
     memcpy(&tile, p.at[SEC_TILES] + 2, sizeof tile);
     assert(tile.tx == -2 && tile.ty == 0); // column -45: tile -2 holds -50 … -31
-    snap_features_t fh;
+    snapshot_features_t fh;
     memcpy(&fh, p.at[SEC_FEATURES], sizeof fh);
-    assert(fh.camera_number == 77 && fh.n == 2 && p.len[SEC_FEATURES] == sizeof fh + 2 * sizeof(snap_feature_t));
-    snap_feature_t f0;
+    assert(fh.camera_number == 77 && fh.n == 2 && p.len[SEC_FEATURES] == sizeof fh + 2 * sizeof(snapshot_feature_t));
+    snapshot_feature_t f0;
     memcpy(&f0, p.at[SEC_FEATURES] + sizeof fh, sizeof f0);
     assert(f0.id == 9 && f0.age == 3 && f0.x16 == 200 && f0.y16 == 1604 && f0.dx64 == -32 && f0.dy64 == 48 && f0.match == 230);
     assert((tile.columns[(5 * 20 + 10) / 2] & 15) == COLUMN_BLOCKED);
@@ -238,26 +238,26 @@ int main(void) {
     running = "";
     loop_ms(100);
     assert(n_sent == 1);
-    snapshot_request(SNAP_COMMAND, 17);
+    snapshot_request(SNAPSHOT_COMMAND, 17);
     loop_ms(1);
     assert(n_sent == 2);
     p = nth(1);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
-    assert(h.seq == 2 && h.why == SNAP_COMMAND && strcmp(h.action, "drive") == 0 && h.end_reason == WIRE_END_OBSTACLE);
+    assert(h.sequence == 2 && h.why == SNAPSHOT_COMMAND && strcmp(h.action, "drive") == 0 && h.end_reason == WIRE_END_OBSTACLE);
     assert(tiles_in(&p) == 0); // all sent already
-    assert(snapshot_sent(&told) && told.command == 17 && told.seq == 2 && told.x_m == 1.25f && told.yaw_rad == 0.75f);
+    assert(snapshot_sent(&told) && told.command == 17 && told.sequence == 2 && told.x_m == 1.25f && told.yaw_rad == 0.75f);
     assert(!snapshot_sent(&told));
     // Asked again, with a tile changed and the robot driving now.
     house_map_put(-45, 0, COLUMN_OPEN);
     running = "goto";
     mode_set(MODE_IDLE);
-    snapshot_request(SNAP_COMMAND, 18);
+    snapshot_request(SNAPSHOT_COMMAND, 18);
     loop_ms(1);
     p = nth(2);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
-    assert(n_sent == 3 && h.why == SNAP_COMMAND && strcmp(h.running, "goto") == 0 && h.mode == MODE_IDLE);
+    assert(n_sent == 3 && h.why == SNAPSHOT_COMMAND && strcmp(h.running, "goto") == 0 && h.mode == MODE_IDLE);
     assert(tiles_in(&p) == 1);
-    assert(snapshot_sent(&told) && told.command == 18 && told.seq == 3);
+    assert(snapshot_sent(&told) && told.command == 18 && told.sequence == 3);
     printf("ok: on a command, the command told once it has gone; a changed tile goes again\n");
 
     // A new server: all the tiles again. More dirty tiles than fit: the rest next time.
@@ -266,8 +266,8 @@ int main(void) {
     loop_ms(1);
     p = nth(3);
     int first = tiles_in(&p);
-    assert(n_sent == 4 && first < house_map_tiles() && p.total <= SNAP_MAX);
-    snapshot_request(SNAP_COMMAND, 0);
+    assert(n_sent == 4 && first < house_map_tiles() && p.total <= SNAPSHOT_MAX);
+    snapshot_request(SNAPSHOT_COMMAND, 0);
     loop_ms(1);
     p = nth(4);
     printf("a new server, %d tiles: %d in the first snapshot (%lu bytes), %d in the next\n", house_map_tiles(), first,
@@ -284,14 +284,14 @@ int main(void) {
     // frame), then goes; without vision catching up, after 0.3 s.
     uint32_t before = n_sent;
     vis.camera_number = 76;
-    snapshot_request(SNAP_COMMAND, 0);
+    snapshot_request(SNAPSHOT_COMMAND, 0);
     loop_ms(100);
     assert(n_sent == before && vision_requests > 0);
     vis.camera_number = 77;
     loop_ms(1);
     assert(n_sent == before + 1);
     vis.camera_number = 70;
-    snapshot_request(SNAP_COMMAND, 0);
+    snapshot_request(SNAPSHOT_COMMAND, 0);
     loop_ms(250);
     assert(n_sent == before + 1);
     loop_ms(100);
@@ -303,10 +303,10 @@ int main(void) {
     uint32_t start = sent_len;
     vis.camera_number = 77; // vision has caught up
     room = 5;
-    snapshot_request(SNAP_COMMAND, 21);
+    snapshot_request(SNAPSHOT_COMMAND, 21);
     loop_ms(1);
     assert(sent_len == start + 5 * WIRE_PART_MAX && !snapshot_sent(&told));
-    snapshot_request(SNAP_COMMAND, 0); // asked while it goes out: waits
+    snapshot_request(SNAPSHOT_COMMAND, 0); // asked while it goes out: waits
     loop_ms(10);
     assert(sent_len == start + 5 * WIRE_PART_MAX); // still full
     room = 1000000;
@@ -322,7 +322,7 @@ int main(void) {
     // The connection lost half-way: not sent again; its command is told (the PC's
     // runner says it wasn't stored); the new server gets its own snapshot.
     room = 3;
-    snapshot_request(SNAP_COMMAND, 22);
+    snapshot_request(SNAPSHOT_COMMAND, 22);
     loop_ms(1);
     assert(!snapshot_sent(&told));
     conn = 0;
@@ -334,9 +334,9 @@ int main(void) {
     loop_ms(1);
     memcpy(&total, sent + 5, 4);
     assert(memcmp(sent, "SNAP", 4) == 0 && sent_len == total && parse(sent).total == total);
-    snap_head_t again;
+    snapshot_head_t again;
     memcpy(&again, parse(sent).at[SEC_HEAD], sizeof again);
-    assert(again.why == SNAP_SERVER && !snapshot_sent(&told));
+    assert(again.why == SNAPSHOT_SERVER && !snapshot_sent(&told));
     printf("ok: a snapshot cut by a lost connection isn't sent again; the new server gets its own\n");
     printf("snapshot: all tests passed\n");
     return 0;

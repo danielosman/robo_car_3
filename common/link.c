@@ -1,4 +1,4 @@
-// Frame on the wire: COBS(type, seq, body, crc16 lo, crc16 hi) followed by 0x00.
+// Frame on the wire: COBS(type, sequence, body, crc16 lo, crc16 hi) followed by 0x00.
 // COBS removes every 0x00 from the encoded bytes, so 0x00 only ever ends a frame
 // and the receiver resynchronises at the next one after any error.
 // CRC is CRC-16/CCITT-FALSE (poly 0x1021, init 0xFFFF).
@@ -26,9 +26,9 @@ static uint32_t rx_tail, tx_head;
 static uint8_t frame[FRAME_MAX];
 static size_t frame_len;
 static bool frame_too_long;
-static uint8_t tx_seq, rx_next_seq;
-static bool rx_seq_known;
-static link_stats_t stats;
+static uint8_t tx_sequence, rx_next_sequence;
+static bool rx_sequence_known;
+static link_statistics_t statistics;
 
 static uint16_t crc16(const uint8_t *p, size_t n) {
     uint16_t crc = 0xFFFF;
@@ -96,10 +96,10 @@ void link_init(void) {
 }
 
 bool link_send(uint8_t type, const void *body, size_t len) {
-    if (len > LINK_MAX_BODY) { stats.tx_dropped++; return false; }
+    if (len > LINK_MAX_BODY) { statistics.tx_dropped++; return false; }
     uint8_t raw[RAW_MAX], out[FRAME_MAX];
     raw[0] = type;
-    raw[1] = tx_seq;
+    raw[1] = tx_sequence;
     memcpy(raw + 2, body, len);
     uint16_t crc = crc16(raw, len + 2);
     raw[len + 2] = crc & 0xFF;
@@ -114,45 +114,45 @@ bool link_send(uint8_t type, const void *body, size_t len) {
         tx_pump();
     }
     restore_interrupts(irq_state);
-    if (!fits) { stats.tx_dropped++; return false; }
-    tx_seq++;
-    stats.tx_msgs++;
+    if (!fits) { statistics.tx_dropped++; return false; }
+    tx_sequence++;
+    statistics.tx_messages++;
     return true;
 }
 
-static bool decode_frame(link_msg_t *msg) {
+static bool decode_frame(link_message_t *message) {
     uint8_t raw[FRAME_MAX];
     size_t n;
     if (frame_too_long || !cobs_decode(frame, frame_len, raw, &n)) return false;
     if (n < 4 || n - 4 > LINK_MAX_BODY) return false;
     if (crc16(raw, n - 2) != (uint16_t)(raw[n - 2] | raw[n - 1] << 8)) return false;
-    uint8_t seq = raw[1];
-    if (rx_seq_known && seq != rx_next_seq) stats.rx_lost += (uint8_t)(seq - rx_next_seq);
-    rx_next_seq = seq + 1;
-    rx_seq_known = true;
-    msg->type = raw[0];
-    msg->len = (uint8_t)(n - 4);
-    memcpy(msg->body, raw + 2, msg->len);
+    uint8_t sequence = raw[1];
+    if (rx_sequence_known && sequence != rx_next_sequence) statistics.rx_lost += (uint8_t)(sequence - rx_next_sequence);
+    rx_next_sequence = sequence + 1;
+    rx_sequence_known = true;
+    message->type = raw[0];
+    message->len = (uint8_t)(n - 4);
+    memcpy(message->body, raw + 2, message->len);
     return true;
 }
 
-bool link_receive(link_msg_t *msg) {
+bool link_receive(link_message_t *message) {
     while (rx_tail != rx_head) {
         uint8_t b = rx_buf[rx_tail++ & (RX_SIZE - 1)];
-        stats.rx_bytes++;
+        statistics.rx_bytes++;
         if (b) {
             if (frame_len < FRAME_MAX) frame[frame_len++] = b;
             else frame_too_long = true;
             continue;
         }
         bool empty = frame_len == 0 && !frame_too_long;
-        bool ok = !empty && decode_frame(msg);
+        bool ok = !empty && decode_frame(message);
         frame_len = 0;
         frame_too_long = false;
-        if (ok) { stats.rx_msgs++; return true; }
-        if (!empty) stats.rx_bad++;
+        if (ok) { statistics.rx_messages++; return true; }
+        if (!empty) statistics.rx_bad++;
     }
     return false;
 }
 
-link_stats_t link_stats(void) { return stats; }
+link_statistics_t link_statistics(void) { return statistics; }

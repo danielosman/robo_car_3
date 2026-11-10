@@ -102,8 +102,8 @@ build test_tracker picoA/app/test/test_tracker.c -Icommon
 build/test_tracker
 build test_watch picoA/app/test/test_watch.c -IpicoA/app/test/stubs -IpicoA/drivers $APP
 build/test_watch
-build test_loop_stats picoA/app/test/test_loop_stats.c
-build/test_loop_stats
+build test_loop_statistics picoA/app/test/test_loop_statistics.c
+build/test_loop_statistics
 build test_body picoA/app/test/test_body.c $APP
 build/test_body
 # The IMU end to end: PicoB's odometry and brain, the link, PicoA's body and move, the PC's batches.

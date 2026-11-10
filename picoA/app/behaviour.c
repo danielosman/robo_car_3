@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include "pico/stdlib.h"
 #include "units.h"
-#include "geom.h"
+#include "geometry.h"
 #include "stamp.h"
 #include "body.h"
 #include "motion.h"
@@ -32,7 +32,7 @@ static const move_kind_t kind_of[] = {MOVE_DRIVE, MOVE_ROTATE, MOVE_WATCH, MOVE_
 // The action of the running move (its act phase: move.h).
 static action_t action;
 static float goal;              // DRIVE: metres (+ = forward); ROTATE: radians (+ = left); WATCH: seconds
-static odom_report_t start;     // the robot when the act phase began
+static odometry_report_t start;     // the robot when the act phase began
 static absolute_time_t run_start;
 static bool following;          // watching: turning towards a movement
 static bool obstacle_stop;      // moving: stopped short, before an obstacle on the map
@@ -45,30 +45,30 @@ static uint32_t seen_us[FOLLOW_HISTORY];
 static int seen_n;
 static uint32_t last_seen_us;
 
-static void act_begin(const odom_report_t *o);
-static move_act_t act_step(const odom_report_t *o);
-static void act_end(const odom_report_t *o, move_end_t how);
+static void act_begin(const odometry_report_t *o);
+static move_act_t act_step(const odometry_report_t *o);
+static void act_end(const odometry_report_t *o, move_end_t how);
 static const move_actor_t behaviour_actor = {act_begin, act_step, act_end};
 
 // Starts the move of action a; the action's own state is set after (the move
 // replaced, if any, has ended by then).
-static void begin(action_t a, float g, float param, uint32_t number) {
-    move_start(kind_of[a], param, number, &behaviour_actor);
+static void begin(action_t a, float g, float parameter, uint32_t number) {
+    move_start(kind_of[a], parameter, number, &behaviour_actor);
     action = a;
     goal = g;
 }
 
-// A move along dir (+1 forward, -1 back) from o: how far the edge on that side is from
+// A move along direction (+1 forward, -1 back) from o: how far the edge on that side is from
 // the nearest obstacle on the map in its path (blocked or overhang), looking at most
 // look_m past the stop point; unknown cells count as free.
-static float obstacle_gap_m(const odom_report_t *o, float dir, float look_m) {
-    return cell_map_obstacle_along(o->x_m, o->y_m, dir * cosf(o->yaw_rad), dir * sinf(o->yaw_rad), PATH_HALF_M,
+static float obstacle_gap_m(const odometry_report_t *o, float direction, float look_m) {
+    return cell_map_obstacle_along(o->x_m, o->y_m, direction * cosf(o->yaw_rad), direction * sinf(o->yaw_rad), PATH_HALF_M,
                                    EDGE_M + STOP_BEFORE_M + look_m) - EDGE_M;
 }
 
 void behaviour_drive(float distance_m, uint32_t number) {
     const char *side = distance_m > 0 ? "ahead" : "behind";
-    float gap_m = obstacle_gap_m(body_odom(), distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
+    float gap_m = obstacle_gap_m(body_odometry(), distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
     if (gap_m <= STOP_BEFORE_M + 0.01f) {
         printf("Drive: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
                (double)(STOP_BEFORE_M * 100));
@@ -86,7 +86,7 @@ void behaviour_rotate(float angle_rad, uint32_t number) {
 }
 
 void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t number) {
-    const odom_report_t *o = body_odom();
+    const odometry_report_t *o = body_odometry();
     float dx = x_m - o->x_m, dy = y_m - o->y_m, d = hypotf(dx, dy), goal_m = d;
     if (d - stop_m < 0.05f) {
         printf("Go to: already there (%.0f cm away)\n", (double)(d * 100));
@@ -182,12 +182,12 @@ static void watch(void) {
 }
 
 // What the action did, by odometry, once the robot stands still.
-static void say_done(const odom_report_t *o) {
+static void say_done(const odometry_report_t *o) {
     float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
     if (action == DRIVE && obstacle_stop) {
-        float dir = goal < 0 ? -1.0f : 1.0f;
-        printf("Drive stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(obstacle_gap_m(o, dir, 0.1f) * 100),
-               dir > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
+        float direction = goal < 0 ? -1.0f : 1.0f;
+        printf("Drive stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(obstacle_gap_m(o, direction, 0.1f) * 100),
+               direction > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
         return;
     }
     if (action == GOTO) {
@@ -209,7 +209,7 @@ static void say_done(const odom_report_t *o) {
 // Going to a point: turn in place towards it, then drive, steering a little to
 // keep it ahead, and stop goal_stop_m before it (measured along the way) or 15 cm
 // before an obstacle on the map. Returns true when done.
-static bool go_to(const odom_report_t *o) {
+static bool go_to(const odometry_report_t *o) {
     float dx = goal_x - o->x_m, dy = goal_y - o->y_m;
     float error_rad = wrap_pi(atan2f(dy, dx) - o->yaw_rad);
     if (!goal_driving) {
@@ -228,7 +228,7 @@ static bool go_to(const odom_report_t *o) {
 }
 
 // The act phase begins: the robot stands still, motors on.
-static void act_begin(const odom_report_t *o) {
+static void act_begin(const odometry_report_t *o) {
     start = *o;
     run_start = get_absolute_time();
     following = false;
@@ -238,24 +238,24 @@ static void act_begin(const odom_report_t *o) {
 }
 
 // Runs the action; returns true when it is done.
-static bool step(const odom_report_t *o) {
+static bool step(const odometry_report_t *o) {
     switch (action) {
     case ROTATE: {
-        float dir = goal < 0 ? -1.0f : 1.0f;
-        float remaining_rad = fabsf(goal) - dir * (o->yaw_rad - start.yaw_rad);
+        float direction = goal < 0 ? -1.0f : 1.0f;
+        float remaining_rad = fabsf(goal) - direction * (o->yaw_rad - start.yaw_rad);
         if (remaining_rad <= 0) return true;
-        body_drive(0, motion_turn_rate(dir * remaining_rad));
+        body_drive(0, motion_turn_rate(direction * remaining_rad));
         return false;
     }
     case DRIVE: {
-        float dir = goal < 0 ? -1.0f : 1.0f;
+        float direction = goal < 0 ? -1.0f : 1.0f;
         // Checked every time: the map grows as the robot drives.
         float remaining_m = fabsf(goal) - hypotf(o->x_m - start.x_m, o->y_m - start.y_m);
-        float room_m = obstacle_gap_m(o, dir, fmaxf(remaining_m, 0)) - STOP_BEFORE_M;
+        float room_m = obstacle_gap_m(o, direction, fmaxf(remaining_m, 0)) - STOP_BEFORE_M;
         obstacle_stop = room_m < remaining_m;
         if (obstacle_stop) remaining_m = room_m;
         if (remaining_m <= 0) return true;
-        body_drive(motion_speed(dir * remaining_m), 0);
+        body_drive(motion_speed(direction * remaining_m), 0);
         return false;
     }
     case WATCH:
@@ -268,14 +268,14 @@ static bool step(const odom_report_t *o) {
     return true;
 }
 
-static move_act_t act_step(const odom_report_t *o) {
+static move_act_t act_step(const odometry_report_t *o) {
     if (!step(o)) return MOVE_ACTING;
     return (action == DRIVE || action == GOTO) && obstacle_stop ? MOVE_ACT_OBSTACLE : MOVE_ACT_DONE;
 }
 
 // The move has ended: done or before an obstacle, what odometry measured; the
 // movement lines stop.
-static void act_end(const odom_report_t *o, move_end_t how) {
+static void act_end(const odometry_report_t *o, move_end_t how) {
     watch_log(false);
     if (how == MOVE_END_DONE || how == MOVE_END_OBSTACLE) say_done(o);
 }

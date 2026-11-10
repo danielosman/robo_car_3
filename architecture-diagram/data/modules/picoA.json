@@ -21,24 +21,24 @@
         "code": "bool body_connected("
       },
       {
-        "name": "body_odom",
+        "name": "body_odometry",
         "kind": "function",
-        "code": "const odom_report_t *body_odom("
+        "code": "const odometry_report_t *body_odometry("
       },
       {
-        "name": "body_odom_time_us",
+        "name": "body_odometry_time_us",
         "kind": "function",
-        "code": "uint32_t body_odom_time_us("
+        "code": "uint32_t body_odometry_time_us("
       },
       {
-        "name": "body_odom_count",
+        "name": "body_odometry_count",
         "kind": "function",
-        "code": "uint32_t body_odom_count("
+        "code": "uint32_t body_odometry_count("
       },
       {
-        "name": "body_odom_get",
+        "name": "body_odometry_get",
         "kind": "function",
-        "code": "bool body_odom_get("
+        "code": "bool body_odometry_get("
       },
       {
         "name": "body_status",
@@ -206,14 +206,14 @@
         "code": "uint8_t tof_format_message_type("
       },
       {
-        "name": "tof_pack",
+        "name": "tof_format_pack",
         "kind": "function",
-        "code": "uint32_t tof_pack("
+        "code": "uint32_t tof_format_pack("
       },
       {
-        "name": "tof_unpack",
+        "name": "tof_format_unpack",
         "kind": "function",
-        "code": "bool tof_unpack("
+        "code": "bool tof_format_unpack("
       }
     ]
   },
@@ -353,9 +353,9 @@
         "code": "} wire_error_t;"
       },
       {
-        "name": "wire_msg_t",
+        "name": "wire_message_t",
         "kind": "type",
-        "code": "} wire_msg_t;"
+        "code": "} wire_message_t;"
       },
       {
         "name": "wire_take",
@@ -559,19 +559,19 @@
         "code": "uint32_t link_pc_connection("
       },
       {
-        "name": "link_send_control",
+        "name": "link_pc_send_control",
         "kind": "function",
-        "code": "bool link_send_control("
+        "code": "bool link_pc_send_control("
       },
       {
-        "name": "link_send_bulk",
+        "name": "link_pc_send_bulk",
         "kind": "function",
-        "code": "bool link_send_bulk("
+        "code": "bool link_pc_send_bulk("
       },
       {
-        "name": "link_received",
+        "name": "link_pc_received",
         "kind": "function",
-        "code": "bool link_received("
+        "code": "bool link_pc_received("
       }
     ]
   },

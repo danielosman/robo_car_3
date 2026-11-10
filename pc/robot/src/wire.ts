@@ -26,9 +26,9 @@ const HELLO_SIZE = 29, BUILD_LEN = 24, CONSOLE_MAX = 240, ANSWER_SIZE = 34, STAT
 const MOVE_START_SIZE = 26, MOVE_END_SIZE = 37, IMU_BATCH_HEADER = 15, IMU_RECORD = 12, TOF_HEADER = 12;
 export const PART_MAX = 1400, COMMAND_TEXT_MAX = 46;
 export const IMU_BATCH_MAX = 10;          // records in an imu batch
-export const IMU_RECORD_PERIOD_US = 9615; // 4 samples at 416 Hz (common/link_msgs.h)
-// An imu record's counts (common/link_msgs.h): accel 0.061 mg, gyro 8.75 mdps a count.
-export const IMU_ACCEL_G_PER_COUNT = 0.000061, IMU_GYRO_DPS_PER_COUNT = 0.00875;
+export const IMU_RECORD_PERIOD_US = 9615; // 4 samples at 416 Hz (common/link_messages.h)
+// An imu record's counts (common/link_messages.h): acceleration 0.061 mg, gyro 8.75 mdps a count.
+export const IMU_ACCELERATION_G_PER_COUNT = 0.000061, IMU_GYRO_DPS_PER_COUNT = 0.00875;
 
 const TABLE = new Map<number, TypeInfo>([
   [TYPE.HELLO, { lane: LANE.CONTROL, min: 1, max: PAYLOAD_MAX }], // any length: another version's hello is read for its version
@@ -73,17 +73,17 @@ export interface Status { x: number; y: number; yaw: number; mode: string; actio
 // A move's start (picoA/app/move.h): its number, its command's, kind, parameter
 // (drive m, rotate rad, goto m to the goal, watch s), its time, the still times;
 // refused: it can't start, its end follows at once and a running move goes on.
-export interface MoveStart { move: number; command: number; kind: string; param: number; tUs: number; preMs: number; postMs: number; refused: boolean }
+export interface MoveStart { move: number; command: number; kind: string; parameter: number; tUs: number; preMs: number; postMs: number; refused: boolean }
 // A move's end: how (an end word), its time, its frames sent and dropped, how far it
 // went (m) and turned (rad), its imu batches sent and dropped.
 export interface MoveEnd {
   move: number; end: string; tUs: number; framesSent: number; framesDropped: number;
   moved: number; rotated: number; imuSent: number; imuDropped: number;
 }
-// The IMU as it measured (common/link_msgs.h, imu_record_t): its time (the middle of
-// its 4 samples), accel and gyro x, y, z as the sensor's raw counts in its own axes.
+// The IMU as it measured (common/link_messages.h, imu_record_t): its time (the middle of
+// its 4 samples), acceleration and gyro x, y, z as the sensor's raw counts in its own axes.
 export type Vec3 = [number, number, number];
-export interface ImuRecord { tUs: number; accel: Vec3; gyro: Vec3 }
+export interface ImuRecord { tUs: number; acceleration: Vec3; gyro: Vec3 }
 // Up to 10 imu records of a move, measured one after the other, evenly spaced.
 export interface ImuBatch { move: number; records: ImuRecord[] }
 export interface RobotCommand { n: number; text: string }
@@ -179,7 +179,7 @@ export function decode(m: RawMessage): Message {
     case TYPE.MOVE_START:
       need(MOVE_START_SIZE);
       return { type: "move_start", move: p.readUInt32LE(0), command: p.readUInt32LE(4), kind: MOVE_KINDS[p[8]] ?? `kind ${p[8]}`,
-               param: p.readFloatLE(9), tUs: readTime(p, 13), preMs: p.readUInt16LE(21), postMs: p.readUInt16LE(23),
+               parameter: p.readFloatLE(9), tUs: readTime(p, 13), preMs: p.readUInt16LE(21), postMs: p.readUInt16LE(23),
                refused: (p[25] & 1) !== 0 };
     case TYPE.MOVE_END:
       need(MOVE_END_SIZE);
@@ -194,7 +194,7 @@ export function decode(m: RawMessage): Message {
       const first = readTime(p, 4), period = p.readUInt16LE(12);
       const records = Array.from({ length: n }, (_, i): ImuRecord => {
         const at = IMU_BATCH_HEADER + i * IMU_RECORD, v = (k: number) => p.readInt16LE(at + 2 * k);
-        return { tUs: first + i * period, accel: [v(0), v(1), v(2)], gyro: [v(3), v(4), v(5)] };
+        return { tUs: first + i * period, acceleration: [v(0), v(1), v(2)], gyro: [v(3), v(4), v(5)] };
       });
       return { type: "imu_batch", move: p.readUInt32LE(0), records };
     }
@@ -248,7 +248,7 @@ export const encodeMapCleared = (): Buffer => header(TYPE.MAP_CLEARED, Buffer.al
 export function encodeMoveStart(s: MoveStart): Buffer {
   const p = Buffer.alloc(MOVE_START_SIZE), kind = MOVE_KINDS.indexOf(s.kind as (typeof MOVE_KINDS)[number]);
   if (kind < 0) throw new Error(`not a move kind: ${s.kind}`);
-  p.writeUInt32LE(s.move >>> 0, 0); p.writeUInt32LE(s.command >>> 0, 4); p[8] = kind; p.writeFloatLE(s.param, 9);
+  p.writeUInt32LE(s.move >>> 0, 0); p.writeUInt32LE(s.command >>> 0, 4); p[8] = kind; p.writeFloatLE(s.parameter, 9);
   writeTime(p, s.tUs, 13); p.writeUInt16LE(s.preMs, 21); p.writeUInt16LE(s.postMs, 23); p[25] = s.refused ? 1 : 0;
   return header(TYPE.MOVE_START, p);
 }
@@ -274,7 +274,7 @@ export function encodeImuBatch(b: ImuBatch): Buffer {
     throw new Error("an imu batch's records must be evenly spaced");
   const p = Buffer.alloc(IMU_BATCH_HEADER + n * IMU_RECORD);
   p.writeUInt32LE(b.move >>> 0, 0); writeTime(p, first, 4); p.writeUInt16LE(period, 12); p[14] = n;
-  b.records.forEach((r, i) => [...r.accel, ...r.gyro].forEach((v, k) => p.writeInt16LE(v, IMU_BATCH_HEADER + i * IMU_RECORD + 2 * k)));
+  b.records.forEach((r, i) => [...r.acceleration, ...r.gyro].forEach((v, k) => p.writeInt16LE(v, IMU_BATCH_HEADER + i * IMU_RECORD + 2 * k)));
   return header(TYPE.IMU_BATCH, p);
 }
 

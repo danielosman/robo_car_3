@@ -7,7 +7,7 @@
 // for robot frames, the replay as batches), a late batch under the move it names,
 // also with the server restarted; the status rows (no peaks)
 // and the path driven; and the old database: the store's
-// file is robot2.duckdb, never robot.duckdb, and a store in a temp dir writes only
+// file is robot2.duckdb, never robot.duckdb, and a store in a temp directory writes only
 // its own file there. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -56,23 +56,23 @@ const frame = (number: number, robotClockUs: number, mm = 500): PosedFrame =>
 const pose = (x: number): LivePose => ({ x, y: 0, yaw: 0, mode: "manual", action: "drive", rssi: -60, at: 0 });
 // n imu records of move from PicoA's time t0, 9615 µs apart; counts from k (the int16 limits on the first).
 const imu = (move: number, t0: number, n: number, k = 0): ImuBatch => ({ move, records: Array.from({ length: n }, (_, i) => ({
-  tUs: (t0 + i * 9615), accel: i === 0 ? [32767, -32768, 16384] : [k + i, -(k + i), 16384], gyro: [i, 0, 0 - k] })) }); // 0 - k: no -0
+  tUs: (t0 + i * 9615), acceleration: i === 0 ? [32767, -32768, 16384] : [k + i, -(k + i), 16384], gyro: [i, 0, 0 - k] })) }); // 0 - k: no -0
 
 test("a boot's moves, frames, zones and status: written as they come, read back, replayed in order; late frames under their move", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-store-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-store-"));
   try {
-    const store = new Store(path.join(dir, DB_FILE));
+    const store = new Store(path.join(directory, DB_FILE));
     const boot = await store.openBoot({ version: WIRE_VERSION, bootId: "0badf00d", build: "test" }, now);
     const t0 = 5e9; // µs since power-up, past 2^32: nothing wraps
     await store.status(boot, boot.status(pose(0)));
-    void store.moveStart(boot, boot.moveStart({ move: 1, command: 4, kind: "drive", param: 0.5, tUs: t0, preMs: 200, postMs: 300, refused: false }));
+    void store.moveStart(boot, boot.moveStart({ move: 1, command: 4, kind: "drive", parameter: 0.5, tUs: t0, preMs: 200, postMs: 300, refused: false }));
     void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: t0 + 50000, frame: frame(11, robotClock(t0 + 50000)) }));
     void store.imuBatch(boot, boot.imuBatch(imu(1, t0 - 30000, 10)));
     void store.status(boot, boot.status(pose(0.1)));
     // The move's end overtakes its last frame (control before bulk); the next move starts meanwhile.
     void store.moveEnd(boot, boot.moveEnd({ move: 1, end: "obstacle", tUs: (t0 + 150000), framesSent: 2, framesDropped: 1,
                                             moved: 0.3, rotated: 0.01, imuSent: 2, imuDropped: 0 }));
-    void store.moveStart(boot, boot.moveStart({ move: 2, command: 5, kind: "watch", param: 60, tUs: (t0 + 200000), preMs: 200, postMs: 300, refused: false }));
+    void store.moveStart(boot, boot.moveStart({ move: 2, command: 5, kind: "watch", parameter: 60, tUs: (t0 + 200000), preMs: 200, postMs: 300, refused: false }));
     void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: t0 + 150000, frame: frame(12, robotClock(t0 + 150000)) }));
     void store.imuBatch(boot, boot.imuBatch(imu(1, (t0 + 66150), 4, 100))); // move 1's last batch, late: after move 2's start
     void store.imuBatch(boot, boot.imuBatch(imu(2, (t0 + 210000), 10, 200)));
@@ -80,7 +80,7 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     await store.flush();
 
     const one = (await store.moveFrames("0badf00d", 1))!;
-    assert.deepEqual(one.move, { move: 1, command: 4, kind: "drive", param: 0.5, preMs: 200, postMs: 300, refused: false, startTS: one.move.startTS,
+    assert.deepEqual(one.move, { move: 1, command: 4, kind: "drive", parameter: 0.5, preMs: 200, postMs: 300, refused: false, startTS: one.move.startTS,
       endTS: one.move.endTS, end: "obstacle", framesSent: 2, framesDropped: 1, moved: 0.3, rotated: 0.01,
       imuSent: 2, imuDropped: 0 });
     assert.deepEqual(one.imu, { records: 14, batches: 2, missing: 0 }); // its late batch too, right after the first
@@ -98,11 +98,11 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     assert.equal(oneImu.frames, 2);
     assert.equal(oneImu.records.length, 14);
     const sent = [...imu(1, t0 - 30000, 10).records, ...imu(1, (t0 + 66150), 4, 100).records];
-    assert.deepEqual(oneImu.records.map(r => ({ tUs: r.tUs, accel: r.accel, gyro: r.gyro })), sent);
+    assert.deepEqual(oneImu.records.map(r => ({ tUs: r.tUs, acceleration: r.acceleration, gyro: r.gyro })), sent);
     oneImu.records.forEach((r, i) => close(r.tS - one.move.startTS!, -0.03 + i * 0.009615, 2e-6)); // even 9.6 ms steps
     assert.deepEqual((await store.moveImu("0badf00d", 2))!.imu, { records: 10, batches: 1, missing: 0 });
     assert.equal(await store.moveImu("0badf00d", 3), null);
-    assert.deepEqual(await store.query("SELECT ax, ay, az, gx, gy, gz FROM imu WHERE move = 1 AND n = 0 ORDER BY msg LIMIT 1"),
+    assert.deepEqual(await store.query("SELECT ax, ay, az, gx, gy, gz FROM imu WHERE move = 1 AND n = 0 ORDER BY message_number LIMIT 1"),
       [{ ax: 32767, ay: -32768, az: 16384, gx: 0, gy: 0, gz: 0 }]);
     const z = await store.query("SELECT row, col, distance_mm, kind, signal, targets FROM zones WHERE number = 13 AND row = 8 AND col >= 7 ORDER BY col");
     assert.deepEqual(z, [{ row: 8, col: 7, distance_mm: 2662, kind: "sure", signal: 62, targets: 1 },
@@ -113,7 +113,7 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     const replay = await store.replay("0badf00d");
     assert.deepEqual(replay.map(m => m.type),
       ["status", "move_start", "tof", "imu_batch", "status", "move_end", "move_start", "tof", "imu_batch", "imu_batch", "tof"]);
-    assert.deepEqual(replay.map(m => m.msg), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    assert.deepEqual(replay.map(m => m.messageNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     const end = replay[5];
     assert.ok(end.type === "move_end" && end.end.framesSent === 2 && end.end.end === "obstacle" && end.end.imuSent === 2);
     const st = replay[4];
@@ -121,19 +121,19 @@ test("a boot's moves, frames, zones and status: written as they come, read back,
     const late = replay[8];
     assert.ok(late.type === "imu_batch");
     assert.deepEqual(late.batch, imu(1, (t0 + 66150), 4, 100)); // a batch back as it came
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("each boot its own mounting; a restarted server numbers a boot's messages on", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-boots-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-boots-"));
   try {
-    const file = path.join(dir, DB_FILE);
+    const file = path.join(directory, DB_FILE);
     let store = new Store(file);
     const a = await store.openBoot({ version: WIRE_VERSION, bootId: "aaaaaaaa", build: "old" }, before);
     const b = await store.openBoot({ version: WIRE_VERSION, bootId: "bbbbbbbb", build: "new" }, now);
     assert.equal(a.mounting.tof.z_m, 0.07);
     assert.equal(b.mounting.tof.z_m, now.tof.z_m);
-    await store.moveStart(a, a.moveStart({ move: 7, command: 1, kind: "rotate", param: 1, tUs: 1e6, preMs: 200, postMs: 200, refused: false }));
+    await store.moveStart(a, a.moveStart({ move: 7, command: 1, kind: "rotate", parameter: 1, tUs: 1e6, preMs: 200, postMs: 200, refused: false }));
     await store.moveEnd(a, a.moveEnd({ move: 7, end: "ok", tUs: 2e6, framesSent: 3, framesDropped: 0, moved: 0, rotated: 1, imuSent: 2, imuDropped: 0 }));
     await store.flush();
     // The server starts again; boot a connects again: its own mounting, not the file's now.
@@ -143,49 +143,49 @@ test("each boot its own mounting; a restarted server numbers a boot's messages o
     assert.deepEqual(await store.mountingOf("aaaaaaaa"), before);
     assert.equal(await store.mountingOf("cccccccc"), null);
     // Its messages are numbered on.
-    const s = again.moveStart({ move: 8, command: 2, kind: "drive", param: 0.1, tUs: 3e6, preMs: 200, postMs: 200, refused: false });
-    assert.equal(s.msg, 3);
+    const s = again.moveStart({ move: 8, command: 2, kind: "drive", parameter: 0.1, tUs: 3e6, preMs: 200, postMs: 200, refused: false });
+    assert.equal(s.messageNumber, 3);
     close(s.tS, 3, 1e-9);
     await store.setMounting("aaaaaaaa", now);
     assert.equal((await store.mountingOf("aaaaaaaa"))!.tof.z_m, now.tof.z_m);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("status rows and the path driven up to a snapshot", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-path-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-path-"));
   try {
-    const store = new Store(path.join(dir, DB_FILE));
+    const store = new Store(path.join(directory, DB_FILE));
     const boot = await store.openBoot({ version: WIRE_VERSION, bootId: "0000beef", build: "test" }, now);
     for (const x of [0, 0.1, 0.2]) void store.status(boot, boot.status(pose(x)));
     await store.flush();
     const columns = await store.query("SELECT column_name AS c FROM information_schema.columns WHERE table_name = 'status' ORDER BY ordinal_position");
-    assert.deepEqual(columns.map(r => r.c), ["boot_id", "msg", "arrived_at", "x", "y", "yaw", "mode", "action", "rssi"]); // no peaks
-    assert.deepEqual(await store.query("SELECT msg, x, rssi FROM status ORDER BY msg"),
-      [{ msg: 1, x: 0, rssi: -60 }, { msg: 2, x: 0.1, rssi: -60 }, { msg: 3, x: 0.2, rssi: -60 }]);
+    assert.deepEqual(columns.map(r => r.c), ["boot_id", "message_number", "arrived_at", "x", "y", "yaw", "mode", "action", "rssi"]); // no peaks
+    assert.deepEqual(await store.query("SELECT message_number, x, rssi FROM status ORDER BY message_number"),
+      [{ message_number: 1, x: 0, rssi: -60 }, { message_number: 2, x: 0.1, rssi: -60 }, { message_number: 3, x: 0.2, rssi: -60 }]);
     assert.deepEqual(await store.path("0000beef", 1), []); // no such snapshot: nothing
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("the old database is never opened: the store's own file, only it in a temp dir", async () => {
+test("the old database is never opened: the store's own file, only it in a temp directory", async () => {
   assert.equal(path.basename(DB_PATH), process.env.ROBOT_DB ? path.basename(process.env.ROBOT_DB) : "robot2.duckdb");
   assert.notEqual(path.basename(DB_PATH), "robot.duckdb");
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-new-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-new-"));
   try {
-    const store = new Store(path.join(dir, DB_FILE));
+    const store = new Store(path.join(directory, DB_FILE));
     await store.query("SELECT 1");
-    assert.deepEqual(readdirSync(dir).filter(f => !f.endsWith(".wal")), ["robot2.duckdb"]);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+    assert.deepEqual(readdirSync(directory).filter(f => !f.endsWith(".wal")), ["robot2.duckdb"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("the server restarted in the middle of a move: the boot goes on, its messages numbered on", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-restart-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-restart-"));
   try {
-    const file = path.join(dir, DB_FILE), wall = Date.UTC(2026, 10, 7, 20);
+    const file = path.join(directory, DB_FILE), wall = Date.UTC(2026, 10, 7, 20);
     let store = new Store(file);
     const hello = { version: WIRE_VERSION, bootId: "0000aaaa", build: "test" };
     let boot = await store.openBoot(hello, now, wall);
     const raw = (s: number) => s * 1e6; // µs since power-up, as the robot sends its times
-    await store.moveStart(boot, boot.moveStart({ move: 1, command: 1, kind: "rotate", param: 1, tUs: raw(28), preMs: 200, postMs: 200, refused: false }, wall + 28000));
+    await store.moveStart(boot, boot.moveStart({ move: 1, command: 1, kind: "rotate", parameter: 1, tUs: raw(28), preMs: 200, postMs: 200, refused: false }, wall + 28000));
     await store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: raw(29.5), frame: frame(1, robotClock(raw(29.5))) }, wall + 29500));
     await store.imuBatch(boot, boot.imuBatch(imu(1, raw(29.9), 10), wall + 29950));
     await store.flush();
@@ -206,19 +206,19 @@ test("the server restarted in the middle of a move: the boot goes on, its messag
     close(ts[0], 29.9, 1e-6);
     close(ts[12], 30.5 + 2 * 0.009615, 1e-6);
     assert.ok(ts.every((t, i) => i === 0 || t > ts[i - 1])); // grows through the restart
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("imu records missing: counted from the gaps in the stored times", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-gaps-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-gaps-"));
   try {
-    const store = new Store(path.join(dir, DB_FILE));
+    const store = new Store(path.join(directory, DB_FILE));
     const boot = await store.openBoot({ version: WIRE_VERSION, bootId: "0000cafe", build: "test" }, now);
     const t0 = 30e6;
     const at = (move: number, ks: number[], jitterUs = 0) => ({ move, records: ks.map((k, i) =>
-      ({ tUs: (t0 + k * 9615 + (i % 2) * jitterUs), accel: [k, 0, 16384] as [number, number, number], gyro: [0, 0, 0] as [number, number, number] })) });
+      ({ tUs: (t0 + k * 9615 + (i % 2) * jitterUs), acceleration: [k, 0, 16384] as [number, number, number], gyro: [0, 0, 0] as [number, number, number] })) });
     for (const move of [1, 2, 3]) {
-      await store.moveStart(boot, boot.moveStart({ move, command: move, kind: "rotate", param: 1, tUs: t0, preMs: 200, postMs: 200, refused: false }));
+      await store.moveStart(boot, boot.moveStart({ move, command: move, kind: "rotate", parameter: 1, tUs: t0, preMs: 200, postMs: 200, refused: false }));
     }
     // Move 1: a batch of 10, then one record missing at the batch boundary.
     await store.imuBatch(boot, boot.imuBatch(at(1, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])));
@@ -234,5 +234,5 @@ test("imu records missing: counted from the gaps in the stored times", async () 
     assert.deepEqual(await count(2), { records: 7, batches: 2, missing: 3 });
     assert.deepEqual(await count(3), { records: 4, batches: 1, missing: 0 });
     assert.equal((await store.moveFrames("0000cafe", 2))!.imu.missing, 3);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

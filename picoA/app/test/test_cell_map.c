@@ -113,8 +113,8 @@ static void measure(posed_frame_t *f, const pose_t *pose) {
 static void add_as_used(const posed_frame_t *f) {
     uint8_t bytes[TOF_FORMAT_MAX];
     posed_frame_t used;
-    uint32_t n_bytes = tof_pack(TOF_USE_MAP, f, bytes);
-    assert(tof_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
+    uint32_t n_bytes = tof_format_pack(TOF_USE_MAP, f, bytes);
+    assert(tof_format_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
     cell_map_add(&used);
 }
 
@@ -435,12 +435,12 @@ int main(void) {
     house_map_put(-55, 3, COLUMN_OPEN);    // a known class overwrites
     assert(house_map_get(-55, 3) == COLUMN_OPEN && house_map_get(-55, 4) == COLUMN_UNKNOWN);
     int16_t tx, ty;
-    const uint8_t *cols;
+    const uint8_t *columns;
     assert(house_map_tiles() == 1);
-    house_map_tile(0, &tx, &ty, &cols);
+    house_map_tile(0, &tx, &ty, &columns);
     assert(tx == -3 && ty == 0); // tile -3 holds columns -70 … -51
     // Column (-55, 3) is (15, 13) in its tile: byte (15 * 20 + 13) / 2, the high half.
-    assert(cols[(15 * 20 + 13) / 2] >> 4 == COLUMN_OPEN && (cols[(16 * 20 + 13) / 2] >> 4) == COLUMN_DRIVABLE);
+    assert(columns[(15 * 20 + 13) / 2] >> 4 == COLUMN_OPEN && (columns[(16 * 20 + 13) / 2] >> 4) == COLUMN_DRIVABLE);
     assert(house_map_next_dirty(0) == 0);
     house_map_sent(0);
     assert(house_map_next_dirty(0) == -1);

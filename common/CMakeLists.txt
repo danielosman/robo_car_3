@@ -1,6 +1,6 @@
 # Code shared by both Picos.
 
-# The PicoA <-> PicoB link (link.h) and its messages (link_msgs.h).
+# The PicoA <-> PicoB link (link.h) and its messages (link_messages.h).
 add_library(common_link INTERFACE)
 target_sources(common_link INTERFACE ${CMAKE_CURRENT_LIST_DIR}/link.c)
 target_include_directories(common_link INTERFACE ${CMAKE_CURRENT_LIST_DIR})

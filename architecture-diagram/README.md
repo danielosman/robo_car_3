@@ -52,7 +52,7 @@ architecture-diagram/
   the new width. A node made by a member sits on that member's row.
 - **Subflows** start at the row where they leave the parent, beside its ribbon. A
   ribbon is as wide as what the code really hands over: `tilt-stop` is fat up to
-  `drive_update`, because `drive_update` gets all of `odom_t` and picks pitch and
+  `drive_update`, because `drive_update` gets all of `odometry_t` and picks pitch and
   roll inside (the pick's circle sits on its row).
 - **Built or planned:** planned things are dashed; ones the plan removes are greyed.
 - **A list of flows** (left): name, id, description, from → to.

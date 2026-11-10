@@ -12,7 +12,7 @@ import type { PosedFrame } from "./tof_format.ts";
 import type { LivePose } from "./link.ts";
 
 // The rows the store writes (store.ts), one per message.
-export interface Stamp { boot: string; msg: number; atMs: number }
+export interface Stamp { boot: string; messageNumber: number; atMs: number }
 export type MoveStartRow = Stamp & MoveStart & { tS: number };
 export type MoveEndRow = Stamp & MoveEnd & { tS: number };
 export type TofRow = Stamp & { format: string; frame: PosedFrame; move: number; tS: number };
@@ -37,7 +37,7 @@ export class Boot {
   get messages(): number { return this.count; }
 
   // The next message's stamp.
-  stamp(atMs = Date.now()): Stamp { return { boot: this.id, msg: ++this.count, atMs }; }
+  stamp(atMs = Date.now()): Stamp { return { boot: this.id, messageNumber: ++this.count, atMs }; }
 
   moveStart(m: MoveStart, atMs = Date.now()): MoveStartRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }
   moveEnd(m: MoveEnd, atMs = Date.now()): MoveEndRow { return { ...this.stamp(atMs), ...m, tS: seconds(m.tUs) }; }

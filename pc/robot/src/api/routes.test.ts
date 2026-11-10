@@ -38,8 +38,8 @@ class EchoRobot extends EventEmitter {
 }
 
 async function setUp(chat?: Chat) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "api-"));
-  const { store, boot } = await storeWithSnapshots(dir);
+  const directory = mkdtempSync(path.join(os.tmpdir(), "api-"));
+  const { store, boot } = await storeWithSnapshots(directory);
   const robot = new EchoRobot(), snapshots = new StoredSnapshots(), log = new Log(null, false);
   snapshots.add("x", 5);
   const live = new LiveRobot();
@@ -47,14 +47,14 @@ async function setUp(chat?: Chat) {
   live.setBoot(boot.id);
   live.setPose(livePose({ type: "status", x: 0.43, y: -0.04, yaw: 30 * Math.PI / 180, mode: "manual", action: "", rssi: -58 }));
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
-  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDir: dir, bootFolders: new BootFolders(dir),
+  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
                           chat, modelName: "gemma-fake" });
   const post = async (command: string, body = "", query = "") => {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });
     return { status: r.status, text: await r.text() };
   };
-  const done = async () => { rmSync(dir, { recursive: true, force: true }); };
-  return { post, robot, log, dir, done, store, boot, live };
+  const done = async () => { rmSync(directory, { recursive: true, force: true }); };
+  return { post, robot, log, directory, done, store, boot, live };
 }
 
 const AT = '"pose":{"x":43,"y":-4,"yaw":0}';
@@ -109,7 +109,7 @@ test("check on the newest snapshot's map", { skip }, async () => {
 });
 
 test("reads: status, map, tof, camera, light, features, log; errors; help", { skip }, async () => {
-  const { post, dir, done, boot } = await setUp();
+  const { post, directory, done, boot } = await setUp();
   const read = async (command: string, arg = "", query = "") => JSON.parse((await post(command, arg, query)).text);
   try {
     const status = await read("status");
@@ -121,7 +121,7 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     assert.ok(map.rows.join("").includes("#"));
     assert.equal(map.legend["#"], "blocked (3-13 cm high)");
     const png = (await read("map", "1", "?png")).file;
-    assert.equal(png, path.join(dir, "map", png.split(path.sep).at(-2), "1.png"));
+    assert.equal(png, path.join(directory, "map", png.split(path.sep).at(-2), "1.png"));
     assert.ok(existsSync(png));
     const tofText = (await post("tof", "1")).text;
     assert.match(tofText, /"distance": \[\n {4}\[/); // a matrix, one row a line
@@ -147,7 +147,7 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
   const { post, done, store, boot } = await setUp();
   try {
     const t0 = 5e9; // µs since power-up, past 2^32: nothing wraps
-    await store.moveStart(boot, boot.moveStart({ move: 1, command: 7, kind: "rotate", param: Math.PI / 6, tUs: t0, preMs: 200, postMs: 200, refused: false }));
+    await store.moveStart(boot, boot.moveStart({ move: 1, command: 7, kind: "rotate", parameter: Math.PI / 6, tUs: t0, preMs: 200, postMs: 200, refused: false }));
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: k === 0 ? 0 : k === 1 ? 2550 : 300 + 10 * k, signal: k, sigmaMm: 5,
       kind: k === 0 ? "nothing" as const : k === 2 ? "unsure" as const : k === 3 ? "less_sure" as const : "sure" as const, targets: k ? 1 : 0 }));
     for (let n = 1; n <= 2; n++) {
@@ -156,7 +156,7 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     }
     // Its imu records: a batch of 10 and its last 3.
     const records = (from: number, n: number) => Array.from({ length: n }, (_, i) =>
-      ({ tUs: (t0 - 20000 + (from + i) * 9615), accel: [from + i, -1, 16384] as [number, number, number],
+      ({ tUs: (t0 - 20000 + (from + i) * 9615), acceleration: [from + i, -1, 16384] as [number, number, number],
          gyro: [-32768, 32767, 0 - (from + i) % 10] as [number, number, number] }));
     await store.imuBatch(boot, boot.imuBatch({ move: 1, records: records(0, 10) }));
     await store.imuBatch(boot, boot.imuBatch({ move: 1, records: records(10, 3) }));
@@ -181,7 +181,7 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     assert.equal(j.frames[0].distance_mm[7][7], 300 + 630);
     // A move with frames dropped on the robot (the lane full) and lost with a dropped
     // connection (sent, never arrived): 1 stored of 3 sent, 2 dropped, 2 lost.
-    await store.moveStart(boot, boot.moveStart({ move: 2, command: 8, kind: "drive", param: 0.5, tUs: t0 + 400000, preMs: 200, postMs: 200, refused: false }));
+    await store.moveStart(boot, boot.moveStart({ move: 2, command: 8, kind: "drive", parameter: 0.5, tUs: t0 + 400000, preMs: 200, postMs: 200, refused: false }));
     await store.tof(boot, boot.tof({ format: "compact", move: 2, tUs: t0 + 450000, frame: { number: 50, robotClockUs: (t0 + 450000) % 2 ** 32, periodUs: 100000, x: 0.5, y: -0.25, yaw: 0.2,
       pitch: 0, turn: 0, still: false, poseKnown: true, beyondMm: 2550, zones } }));
     await store.moveEnd(boot, boot.moveEnd({ move: 2, end: "ok", tUs: t0 + 900000, framesSent: 3, framesDropped: 2, moved: 0.5, rotated: 0, imuSent: 3, imuDropped: 1 }));
@@ -204,7 +204,7 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     const imu = (await post("imu", `${boot.id} 1`)).text.split("\n");
     assert.equal(imu[0], lines[0]);
     assert.equal(imu[2], lines[2]);
-    assert.match(imu[3], /^ax, ay, az \(accel\) and gx, gy, gz \(gyro\): the IMU's raw counts in its own axes/);
+    assert.match(imu[3], /^ax, ay, az \(acceleration\) and gx, gy, gz \(gyro\): the IMU's raw counts in its own axes/);
     assert.equal(imu[5], "       t s      ax     ay     az     gx     gy     gz");
     const counts = (line: string) => line.trim().split(/ +/);
     assert.equal(imu[6].length, imu[5].length);
@@ -213,7 +213,7 @@ test("frames and imu: a move's frames, its imu records, as text and as JSON; a b
     assert.equal(imu.filter(l => /^ +\d+\.\d{4} /.test(l)).length, 13);
     const ij = JSON.parse((await post("imu", `${boot.id} 1`, "?json")).text);
     assert.equal(ij.records.length, 13);
-    assert.deepEqual(ij.records[12].accel, [12, -1, 16384]);
+    assert.deepEqual(ij.records[12].acceleration, [12, -1, 16384]);
     assert.ok(Math.abs(ij.records[12].t_s - ij.records[0].t_s - 12 * 0.009615) < 1e-6);
     assert.deepEqual([ij.imu_records_stored, ij.imu_batches_stored], [13, 2]);
     assert.equal((await post("imu", `${folder} 2`)).status, 200);

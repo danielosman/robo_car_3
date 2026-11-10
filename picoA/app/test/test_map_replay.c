@@ -83,8 +83,8 @@ static void run(int n) {
     for (int i = 0; i < n; i++) {
         uint8_t bytes[TOF_FORMAT_MAX];
         posed_frame_t used;
-        uint32_t n_bytes = tof_pack(TOF_USE_MAP, &frames[i], bytes);
-        assert(tof_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
+        uint32_t n_bytes = tof_format_pack(TOF_USE_MAP, &frames[i], bytes);
+        assert(tof_format_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
         cell_map_add(&used);
     }
 }

@@ -420,7 +420,7 @@ speed, so that a blip causes only a small twitch. (Not answered.)
 
 - **Roll in the pose:** when turning, the robot rolls 3-5°, and the map and the
   ToF floor rows ignore it. This includes the ToF frame time from the INT pin, the
-  IMU sample time in ODOM, and DRIVE sent on change
+  IMU sample time in ODOMETRY, and DRIVE sent on change
   ([archive/ARCHITECTURE_PLAN.md](archive/ARCHITECTURE_PLAN.md) A2). Do it only
   when a feature needs it, for example if door edges show false movement while
   turning.

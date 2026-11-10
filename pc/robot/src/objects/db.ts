@@ -10,49 +10,49 @@ import type { Mounting } from "../mounting.ts";
 // model: who found the boxes (the vision model, or detect_save's --by). From detect_save
 // the rest may be null: an outside agent doesn't say how it worked.
 export interface DetectRun {
-  boot: string; seq: number; atMs: number; model: string; promptVersion: number | null; thinking: boolean | null;
+  boot: string; sequence: number; atMs: number; model: string; promptVersion: number | null; thinking: boolean | null;
   reasoningBudget: number | null; seconds: number | null; turns: number | null; result: "ok" | "failed"; why: string | null; transcript: string | null;
 }
 
 export interface StoredObject {
-  object_id: string; seq: number; n: number; label: string; floor: string; kind: string | null; distance: number | null;
+  object_id: string; sequence: number; n: number; label: string; floor: string; kind: string | null; distance: number | null;
   cx: number | null; cy: number | null; width: number | null; depth: number | null; angle: number | null;
   ymin: number; xmin: number; ymax: number; xmax: number; confidence: number | null;
 }
 
-const snapId = (boot: string, seq: number) => `${boot}-${seq}`;
+const snapshotId = (boot: string, sequence: number) => `${boot}-${sequence}`;
 const localUs = (ms: number) => BigInt(Math.round((ms - new Date(ms).getTimezoneOffset() * 60000) * 1000));
 
 // Saves a run, replacing the snapshot's earlier one (to tweak later: keep every run).
 export async function saveRun(store: Store, run: DetectRun, detections: Detection[], placed: Placed[]): Promise<void> {
-  const id = snapId(run.boot, run.seq);
+  const id = snapshotId(run.boot, run.sequence);
   await store.write(async c => {
     await c.run("BEGIN TRANSACTION");
-    const objects = (await c.runAndReadAll("SELECT object_id FROM object_detections WHERE snap_id = $1", [id])).getRowObjects();
+    const objects = (await c.runAndReadAll("SELECT object_id FROM object_detections WHERE snapshot_id = $1", [id])).getRowObjects();
     for (const o of objects) await c.run("DELETE FROM map_objects WHERE object_id = $1", [String(o.object_id)]);
-    for (const table of ["detect_runs", "detections", "object_detections"]) await c.run(`DELETE FROM ${table} WHERE snap_id = $1`, [id]);
+    for (const table of ["detect_runs", "detections", "object_detections"]) await c.run(`DELETE FROM ${table} WHERE snapshot_id = $1`, [id]);
     await c.run(`INSERT INTO detect_runs VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [id, run.boot, run.seq, timestampValue(localUs(run.atMs)), run.model, run.promptVersion, run.thinking, run.seconds,
+      [id, run.boot, run.sequence, timestampValue(localUs(run.atMs)), run.model, run.promptVersion, run.thinking, run.seconds,
        run.turns, run.result, run.why, run.transcript, run.reasoningBudget]);
     for (const [n, d] of detections.entries()) {
       const p = placed[n], objectId = `${id}-${n}`;
       await c.run("INSERT INTO detections VALUES ($1, $2, $3, $4, $5, $6, $7, $8)", [id, n, d.label, ...d.bbox, d.confidence]);
       await c.run("INSERT INTO map_objects VALUES ($1, $2, $3, $4, 'camera', $5, $6, $7, $8, $9, $10, $11, $12)",
-        [objectId, run.boot, run.seq, d.label, p.floor, p.kind, p.distanceM, p.cx, p.cy, p.width, p.depth, p.angle]);
+        [objectId, run.boot, run.sequence, d.label, p.floor, p.kind, p.distanceM, p.cx, p.cy, p.width, p.depth, p.angle]);
       await c.run("INSERT INTO object_detections VALUES ($1, $2, $3)", [objectId, id, n]);
     }
     await c.run("COMMIT");
   });
 }
 
-const OBJECTS_SQL = `SELECT o.object_id, o.seq, od.n, o.label, o.floor, o.kind, o.distance, o.cx, o.cy, o.width, o.depth, o.angle,
+const OBJECTS_SQL = `SELECT o.object_id, o.sequence, od.n, o.label, o.floor, o.kind, o.distance, o.cx, o.cy, o.width, o.depth, o.angle,
     d.ymin, d.xmin, d.ymax, d.xmax, d.confidence
-  FROM map_objects o JOIN object_detections od USING (object_id) JOIN detections d ON d.snap_id = od.snap_id AND d.n = od.n`;
+  FROM map_objects o JOIN object_detections od USING (object_id) JOIN detections d ON d.snapshot_id = od.snapshot_id AND d.n = od.n`;
 
 const numberOrNull = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 function objectRow(r: Record<string, unknown>): StoredObject {
   return {
-    object_id: String(r.object_id), seq: Number(r.seq), n: Number(r.n), label: String(r.label), floor: String(r.floor),
+    object_id: String(r.object_id), sequence: Number(r.sequence), n: Number(r.n), label: String(r.label), floor: String(r.floor),
     kind: r.kind === null ? null : String(r.kind), distance: numberOrNull(r.distance),
     cx: numberOrNull(r.cx), cy: numberOrNull(r.cy), width: numberOrNull(r.width), depth: numberOrNull(r.depth), angle: numberOrNull(r.angle),
     ymin: Number(r.ymin), xmin: Number(r.xmin), ymax: Number(r.ymax), xmax: Number(r.xmax), confidence: numberOrNull(r.confidence),
@@ -60,34 +60,34 @@ function objectRow(r: Record<string, unknown>): StoredObject {
 }
 
 // The snapshot's run and its objects; null if detect never ran on it.
-export async function runOf(store: Store, boot: string, seq: number) {
-  const id = snapId(boot, seq);
+export async function runOf(store: Store, boot: string, sequence: number) {
+  const id = snapshotId(boot, sequence);
   return store.read(async c => {
     const run = (await c.runAndReadAll(`SELECT model, prompt_version, thinking, reasoning_budget, seconds, turns, result, why,
-      strftime(ran_at, '%Y-%m-%d %H:%M:%S') AS ran_at FROM detect_runs WHERE snap_id = $1`, [id])).getRowObjectsJson()[0];
+      strftime(ran_at, '%Y-%m-%d %H:%M:%S') AS ran_at FROM detect_runs WHERE snapshot_id = $1`, [id])).getRowObjectsJson()[0];
     if (!run) return null;
-    const objects = (await c.runAndReadAll(`${OBJECTS_SQL} WHERE od.snap_id = $1 ORDER BY od.n`, [id])).getRowObjectsJson();
+    const objects = (await c.runAndReadAll(`${OBJECTS_SQL} WHERE od.snapshot_id = $1 ORDER BY od.n`, [id])).getRowObjectsJson();
     return { run: run as Record<string, unknown>, objects: objects.map(o => objectRow(o as Record<string, unknown>)) };
   });
 }
 
-// The boot's objects from snapshots up to seq (the map as the page shows it then).
-export async function objectsUpTo(store: Store, boot: string, seq: number): Promise<StoredObject[]> {
-  return store.read(async c => (await c.runAndReadAll(`${OBJECTS_SQL} WHERE o.boot_id = $1 AND o.seq <= $2 ORDER BY o.seq, od.n`,
-    [boot, seq])).getRowObjectsJson().map(o => objectRow(o as Record<string, unknown>)));
+// The boot's objects from snapshots up to sequence (the map as the page shows it then).
+export async function objectsUpTo(store: Store, boot: string, sequence: number): Promise<StoredObject[]> {
+  return store.read(async c => (await c.runAndReadAll(`${OBJECTS_SQL} WHERE o.boot_id = $1 AND o.sequence <= $2 ORDER BY o.sequence, od.n`,
+    [boot, sequence])).getRowObjectsJson().map(o => objectRow(o as Record<string, unknown>)));
 }
 
 // For the page: the snapshot's run and boxes, and the boot's objects up to it.
-export async function pageObjects(store: Store, boot: string, seq: number) {
-  const here = await runOf(store, boot, seq), all = await objectsUpTo(store, boot, seq);
+export async function pageObjects(store: Store, boot: string, sequence: number) {
+  const here = await runOf(store, boot, sequence), all = await objectsUpTo(store, boot, sequence);
   return { run: here?.run ?? null, here: here?.objects ?? [], map: all };
 }
 
 // The run's conversation (JSON), for looking at what the model said: null if nothing
 // ran; transcript null if detect_save saved it without one.
-export async function transcriptOf(store: Store, boot: string, seq: number): Promise<{ by: string; transcript: string | null } | null> {
-  const rows = await store.read(async c => (await c.runAndReadAll("SELECT model, transcript FROM detect_runs WHERE snap_id = $1",
-    [snapId(boot, seq)])).getRowObjects());
+export async function transcriptOf(store: Store, boot: string, sequence: number): Promise<{ by: string; transcript: string | null } | null> {
+  const rows = await store.read(async c => (await c.runAndReadAll("SELECT model, transcript FROM detect_runs WHERE snapshot_id = $1",
+    [snapshotId(boot, sequence)])).getRowObjects());
   if (!rows.length) return null;
   return { by: String(rows[0].model), transcript: rows[0].transcript === null ? null : String(rows[0].transcript) };
 }
@@ -100,7 +100,7 @@ export async function placeAgain(store: Store, placeOne: (d: Pick<Detection, "la
                                                           mounting: Mounting) => Placed, boot: string | null = null): Promise<number> {
   return store.write(async c => {
     const rows = (await c.runAndReadAll(`SELECT od.object_id, d.label, d.ymin, d.xmin, d.ymax, d.xmax, s.x, s.y, s.yaw, s.pitch, b.mounting
-      FROM object_detections od JOIN detections d ON d.snap_id = od.snap_id AND d.n = od.n JOIN snapshots s ON s.snap_id = od.snap_id
+      FROM object_detections od JOIN detections d ON d.snapshot_id = od.snapshot_id AND d.n = od.n JOIN snapshots s ON s.snapshot_id = od.snapshot_id
       JOIN boots b ON b.boot_id = s.boot_id WHERE s.x IS NOT NULL AND ($1::VARCHAR IS NULL OR s.boot_id = $1)`, [boot])).getRowObjects();
     await c.run("BEGIN TRANSACTION");
     for (const r of rows) {

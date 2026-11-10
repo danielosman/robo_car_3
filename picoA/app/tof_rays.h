@@ -30,7 +30,7 @@ typedef enum {
 // A zone's reading placed in the world (the "rays" of doc/DATA_FLOW_PLAN.md).
 typedef struct {
     float origin[3];           // the sensor, in the world (z above the floor)
-    float dir[TOF_RAYS_N][3];  // the rays, in the world (pitch and yaw applied); k = down third * 3 + left third
+    float direction[TOF_RAYS_N][3];  // the rays, in the world (pitch and yaw applied); k = down third * 3 + left third
     float length_m;            // along each ray
     float point[3];            // where the centre ray ends
     float low_m, high_m;       // the lowest and highest ray end (height above the floor)
@@ -46,16 +46,16 @@ void tof_rays_of(const posed_frame_t *f, int zone, float length_m, tof_rays_t *o
 
 // In the robot frame, the robot level (for watching):
 void tof_rays_origin(float origin[3]); // the sensor (z above the floor)
-void tof_rays_direction(int zone, float dir[3]); // the zone's centre ray
+void tof_rays_direction(int zone, float direction[3]); // the zone's centre ray
 float tof_rays_zone_rad(void); // one zone's angle
 // The row index from which down the rows look at the floor (rows 5-8; watch ignores
 // them while turning). Not the same as floor_limit_m() > 0: row 5's upper edge is
 // level, so it has no limit, but it looks down.
 int tof_rays_first_floor_row(void);
 // Only for the host tests' simulated sensors (the robot's code uses tof_rays_of()): a
-// ray inside the zone, down_frac and left_frac (−0.5…0.5) of it from its centre
+// ray inside the zone, down_fraction and left_fraction (−0.5…0.5) of it from its centre
 // (+ = down, left), with the robot pitched nose up by pitch_rad.
-void tof_rays_sub_direction(int zone, float down_frac, float left_frac, float pitch_rad, float dir[3]);
+void tof_rays_sub_direction(int zone, float down_fraction, float left_fraction, float pitch_rad, float direction[3]);
 // For a zone that sees the floor: the farthest reading that can still be its floor
 // (robot level; farther ones are reflections or a drop, and tell nothing about what
 // stands there). 0 for zones with no such limit.

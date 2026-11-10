@@ -16,10 +16,10 @@
 // | 0x03 | answer        | control      | command n u32; end u8 (wire_end_t); has u8 (WIRE_HAS_*); x, y f32 m; yaw f32 rad; moved f32 m; rotated f32 rad; goal f32 m; snapshot u32 (34 B) |
 // | 0x04 | status        | control      | x, y f32 m; yaw f32 rad (not wrapped); mode char[8]; action char[12] ("" none); WiFi signal i8 dBm (0 unknown) (33 B) |
 // | 0x05 | map cleared   | control      | none |
-// | 0x06 | move start    | control      | move n u32; command n u32; kind u8 (wire_move_kind_t); param f32 (drive m, turn rad, go to: m to the goal, watch s); t u64; pre_ms u16; post_ms u16; flags u8 (bit 0 refused: it ends at once, a running move goes on) (26 B) |
+// | 0x06 | move start    | control      | move n u32; command n u32; kind u8 (wire_move_kind_t); parameter f32 (drive m, turn rad, go to: m to the goal, watch s); t u64; pre_ms u16; post_ms u16; flags u8 (bit 0 refused: it ends at once, a running move goes on) (26 B) |
 // | 0x07 | move end      | control      | move n u32; end u8 (wire_end_t); t u64; frames sent u32; frames dropped u32; moved f32 m; rotated f32 rad; imu batches sent u32; imu batches dropped u32 (37 B) |
 // | 0x10 | snapshot part | bulk         | the next 1-1400 bytes of a snapshot (snapshot.h); a snapshot's parts in order |
-// | 0x11 | imu batch     | bulk         | move n u32; first record's t u64; period u16 µs; count u8 (1-10); then per record accel x, y, z, gyro x, y, z i16 (raw counts, link_msgs.h) (15 + 12 × count B); only during a move (move.h) |
+// | 0x11 | imu batch     | bulk         | move n u32; first record's t u64; period u16 µs; count u8 (1-10); then per record acceleration x, y, z, gyro x, y, z i16 (raw counts, link_messages.h) (15 + 12 × count B); only during a move (move.h) |
 // | 0x40 | tof compact   | bulk         | move n u32; t u64 (the frame's middle); then a compact tof frame (tof_format.h; its types come from tof_format_message_type()) (12 + 277 B); only during a move (move.h) |
 // | 0x20 | command       | to the robot | command n u32; the command's text, 1-46 printable ASCII (commands.h) |
 // | 0x21 | heartbeat     | to the robot | none (every 2 s: the robot closes after 30 s of nothing) |
@@ -36,14 +36,14 @@
 // measured at t + i × period.
 #include <stdbool.h>
 #include <stdint.h>
-#include "link_msgs.h"
+#include "link_messages.h"
 #include "tof_format.h"
 
 #define WIRE_VERSION 4 // up when any payload or the table changes; the PC refuses another
 
 #define WIRE_HEADER      3
 #define WIRE_PAYLOAD_MAX 1400 // the longest payload of any message (a snapshot part)
-#define WIRE_MSG_MAX     (WIRE_HEADER + WIRE_PAYLOAD_MAX)
+#define WIRE_MESSAGE_MAX     (WIRE_HEADER + WIRE_PAYLOAD_MAX)
 
 enum {
     WIRE_HELLO = 0x01,
@@ -94,13 +94,13 @@ typedef struct {
     uint8_t type;
     const uint8_t *payload; // inside the bytes given to wire_take()
     uint16_t len;
-} wire_msg_t;
+} wire_message_t;
 // The first message in bytes[0..len): > 0 its length (header and payload; it is in
 // *m), 0 if it isn't whole yet, < 0 a wire_error_t (the stream is broken from here).
-int32_t wire_take(const uint8_t *bytes, uint32_t len, wire_msg_t *m);
+int32_t wire_take(const uint8_t *bytes, uint32_t len, wire_message_t *m);
 const char *wire_error_text(int32_t error);
 // The type of a whole message made by the encoders below (its first byte).
-static inline uint8_t wire_type(const uint8_t *msg) { return msg[0]; }
+static inline uint8_t wire_type(const uint8_t *message) { return message[0]; }
 // Writes the header: type, payload length; returns WIRE_HEADER. The payload follows.
 uint32_t wire_header(uint8_t *out, uint8_t type, uint16_t len);
 
@@ -114,12 +114,12 @@ typedef struct {
     char build[WIRE_BUILD_LEN + 1]; // when the firmware was built
 } wire_hello_t;
 uint32_t wire_encode_hello(const wire_hello_t *h, uint8_t *out);
-bool wire_decode_hello(const wire_msg_t *m, wire_hello_t *h);
+bool wire_decode_hello(const wire_message_t *m, wire_hello_t *h);
 
 // text: n bytes (more than WIRE_CONSOLE_MAX are cut), without '\n'.
 uint32_t wire_encode_console(const char *text, uint32_t n, uint8_t *out);
 // The line into text (room for WIRE_CONSOLE_MAX + 1), NUL-terminated.
-bool wire_decode_console(const wire_msg_t *m, char *text);
+bool wire_decode_console(const wire_message_t *m, char *text);
 
 // How a command ended (the PC's answers name them: pc/robot/src/api/answers.ts).
 typedef enum {
@@ -139,7 +139,7 @@ typedef struct {
     uint32_t snapshot;     // its number
 } wire_answer_t;
 uint32_t wire_encode_answer(const wire_answer_t *a, uint8_t *out);
-bool wire_decode_answer(const wire_msg_t *m, wire_answer_t *a);
+bool wire_decode_answer(const wire_message_t *m, wire_answer_t *a);
 
 typedef struct {
     float x_m, y_m, yaw_rad;
@@ -148,7 +148,7 @@ typedef struct {
     int8_t rssi_dbm;                  // 0: not known
 } wire_status_t;
 uint32_t wire_encode_status(const wire_status_t *s, uint8_t *out);
-bool wire_decode_status(const wire_msg_t *m, wire_status_t *s);
+bool wire_decode_status(const wire_message_t *m, wire_status_t *s);
 
 uint32_t wire_encode_map_cleared(uint8_t *out);
 
@@ -158,14 +158,14 @@ typedef struct {
     uint32_t move;         // counts the moves since power-up, from 1
     uint32_t command;      // the number of the command that started it (0: typed on USB without one)
     uint8_t kind;          // wire_move_kind_t
-    float param;           // drive: m (+ = forward); rotate: rad (+ = left); go to: m to the goal; watch: s
+    float parameter;           // drive: m (+ = forward); rotate: rad (+ = left); go to: m to the goal; watch: s
     uint64_t t_us;         // when it started (since power-up)
     uint16_t pre_ms, post_ms; // the still times it stands before and after
     uint8_t flags;         // WIRE_MOVE_REFUSED
 } wire_move_start_t;
 #define WIRE_MOVE_REFUSED 1 // it can't start: its end follows at once, and a running move goes on (it stays the open one)
 uint32_t wire_encode_move_start(const wire_move_start_t *s, uint8_t *out);
-bool wire_decode_move_start(const wire_msg_t *m, wire_move_start_t *s);
+bool wire_decode_move_start(const wire_message_t *m, wire_move_start_t *s);
 
 typedef struct {
     uint32_t move;
@@ -177,7 +177,7 @@ typedef struct {
     uint32_t imu_sent, imu_dropped; // imu batches handed to the bulk lane during the move, and refused by it
 } wire_move_end_t;
 uint32_t wire_encode_move_end(const wire_move_end_t *e, uint8_t *out);
-bool wire_decode_move_end(const wire_msg_t *m, wire_move_end_t *e);
+bool wire_decode_move_end(const wire_message_t *m, wire_move_end_t *e);
 
 // Up to WIRE_IMU_BATCH_MAX imu records of a move, oldest first, evenly spaced:
 // record i was measured at t_us + i × period_us. The records' own t_us is not on
@@ -190,7 +190,7 @@ typedef struct {
     imu_record_t records[WIRE_IMU_BATCH_MAX];
 } wire_imu_batch_t;
 uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out); // 0 if n is out of range
-bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b);
+bool wire_decode_imu_batch(const wire_message_t *m, wire_imu_batch_t *b);
 
 // A tof frame of a move, packed for `use` (tof_format.h), in its message (room for
 // WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX). t_us: the frame's middle, since
@@ -206,6 +206,6 @@ typedef struct {
 } wire_command_t;
 // 0 if text is empty, too long or not printable ASCII.
 uint32_t wire_encode_command(const wire_command_t *c, uint8_t *out);
-bool wire_decode_command(const wire_msg_t *m, wire_command_t *c);
+bool wire_decode_command(const wire_message_t *m, wire_command_t *c);
 
 uint32_t wire_encode_heartbeat(uint8_t *out);

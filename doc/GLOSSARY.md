@@ -5,6 +5,12 @@ Add terms here as they come up. Older plans in [archive/](archive/) used some
 words that are gone (log-odds, slice, credible, step); their meaning is in those
 plans.
 
+Names in the code are whole words. Short forms that stay: these acronyms, IMU
+(inertial measurement unit: gyro and accelerometer), ToF (time of flight: the distance
+sensor), PC, UART (the serial link between the Picos), CRC (a checksum), COBS (how the
+serial link frames messages), VL53 (the ToF chip, ST's VL53L8CX), ULD (ST's driver for
+it); and the short words listed in DATA_FLOW_PLAN.md step 4h ("Kept").
+
 ## Robot and time
 
 | Term | Meaning |
@@ -37,10 +43,10 @@ plans.
 | **sigma** | The VL53's estimate of a target's distance uncertainty (mm) |
 | **exposure / gain** | How long each camera row collects light / how much the signal is amplified |
 | **mounting** | Where the sensors sit on the robot: the ToF's and the camera's position, the ToF's zone angle and turn, the camera's f and tilt, the IMU's axes. One file, `common/mounting.json`; the C code gets it as a parameter (`mounting_t`); the PC keeps a copy per **boot**, taken when the boot was first seen |
-| **imu_sample** | One IMU reading, 416 a second: accel in g and gyro in °/s, the sensor's axes, the gyro's power-up bias taken out (PicoB's driver, `imu_sample_t`). Odometry uses it |
-| **imu_record** | 4 imu_samples averaged (104 a second): accel and gyro x, y, z as the sensor's own int16 counts (0.061 mg, 8.75 mdps a count), its axes, nothing taken out (raw), and the time (the middle of its samples). Made by PicoB's `odometry`, sent to PicoA in `MSG_IMU`, on PicoA's clock after `body`, stored on the PC (`imu` table): training data |
+| **imu_sample** | One IMU reading, 416 a second: acceleration in g and gyro in °/s, the sensor's axes, the gyro's power-up bias taken out (PicoB's driver, `imu_sample_t`). Odometry uses it |
+| **imu_record** | 4 imu_samples averaged (104 a second): acceleration and gyro x, y, z as the sensor's own int16 counts (0.061 mg, 8.75 mdps a count), its axes, nothing taken out (raw), and the time (the middle of its samples). Made by PicoB's `odometry`, sent to PicoA in `MESSAGE_IMU`, on PicoA's clock after `body`, stored on the PC (`imu` table): training data |
 | **imu_batch** | Up to 10 imu_records of a move (~0.1 s), evenly spaced: the move's number, the first record's time, the period, the count, the records. Made by `move` during a move, sent on bulk; dropped and counted when the lane is full |
-| **odom_report** | PicoB's odometry, 50 a second (`MSG_ODOM`): pose (x, y, yaw, pitch, roll), speeds, wheel distances, still, motors on, stop reason. No peaks since step 4c |
+| **odometry_report** | PicoB's odometry, 50 a second (`MESSAGE_ODOMETRY`): pose (x, y, yaw, pitch, roll), speeds, still, motors on, stop reason (37 B). No peaks since step 4c |
 | **rolling shutter** | The camera exposes its rows one after another, so each row has its own time (`camera_row_time()`) |
 
 ## Map
@@ -65,7 +71,7 @@ plans.
 | **watch** | Watching for movement around the robot: the module `watch` (`watch.h`, the one interface; inside it `watch_tof`, `watch_camera`, `tracker`). Was "movement detection" (`motion_sense`, `tof_motion`, `camera_motion`) until 7 Nov |
 | **background** | What a sensor sees when nothing moves. The VL53 keeps it per world direction (heading bins), so it stays valid while the robot turns; the camera per block, learned after each stop |
 | **blob** | Moved cells (zones or camera blocks) that touch, reported as one observation |
-| **observation** (`watch_obs_t`) | One detector's report of a blob: direction (+ = left), extent, distance if known, strength, time |
+| **observation** (`watch_observation_t`) | One detector's report of a blob: direction (+ = left), extent, distance if known, strength, time |
 | **target** | (in the tracker) the one blob the tracker follows; only logged |
 | **mover** | Something moving in the room (a person, a hand) |
 

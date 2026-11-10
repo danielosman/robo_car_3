@@ -22,7 +22,7 @@
 #include "link_pc.h"
 #include "camera.h"
 #include "watch.h"
-#include "loop_stats.h"
+#include "loop_statistics.h"
 #include "snapshot.h"
 #include "opt4048.h"
 #include "vision.h"
@@ -44,7 +44,7 @@ static void start_up(absolute_time_t usb_check) {
     }
 }
 
-static void stage_done(const char *stage) { loop_stats_stage(stage, time_us_32()); }
+static void stage_done(const char *stage) { loop_statistics_stage(stage, time_us_32()); }
 
 // A posed frame as a use gets it: packed in its format and unpacked again, the same
 // data the PC gets (doc/DATA_FLOW_PLAN.md). NULL if that failed (a format table bug):
@@ -52,8 +52,8 @@ static void stage_done(const char *stage) { loop_stats_stage(stage, time_us_32()
 static const posed_frame_t *as_used(tof_use_t use, const posed_frame_t *f) {
     static uint8_t bytes[TOF_FORMAT_MAX];
     static posed_frame_t unpacked;
-    uint32_t n_bytes = tof_pack(use, f, bytes);
-    return tof_unpack(tof_format_of(use), bytes, n_bytes, &unpacked) ? &unpacked : NULL;
+    uint32_t n_bytes = tof_format_pack(use, f, bytes);
+    return tof_format_unpack(tof_format_of(use), bytes, n_bytes, &unpacked) ? &unpacked : NULL;
 }
 
 // The ToF pipeline: each new frame, stamped with where the robot was, to the PC
@@ -94,7 +94,7 @@ int main(void) {
     bool color_ok = opt4048_init();
     absolute_time_t next_color = get_absolute_time();
     for (;;) {
-        loop_stats_begin(time_us_32());
+        loop_statistics_begin(time_us_32());
         start_up(usb_check);
         body_update();
         pose_update();

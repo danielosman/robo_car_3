@@ -14,7 +14,7 @@ void drive_init(void);              // motors off (driver standby)
 void drive_enable(bool on);         // off stops at once; on starts from standstill
 bool drive_enabled(void);
 void drive_set(float v_mps, float w_radps); // + = forward / turn left; held until changed
-void drive_update(const odom_t *odom);      // call every ~10 ms
+void drive_update(const odometry_t *odometry);      // call every ~10 ms
 
 typedef enum { DRIVE_OK, DRIVE_LEFT_NOT_FOLLOWING, DRIVE_RIGHT_NOT_FOLLOWING, DRIVE_TILTED } drive_fault_t;
 // Why drive_update() switched the motors off by itself; cleared by drive_enable(true).

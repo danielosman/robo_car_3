@@ -17,9 +17,9 @@ static uint8_t bytes[TOF_FORMAT_MAX];
 
 static posed_frame_t round_trip(const posed_frame_t *f) {
     posed_frame_t out;
-    uint32_t n = tof_pack(TOF_USE_MAP, f, bytes);
+    uint32_t n = tof_format_pack(TOF_USE_MAP, f, bytes);
     assert(n == TOF_COMPACT_BYTES);
-    assert(tof_unpack(TOF_FORMAT_COMPACT, bytes, n, &out));
+    assert(tof_format_unpack(TOF_FORMAT_COMPACT, bytes, n, &out));
     return out;
 }
 
@@ -38,7 +38,7 @@ static void table(void) {
     for (int u = 0; u < TOF_USES; u++) {
         assert(tof_format_of((tof_use_t)u) == TOF_FORMAT_COMPACT);
         posed_frame_t f = {0};
-        assert(tof_pack((tof_use_t)u, &f, bytes) == tof_format_size(TOF_FORMAT_COMPACT));
+        assert(tof_format_pack((tof_use_t)u, &f, bytes) == tof_format_size(TOF_FORMAT_COMPACT));
     }
     assert(tof_format_size(TOF_FORMAT_COMPACT) == 277 && TOF_FORMAT_MAX >= 277);
     assert(tof_format_message_type(TOF_FORMAT_COMPACT) != 0);
@@ -162,8 +162,8 @@ static void again_and_refused(void) {
         assert(memcmp(b, &twice.frame.zone[i], sizeof *b) == 0);
     }
     posed_frame_t untouched = {.x_m = 9};
-    assert(!tof_unpack(TOF_FORMAT_COMPACT, bytes, TOF_COMPACT_BYTES - 1, &untouched) && untouched.x_m == 9);
-    assert(!tof_unpack(TOF_FORMAT_COMPACT, bytes, TOF_COMPACT_BYTES + 1, &untouched) && untouched.x_m == 9);
+    assert(!tof_format_unpack(TOF_FORMAT_COMPACT, bytes, TOF_COMPACT_BYTES - 1, &untouched) && untouched.x_m == 9);
+    assert(!tof_format_unpack(TOF_FORMAT_COMPACT, bytes, TOF_COMPACT_BYTES + 1, &untouched) && untouched.x_m == 9);
     printf("ok: within 5 mm below 2.545 m; packing an unpacked frame gives the same bytes; a wrong length refused\n");
 }
 

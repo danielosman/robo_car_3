@@ -26,7 +26,7 @@
 // robot has moved 10 cm all bins are forgotten (driving is not watched).
 #include <stdbool.h>
 #include "tof_frame.h"
-#include "watch_obs.h"
+#include "watch_observation.h"
 
 // The robot during a frame (the map's frame; watch.c makes it from the posed frame):
 // its heading at the start and the end of the measurement, and where it was.
@@ -39,7 +39,7 @@ void watch_tof_restart(void); // forgets everything
 bool watch_tof_ready(void);   // the view in front is known
 // Feeds one frame measured from `view`; fills up to max observations, the most zones
 // first, and returns how many.
-int watch_tof_add(const tof_frame_t *frame, const tof_view_t *view, watch_obs_t *obs, int max);
+int watch_tof_add(const tof_frame_t *frame, const tof_view_t *view, watch_observation_t *observations, int max);
 
 // For printing, per zone: whether it moved, and its background in the last frame
 // (mm, 0 = nothing or not known).

@@ -15,14 +15,14 @@
 // Layout (little-endian, packed; the PC reads it in pc/robot/src/snapshot.ts):
 // "SNAP", version u8, total length u32, then sections [type u8][length u32][payload],
 // then a CRC-32 (zlib's, crc32.h) of everything before it. The sections are the
-// snap_*_t structs in snapshot.c; a section is left out when there is nothing for it.
+// snapshot_*_t structs in snapshot.c; a section is left out when there is nothing for it.
 #include <stdbool.h>
 #include <stdint.h>
 #include "tof_frame.h"
 
 typedef enum {
-    SNAP_COMMAND = 1, // a command asked for it (0 was "an action ended", until 14 Oct)
-    SNAP_SERVER = 2,  // a server connected
+    SNAPSHOT_COMMAND = 1, // a command asked for it (0 was "an action ended", until 14 Oct)
+    SNAPSHOT_SERVER = 2,  // a server connected
 } snapshot_why_t;
 
 // The boot id and the firmware's build (when it was built) for every snapshot's head;
@@ -36,7 +36,7 @@ void snapshot_request(snapshot_why_t why, uint32_t command);
 // stored and says so if it isn't). Its command, its number and the robot's pose in
 // it; true once per such snapshot.
 typedef struct {
-    uint32_t command, seq;
+    uint32_t command, sequence;
     float x_m, y_m, yaw_rad;
 } snapshot_sent_t;
 bool snapshot_sent(snapshot_sent_t *s);

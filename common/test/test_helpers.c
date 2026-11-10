@@ -1,5 +1,5 @@
 // Host test for the shared helpers: stamp.h (time differences across the clock's
-// wrap), geom.h (bearing, wrapping an angle) and stats.h (n-th value, median, sort).
+// wrap), geometry.h (bearing, wrapping an angle) and statistics.h (n-th value, median, sort).
 // Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon -o build/test_helpers common/test/test_helpers.c -lm && build/test_helpers
 #include <assert.h>
@@ -7,8 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 #include "stamp.h"
-#include "geom.h"
-#include "stats.h"
+#include "geometry.h"
+#include "statistics.h"
 
 static int compare(const void *a, const void *b) {
     float x = *(const float *)a, y = *(const float *)b;
@@ -22,7 +22,7 @@ int main(void) {
     assert(stamp_us(1000, 400) == 600);
     assert(fabsf(stamp_s(250000, 0u - 250000u) - 0.5f) < 1e-6f);
 
-    // geom: the four axes; ±π and ±3π.
+    // geometry: the four axes; ±π and ±3π.
     assert(fabsf(bearing_rad((float[3]){1, 0, 0})) < 1e-6f);
     assert(fabsf(bearing_rad((float[3]){0, 1, 0}) - PI_F / 2) < 1e-6f);
     assert(fabsf(bearing_rad((float[3]){0, -1, 0}) + PI_F / 2) < 1e-6f);
@@ -32,7 +32,7 @@ int main(void) {
     assert(fabsf(fabsf(wrap_pi(3 * PI_F)) - PI_F) < 1e-5f && fabsf(fabsf(wrap_pi(-3 * PI_F)) - PI_F) < 1e-5f);
     assert(fabsf(wrap_pi(0.5f + 4 * PI_F) - 0.5f) < 1e-5f && wrap_pi(-0.5f) == -0.5f);
 
-    // stats: against a sorted copy, on random arrays of 1-300 values (with repeats).
+    // statistics: against a sorted copy, on random arrays of 1-300 values (with repeats).
     srand(1);
     for (int trial = 0; trial < 2000; trial++) {
         int n = 1 + rand() % 300;

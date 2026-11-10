@@ -24,7 +24,7 @@ static float v_target_mps, w_target_radps; // commanded
 static float v_mps, w_radps;               // ramped toward the command
 static float left_integral_m, right_integral_m; // wheel speed error, integrated
 static float turn_trim_mps;                // wheel speed difference added to correct the turn rate
-static float lag_s[ENC_COUNT];              // how long each wheel hasn't followed its side's target
+static float lag_s[ENCODER_COUNT];              // how long each wheel hasn't followed its side's target
 static drive_fault_t fault;
 static uint64_t last_us;
 
@@ -36,7 +36,7 @@ static float approach(float x, float target, float step) {
 static void reset_control(void) {
     v_mps = w_radps = 0;
     left_integral_m = right_integral_m = turn_trim_mps = 0;
-    for (int i = 0; i < ENC_COUNT; i++) lag_s[i] = 0;
+    for (int i = 0; i < ENCODER_COUNT; i++) lag_s[i] = 0;
 }
 
 void drive_init(void) {
@@ -79,12 +79,12 @@ static bool not_following(float *seconds, float target_mps, float measured_mps, 
     return *seconds >= DRIVE_FOLLOW_TIME_S;
 }
 
-void drive_update(const odom_t *odom) {
+void drive_update(const odometry_t *odometry) {
     uint64_t now = time_us_64();
     float dt = fminf((float)(now - last_us) * 1e-6f, 0.05f);
     last_us = now;
     if (!enabled) return;
-    if (fabsf(odom->pitch_rad) > MAX_TILT_RAD || fabsf(odom->roll_rad) > MAX_TILT_RAD) {
+    if (fabsf(odometry->pitch_rad) > MAX_TILT_RAD || fabsf(odometry->roll_rad) > MAX_TILT_RAD) {
         fault = DRIVE_TILTED;
         drive_enable(false);
         return;
@@ -98,15 +98,15 @@ void drive_update(const odom_t *odom) {
         return;
     }
     // Keeps the measured turn rate on the command; with w = 0 it also keeps the robot straight.
-    turn_trim_mps = clampf(turn_trim_mps + TURN_KI * (w_radps - odom->w_radps) * dt, -TURN_TRIM_MAX, TURN_TRIM_MAX);
+    turn_trim_mps = clampf(turn_trim_mps + TURN_KI * (w_radps - odometry->w_radps) * dt, -TURN_TRIM_MAX, TURN_TRIM_MAX);
     float half_diff_mps = w_radps * TRACK_M * 0.5f + turn_trim_mps;
     float left_target_mps = v_mps - half_diff_mps, right_target_mps = v_mps + half_diff_mps;
     // Judged per wheel, so one stuck motor is caught even while the other one on
     // its side keeps the side's average speed up.
     bool left_bad = false, right_bad = false;
-    for (int i = 0; i < ENC_COUNT; i++) {
-        bool left = i == ENC_LEFT_FRONT || i == ENC_LEFT_REAR;
-        if (not_following(&lag_s[i], left ? left_target_mps : right_target_mps, odom->wheel_mps[i], dt)) {
+    for (int i = 0; i < ENCODER_COUNT; i++) {
+        bool left = i == ENCODER_LEFT_FRONT || i == ENCODER_LEFT_REAR;
+        if (not_following(&lag_s[i], left ? left_target_mps : right_target_mps, odometry->wheel_mps[i], dt)) {
             if (left) left_bad = true; else right_bad = true;
         }
     }
@@ -115,6 +115,6 @@ void drive_update(const odom_t *odom) {
         drive_enable(false);
         return;
     }
-    motor_set(wheel_power(&left_integral_m, left_target_mps, odom->wheel_left_mps, dt),
-              wheel_power(&right_integral_m, right_target_mps, odom->wheel_right_mps, dt));
+    motor_set(wheel_power(&left_integral_m, left_target_mps, odometry->wheel_left_mps, dt),
+              wheel_power(&right_integral_m, right_target_mps, odometry->wheel_right_mps, dt));
 }

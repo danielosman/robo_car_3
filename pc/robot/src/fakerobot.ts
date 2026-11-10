@@ -23,14 +23,14 @@ import {
 
 const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, GOTO_MAX_M = 3, STILL_MS = 200;
 
-export interface FakeSnapshot { bytes: Buffer; seq: number; pose: { x: number; y: number; yaw: number } | null }
+export interface FakeSnapshot { bytes: Buffer; sequence: number; pose: { x: number; y: number; yaw: number } | null }
 
 // The snapshots among a boot's stored messages, as the robot sends them.
 export function snapshotsOf(messages: Replayed[]): FakeSnapshot[] {
   return messages.flatMap(m => {
     if (m.type !== "snapshot") return [];
     const s = parseSnapshot(m.bytes);
-    return [{ bytes: m.bytes, seq: s.seq, pose: s.pose }];
+    return [{ bytes: m.bytes, sequence: s.sequence, pose: s.pose }];
   });
 }
 
@@ -170,11 +170,11 @@ export class FakeRobot {
   private wait(s: number) { let left = s; return () => (left -= STEP_S) <= 0; }
 
   // name as the robot prints it; a move: still STILL_MS before and after, as the robot's.
-  private begin(name: string, kind: (typeof MOVE_KINDS)[number], n: number, param: number, steps: (() => boolean)[], goal?: number): void {
+  private begin(name: string, kind: (typeof MOVE_KINDS)[number], n: number, parameter: number, steps: (() => boolean)[], goal?: number): void {
     this.end("replaced");
     if (this.mode === "idle") { this.mode = "manual"; this.say("Mode: manual\n"); }
     const move = ++this.moves;
-    this.socket.write(encodeMoveStart({ move, command: n, kind, param, tUs: this.timeUs(), preMs: STILL_MS, postMs: STILL_MS, refused: false }));
+    this.socket.write(encodeMoveStart({ move, command: n, kind, parameter, tUs: this.timeUs(), preMs: STILL_MS, postMs: STILL_MS, refused: false }));
     this.action = { name, kind, n, move, steps: [this.wait(STILL_MS / 1000), ...steps, this.wait(STILL_MS / 1000)], start: { ...this.pose }, goal };
     this.say(`${name}: started\n`);
   }
@@ -184,11 +184,11 @@ export class FakeRobot {
   }
 
   private sendSnapshot(n: number | null): void {
-    const snaps = this.opts.snapshots;
-    if (!snaps.length) { if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT }); return; }
-    const s = snaps[this.next++ % snaps.length];
+    const snapshots = this.opts.snapshots;
+    if (!snapshots.length) { if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT }); return; }
+    const s = snapshots[this.next++ % snapshots.length];
     this.sendParts(s.bytes);
-    if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT, snapshot: s.seq }, s.pose ?? this.pose);
+    if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT, snapshot: s.sequence }, s.pose ?? this.pose);
   }
 
   private command(n: number, text: string): void {

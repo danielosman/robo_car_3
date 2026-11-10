@@ -62,17 +62,17 @@
 static bool chair_there;
 
 // --- The simulated robot ---
-static odom_report_t sim, report;
+static odometry_report_t sim, report;
 static uint32_t report_time_us, report_count;
 static bool motors_wanted;
 static uint64_t motors_changed_us;
 static float cmd_v, cmd_w, v, w, still_s, max_yaw_rad;
 
 bool body_connected(void) { return true; }
-const odom_report_t *body_odom(void) { return &report; }
-uint32_t body_odom_time_us(void) { return report_time_us; }
-uint32_t body_odom_count(void) { return report_count; }
-bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) {
+const odometry_report_t *body_odometry(void) { return &report; }
+uint32_t body_odometry_time_us(void) { return report_time_us; }
+uint32_t body_odometry_count(void) { return report_count; }
+bool body_odometry_get(uint32_t n, odometry_report_t *r, uint32_t *t_us) {
     if (n != report_count) return false; // the fake keeps only the latest
     *r = report;
     *t_us = report_time_us;
@@ -133,9 +133,9 @@ static bool move_open;            // a move has started and not ended
 static int moves_started, frames_in_move, frames_sent;
 static wire_move_start_t last_start;
 static wire_move_end_t last_end;
-bool link_send_control(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len);
+bool link_pc_send_control(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len);
     if (wire_decode_move_start(&m, &last_start)) {
         assert(!move_open); // the one before has ended
         move_open = true;
@@ -148,9 +148,9 @@ bool link_send_control(const uint8_t *msg, uint32_t len) {
     }
     return true;
 }
-bool link_send_bulk(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len && move_open); // frames only during a move
+bool link_pc_send_bulk(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len && move_open); // frames only during a move
     assert(read32(m.payload) == last_start.move);                  // under the running move's number
     frames_in_move++;
     frames_sent++;
@@ -165,8 +165,8 @@ static void tof_pipeline(void) {
     if (!tof_poll(&frame)) return;
     pose_stamp(&frame, &posed);
     move_tof(&posed);
-    uint32_t n_bytes = tof_pack(TOF_USE_MAP, &posed, bytes);
-    assert(tof_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
+    uint32_t n_bytes = tof_format_pack(TOF_USE_MAP, &posed, bytes);
+    assert(tof_format_unpack(tof_format_of(TOF_USE_MAP), bytes, n_bytes, &used));
     cell_map_add(&used);
 }
 
@@ -218,7 +218,7 @@ static void measure_frame(void) {
             for (int k = -1; k <= 1; k++) { // the zone's centre and its upper and lower edges
                 float r[3], d[3];
                 int i = row * 8 + col;
-                direction(zone_down_rad[i] + (float)k * zone_rad / 2, zone_left_rad[i], sim.pitch_rad, r);
+                ray_direction(zone_down_rad[i] + (float)k * zone_rad / 2, zone_left_rad[i], sim.pitch_rad, r);
                 d[0] = c * r[0] - s * r[1]; d[1] = s * r[0] + c * r[1]; d[2] = r[2];
                 float t = cast(p, d);
                 if (t > 0 && (range == 0 || t < range)) range = t;
@@ -249,7 +249,7 @@ static void tick(void) {
     stopped_still_s = person_radps == 0 && w == 0 ? stopped_still_s + dt : 0;
     sight();
     sim.stationary = still_s >= 0.5f;
-    if ((fake_now_us - FAKE_CLOCK_START_US) % LINK_ODOM_PERIOD_US == 0) { // PicoB's report arrives
+    if ((fake_now_us - FAKE_CLOCK_START_US) % LINK_ODOMETRY_PERIOD_US == 0) { // PicoB's report arrives
         report = sim;
         report.t_us = (uint32_t)fake_now_us;
         report_time_us = (uint32_t)fake_now_us;
@@ -306,7 +306,7 @@ static void watch_trial(unsigned seed, trial_t *t) {
     // Nothing moving: the robot stays put, motors on.
     srand(seed);
     behaviour_watch(60, 0);
-    assert(move_open && last_start.kind == WIRE_MOVE_WATCH && last_start.param == 60); // a watch is a move
+    assert(move_open && last_start.kind == WIRE_MOVE_WATCH && last_start.parameter == 60); // a watch is a move
     float yaw = sim.yaw_rad;
     run(5);
     assert(*move_running() && sim.yaw_rad == yaw && sim.motors_on && movement_log);
@@ -387,7 +387,7 @@ int main(void) {
     // A scan: 390° left, then it stands still with the motors off (no turn to the
     // most open direction, no watching).
     behaviour_rotate(SCAN_RAD, 7);
-    assert(move_open && last_start.kind == WIRE_MOVE_ROTATE && last_start.command == 7 && fabsf(last_start.param - SCAN_RAD) < 1e-6f);
+    assert(move_open && last_start.kind == WIRE_MOVE_ROTATE && last_start.command == 7 && fabsf(last_start.parameter - SCAN_RAD) < 1e-6f);
     assert(last_start.pre_ms == 200 && last_start.post_ms == 200);
     float seconds = run_action(40);
     assert(!move_open && last_end.end == WIRE_END_OK && moves_started == 1);
@@ -518,7 +518,7 @@ int main(void) {
     int before = moves_started;
     behaviour_rotate(-30 * RAD_PER_DEG, 0);
     assert(motors_wanted && last_end.end == WIRE_END_REPLACED && moves_started == before + 1 && move_open);
-    assert(last_start.kind == WIRE_MOVE_ROTATE && last_start.param < 0);
+    assert(last_start.kind == WIRE_MOVE_ROTATE && last_start.parameter < 0);
     run_action(10);
     assert(last_end.end == WIRE_END_OK);
     float after_replace = DEG(sim.yaw_rad - yaw);

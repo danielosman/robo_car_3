@@ -40,13 +40,13 @@ test("a missing or wrong field is refused, naming it", () => {
 });
 
 test("a file that doesn't read or parse says which file", () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "robocar-mounting-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-mounting-"));
   try {
-    const bad = path.join(dir, "mounting.json");
+    const bad = path.join(directory, "mounting.json");
     writeFileSync(bad, "{");
     assert.throws(() => loadMounting(bad), new RegExp(`${bad.replace(/[.\\/]/g, "\\$&")} doesn't read`));
-    assert.throws(() => loadMounting(path.join(dir, "none.json")), /none\.json doesn't read/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+    assert.throws(() => loadMounting(path.join(directory, "none.json")), /none\.json doesn't read/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("the page gets it: GET /api/mounting", async () => {

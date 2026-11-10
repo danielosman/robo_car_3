@@ -17,7 +17,7 @@ interface Moved { end: Pose; result: "ok" | "obstacle"; moved: number }
 
 // Driving distanceM (+ forward, - back) from p.
 function drive(map: RobotMap, p: Pose, distanceM: number): Moved {
-  const dir = distanceM < 0 ? -1 : 1, dx = dir * Math.cos(p.yaw), dy = dir * Math.sin(p.yaw), want = Math.abs(distanceM);
+  const direction = distanceM < 0 ? -1 : 1, dx = direction * Math.cos(p.yaw), dy = direction * Math.sin(p.yaw), want = Math.abs(distanceM);
   const look = MOVE.edgeM + MOVE.stopBeforeM + want, along = map.obstacleAlong(p.x, p.y, dx, dy, MOVE.pathHalfM, look);
   const gap = along - MOVE.edgeM, blocked = along < look; // nothing found: along is look itself
   const room = !blocked ? want : gap <= MOVE.stopBeforeM + 0.01 ? 0 : gap - MOVE.stopBeforeM;

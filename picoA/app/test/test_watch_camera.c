@@ -34,7 +34,7 @@ static uint8_t px[CAMERA_WIDTH * CAMERA_HEIGHT];
 static camera_frame_t f = {.pixels = px, .line_us = 42.7f, .exposure_us = 40000.0f, .gain = 1.0f,
                            .last_row_us = 0u - 30000000u}; // 30 s before the clock wraps
 static uint32_t frame_us = 40000; // 25 frames/s
-static watch_obs_t obs[8];
+static watch_observation_t observations[8];
 
 static float random_noise(float amplitude) { return amplitude * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }
 
@@ -89,7 +89,7 @@ static int frame(void (*scene)(void), bool *used) {
     }
     uint32_t before = last_us;
     bool watching = state == WATCHING;
-    int n = watch_camera_add(&f, obs, 8);
+    int n = watch_camera_add(&f, observations, 8);
     bool was_used = watching && state == WATCHING && last_us != before; // not an exposure adjustment
     assert(was_used ? n >= 0 : n == -1); // a skipped frame must not read as "nothing moved"
     if (used) *used = was_used;
@@ -209,15 +209,15 @@ static void run(void) {
 
     int n = frames_to_find(person);
     assert(n <= 2);
-    assert(obs[0].cells >= 30 && obs[0].range_m < 0);
-    assert(obs[0].where[1] > 0.1f && obs[0].where[0] > 0.9f); // left, ahead
-    printf("ok: a person steps in on the left: %d blocks, where (%.2f %.2f %.2f), in %d frames\n", obs[0].cells,
-           (double)obs[0].where[0], (double)obs[0].where[1], (double)obs[0].where[2], n);
+    assert(observations[0].cells >= 30 && observations[0].range_m < 0);
+    assert(observations[0].where[1] > 0.1f && observations[0].where[0] > 0.9f); // left, ahead
+    printf("ok: a person steps in on the left: %d blocks, where (%.2f %.2f %.2f), in %d frames\n", observations[0].cells,
+           (double)observations[0].where[0], (double)observations[0].where[1], (double)observations[0].where[2], n);
     quiet_again();
     printf("ok: ...standing still, they are the view after ~1 s; walking off is movement, then the view again\n");
 
     n = frames_to_find(small);
-    assert(n == 3 && obs[0].cells == 1 && obs[0].where[1] < 0);
+    assert(n == 3 && observations[0].cells == 1 && observations[0].where[1] < 0);
     quiet_again();
     printf("ok: a small object in one block (right): found in %d frames\n", n);
 
@@ -292,19 +292,19 @@ static void run(void) {
 // leaves every frame unused.
 static void mounting(void) {
     mounting_t m = ROBOT_MOUNTING;
-    float dir[3];
+    float direction[3];
     for (int k = 0; k < 2; k++) {
         m.camera.f_px = k ? 94.0f : 188.0f;
         assert(watch_camera_init(&m));
-        block_direction(0, dir); // the top-left block: its centre 76 px left of the middle
-        assert(fabsf(atan2f(dir[1], dir[0]) - atanf(76.0f / m.camera.f_px)) < 1e-5f);
+        block_direction(0, direction); // the top-left block: its centre 76 px left of the middle
+        assert(fabsf(atan2f(direction[1], direction[0]) - atanf(76.0f / m.camera.f_px)) < 1e-5f);
     }
-    watch_obs_t obs[4];
+    watch_observation_t observations[4];
     m.camera.width_px = 320;
-    assert(!watch_camera_init(&m) && watch_camera_add(&f, obs, 4) == -1);
+    assert(!watch_camera_init(&m) && watch_camera_add(&f, observations, 4) == -1);
     m = ROBOT_MOUNTING;
     m.camera.f_px = 0;
-    assert(!watch_camera_init(&m) && watch_camera_add(&f, obs, 4) == -1);
+    assert(!watch_camera_init(&m) && watch_camera_add(&f, observations, 4) == -1);
     printf("ok: directions from the mounting's f (188: block 0 at %.1f deg); a wrong mounting uses no frame\n",
            (double)(atanf(76.0f / 188.0f) * DEG_PER_RAD));
 }

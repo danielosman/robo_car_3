@@ -18,9 +18,9 @@ const errors: string[] = [];
 const refs: Resolved["refs"] = {};
 
 const readJson = (file: string): unknown => JSON.parse(readFileSync(file, "utf8"));
-const modulesDir = path.join(diagram, "data", "modules");
-const modules: Module[] = readdirSync(modulesDir).filter(f => f.endsWith(".json")).sort()
-  .flatMap(f => readJson(path.join(modulesDir, f)) as Module[]);
+const modulesDirectory = path.join(diagram, "data", "modules");
+const modules: Module[] = readdirSync(modulesDirectory).filter(f => f.endsWith(".json")).sort()
+  .flatMap(f => readJson(path.join(modulesDirectory, f)) as Module[]);
 const flows = readJson(path.join(diagram, "data", "flows.json")) as Flow[];
 
 // --- keys and values: refuse what schema.ts doesn't know ---

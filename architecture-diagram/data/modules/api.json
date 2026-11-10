@@ -79,7 +79,7 @@
       {
         "name": "StoredSnapshots.add",
         "kind": "function",
-        "code": "add(boot: string, seq: number): void {"
+        "code": "add(boot: string, sequence: number): void {"
       },
       {
         "name": "StoredSnapshots.newest",
@@ -89,7 +89,7 @@
       {
         "name": "StoredSnapshots.stored",
         "kind": "function",
-        "code": "stored(seq: number, ms: number): Promise<boolean> {"
+        "code": "stored(sequence: number, ms: number): Promise<boolean> {"
       },
       {
         "name": "CommandRunner",

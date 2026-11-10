@@ -11,7 +11,7 @@
 // least 0.15 s), it is leaving that way, reported once per target.
 #include <stdbool.h>
 #include <stdint.h>
-#include "watch_obs.h"
+#include "watch_observation.h"
 
 typedef struct {
     float bearing_rad; // + = left of straight ahead, from the sensor
@@ -35,5 +35,5 @@ void tracker_reset(void); // forgets the target (the robot moved: the view chang
 // One frame's observations (the most cells first) at t_us; returns what happened.
 // After TRACK_EXITED_* and TRACK_STOPPED, tracker_target() still gives the lost
 // target until the next call.
-track_event_t tracker_add(const watch_obs_t *obs, int n, uint32_t t_us);
+track_event_t tracker_add(const watch_observation_t *observations, int n, uint32_t t_us);
 const target_t *tracker_target(void); // NULL when there is none

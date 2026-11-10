@@ -13,7 +13,7 @@
 // Timing both sides rely on.
 #define LINK_HELLO_PERIOD_US   1000000 // HELLO repeats until answered
 #define LINK_DRIVE_TIMEOUT_US  250000  // PicoB stops the motors without a DRIVE this long
-#define LINK_ODOM_PERIOD_US    20000   // PicoB sends ODOM at 50 Hz
+#define LINK_ODOMETRY_PERIOD_US    20000   // PicoB sends ODOMETRY at 50 Hz
 #define LINK_STATUS_PERIOD_US  500000  // PicoB sends STATUS at 2 Hz
 // The IMU measures 416 times a second; PicoB averages each 4 of its samples into one
 // imu_record_t (104 a second) and sends each as soon as it is made.
@@ -21,29 +21,29 @@
 #define IMU_RECORD_PERIOD_US   9615    // 4 / 416 Hz, on the sensor's own clock (it may run a little off)
 
 enum {
-    MSG_HELLO = 1, // both ways, hello_msg_t: each side repeats it until answered
-    MSG_MOTORS,    // A -> B, motors_msg_t
-    MSG_DRIVE,     // A -> B, drive_msg_t, repeated well within LINK_DRIVE_TIMEOUT_US
-    MSG_ODOM,      // B -> A, odom_report_t, every LINK_ODOM_PERIOD_US
-    MSG_LOG,       // B -> A, text without terminator; PicoA prints it in its debug log
-    MSG_STATUS,    // B -> A, status_report_t, every LINK_STATUS_PERIOD_US
-    MSG_IMU,       // B -> A, imu_record_t, one each IMU_RECORD_PERIOD_US, from PicoB's start
+    MESSAGE_HELLO = 1, // both ways, hello_message_t: each side repeats it until answered
+    MESSAGE_MOTORS,    // A -> B, motors_message_t
+    MESSAGE_DRIVE,     // A -> B, drive_message_t, repeated well within LINK_DRIVE_TIMEOUT_US
+    MESSAGE_ODOMETRY,      // B -> A, odometry_report_t, every LINK_ODOMETRY_PERIOD_US
+    MESSAGE_LOG,       // B -> A, text without terminator; PicoA prints it in its debug log
+    MESSAGE_STATUS,    // B -> A, status_report_t, every LINK_STATUS_PERIOD_US
+    MESSAGE_IMU,       // B -> A, imu_record_t, one each IMU_RECORD_PERIOD_US, from PicoB's start
 };
 
 typedef struct __attribute__((packed)) {
     uint8_t version;  // LINK_PROTOCOL_VERSION
     bool is_reply;    // answering the other side's HELLO; replies are not answered
-} hello_msg_t;
+} hello_message_t;
 
 typedef struct __attribute__((packed)) {
     bool on;          // on also clears a safety stop
-    uint8_t request;  // numbers each request; PicoB echoes it in odom_report_t.motors_request
-} motors_msg_t;
+    uint8_t request;  // numbers each request; PicoB echoes it in odometry_report_t.motors_request
+} motors_message_t;
 
 typedef struct __attribute__((packed)) {
     float v_mps;      // forward speed
     float w_radps;    // turn rate, + = left
-} drive_msg_t;
+} drive_message_t;
 
 // Why PicoB switched the motors off by itself. The motors stay off until PicoA
 // switches them on again, which clears the reason. Texts fit in a LOG message.
@@ -77,12 +77,12 @@ typedef struct __attribute__((packed)) {
     uint8_t stop_reason;     // STOP_*: why PicoB switched the motors off by itself
     uint8_t motors_request;  // the last MOTORS request PicoB acted on (0 = none since it started)
     bool imu_error;          // no IMU: odometry is frozen and the motors stay off
-} odom_report_t;
+} odometry_report_t;
 
 // The IMU as it measured (doc/DATA_FLOW_PLAN.md, the imu record): IMU_RECORD_SAMPLES
 // samples averaged (rounded to the nearest count, halves away from zero), in the
 // sensor's own int16 counts and axes, nothing taken out (the gyro's bias neither):
-// raw, for the PC to do its own. Scale: accel 0.061 mg a count (±2 g), gyro 8.75 mdps
+// raw, for the PC to do its own. Scale: acceleration 0.061 mg a count (±2 g), gyro 8.75 mdps
 // a count (±250 °/s) (picoB/drivers/imu.h). The sensor's axes turn into the robot's by
 // imu.robot_from_sensor in common/mounting.json. t_us: the middle of the times PicoB
 // read its samples (each a small, steady lag after the sensor measured it, with up to
@@ -91,7 +91,7 @@ typedef struct __attribute__((packed)) {
 // record, so it shows as a gap in the times.
 typedef struct __attribute__((packed)) {
     uint32_t t_us;
-    int16_t accel[3];        // x, y, z
+    int16_t acceleration[3];        // x, y, z
     int16_t gyro[3];         // x, y, z
 } imu_record_t;
 

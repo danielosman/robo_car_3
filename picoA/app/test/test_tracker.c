@@ -15,24 +15,24 @@ static uint32_t frame_us; // 66667 (15 Hz) or 100000 (10 Hz)
 #define VIEW_DEG 22.5f
 
 static uint32_t now_us = 0u - 30000000u; // 30 s before the clock wraps
-static watch_obs_t obs[4];
+static watch_observation_t observations[4];
 
 static float jitter_deg(void) { return 2.0f * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }
 
 // A blob of `cells` cells from `right_deg` to `left_deg`.
-static watch_obs_t wide_blob(float right_deg, float left_deg, float range_m, int cells) {
+static watch_observation_t wide_blob(float right_deg, float left_deg, float range_m, int cells) {
     float b = (left_deg + right_deg) / 2 * RAD_PER_DEG;
-    watch_obs_t o = {.where = {cosf(b), sinf(b), 0.0f}, .left_rad = left_deg * RAD_PER_DEG,
+    watch_observation_t o = {.where = {cosf(b), sinf(b), 0.0f}, .left_rad = left_deg * RAD_PER_DEG,
                       .right_rad = right_deg * RAD_PER_DEG, .range_m = range_m, .cells = cells};
     return o;
 }
-static watch_obs_t blob(float bearing_deg, float range_m, int cells) {
+static watch_observation_t blob(float bearing_deg, float range_m, int cells) {
     return wide_blob(bearing_deg, bearing_deg, range_m, cells);
 }
 
 static track_event_t frame(int n) {
     now_us += frame_us;
-    return tracker_add(obs, n, now_us);
+    return tracker_add(observations, n, now_us);
 }
 
 static float deg(float rad) { return rad * DEG_PER_RAD; }
@@ -53,7 +53,7 @@ static track_event_t walk(float from, float to, float speed, bool stops, float *
     for (int k = 0; k < 400; k++) {
         bool arrived = to > from ? b >= to : b <= to;
         bool seen = fabsf(b) < VIEW_DEG && !(stops && arrived) && rand() % 8 != 0; // still: taken in, no blob
-        if (seen) { obs[0] = blob(b + jitter_deg(), 1.0f, 6); last_seen_deg = b; }
+        if (seen) { observations[0] = blob(b + jitter_deg(), 1.0f, 6); last_seen_deg = b; }
         track_event_t e = frame(seen ? 1 : 0);
         if (e == TRACK_NEW) { assert(!started); started = true; continue; }
         if (e == TRACK_LEAVING_LEFT || e == TRACK_LEAVING_RIGHT) {
@@ -98,12 +98,12 @@ static void run(uint32_t period_us) {
            "    stopping inside: stopped, not leaving (20 seeds)\n");
 
     // The first target is the biggest blob; it is kept over a bigger newcomer elsewhere.
-    obs[0] = blob(-10.0f, 0.8f, 9);
-    obs[1] = blob(12.0f, 1.5f, 3);
+    observations[0] = blob(-10.0f, 0.8f, 9);
+    observations[1] = blob(12.0f, 1.5f, 3);
     assert(frame(2) == TRACK_NEW && fabsf(deg(tracker_target()->bearing_rad) + 10.0f) < 0.1f);
     for (int k = 0; k < 10; k++) {
-        obs[0] = blob(15.0f, 0.5f, 12); // bigger, elsewhere
-        obs[1] = blob(-10.0f, 0.8f, 9);
+        observations[0] = blob(15.0f, 0.5f, 12); // bigger, elsewhere
+        observations[1] = blob(-10.0f, 0.8f, 9);
         assert(frame(2) == TRACK_NOTHING);
         assert(fabsf(deg(tracker_target()->bearing_rad) + 10.0f) < 0.1f);
     }
@@ -112,7 +112,7 @@ static void run(uint32_t period_us) {
     // Gaps shorter than 0.5 s don't lose it; a blob without a range keeps the last one.
     int gap = (int)(470000 / frame_us); // 7 frames at 15 Hz, 4 at 10
     for (int k = 0; k < gap; k++) assert(frame(0) == TRACK_NOTHING && tracker_target());
-    obs[0] = blob(-10.0f, -1.0f, 4);
+    observations[0] = blob(-10.0f, -1.0f, 4);
     assert(frame(1) == TRACK_NOTHING && fabsf(tracker_target()->range_m - 0.8f) < 0.01f);
     printf("ok: through a gap of %.2f s; a blob without a range keeps the last range\n", (double)(gap * frame_us) * 1e-6);
 
@@ -125,7 +125,7 @@ static void run(uint32_t period_us) {
     float b = -10.0f;
     uint32_t first_us = now_us + frame_us;
     for (int k = 0; (float)k * (float)frame_us < 1e6f; k++, b += 20.0f * (float)frame_us * 1e-6f) {
-        obs[0] = blob(b, 1.0f, 4);
+        observations[0] = blob(b, 1.0f, 4);
         track_event_t te = frame(1);
         assert(te == (k == 0 ? TRACK_NEW : TRACK_NOTHING));
         bool measured = stamp_us(now_us, first_us) >= RATE_MIN_US;
@@ -135,7 +135,7 @@ static void run(uint32_t period_us) {
     uint32_t turned_us = now_us;
     while (stamp_us(now_us, turned_us) < 800000) {
         b -= 20.0f * (float)frame_us * 1e-6f;
-        obs[0] = blob(b, 1.0f, 4);
+        observations[0] = blob(b, 1.0f, 4);
         assert(frame(1) == TRACK_NOTHING);
     }
     assert(fabsf(deg(tracker_target()->rate_radps) + 20.0f) < 0.5f);
@@ -144,22 +144,22 @@ static void run(uint32_t period_us) {
 
     // As on the robot: someone close comes in at the right edge, then is a big blob
     // reaching from -15 to +20 deg (centre +3) plus a 2-zone piece at -17 deg.
-    obs[0] = blob(-20.0f, 0.53f, 1);
+    observations[0] = blob(-20.0f, 0.53f, 1);
     assert(frame(1) == TRACK_NEW);
-    obs[0] = wide_blob(-15.0f, 20.0f, 0.45f, 24);
-    obs[1] = blob(-17.0f, 0.55f, 2);
+    observations[0] = wide_blob(-15.0f, 20.0f, 0.45f, 24);
+    observations[1] = blob(-17.0f, 0.55f, 2);
     assert(frame(2) == TRACK_NOTHING && tracker_target()->last_seen_us == now_us);
     assert(fabsf(deg(tracker_target()->bearing_rad) - 2.5f) < 0.1f);
-    obs[0] = wide_blob(5.0f, 22.0f, 0.5f, 12);
+    observations[0] = wide_blob(5.0f, 22.0f, 0.5f, 12);
     assert(frame(1) == TRACK_NOTHING && deg(tracker_target()->bearing_rad) > 10.0f);
     printf("ok: someone close: the big blob reaching where they are, not a small piece nearer its centre\n");
 
     // ...leaving at the left edge (moving outward there: about to leave), a far zone
     // in the same direction is not them. (To 21°: at 10 Hz the speed is measured one
     // frame sooner, from the blob's jumps above, and puts them at 30.2°: 20° + 10° missed it.)
-    obs[0] = wide_blob(17.0f, 21.0f, 0.5f, 4);
+    observations[0] = wide_blob(17.0f, 21.0f, 0.5f, 4);
     assert(frame(1) == TRACK_LEAVING_LEFT);
-    obs[0] = blob(20.0f, 2.8f, 1);
+    observations[0] = blob(20.0f, 2.8f, 1);
     track_event_t e = TRACK_NOTHING;
     for (int k = 0; k < 10 && e == TRACK_NOTHING; k++) e = frame(1);
     assert(e == TRACK_EXITED_LEFT && fabsf(tracker_target()->range_m - 0.5f) < 0.01f);

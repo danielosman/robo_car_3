@@ -1,6 +1,6 @@
 #include <math.h>
 #include <string.h>
-#include "stats.h"
+#include "statistics.h"
 #include "change_grid.h"
 #include "watch_camera.h"
 
@@ -87,29 +87,29 @@ static void learn_backgrounds(void) {
 static float threshold(int i) { return DIFFER_NOISE * noise[i]; }
 
 // The direction a block's centre looks along, robot frame (x forward, y left, z up).
-static void block_direction(int i, float *dir) {
+static void block_direction(int i, float *direction) {
     float x = (float)(i % WATCH_CAMERA_COLS * BLOCK) + (BLOCK - 1) / 2.0f;
     float y = (float)(i / WATCH_CAMERA_COLS * BLOCK) + (BLOCK - 1) / 2.0f;
     float v[3] = {focal_px, (CAMERA_WIDTH - 1) / 2.0f - x, (CAMERA_HEIGHT - 1) / 2.0f - y};
     float len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-    for (int k = 0; k < 3; k++) dir[k] = v[k] / len;
+    for (int k = 0; k < 3; k++) direction[k] = v[k] / len;
 }
 
 // The blobs, each timed when the camera read its middle row (the rolling shutter).
 // No range: the camera gives none.
-static int observations(const camera_frame_t *f, watch_obs_t *obs, int max) {
+static int find_observations(const camera_frame_t *f, watch_observation_t *observations, int max) {
     static uint8_t label[WATCH_CAMERA_BLOCKS];
-    static watch_obs_t all[255];
+    static watch_observation_t all[255];
     static float row_sum[255];
     int blobs = change_grid_observations(&grid, block_direction, label, all);
     memset(row_sum, 0, sizeof row_sum);
     for (int i = 0; i < WATCH_CAMERA_BLOCKS; i++)
         if (label[i]) row_sum[label[i] - 1] += (float)(i / WATCH_CAMERA_COLS * BLOCK) + (BLOCK - 1) / 2.0f;
     for (int b = 0; b < blobs; b++) all[b].t_us = camera_row_time(f, (int)(row_sum[b] / (float)all[b].cells));
-    return change_grid_biggest(all, blobs, obs, max);
+    return change_grid_biggest(all, blobs, observations, max);
 }
 
-int watch_camera_add(const camera_frame_t *f, watch_obs_t *obs, int max) {
+int watch_camera_add(const camera_frame_t *f, watch_observation_t *observations, int max) {
     if (focal_px <= 0) return -1; // no mounting (watch_camera_init): no directions, nothing to say
     if (!grid_ready) watch_camera_restart();
     if (f->settling) { settled = 0; return -1; }
@@ -158,8 +158,8 @@ int watch_camera_add(const camera_frame_t *f, watch_obs_t *obs, int max) {
         } else steady[i] = false;
         if (!differs[i]) background[i] += DRIFT * (value[i] - background[i]);
     }
-    int n_obs = observations(f, obs, max);
-    if (n_obs > 0) last_moved_us = f->last_row_us;
+    int n_observations = find_observations(f, observations, max);
+    if (n_observations > 0) last_moved_us = f->last_row_us;
     // The exposure is the driver's: it is adjusted only when calm, without watching.
     if (!f->wants_exposure_change) wanting = false;
     else if (!wanting) { wanting = true; wants_since_us = f->last_row_us; }
@@ -168,7 +168,7 @@ int watch_camera_add(const camera_frame_t *f, watch_obs_t *obs, int max) {
         watch_camera_restart();
         return -1;
     }
-    return n_obs;
+    return n_observations;
 }
 
 float watch_camera_background(int block) { return background[block]; }

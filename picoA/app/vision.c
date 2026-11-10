@@ -4,7 +4,7 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "camera.h"
-#include "stats.h"
+#include "statistics.h"
 #include "vision.h"
 
 #define W            160
@@ -57,7 +57,7 @@ static vision_frame_t rec;
 static bool have_rec;
 static uint16_t next_id = 1;
 static uint32_t prev_t_us;
-static vision_pose_t prev_pose;
+static vision_pose_t previous_pose;
 
 // --- matching ---
 
@@ -380,9 +380,9 @@ const vision_frame_t *vision_process(const vision_image_t *im, const vision_pose
     const uint8_t *img = im->pixels;
     for (int k = 0; k < VISION_MAX_FEATURES; k++) if (tracks[k].lost) tracks[k].live = tracks[k].lost = false;
     half_image(img);
-    uint32_t seq = have_rec ? rec.seq + 1 : 1;
+    uint32_t sequence = have_rec ? rec.sequence + 1 : 1;
     memset(&rec, 0, sizeof rec);
-    rec.seq = seq;
+    rec.sequence = sequence;
     rec.camera_number = im->number;
     rec.row0_us = im->row0_us;
     rec.line_us = im->line_us;
@@ -391,7 +391,7 @@ const vision_frame_t *vision_process(const vision_image_t *im, const vision_pose
     rec.exposure_us = im->exposure_us;
     rec.gain = im->gain;
     if (pose) rec.pose = *pose;
-    rec.prev_pose = prev_pose;
+    rec.previous_pose = previous_pose;
     brightness(img);
 
     // Follow every live feature.
@@ -438,7 +438,7 @@ const vision_frame_t *vision_process(const vision_image_t *im, const vision_pose
         rec.features[k].t_us = rec.row0_us + (uint32_t)(rec.features[k].y * rec.line_us);
     regions();
     prev_t_us = rec.t_us;
-    prev_pose = rec.pose;
+    previous_pose = rec.pose;
     have_rec = true;
     return &rec;
 }

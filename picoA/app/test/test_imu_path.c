@@ -23,15 +23,15 @@ static wire_imu_batch_t batches[256];
 static int n_batches;
 static wire_move_end_t move_end;
 static bool ended_seen;
-bool link_send_control(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len);
+bool link_pc_send_control(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len);
     if (m.type == WIRE_MOVE_END) { assert(wire_decode_move_end(&m, &move_end)); ended_seen = true; }
     return true;
 }
-bool link_send_bulk(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len && m.type == WIRE_IMU_BATCH && n_batches < 256);
+bool link_pc_send_bulk(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len && m.type == WIRE_IMU_BATCH && n_batches < 256);
     assert(wire_decode_imu_batch(&m, &batches[n_batches]));
     n_batches++;
     return true;
@@ -39,9 +39,9 @@ bool link_send_bulk(const uint8_t *msg, uint32_t len) {
 
 // --- the action: stands still 2 s ---
 static int act_steps;
-static void act_begin(const odom_report_t *o) { (void)o; }
-static move_act_t act_step(const odom_report_t *o) { (void)o; return ++act_steps >= 2000 ? MOVE_ACT_DONE : MOVE_ACTING; }
-static void act_end(const odom_report_t *o, move_end_t how) { (void)o; assert(how == MOVE_END_DONE); }
+static void act_begin(const odometry_report_t *o) { (void)o; }
+static move_act_t act_step(const odometry_report_t *o) { (void)o; return ++act_steps >= 2000 ? MOVE_ACT_DONE : MOVE_ACTING; }
+static void act_end(const odometry_report_t *o, move_end_t how) { (void)o; assert(how == MOVE_END_DONE); }
 static const move_actor_t actor = {act_begin, act_step, act_end};
 
 // PicoB's clock: this far ahead of PicoA's (mod 2^32), so it wraps at another moment.
@@ -59,13 +59,13 @@ static void run_ms(int ms, bool move_running) {
         while (b_next_sample_us <= fake_now_us) {
             uint32_t j = samples / 4;
             if (samples % 4 == 0) record_mid_us[j % 20000] = b_next_sample_us + (3 * SAMPLE_US + 1) / 2;
-            const int16_t accel[3] = {(int16_t)(j % 30000), (int16_t)-(int16_t)(j % 30000), 16384};
+            const int16_t acceleration[3] = {(int16_t)(j % 30000), (int16_t)-(int16_t)(j % 30000), 16384};
             const int16_t gyro[3] = {-32768, 32767, (int16_t)(j % 7)};
-            b_sample(b_next_sample_us + B_AHEAD_US, accel, gyro);
+            b_sample(b_next_sample_us + B_AHEAD_US, acceleration, gyro);
             samples++;
             b_next_sample_us += SAMPLE_US;
         }
-        link_msg_t m[64];
+        link_message_t m[64];
         int n = b_sent(m, 64);
         for (int k = 0; k < n; k++) fake_link_deliver(m[k].type, m[k].body, m[k].len); // PicoB -> PicoA within 1 ms
         body_update();
@@ -82,7 +82,7 @@ int main(void) {
     b_next_sample_us = fake_now_us + 1000;
     body_init();
     b_start(fake_now_us + B_AHEAD_US);
-    run_ms(1000, false); // greeting, ODOM, the clocks matched; nothing batched while idle
+    run_ms(1000, false); // greeting, ODOMETRY, the clocks matched; nothing batched while idle
     assert(body_connected() && n_batches == 0);
     uint32_t received_idle = body_imu_received();
     assert(received_idle > 90); // ~104 a second once greeted
@@ -100,10 +100,10 @@ int main(void) {
         assert(batches[b].move == 1);
         for (int i = 0; i < batches[b].n; i++) {
             const imu_record_t *r = &batches[b].records[i];
-            int32_t j = r->accel[0];
+            int32_t j = r->acceleration[0];
             assert(prev < 0 || j == prev + 1);
             prev = j;
-            assert(r->accel[1] == -j && r->accel[2] == 16384 && r->gyro[0] == -32768 && r->gyro[1] == 32767 && r->gyro[2] == j % 7);
+            assert(r->acceleration[1] == -j && r->acceleration[2] == 16384 && r->gyro[0] == -32768 && r->gyro[1] == 32767 && r->gyro[2] == j % 7);
             uint64_t t_us = batches[b].t_us + (uint64_t)i * batches[b].period_us; // since power-up
             float err_ms = (float)((int64_t)t_us - (int64_t)(record_mid_us[j] - CLOCK_START_US)) * 1e-3f;
             if (err_ms < 0) err_ms = -err_ms;

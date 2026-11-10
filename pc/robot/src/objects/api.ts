@@ -16,7 +16,7 @@ import { ReadError, findSnapshot, type ApiContext, type Read } from "../api/read
 import { yawDeg } from "../api/answers.ts";
 import { checkReport } from "./labels.ts";
 import { MODEL, ModelError, REASONING_BUDGET, parseBudget } from "./model.ts";
-import { cameraGeometry, place, type CameraGeometry, type SnapPoseLike } from "./place.ts";
+import { cameraGeometry, place, type CameraGeometry, type SnapshotPoseLike } from "./place.ts";
 import { PROMPT_VERSION, detectObjects, promptFor } from "./session.ts";
 import { runOf, saveRun, transcriptOf, type StoredObject } from "./db.ts";
 
@@ -33,14 +33,14 @@ function objectOut(o: StoredObject) {
 type SnapshotId = Awaited<ReturnType<typeof findSnapshot>>;
 
 async function snapshotForDetect(ctx: ApiContext, id: SnapshotId) {
-  const [row] = await ctx.store.query(`SELECT image, x, y, yaw, pitch FROM snapshots WHERE snap_id = '${id.boot}-${id.seq}'`);
-  if (!row?.image) throw new ReadError(`snapshot ${id.seq} has no picture`);
-  if (row.x === null) throw new ReadError(`snapshot ${id.seq} has no pose (PicoB not connected), so nothing can be placed`);
-  const pose: SnapPoseLike = { x: Number(row.x), y: Number(row.y), yaw: Number(row.yaw), pitch: Number(row.pitch ?? 0) };
+  const [row] = await ctx.store.query(`SELECT image, x, y, yaw, pitch FROM snapshots WHERE snapshot_id = '${id.boot}-${id.sequence}'`);
+  if (!row?.image) throw new ReadError(`snapshot ${id.sequence} has no picture`);
+  if (row.x === null) throw new ReadError(`snapshot ${id.sequence} has no pose (PicoB not connected), so nothing can be placed`);
+  const pose: SnapshotPoseLike = { x: Number(row.x), y: Number(row.y), yaw: Number(row.yaw), pitch: Number(row.pitch ?? 0) };
   const mounting = await ctx.store.mountingOf(id.boot);
   if (!mounting) throw new ReadError(`boot ${id.boot} has no mounting in the database`);
   const camera: CameraGeometry = cameraGeometry(mounting); // the boot's own copy
-  return { pose, camera, file: path.join(ctx.recordingsDir, String(row.image)) };
+  return { pose, camera, file: path.join(ctx.recordingsDirectory, String(row.image)) };
 }
 
 const usage = (args: string[], u: string) => { if (args.length > 1) throw new ReadError(`usage: robot ${u}`, 400); };
@@ -65,13 +65,13 @@ export async function detectSave(ctx: ApiContext, id: SnapshotId, input: DetectS
   if (!checked.ok) throw new ReadError(`not saved; fix these:\n${checked.errors.join("\n")}`, 400);
   const detections = checked.detections;
   await saveRun(ctx.store, {
-    boot: id.boot, seq: id.seq, atMs: Date.now(), model: input.by, promptVersion: input.promptVersion, thinking: input.thinking,
+    boot: id.boot, sequence: id.sequence, atMs: Date.now(), model: input.by, promptVersion: input.promptVersion, thinking: input.thinking,
     reasoningBudget: input.reasoningBudget, seconds: input.seconds, turns: input.turns, result, why: input.why ?? null,
     transcript: input.transcript === null || input.transcript === undefined ? null : JSON.stringify(input.transcript),
   }, detections, detections.map(d => place(d, pose, camera)));
-  ctx.log.note(`detect ${id.seq} (${input.by}): ${result === "ok" ? `${detections.length} objects` : `failed: ${input.why}`}`);
-  const saved = await runOf(ctx.store, id.boot, id.seq);
-  return { snapshot: id.seq, result, ...(result === "failed" ? { why: input.why } : {}),
+  ctx.log.note(`detect ${id.sequence} (${input.by}): ${result === "ok" ? `${detections.length} objects` : `failed: ${input.why}`}`);
+  const saved = await runOf(ctx.store, id.boot, id.sequence);
+  return { snapshot: id.sequence, result, ...(result === "failed" ? { why: input.why } : {}),
            seconds: input.seconds, turns: input.turns, objects: saved!.objects.map(objectOut) };
 }
 
@@ -159,14 +159,14 @@ export const OBJECT_COMMANDS: Record<string, Read> = {
       usage(args, this.usage);
       const id = await findSnapshot(ctx.store, args[0]);
       if (flags.has("transcript")) {
-        const t = await transcriptOf(ctx.store, id.boot, id.seq);
-        if (t === null) throw new ReadError(`detect hasn't run on snapshot ${id.seq} (robot detect ${id.seq})`);
-        if (t.transcript === null) throw new ReadError(`snapshot ${id.seq}'s objects were saved by ${t.by} without a conversation`);
-        return { snapshot: id.seq, transcript: JSON.parse(t.transcript) };
+        const t = await transcriptOf(ctx.store, id.boot, id.sequence);
+        if (t === null) throw new ReadError(`detect hasn't run on snapshot ${id.sequence} (robot detect ${id.sequence})`);
+        if (t.transcript === null) throw new ReadError(`snapshot ${id.sequence}'s objects were saved by ${t.by} without a conversation`);
+        return { snapshot: id.sequence, transcript: JSON.parse(t.transcript) };
       }
-      const saved = await runOf(ctx.store, id.boot, id.seq);
-      if (!saved) throw new ReadError(`detect hasn't run on snapshot ${id.seq} (robot detect ${id.seq})`);
-      return { snapshot: id.seq, ...saved.run, objects: saved.objects.map(objectOut) };
+      const saved = await runOf(ctx.store, id.boot, id.sequence);
+      if (!saved) throw new ReadError(`detect hasn't run on snapshot ${id.sequence} (robot detect ${id.sequence})`);
+      return { snapshot: id.sequence, ...saved.run, objects: saved.objects.map(objectOut) };
     },
   },
 };

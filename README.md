@@ -46,7 +46,7 @@ One configure and build produces every firmware. Drivers are shared: each Pico's
 to re-test hardware (e.g. a new PCB revision).
 Code shared between the Picos (the inter-Pico link; `mounting.json`, where the
 sensors sit, which the build turns into `robot_mounting.h` and the PC reads; `crc32.h`; `stamp.h` time differences
-across the clock's wrap, `geom.h` bearings and angles, `stats.h` n-th value and
+across the clock's wrap, `geometry.h` bearings and angles, `statistics.h` n-th value and
 median; `clock_start.h`: both Picos start their clock 30 s before
 `time_us_32()` wraps, so every run crosses the wrap 30 s after power-up) is in `common/`.
 
@@ -684,7 +684,7 @@ The MLX90640 is not implemented yet.
 - **Serial (USB):** nothing is printed and the driver stays in standby until a
   serial monitor is open; closing it stops the motor. Send `g` to enable, `s` to
   stop, `z` to zero revolutions. 10 Hz lines (units in the header): tilt X/Y (deg),
-  accel ax/ay/az (g), gyro gx/gy/gz (deg/s), left/right power, then revolutions/rpm per
+  acceleration ax/ay/az (g), gyro gx/gy/gz (deg/s), left/right power, then revolutions/rpm per
   wheel: LF, LR, RF, RR (left/right, front/rear; + = forward), RUN/STOP.
 
 Keep the robot still for ~1 s after power-up (gyro bias).

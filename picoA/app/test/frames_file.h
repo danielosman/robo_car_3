@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../tof_frame.h"
-#include "geom.h"
+#include "geometry.h"
 
 #define FRAMES_FILE_HZ 15 // every frames file so far was recorded at 15 Hz
 

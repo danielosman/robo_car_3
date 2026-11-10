@@ -46,7 +46,7 @@ to the PC during a move, into the snapshot, the map and watch, below), `camera`,
 `watch` (watching; it takes the camera's frames), `vision` (camera features, every
 3rd frame), `move` (the running move's phases; inside it `behaviour`'s action), the colour sensor
 (asked every 0.1 s), `snapshot`, `link_pc` (the link to the PC), `commands` (the
-server's commands, and their answers). `loop_stats` times every stage. Core 1 is not used.
+server's commands, and their answers). `loop_statistics` times every stage. Core 1 is not used.
 
 ### Frames and conventions
 
@@ -67,12 +67,12 @@ server's commands, and their answers). `loop_stats` times every stage. Core 1 is
   and ramped against wheel slip. Faults: a wheel not following its side's target
   for 1 s, or pitch or roll beyond 15°.
 - **`odometry`**: the IMU's axes turned into the robot's by the mounting
-  (`common/mounting.json`, given to `odom_init()`); heading from the gyro, distance from the encoders (each side the
+  (`common/mounting.json`, given to `odometry_init()`); heading from the gyro, distance from the encoders (each side the
   mean of front and rear), tilt from a complementary filter (gyro short-term,
   gravity long-term). Detects standing still; while still the heading is frozen
   and the gyro bias is measured again, so standing costs no drift. **The imu
   records:** each 4 of the IMU's samples (416 a second) averaged into one
-  `imu_record_t` (104 a second; `odom_imu_take()`, the newest 8 kept): accel and gyro
+  `imu_record_t` (104 a second; `odometry_imu_take()`, the newest 8 kept): acceleration and gyro
   x, y, z as the sensor's own int16 counts (±2 g, ±250 °/s), its own axes, nothing
   taken out (the gyro's bias neither), rounded to the nearest count (halves away from
   zero), stamped with the middle of the times PicoB read its samples (a small steady
@@ -80,12 +80,12 @@ server's commands, and their answers). `loop_stats` times every stage. Core 1 is
   samples are always consecutive: a sample skipped (more than 1.5 sample times since
   the one before) drops the partial record and starts a new one, so the skip shows
   as a gap. Records not taken in time and partial records dropped after a skipped
-  sample are counted (`odom_imu_lost()`, `odom_imu_skipped()`, in STATUS; PicoA's
+  sample are counted (`odometry_imu_lost()`, `odometry_imu_skipped()`, in STATUS; PicoA's
   `status` prints both). Training
   data for the PC; odometry itself uses the float samples.
 - **`brain`**: PicoA as PicoB sees it. Answers PicoA's greeting, keeps the motors
-  off until the protocol versions match, applies MOTORS and DRIVE, sends ODOM
-  (50 Hz), each imu record as it is made (`MSG_IMU`, once greeted) and status (2 Hz). **Safety stops:** no DRIVE for 250 ms, or a fault from
+  off until the protocol versions match, applies MOTORS and DRIVE, sends ODOMETRY
+  (50 Hz), each imu record as it is made (`MESSAGE_IMU`, once greeted) and status (2 Hz). **Safety stops:** no DRIVE for 250 ms, or a fault from
   `drive`, switch the motors off until PicoA asks for them again.
 - **Drivers:** `imu` (ISM330DHCX on SPI0, 416 Hz; `imu_read()` gives the sample in g
   and °/s, the gyro's power-up bias taken out, and the same reading as raw counts), `motor` (two TB6612FNG, 20 kHz
@@ -95,13 +95,13 @@ server's commands, and their answers). `loop_stats` times every stage. Core 1 is
 
 - **`link`**: UART0 (GP0/GP1), COBS frames with CRC-16, interrupt-buffered, never
   blocks; a damaged message is dropped. The messages are packed structs in
-  `link_msgs.h`, one header for both Picos (protocol version 6): HELLO, MOTORS, DRIVE
-  (A → B); ODOM (45 B, 50 Hz), IMU (16 B, 104 Hz), LOG, STATUS (B → A: the gyro bias,
-  imu records lost and dropped on PicoB). The receive buffer (1 KB) holds ~200 ms of PicoB's
-  traffic; bytes beyond it are lost (a bad frame, the rest counted as lost). ~4.9 KB/s from
+  `link_messages.h`, one header for both Picos (protocol version 7): HELLO, MOTORS, DRIVE
+  (A → B); ODOMETRY (37 B, 50 Hz), IMU (16 B, 104 Hz), LOG, STATUS (B → A: the gyro bias,
+  imu records lost and dropped on PicoB). The receive buffer (1 KB) holds ~230 ms of PicoB's
+  traffic; bytes beyond it are lost (a bad frame, the rest counted as lost). ~4.5 KB/s from
   PicoB of the ~100 KB/s the UART carries.
-- **Helpers**: `stamp.h` (time differences across the wrap), `geom.h` (bearings,
-  `wrap_pi`), `stats.h` (n-th value, median, sort), `units.h`, `clock_start.h`, `crc32.h`
+- **Helpers**: `stamp.h` (time differences across the wrap), `geometry.h` (bearings,
+  `wrap_pi`), `statistics.h` (n-th value, median, sort), `units.h`, `clock_start.h`, `crc32.h`
   (zlib's CRC-32, for snapshots).
 - **The mounting** (`mounting.json`): where the sensors sit, the one place for it.
   The ToF: 3.2 cm ahead of the centre, 2.6 cm right, 9 cm up, zones of 5.625°, its
@@ -111,7 +111,7 @@ server's commands, and their answers). `loop_stats` times every stage. Core 1 is
   when the file changes) and writes `robot_mounting.h` into the build dir:
   `ROBOT_MOUNTING`, a `mounting_t` (`mounting.h`). Only each Pico's `main.c`
   includes it and passes it on: PicoA to `tof_rays_init()`, `tof_init()` (the zone
-  grid's turn) and `watch_init()` (the camera), PicoB to `odom_init()`. No module
+  grid's turn) and `watch_init()` (the camera), PicoB to `odometry_init()`. No module
   has the numbers. A wrong zone turn makes `tof_init()` fail ("ToF sensor not
   working"), a wrong camera makes the camera not watch (main.c prints both). The
   PC reads the same file (`pc/robot/src/mounting.ts`). Host tests make the header
@@ -125,8 +125,8 @@ server's commands, and their answers). `loop_stats` times every stage. Core 1 is
 
 - **`body`**: PicoB as PicoA sees it. Greets it, repeats DRIVE every 50 ms
   (PicoB stops after 250 ms without one), switches the motors, keeps the last 16
-  ODOM reports numbered (so a slow loop iteration loses none) and translates
-  PicoB's clock into PicoA's (the smallest delay of the ODOM reports). PicoB's imu
+  ODOMETRY reports numbered (so a slow loop iteration loses none) and translates
+  PicoB's clock into PicoA's (the smallest delay of the ODOMETRY reports). PicoB's imu
   records get their time on PicoA's clock as they arrive and wait to be taken
   (`body_imu_take()`, the newest 32, ~0.3 s; the lost counted); records before the
   clock is known (a hello, then no report yet) are dropped. PicoB's log lines are
@@ -294,7 +294,7 @@ movement (only while watching) and gives behaviour the biggest movement
 Both detectors score cells in a **`change_grid`**: a cell has moved when it differs
 in 2 of the last 4 frames next to another such cell, or in 3 alone (frames, not
 time: how many readings agree; 0.4 s at the VL53's 10 Hz); moved cells
-that touch form blobs, reported as `watch_obs_t` (direction, extent, range if
+that touch form blobs, reported as `watch_observation_t` (direction, extent, range if
 known, strength).
 
 - **`watch_tof`** (the VL53; watches still **and while turning in place**): the
@@ -380,7 +380,7 @@ command's snapshot is answered once every part has been handed to TCP on a
 connection that is still up, so on one connection its answer always follows it.
 The one bad case: the connection lost after that, before the parts arrived; the
 snapshot is gone, its answer arrives on the next connection, and the server's
-runner says "the snapshot wasn't stored". The layout is the `snap_*_t` structs in `snapshot.c` (sections, CRC-32
+runner says "the snapshot wasn't stored". The layout is the `snapshot_*_t` structs in `snapshot.c` (sections, CRC-32
 from `common/crc32.h`; version 2), read by `pc/robot/src/snapshot.ts`, which refuses another version.
 
 ### Moves (`move`)
@@ -486,7 +486,7 @@ them). `WIRE_VERSION` (3) is in hello.
 | 0x06 | move start | control | move n, command n, kind, parameter, t_us, pre_ms, post_ms, flags (refused) (22 B) |
 | 0x07 | move end | control | move n, end, t_us, frames sent, dropped, first and last frame n, moved, rotated, imu batches sent, dropped (41 B) |
 | 0x10 | snapshot part | bulk | 1-1400 B of a snapshot |
-| 0x11 | imu batch | bulk | move n, the first record's t_us, period µs, count; per record accel and gyro x, y, z, int16 counts (11 + 12 × 1-10 B; only during a move) |
+| 0x11 | imu batch | bulk | move n, the first record's t_us, period µs, count; per record acceleration and gyro x, y, z, int16 counts (11 + 12 × 1-10 B; only during a move) |
 | 0x40 | tof compact | bulk | a compact tof frame, the map use's (277 B; only during a move) |
 | 0x20 | command | to the robot | number, text (≤ 46 B) |
 | 0x21 | heartbeat | to the robot | none |
@@ -495,8 +495,8 @@ them). `WIRE_VERSION` (3) is in hello.
 network in `wifi_config.h` (git-ignored; copy `wifi_config.example.h`), finds the
 server by its UDP announcements (or `WIFI_SERVER_IP`), keeps one TCP connection
 (port 4211) and reconnects by itself; losing it doesn't stop the robot. Its
-interface: `link_send_control()`, `link_send_bulk()` (whole messages from wire's
-encoders), `link_received()` (the next command), `link_pc_connection()` (a number
+interface: `link_pc_send_control()`, `link_pc_send_bulk()` (whole messages from wire's
+encoders), `link_pc_received()` (the next command), `link_pc_connection()` (a number
 that changes with each connection), `link_bulk_state()` (a bulk message's ticket:
 queued, sent, or lost with its connection), and status, which it sends
 itself every 0.25 s while connected (filled by `commands_status()`, the WiFi signal
@@ -543,7 +543,7 @@ added).
   frees ~31 KB.
 - **Loop:** mean ~60 µs, worst ~29 ms (a map frame, measured at 15 Hz); a ToF frame every 100 ms, DRIVE
   every 50 ms (PicoB stops after 250 ms), 16 odometry reports kept (320 ms), 32 imu
-  records (~300 ms). The UART's receive buffer (1 KB) holds ~200 ms of PicoB's messages.
+  records (~300 ms). The UART's receive buffer (1 KB) holds ~230 ms of PicoB's messages.
 - **To the PC while moving:** tof frames ~2.8 KB/s, imu batches ~1.4 KB/s (10 a
   second, 134 B each), status ~0.1 KB/s.
 - **Stack:** core 0 ~6.4 KB worst case of the 8 KB it can use (both scratch banks;
@@ -592,7 +592,7 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   mode, action, WiFi), `snapshots` (with their bytes), `snapshot_zones` (each also in the world,
   by the boot's mounting), `snapshot_features`, `snapshot_tiles`, the objects' tables.
   Times: `t_us` PicoA's as sent, `t_s` since power-up, `arrived_at` the PC's;
-  `msg` the order they came. Opened per operation, so the `duckdb` command line can
+  `message_number` the order they came. Opened per operation, so the `duckdb` command line can
   use it in between. Reads: a move's frames, its imu records, a boot's messages for a
   replay, the path. No migration: `robot2.duckdb` is new with this rework (not yet
   written on the robot); a database from before step 4c would need deleting.
@@ -632,7 +632,7 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   8 Nov: the viewer shows everything it showed.)
 - **`snapshot.ts`, `snapshots_api.ts`**: a snapshot read (version 2; the ToF section a
   compact frame), stored with its bytes, each camera picture as
-  `recordings/camera/<folder>/<seq>.png` (map pictures from `robot map --png` in
+  `recordings/camera/<folder>/<sequence>.png` (map pictures from `robot map --png` in
   `recordings/map/<folder>/`). The API composes the map at any snapshot: the newest
   of each tile up to it since the map was last cleared; `/api/mounting?boot=` gives
   the boot's own mounting.
@@ -644,7 +644,7 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   an error). The database and the API keep the boot id; the page's Boot dropdown
   shows the folder name (`/api/boots` sends it as `folder`; `robot frames` takes
   either);
-  `snapshots.image` holds the picture's path, so the page's `/camera/<boot>/<seq>.png`
+  `snapshots.image` holds the picture's path, so the page's `/camera/<boot>/<sequence>.png`
   reads it from there.
 - **`objects/`**: objects on the map from the camera ([OBJECTS_PLAN.md](OBJECTS_PLAN.md)).
   `robot detect [n]` sends the snapshot's picture to a vision model on an
@@ -675,7 +675,7 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   back (`--transcript`: the conversation). `npm run place-objects` places every
   saved box again with its boot's mounting (`-- --from-file [<boot>]` first gives the
   boot, or every boot, today's `mounting.json`: after a calibration). The page draws the boxes on the camera
-  picture and the shapes on the map (`/api/snapshots/<boot>/<seq>/objects`;
+  picture and the shapes on the map (`/api/snapshots/<boot>/<sequence>/objects`;
   `?snapshot=<n>` opens a snapshot).
 - **The page without the robot:** `npm run fakerobot -- <boot>` connects to a
   server as the robot does and speaks the wire: it replays the stored boot's

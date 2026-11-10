@@ -25,7 +25,7 @@
 // Only this module switches the motors for an action and turns the frames on and off.
 #include <stdbool.h>
 #include <stdint.h>
-#include "link_msgs.h"
+#include "link_messages.h"
 #include "tof_frame.h"
 #include "wire.h"
 
@@ -49,18 +49,18 @@ typedef enum {
 // What the act phase does: the action's own code (behaviour.c gives it).
 typedef enum { MOVE_ACTING, MOVE_ACT_DONE, MOVE_ACT_OBSTACLE } move_act_t;
 typedef struct {
-    void (*begin)(const odom_report_t *start); // the act phase starts (the robot stands still, motors on)
-    move_act_t (*step)(const odom_report_t *o); // every loop while acting; it drives (body_drive)
-    void (*end)(const odom_report_t *o, move_end_t how); // the move has ended, however; once
+    void (*begin)(const odometry_report_t *start); // the act phase starts (the robot stands still, motors on)
+    move_act_t (*step)(const odometry_report_t *o); // every loop while acting; it drives (body_drive)
+    void (*end)(const odometry_report_t *o, move_end_t how); // the move has ended, however; once
 } move_actor_t;
 
-// Starts a move: param is its parameter (drive: m, + = forward; rotate: rad, + = left;
+// Starts a move: parameter is its parameter (drive: m, + = forward; rotate: rad, + = left;
 // go to: m to the goal; watch: s); command, the number of its command. A running
 // move ends first (replaced).
-void move_start(move_kind_t kind, float param, uint32_t command, const move_actor_t *actor);
+void move_start(move_kind_t kind, float parameter, uint32_t command, const move_actor_t *actor);
 // A move that ends before it starts (how: obstacle, or done for a goal already
 // reached): numbered, its start and end sent, nothing else; a running move goes on.
-void move_refused(move_kind_t kind, float param, uint32_t command, move_end_t how);
+void move_refused(move_kind_t kind, float parameter, uint32_t command, move_end_t how);
 void move_stop(void);   // ends the running move: the robot stands still, motors off
 void move_update(void); // call every loop iteration, after the ToF pipeline
 // Every posed frame (main.c): during a move it goes to the PC, counted.
@@ -81,7 +81,7 @@ typedef struct {
     uint32_t command;     // the number of the command that started it
     move_kind_t kind;
     move_end_t how;
-    uint8_t stop_reason;  // MOVE_END_SAFETY_STOP: PicoB's STOP_* (link_msgs.h)
+    uint8_t stop_reason;  // MOVE_END_SAFETY_STOP: PicoB's STOP_* (link_messages.h)
     float moved_m;        // from where it began acting to where it ended, straight
     float rotated_rad;    // how far it turned, + = left (not wrapped)
     float goal_m;         // go to: how far the goal was when it started; 0 for the others

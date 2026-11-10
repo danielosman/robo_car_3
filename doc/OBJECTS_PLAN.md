@@ -359,7 +359,7 @@ row where the dark object turns into the bright floor), not from the model's box
 DuckDB is already there (`recordings/robot2.duckdb` since 7 Nov; `robot.duckdb` before, `@duckdb/node-api`), so no
 SQLite. A first idea of the tables:
 
-- `detect_runs`: one per `robot detect` on a snapshot: boot, seq, model, prompt
+- `detect_runs`: one per `robot detect` on a snapshot: boot, sequence, model, prompt
   version, time, tries, the model's raw answers, the result (ok / failed and why).
 - `detections`: one per box: run, label, box (y1, x1, y2, x2 on 0-1000, as the
   model gave it).

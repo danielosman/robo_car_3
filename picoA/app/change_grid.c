@@ -1,11 +1,11 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include "geom.h"
+#include "geometry.h"
 #include "change_grid.h"
 
-void change_grid_init(change_grid_t *g, int cols, int rows, float threshold, float neighbour_threshold) {
-    g->cols = cols;
+void change_grid_init(change_grid_t *g, int columns, int rows, float threshold, float neighbour_threshold) {
+    g->columns = columns;
     g->rows = rows;
     g->threshold = threshold;
     g->neighbour_threshold = neighbour_threshold;
@@ -20,15 +20,15 @@ void change_grid_clear(change_grid_t *g) {
 }
 
 static bool neighbour_scores(const change_grid_t *g, int cell) {
-    int col = cell % g->cols, row = cell / g->cols;
+    int col = cell % g->columns, row = cell / g->columns;
     return (col > 0 && g->sum[cell - 1] >= g->neighbour_threshold) ||
-           (col < g->cols - 1 && g->sum[cell + 1] >= g->neighbour_threshold) ||
-           (row > 0 && g->sum[cell - g->cols] >= g->neighbour_threshold) ||
-           (row < g->rows - 1 && g->sum[cell + g->cols] >= g->neighbour_threshold);
+           (col < g->columns - 1 && g->sum[cell + 1] >= g->neighbour_threshold) ||
+           (row > 0 && g->sum[cell - g->columns] >= g->neighbour_threshold) ||
+           (row < g->rows - 1 && g->sum[cell + g->columns] >= g->neighbour_threshold);
 }
 
 void change_grid_add(change_grid_t *g, const float *score) {
-    int n = g->cols * g->rows;
+    int n = g->columns * g->rows;
     for (int i = 0; i < n; i++) {
         g->sum[i] += score[i] - g->score[g->next][i];
         if (g->sum[i] < 0) g->sum[i] = 0; // rounding
@@ -43,7 +43,7 @@ bool change_grid_moved(const change_grid_t *g, int cell) { return g->moved[cell]
 float change_grid_sum(const change_grid_t *g, int cell) { return g->sum[cell]; }
 
 int change_grid_blobs(const change_grid_t *g, uint8_t *label) {
-    int n = g->cols * g->rows, blobs = 0;
+    int n = g->columns * g->rows, blobs = 0;
     memset(label, 0, (size_t)n);
     static int stack[CHANGE_GRID_MAX_CELLS];
     for (int start = 0; start < n; start++) {
@@ -52,9 +52,9 @@ int change_grid_blobs(const change_grid_t *g, uint8_t *label) {
         int top = 0;
         stack[top++] = start;
         while (top > 0) { // flood fill: each cell is pushed once, when labelled
-            int c = stack[--top], col = c % g->cols;
-            int next[4] = {col > 0 ? c - 1 : -1, col < g->cols - 1 ? c + 1 : -1, c - g->cols,
-                           c + g->cols < n ? c + g->cols : -1};
+            int c = stack[--top], col = c % g->columns;
+            int next[4] = {col > 0 ? c - 1 : -1, col < g->columns - 1 ? c + 1 : -1, c - g->columns,
+                           c + g->columns < n ? c + g->columns : -1};
             for (int k = 0; k < 4; k++) {
                 int m = next[k];
                 if (m < 0 || !g->moved[m] || label[m]) continue;
@@ -66,23 +66,23 @@ int change_grid_blobs(const change_grid_t *g, uint8_t *label) {
     return blobs;
 }
 
-int change_grid_observations(const change_grid_t *g, void (*direction)(int cell, float dir[3]), uint8_t *label,
-                             watch_obs_t *all) {
-    int blobs = change_grid_blobs(g, label), n = g->cols * g->rows;
+int change_grid_observations(const change_grid_t *g, void (*direction_of)(int cell, float direction[3]), uint8_t *label,
+                             watch_observation_t *all) {
+    int blobs = change_grid_blobs(g, label), n = g->columns * g->rows;
     memset(all, 0, (size_t)blobs * sizeof all[0]);
     for (int i = 0; i < n; i++) {
         if (!label[i]) continue;
-        watch_obs_t *o = &all[label[i] - 1];
-        float dir[3];
-        direction(i, dir);
-        for (int k = 0; k < 3; k++) o->where[k] += dir[k];
-        float bearing = bearing_rad(dir);
+        watch_observation_t *o = &all[label[i] - 1];
+        float direction[3];
+        direction_of(i, direction);
+        for (int k = 0; k < 3; k++) o->where[k] += direction[k];
+        float bearing = bearing_rad(direction);
         if (o->cells == 0 || bearing > o->left_rad) o->left_rad = bearing;
         if (o->cells == 0 || bearing < o->right_rad) o->right_rad = bearing;
         o->cells++;
     }
     for (int b = 0; b < blobs; b++) {
-        watch_obs_t *o = &all[b];
+        watch_observation_t *o = &all[b];
         float len = sqrtf(o->where[0] * o->where[0] + o->where[1] * o->where[1] + o->where[2] * o->where[2]);
         for (int k = 0; k < 3; k++) o->where[k] /= len;
         o->range_m = -1.0f;
@@ -92,12 +92,12 @@ int change_grid_observations(const change_grid_t *g, void (*direction)(int cell,
 }
 
 static int compare_cells(const void *a, const void *b) {
-    return ((const watch_obs_t *)b)->cells - ((const watch_obs_t *)a)->cells;
+    return ((const watch_observation_t *)b)->cells - ((const watch_observation_t *)a)->cells;
 }
 
-int change_grid_biggest(watch_obs_t *all, int blobs, watch_obs_t *obs, int max) {
+int change_grid_biggest(watch_observation_t *all, int blobs, watch_observation_t *observations, int max) {
     qsort(all, (size_t)blobs, sizeof all[0], compare_cells);
     int n = blobs < max ? blobs : max;
-    memcpy(obs, all, (size_t)n * sizeof all[0]);
+    memcpy(observations, all, (size_t)n * sizeof all[0]);
     return n;
 }

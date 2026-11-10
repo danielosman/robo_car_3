@@ -35,6 +35,6 @@ uint8_t tof_format_message_type(tof_format_t format);
 
 // Packs `f` for `use` into bytes (room for TOF_FORMAT_MAX); returns the bytes
 // written: tof_format_size(tof_format_of(use)).
-uint32_t tof_pack(tof_use_t use, const posed_frame_t *f, uint8_t *bytes);
+uint32_t tof_format_pack(tof_use_t use, const posed_frame_t *f, uint8_t *bytes);
 // Unpacks `len` bytes in `format`; false (and *out untouched) if len is not its size.
-bool tof_unpack(tof_format_t format, const uint8_t *bytes, uint32_t len, posed_frame_t *out);
+bool tof_format_unpack(tof_format_t format, const uint8_t *bytes, uint32_t len, posed_frame_t *out);

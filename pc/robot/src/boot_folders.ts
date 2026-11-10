@@ -33,14 +33,14 @@ export function saveBootFolders(file: string, folders: Record<string, string>): 
 }
 
 export class BootFolders {
-  private readonly recordingsDir: string;
+  private readonly recordingsDirectory: string;
   private readonly file: string;
   private readonly folders: Record<string, string>;
   private current = { bootId: "", folder: "" };
 
-  constructor(recordingsDir: string) {
-    this.recordingsDir = recordingsDir;
-    this.file = path.join(recordingsDir, BOOTS_FILE);
+  constructor(recordingsDirectory: string) {
+    this.recordingsDirectory = recordingsDirectory;
+    this.file = path.join(recordingsDirectory, BOOTS_FILE);
     this.folders = loadBootFolders(this.file);
   }
 
@@ -67,7 +67,7 @@ export class BootFolders {
     const owner = Object.keys(this.folders).find(id => this.folders[id] === folder);
     if (owner) throw new Error(`boot ${bootId} would get folder ${folder}, already boot ${owner}'s (${BOOTS_FILE})`);
     for (const kind of FOLDER_KINDS) {
-      if (existsSync(path.join(this.recordingsDir, kind, folder))) throw new Error(`boot ${bootId}: folder ${kind}/${folder} already exists`);
+      if (existsSync(path.join(this.recordingsDirectory, kind, folder))) throw new Error(`boot ${bootId}: folder ${kind}/${folder} already exists`);
     }
     this.folders[bootId] = folder;
     saveBootFolders(this.file, this.folders);

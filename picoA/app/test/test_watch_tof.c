@@ -32,7 +32,7 @@ static int hz;          // the rate the tests run at (10 and 15): times, not fra
 #define RANGE_INVALID   0xFFFF
 static struct { uint32_t t_us; uint16_t range_mm[TOF_ZONES]; } f = {.t_us = 0u - 30000000u}; // 30 s before the clock wraps
 static uint32_t period_us(void) { return 1000000u / (uint32_t)hz; }
-static watch_obs_t obs[8];
+static watch_observation_t observations[8];
 
 static float jitter(float mm) { return mm * 0.015f * (2.0f * (float)rand() / (float)RAND_MAX - 1.0f); }
 static int chance(int one_in) { return rand() % one_in == 0; }
@@ -85,9 +85,9 @@ static int frame(void) {
     }
     static uint8_t bytes[TOF_FORMAT_MAX];
     static posed_frame_t used;
-    uint32_t n_bytes = tof_pack(TOF_USE_WATCH, &p, bytes);
-    assert(tof_unpack(tof_format_of(TOF_USE_WATCH), bytes, n_bytes, &used));
-    return watch_tof_add(&used.frame, &view, obs, 8);
+    uint32_t n_bytes = tof_format_pack(TOF_USE_WATCH, &p, bytes);
+    assert(tof_format_unpack(tof_format_of(TOF_USE_WATCH), bytes, n_bytes, &used));
+    return watch_tof_add(&used.frame, &view, observations, 8);
 }
 
 // Watches the room with `scene` in it for n frames; returns how many frames showed movement.
@@ -311,18 +311,18 @@ static void run(int rate) {
     // A person steps in on the left: found in the 2nd frame, left of centre, ~80 cm.
     room(); person(); assert(frame() == 0);
     room(); person(); assert(frame() > 0);
-    assert(obs[0].cells >= 5); // a zone may be in its odd unsure frame
-    assert(obs[0].where[1] > 0.1f && obs[0].where[0] > 0.9f); // left, ahead
-    assert(fabsf(obs[0].range_m - 0.8f) < 0.05f);
-    assert(fabsf(obs[0].point[0] - 0.8f) < 0.1f && obs[0].point[1] > 0.1f);
+    assert(observations[0].cells >= 5); // a zone may be in its odd unsure frame
+    assert(observations[0].where[1] > 0.1f && observations[0].where[0] > 0.9f); // left, ahead
+    assert(fabsf(observations[0].range_m - 0.8f) < 0.05f);
+    assert(fabsf(observations[0].point[0] - 0.8f) < 0.1f && observations[0].point[1] > 0.1f);
     printf("ok: a person steps in on the left: %d zones, where (%.2f %.2f %.2f), %.2f m, in 2 frames\n",
-           obs[0].cells, (double)obs[0].where[0], (double)obs[0].where[1], (double)obs[0].where[2],
-           (double)obs[0].range_m);
+           observations[0].cells, (double)observations[0].where[0], (double)observations[0].where[1], (double)observations[0].where[2],
+           (double)observations[0].range_m);
     quiet_again();
 
     room(); pole(); assert(frame() == 0);
     room(); pole(); assert(frame() == 0);
-    room(); pole(); assert(frame() == 1 && obs[0].cells == 1);
+    room(); pole(); assert(frame() == 1 && observations[0].cells == 1);
     quiet_again();
     printf("ok: a thin pole in one zone: found in 3 frames\n");
 

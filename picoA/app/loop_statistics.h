@@ -5,7 +5,7 @@
 // (the one to look at when the longest iteration is too long).
 #include <stdint.h>
 
-#define LOOP_STATS_WINDOW_US 10000000u
+#define LOOP_STATISTICS_WINDOW_US 10000000u
 
 typedef struct {
     uint32_t iterations;
@@ -16,9 +16,9 @@ typedef struct {
     uint32_t slowest_us;
 } loop_window_t;
 
-void loop_stats_begin(uint32_t now_us);                    // an iteration starts (and the one before ends)
-void loop_stats_stage(const char *stage, uint32_t now_us); // a stage ended; it began where the one before ended
+void loop_statistics_begin(uint32_t now_us);                    // an iteration starts (and the one before ends)
+void loop_statistics_stage(const char *stage, uint32_t now_us); // a stage ended; it began where the one before ended
 // The last full window; before the first is full, the one running.
-const loop_window_t *loop_stats_window(void);
+const loop_window_t *loop_statistics_window(void);
 // "Loop: N per s, mean X us, max Y us (slowest: <stage> Z us)".
-void loop_stats_print(void);
+void loop_statistics_print(void);

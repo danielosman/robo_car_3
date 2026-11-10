@@ -24,33 +24,33 @@
 #include "../move.c"
 
 // --- body.h: the robot as PicoB reports it ---
-static odom_report_t odom;
+static odometry_report_t odometry;
 static bool connected = true, motors;
 static float drive_v, drive_w;
 static int drives_nonzero_before_act; // the action drove before its act phase: must stay 0
 bool body_connected(void) { return connected; }
-const odom_report_t *body_odom(void) { return &odom; }
+const odometry_report_t *body_odometry(void) { return &odometry; }
 void body_motors(bool on) { motors = on; }
 void body_drive(float v, float w) { drive_v = v; drive_w = w; }
 
 // --- link_pc.h: what goes to the PC ---
-static uint8_t control[64][WIRE_MSG_MAX];
+static uint8_t control[64][WIRE_MESSAGE_MAX];
 static int n_control;
 static int bulk_room = 1000;  // messages the bulk lane still takes
 static int n_bulk;
-static uint8_t last_bulk[WIRE_MSG_MAX];
+static uint8_t last_bulk[WIRE_MESSAGE_MAX];
 static uint32_t last_tof_move;       // the move number the last tof frame went under
 static wire_imu_batch_t batches[64]; // the imu batches the lane took
 static int n_batches;
-bool link_send_control(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len && n_control < 64);
-    memcpy(control[n_control++], msg, len);
+bool link_pc_send_control(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len && n_control < 64);
+    memcpy(control[n_control++], message, len);
     return true;
 }
-bool link_send_bulk(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len);
+bool link_pc_send_bulk(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len);
     if (bulk_room <= 0) return false;
     bulk_room--;
     n_bulk++;
@@ -59,19 +59,19 @@ bool link_send_bulk(const uint8_t *msg, uint32_t len) {
         n_batches++;
         return true;
     }
-    memcpy(last_bulk, msg, len);
+    memcpy(last_bulk, message, len);
     last_tof_move = read32(m.payload);
     return true;
 }
-static wire_msg_t control_msg(int i) { wire_msg_t m; assert(i < n_control && wire_take(control[i], WIRE_MSG_MAX, &m) > 0); return m; }
-static wire_move_start_t start_msg(int i) {
-    wire_msg_t m = control_msg(i);
+static wire_message_t control_message(int i) { wire_message_t m; assert(i < n_control && wire_take(control[i], WIRE_MESSAGE_MAX, &m) > 0); return m; }
+static wire_move_start_t start_message(int i) {
+    wire_message_t m = control_message(i);
     wire_move_start_t s;
     assert(wire_decode_move_start(&m, &s));
     return s;
 }
-static wire_move_end_t end_msg(int i) {
-    wire_msg_t m = control_msg(i);
+static wire_move_end_t end_message(int i) {
+    wire_message_t m = control_message(i);
     wire_move_end_t e;
     assert(wire_decode_move_end(&m, &e));
     return e;
@@ -82,13 +82,13 @@ static int begins, ends;
 static uint64_t begun_at_us, ended_at_us;
 static move_act_t result = MOVE_ACTING;
 static move_end_t ended_how;
-static void fake_begin(const odom_report_t *o) { (void)o; begins++; begun_at_us = fake_now_us; }
-static move_act_t fake_step(const odom_report_t *o) {
+static void fake_begin(const odometry_report_t *o) { (void)o; begins++; begun_at_us = fake_now_us; }
+static move_act_t fake_step(const odometry_report_t *o) {
     (void)o;
     if (result == MOVE_ACTING) body_drive(0.1f, 0);
     return result;
 }
-static void fake_end(const odom_report_t *o, move_end_t how) { (void)o; ends++; ended_how = how; ended_at_us = fake_now_us; }
+static void fake_end(const odometry_report_t *o, move_end_t how) { (void)o; ends++; ended_how = how; ended_at_us = fake_now_us; }
 static const move_actor_t fake_actor = {fake_begin, fake_step, fake_end};
 
 // A posed frame numbered n.
@@ -117,33 +117,33 @@ static void reset(void) {
 
 static void test_phases(void) {
     reset();
-    odom = (odom_report_t){.stationary = false, .motors_on = false, .x_m = 1, .yaw_rad = 0.5f};
+    odometry = (odometry_report_t){.stationary = false, .motors_on = false, .x_m = 1, .yaw_rad = 0.5f};
     frame(1); // idle: nothing goes
     assert(n_bulk == 0);
     move_start(MOVE_DRIVE, 0.5f, 17, &fake_actor);
     assert(motors && !strcmp(move_running(), "drive") && n_control == 1);
-    wire_move_start_t s = start_msg(0);
-    assert(s.move == 1 && s.command == 17 && s.kind == WIRE_MOVE_DRIVE && s.param == 0.5f && s.t_us == clock_since_start_us() &&
+    wire_move_start_t s = start_message(0);
+    assert(s.move == 1 && s.command == 17 && s.kind == WIRE_MOVE_DRIVE && s.parameter == 0.5f && s.t_us == clock_since_start_us() &&
            s.pre_ms == 200 && s.post_ms == 200);
     frame(2); // from the start on, frames go
     assert(n_bulk == 1);
     // The motors come on, the robot settles: only then the pre phase counts.
     loop_ms(100);
-    odom.motors_on = true;
+    odometry.motors_on = true;
     loop_ms(400);
     assert(begins == 0);
-    odom.stationary = true;
+    odometry.stationary = true;
     uint64_t still_from = fake_now_us + 1000;
     loop_ms(150);
     assert(begins == 0 && drive_v == 0);
     loop_ms(100);
     assert(begins == 1 && begun_at_us - still_from == 200000); // pre: 200 ms of standing still, motors on
     assert(drives_nonzero_before_act == 0 && drive_v == 0.1f);
-    odom.stationary = false;
+    odometry.stationary = false;
     frame(3);
     frame(4);
-    odom.x_m = 1.3f;
-    odom.yaw_rad = 0.6f;
+    odometry.x_m = 1.3f;
+    odometry.yaw_rad = 0.6f;
     loop_ms(500);
     // Done: drive 0 at once; post: 200 ms still, and only once PicoB says still.
     result = MOVE_ACT_DONE;
@@ -153,23 +153,23 @@ static void test_phases(void) {
     frame(5); // during post: still the move's
     loop_ms(300);
     assert(*move_running()); // not still yet
-    odom.stationary = true;
+    odometry.stationary = true;
     loop_ms(1);
     assert(!*move_running() && !motors && ends == 1 && ended_how == MOVE_END_DONE && fake_now_us - done_at == 301000);
     move_record_t r;
     assert(move_endings(&r) == 1 && r.move == 1 && r.command == 17 && r.kind == MOVE_DRIVE && r.how == MOVE_END_DONE &&
            move_wire_end(&r) == WIRE_END_OK && r.frames_sent == 4 && r.frames_dropped == 0 && r.goal_m == 0);
     assert(r.moved_m > 0.29f && r.moved_m < 0.31f && r.rotated_rad > 0.099f && r.rotated_rad < 0.101f);
-    wire_move_end_t e = end_msg(1);
+    wire_move_end_t e = end_message(1);
     assert(n_control == 2 && e.move == 1 && e.end == WIRE_END_OK && e.t_us == clock_since_start_us() && e.frames_sent == 4 &&
            e.frames_dropped == 0 && e.moved_m == r.moved_m);
     frame(6); // ended: no more frames
     assert(n_bulk == 4 && strcmp(move_running(), "") == 0);
     // The frames went in the map use's format.
-    wire_msg_t m;
-    assert(wire_take(last_bulk, WIRE_MSG_MAX, &m) > 0 && m.type == tof_format_message_type(tof_format_of(TOF_USE_MAP)));
+    wire_message_t m;
+    assert(wire_take(last_bulk, WIRE_MESSAGE_MAX, &m) > 0 && m.type == tof_format_message_type(tof_format_of(TOF_USE_MAP)));
     posed_frame_t back;
-    assert(tof_unpack(tof_format_of(TOF_USE_MAP), m.payload + WIRE_TOF_HEADER, m.len - WIRE_TOF_HEADER, &back) &&
+    assert(tof_format_unpack(tof_format_of(TOF_USE_MAP), m.payload + WIRE_TOF_HEADER, m.len - WIRE_TOF_HEADER, &back) &&
            back.frame.number == 5);
     // ... under the move's number, its time since power-up (the frame's own time_us_32()).
     assert(read32(m.payload) == 1 && read64(m.payload + 4) == clock_since_start_of(back.frame.t_us));
@@ -196,14 +196,14 @@ static void test_still_settings(void) {
     reset();
     assert(!move_set_still(-1, 0) && !move_set_still(0, MOVE_STILL_MAX_MS + 1) && move_pre_ms() == 200);
     assert(move_set_still(0, 0) && move_pre_ms() == 0 && move_post_ms() == 0);
-    odom.stationary = odom.motors_on = true;
+    odometry.stationary = odometry.motors_on = true;
     move_start(MOVE_ROTATE, -0.5f, 19, &fake_actor);
-    assert(start_msg(0).pre_ms == 0 && start_msg(0).post_ms == 0);
+    assert(start_message(0).pre_ms == 0 && start_message(0).post_ms == 0);
     loop_ms(1);
     assert(begins == 1); // pre 0: acts at once
     result = MOVE_ACT_OBSTACLE;
     loop_ms(2); // post 0: ends on the next loop
-    assert(!*move_running() && ended_how == MOVE_END_OBSTACLE && end_msg(1).end == WIRE_END_OBSTACLE);
+    assert(!*move_running() && ended_how == MOVE_END_OBSTACLE && end_message(1).end == WIRE_END_OBSTACLE);
     assert(move_set_still(500, 1000));
     reset();
     move_start(MOVE_DRIVE, 1, 20, &fake_actor);
@@ -224,20 +224,20 @@ static void test_still_settings(void) {
 static void test_stops(void) {
     // Stop during pre: ends at once, motors off, the action never began.
     reset();
-    odom.stationary = odom.motors_on = true;
+    odometry.stationary = odometry.motors_on = true;
     move_start(MOVE_DRIVE, 0.5f, 21, &fake_actor);
     loop_ms(100);
     move_stop();
     assert(!*move_running() && !motors && begins == 0 && ends == 1 && ended_how == MOVE_END_STOPPED);
     move_record_t r;
     move_endings(&r);
-    assert(r.how == MOVE_END_STOPPED && move_wire_end(&r) == WIRE_END_STOPPED && r.moved_m == 0 && end_msg(1).end == WIRE_END_STOPPED);
+    assert(r.how == MOVE_END_STOPPED && move_wire_end(&r) == WIRE_END_STOPPED && r.moved_m == 0 && end_message(1).end == WIRE_END_STOPPED);
     // Stop during post.
     reset();
     move_start(MOVE_DRIVE, 0.5f, 22, &fake_actor);
     loop_ms(250);
     result = MOVE_ACT_DONE;
-    odom.stationary = false;
+    odometry.stationary = false;
     loop_ms(50);
     assert(*move_running());
     move_stop();
@@ -248,18 +248,18 @@ static void test_stops(void) {
 
     // A new move replaces the running one: the motors stay on.
     reset();
-    odom.stationary = true;
+    odometry.stationary = true;
     move_start(MOVE_ROTATE, 1, 23, &fake_actor);
     loop_ms(300);
     move_start(MOVE_WATCH, 60, 24, &fake_actor);
     assert(motors && *move_running() && ended_how == MOVE_END_REPLACED && n_control == 3);
-    assert(end_msg(1).end == WIRE_END_REPLACED && start_msg(2).kind == WIRE_MOVE_WATCH && start_msg(2).param == 60 &&
-           start_msg(2).move == end_msg(1).move + 1);
+    assert(end_message(1).end == WIRE_END_REPLACED && start_message(2).kind == WIRE_MOVE_WATCH && start_message(2).parameter == 60 &&
+           start_message(2).move == end_message(1).move + 1);
     assert(!strcmp(move_running(), "watch")); // a watch is a move like the others
     // PicoB's safety stop while acting.
     loop_ms(300);
-    odom.motors_on = false;
-    odom.stop_reason = STOP_TILT;
+    odometry.motors_on = false;
+    odometry.stop_reason = STOP_TILT;
     loop_ms(1);
     move_record_t t;
     move_endings(&t);
@@ -271,25 +271,25 @@ static void test_stops(void) {
         move_record_t x = {.how = MOVE_END_SAFETY_STOP, .stop_reason = named[i].stop};
         assert(move_wire_end(&x) == named[i].end);
     }
-    assert(end_msg(3).end == WIRE_END_TILT && t.kind == MOVE_WATCH);
-    odom.stop_reason = STOP_NONE;
+    assert(end_message(3).end == WIRE_END_TILT && t.kind == MOVE_WATCH);
+    odometry.stop_reason = STOP_NONE;
     // PicoB lost.
     reset();
-    odom.motors_on = true;
+    odometry.motors_on = true;
     move_start(MOVE_DRIVE, 0.2f, 25, &fake_actor);
     connected = false;
     loop_ms(1);
     connected = true;
-    assert(!*move_running() && !motors && ended_how == MOVE_END_PICOB_LOST && end_msg(1).end == WIRE_END_PICOB_LOST);
+    assert(!*move_running() && !motors && ended_how == MOVE_END_PICOB_LOST && end_message(1).end == WIRE_END_PICOB_LOST);
     // Never still: no start after 3 s.
     reset();
-    odom.stationary = false;
+    odometry.stationary = false;
     move_start(MOVE_DRIVE, 0.2f, 26, &fake_actor);
     loop_ms(2999);
     assert(*move_running());
     loop_ms(1);
-    assert(!*move_running() && !motors && ended_how == MOVE_END_NO_START && end_msg(1).end == WIRE_END_NO_START);
-    odom.stationary = true;
+    assert(!*move_running() && !motors && ended_how == MOVE_END_NO_START && end_message(1).end == WIRE_END_NO_START);
+    odometry.stationary = true;
     printf("ok: replaced (motors stay on), a watch is a move, safety stop named, PicoB lost, no start after 3 s\n");
 }
 
@@ -300,8 +300,8 @@ static void test_refused(void) {
     move_start(MOVE_ROTATE, 1, 30, &fake_actor);
     move_refused(MOVE_DRIVE, 0.5f, 31, MOVE_END_OBSTACLE);
     assert(!strcmp(move_running(), "rotate") && n_control == 3);
-    wire_move_start_t a = start_msg(0), b = start_msg(1);
-    wire_move_end_t e = end_msg(2);
+    wire_move_start_t a = start_message(0), b = start_message(1);
+    wire_move_end_t e = end_message(2);
     assert(a.flags == 0 && b.flags == WIRE_MOVE_REFUSED); // the PC keeps the turn as the open move
     assert(b.move == a.move + 1 && b.command == 31 && e.move == b.move && e.end == WIRE_END_OBSTACLE && e.frames_sent == 0);
     move_record_t r;
@@ -310,7 +310,7 @@ static void test_refused(void) {
     loop_ms(300);
     result = MOVE_ACT_DONE;
     loop_ms(300);
-    assert(!*move_running() && end_msg(3).move == a.move && end_msg(3).frames_sent == 1 && last_tof_move == a.move);
+    assert(!*move_running() && end_message(3).move == a.move && end_message(3).frames_sent == 1 && last_tof_move == a.move);
     // Taken one by one, oldest first: the refused drive, then the turn (both in one loop for commands.c).
     move_record_t q;
     while (move_next_ended(&q) && q.command != 31) {}
@@ -342,7 +342,7 @@ static void test_since_start(void) {
 
 static void test_frames_dropped(void) {
     reset();
-    odom.stationary = true;
+    odometry.stationary = true;
     move_start(MOVE_WATCH, 5, 40, &fake_actor);
     bulk_room = 2;
     for (uint32_t n = 200; n < 205; n++) frame(n);
@@ -350,7 +350,7 @@ static void test_frames_dropped(void) {
     move_stop();
     move_record_t r;
     move_endings(&r);
-    wire_move_end_t e = end_msg(1);
+    wire_move_end_t e = end_message(1);
     assert(r.frames_sent == 2 && r.frames_dropped == 3 && e.frames_sent == 2 && e.frames_dropped == 3);
     bulk_room = 1000;
     printf("ok: the bulk lane full: frames dropped and counted per move\n");
@@ -359,8 +359,8 @@ static void test_frames_dropped(void) {
 // imu record k of a run: measured every IMU_RECORD_PERIOD_US from t0, its counts from k.
 static imu_record_t imu_rec(uint32_t t0, int k) {
     imu_record_t r = {.t_us = t0 + (uint32_t)k * IMU_RECORD_PERIOD_US};
-    for (int a = 0; a < 3; a++) { r.accel[a] = (int16_t)(k * 3 + a); r.gyro[a] = (int16_t)(-k * 3 - a); }
-    if (k == 0) { r.accel[0] = 32767; r.gyro[0] = -32768; } // the limits go through
+    for (int a = 0; a < 3; a++) { r.acceleration[a] = (int16_t)(k * 3 + a); r.gyro[a] = (int16_t)(-k * 3 - a); }
+    if (k == 0) { r.acceleration[0] = 32767; r.gyro[0] = -32768; } // the limits go through
     return r;
 }
 
@@ -372,14 +372,14 @@ static void check_batch(int b, uint32_t move, uint32_t t0, int first, int n) {
         imu_record_t want = imu_rec(t0, first + i), got = batches[b].records[i];
         int64_t got_us = (int64_t)(batches[b].t_us + (uint64_t)i * batches[b].period_us);
         assert(llabs(got_us - (int64_t)clock_since_start_of(want.t_us)) <= 5);
-        assert(!memcmp(got.accel, want.accel, sizeof got.accel) && !memcmp(got.gyro, want.gyro, sizeof got.gyro));
+        assert(!memcmp(got.acceleration, want.acceleration, sizeof got.acceleration) && !memcmp(got.gyro, want.gyro, sizeof got.gyro));
     }
 }
 
 static void test_imu(void) {
     reset();
     n_batches = 0;
-    odom.stationary = odom.motors_on = true;
+    odometry.stationary = odometry.motors_on = true;
     uint32_t t0 = time_us_32();
     imu_record_t r = imu_rec(t0, 0);
     move_imu(&r); // idle: nothing goes
@@ -387,7 +387,7 @@ static void test_imu(void) {
     // A move: 25 records make two batches of 10 while it runs, and the last 5 go
     // as a batch of their own when it ends, before the move end.
     move_start(MOVE_ROTATE, 1, 50, &fake_actor);
-    uint32_t move = start_msg(0).move;
+    uint32_t move = start_message(0).move;
     t0 = time_us_32() + 0xfffff000u; // the records' times cross the clock's wrap
     for (int k = 0; k < 25; k++) {
         r = imu_rec(t0, k);
@@ -401,7 +401,7 @@ static void test_imu(void) {
     check_batch(0, move, t0, 0, 10);
     check_batch(1, move, t0, 10, 10);
     check_batch(2, move, t0, 20, 5);
-    wire_move_end_t e = end_msg(1);
+    wire_move_end_t e = end_message(1);
     move_record_t rec;
     move_endings(&rec);
     assert(e.imu_sent == 3 && e.imu_dropped == 0 && rec.imu_sent == 3 && rec.imu_dropped == 0);
@@ -415,7 +415,7 @@ static void test_imu(void) {
     reset();
     n_batches = 0;
     move_start(MOVE_DRIVE, 0.2f, 51, &fake_actor);
-    move = start_msg(0).move;
+    move = start_message(0).move;
     t0 = time_us_32();
     for (int k = 0; k < 3; k++) { r = imu_rec(t0, k); move_imu(&r); }
     for (int k = 4; k < 7; k++) { r = imu_rec(t0, k); move_imu(&r); }  // record 3 lost
@@ -430,21 +430,21 @@ static void test_imu(void) {
     assert(n_batches == 3 && batches[2].n == 2);
     check_batch(0, move, t0, 0, 3);
     check_batch(1, move, t0, 4, 3);
-    assert(end_msg(1).imu_sent == 3);
+    assert(end_message(1).imu_sent == 3);
     printf("ok: a lost record or a step back in time starts a new batch\n");
 
     // Replaced: the running move's records go under its own number; then the new one's.
     reset();
     n_batches = 0;
     move_start(MOVE_WATCH, 5, 52, &fake_actor);
-    uint32_t first = start_msg(0).move;
+    uint32_t first = start_message(0).move;
     t0 = time_us_32();
     for (int k = 0; k < 4; k++) { r = imu_rec(t0, k); move_imu(&r); }
     move_start(MOVE_ROTATE, 1, 53, &fake_actor);
     for (int k = 4; k < 6; k++) { r = imu_rec(t0, k); move_imu(&r); }
     move_refused(MOVE_DRIVE, 1, 54, MOVE_END_OBSTACLE); // a refused move: no batches, the turn goes on
     move_stop();
-    assert(n_batches == 2 && end_msg(1).imu_sent == 1 && end_msg(4).imu_sent == 0 && end_msg(5).imu_sent == 1);
+    assert(n_batches == 2 && end_message(1).imu_sent == 1 && end_message(4).imu_sent == 0 && end_message(5).imu_sent == 1);
     check_batch(0, first, t0, 0, 4);
     check_batch(1, first + 1, t0, 4, 2);
     printf("ok: a replaced move's last batch under its own number; a refused move sends none\n");
@@ -468,7 +468,7 @@ static void test_imu(void) {
     // period says so; records while the move is starting (not yet still) go too.
     reset();
     n_batches = 0;
-    odom.stationary = false;
+    odometry.stationary = false;
     move_start(MOVE_ROTATE, 1, 57, &fake_actor);
     t0 = time_us_32();
     for (int k = 0; k < 10; k++) {
@@ -478,7 +478,7 @@ static void test_imu(void) {
         loop_ms(9);
     }
     assert(begins == 0 && n_batches == 1 && batches[0].n == 10 && batches[0].period_us == 9807);
-    odom.stationary = true;
+    odometry.stationary = true;
     move_stop();
     printf("ok: a sensor 2 %% slow stays one batch with its own period; records while starting go too\n");
 
@@ -510,7 +510,7 @@ static void test_imu(void) {
     for (int k = 0; k < 35; k++) { r = imu_rec(t0, k); move_imu(&r); }
     move_stop();
     move_endings(&rec);
-    e = end_msg(1);
+    e = end_message(1);
     assert(n_batches == 1 && e.imu_sent == 1 && e.imu_dropped == 3 && rec.imu_dropped == 3);
     bulk_room = 1000;
     printf("ok: imu batches dropped and counted when the lane is full\n");

@@ -390,7 +390,7 @@
       {
         "name": "Boot.stamp",
         "kind": "function",
-        "code": "stamp(atMs = Date.now()): Stamp { return { boot: this.id, msg: ++this.count, atMs }; }"
+        "code": "stamp(atMs = Date.now()): Stamp { return { boot: this.id, messageNumber: ++this.count, atMs }; }"
       },
       {
         "name": "Boot.moveStart",
@@ -533,12 +533,12 @@
       {
         "name": "Store.importSnapshot",
         "kind": "function",
-        "code": "async importSnapshot(boot: Boot, msg: number, s: Snapshot, bytes: Buffer, arrivalMs: number, image: string | null): Promise<void> {"
+        "code": "async importSnapshot(boot: Boot, messageNumber: number, s: Snapshot, bytes: Buffer, arrivalMs: number, image: string | null): Promise<void> {"
       },
       {
         "name": "Store.path",
         "kind": "function",
-        "code": "async path(boot: string, seq: number): Promise<{ x: number; y: number }[]> {"
+        "code": "async path(boot: string, sequence: number): Promise<{ x: number; y: number }[]> {"
       },
       {
         "name": "Store.hasBoot",

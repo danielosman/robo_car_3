@@ -21,14 +21,14 @@
 // --- fakes: PicoB reporting a robot turning at turn_radps from yaw0; no camera ---
 static float turn_radps, yaw0_rad;
 static uint32_t t0_us, reports;
-static odom_report_t odom = {.stationary = false};
+static odometry_report_t odometry = {.stationary = false};
 bool body_connected(void) { return true; }
-const odom_report_t *body_odom(void) { return &odom; }
-uint32_t body_odom_count(void) { return reports; }
-bool body_odom_get(uint32_t n, odom_report_t *r, uint32_t *t_us) {
+const odometry_report_t *body_odometry(void) { return &odometry; }
+uint32_t body_odometry_count(void) { return reports; }
+bool body_odometry_get(uint32_t n, odometry_report_t *r, uint32_t *t_us) {
     if (n != reports) return false; // the fake keeps only the latest
-    *r = odom;
-    *t_us = odom.t_us;
+    *r = odometry;
+    *t_us = odometry.t_us;
     return true;
 }
 bool camera_frame(camera_frame_t *frame) { (void)frame; return false; }
@@ -36,15 +36,15 @@ uint32_t camera_frames_captured(void) { return 0; }
 void watch_camera_restart(void) {}
 bool watch_camera_ready(void) { return false; }
 bool watch_camera_init(const mounting_t *m) { (void)m; return true; }
-int watch_camera_add(const camera_frame_t *frame, watch_obs_t *obs, int max) { (void)frame; (void)obs; (void)max; return -1; }
+int watch_camera_add(const camera_frame_t *frame, watch_observation_t *observations, int max) { (void)frame; (void)observations; (void)max; return -1; }
 uint32_t watch_camera_exposure_adjustments(void) { return 0; }
 
 // PicoB's reports up to now (every 20 ms).
 static void reports_until(uint32_t until_us) {
-    while (stamp_us(until_us, odom.t_us) >= 20000) {
-        odom.t_us += 20000;
-        odom.yaw_rad = yaw0_rad + turn_radps * stamp_s(odom.t_us, t0_us);
-        odom.w_radps = turn_radps;
+    while (stamp_us(until_us, odometry.t_us) >= 20000) {
+        odometry.t_us += 20000;
+        odometry.yaw_rad = yaw0_rad + turn_radps * stamp_s(odometry.t_us, t0_us);
+        odometry.w_radps = turn_radps;
         reports++;
         pose_update();
     }
@@ -62,8 +62,8 @@ static void frame(uint32_t period_us, bool posed) {
     pose_stamp(&f, &p);
     if (!posed) p.pose_known = false;
     uint8_t bytes[TOF_FORMAT_MAX];
-    uint32_t n_bytes = tof_pack(TOF_USE_WATCH, &p, bytes);
-    assert(tof_unpack(tof_format_of(TOF_USE_WATCH), bytes, n_bytes, &used));
+    uint32_t n_bytes = tof_format_pack(TOF_USE_WATCH, &p, bytes);
+    assert(tof_format_unpack(tof_format_of(TOF_USE_WATCH), bytes, n_bytes, &used));
     watch_add(&used);
 }
 
@@ -71,7 +71,7 @@ static void turning(float yaw0_deg, const uint32_t *periods, int n, const char *
     yaw0_rad = yaw0_deg * RAD_PER_DEG;
     turn_radps = 30 * RAD_PER_DEG;
     t0_us = time_us_32();
-    odom.t_us = t0_us - 1000000; // a second of reports before
+    odometry.t_us = t0_us - 1000000; // a second of reports before
     reports_until(t0_us);
     for (int k = 0; k < n; k++) {
         frame(periods[k], true);

@@ -17,11 +17,11 @@
 #define STILL_TIME_S      0.5f
 #define BIAS_TAU_S        5.0f   // gyro bias tracking while stationary
 
-static odom_t o;
+static odometry_t o;
 static bool imu_ok, have_tilt;
 static float yaw_bias_dps;       // on top of the power-up calibration in imu.c
 static float still_s;
-static int32_t last_count[ENC_COUNT];
+static int32_t last_count[ENCODER_COUNT];
 static uint64_t last_us;
 
 // How the ISM330DHCX breakout is mounted (common/mounting.json: Z up, X backward, Y
@@ -29,12 +29,12 @@ static uint64_t last_us;
 // side up raises roll, turning left raises yaw.
 static int8_t robot_from_sensor[3][3];
 
-// The imu records: the samples summed so far (accel x, y, z, gyro x, y, z) and when
+// The imu records: the samples summed so far (acceleration x, y, z, gyro x, y, z) and when
 // they were read; the records made, made - taken of them waiting.
 static int32_t sum[6];
 static int summed;
 static uint32_t first_us, offsets_us; // the first sample's time; the others' times after it, added
-static imu_record_t made[ODOM_IMU_KEPT];
+static imu_record_t made[ODOMETRY_IMU_KEPT];
 static uint32_t made_n, taken_n, lost_n;
 static uint32_t skipped_n; // partial records dropped after a skipped sample
 static uint32_t last_sample_us;
@@ -42,31 +42,31 @@ static uint32_t last_sample_us;
 // sample times).
 #define SAMPLE_GAP_US (3 * 1000000 / 416 / 2)
 
-static void to_robot_frame(const imu_sample_t *s, float accel_g[3], float gyro_dps[3]) {
+static void to_robot_frame(const imu_sample_t *s, float acceleration_g[3], float gyro_dps[3]) {
     const float a[3] = {s->ax, s->ay, s->az}, g[3] = {s->gx, s->gy, s->gz};
     for (int i = 0; i < 3; i++) {
-        accel_g[i] = gyro_dps[i] = 0;
+        acceleration_g[i] = gyro_dps[i] = 0;
         for (int k = 0; k < 3; k++) {
-            accel_g[i] += (float)robot_from_sensor[i][k] * a[k];
+            acceleration_g[i] += (float)robot_from_sensor[i][k] * a[k];
             gyro_dps[i] += (float)robot_from_sensor[i][k] * g[k];
         }
     }
 }
 
-bool odom_init(const mounting_t *m) {
+bool odometry_init(const mounting_t *m) {
     memcpy(robot_from_sensor, m->imu.robot_from_sensor, sizeof robot_from_sensor);
     imu_ok = imu_init();
     if (imu_ok) imu_calibrate_gyro(400); // ~1 s at 416 Hz
     encoder_init();
-    for (int i = 0; i < ENC_COUNT; i++) last_count[i] = encoder_count(i);
+    for (int i = 0; i < ENCODER_COUNT; i++) last_count[i] = encoder_count(i);
     last_us = time_us_64();
     return imu_ok;
 }
 
 static void update_wheels(float dt) {
-    float step_m[ENC_COUNT];
+    float step_m[ENCODER_COUNT];
     float k = dt / (WHEEL_SPEED_TAU_S + dt);
-    for (int i = 0; i < ENC_COUNT; i++) {
+    for (int i = 0; i < ENCODER_COUNT; i++) {
         int32_t count = encoder_count(i);
         step_m[i] = (float)(count - last_count[i]) * M_PER_COUNT;
         last_count[i] = count;
@@ -74,10 +74,10 @@ static void update_wheels(float dt) {
     }
     // Both wheels of a side roll together (skid steering), so averaging them halves
     // the counting steps and evens out a wheel that slips for a moment.
-    float dl = 0.5f * (step_m[ENC_LEFT_FRONT] + step_m[ENC_LEFT_REAR]);
-    float dr = 0.5f * (step_m[ENC_RIGHT_FRONT] + step_m[ENC_RIGHT_REAR]);
-    o.wheel_left_mps = 0.5f * (o.wheel_mps[ENC_LEFT_FRONT] + o.wheel_mps[ENC_LEFT_REAR]);
-    o.wheel_right_mps = 0.5f * (o.wheel_mps[ENC_RIGHT_FRONT] + o.wheel_mps[ENC_RIGHT_REAR]);
+    float dl = 0.5f * (step_m[ENCODER_LEFT_FRONT] + step_m[ENCODER_LEFT_REAR]);
+    float dr = 0.5f * (step_m[ENCODER_RIGHT_FRONT] + step_m[ENCODER_RIGHT_REAR]);
+    o.wheel_left_mps = 0.5f * (o.wheel_mps[ENCODER_LEFT_FRONT] + o.wheel_mps[ENCODER_LEFT_REAR]);
+    o.wheel_right_mps = 0.5f * (o.wheel_mps[ENCODER_RIGHT_FRONT] + o.wheel_mps[ENCODER_RIGHT_REAR]);
     o.v_mps = 0.5f * (o.wheel_left_mps + o.wheel_right_mps);
 
     // Distance from the encoders, direction from the gyro heading halfway through the step.
@@ -104,21 +104,21 @@ static void update_heading(float yaw_rate_raw_dps, float dt) {
     o.yaw_rad += o.w_radps * dt;
 }
 
-static void update_tilt(const float accel_g[3], const float gyro_dps[3], float dt) {
+static void update_tilt(const float acceleration_g[3], const float gyro_dps[3], float dt) {
     // At rest the accelerometer reads +1 g along whichever axis points up:
     // nose up gives +x, left side up gives +y.
-    float accel_pitch = atan2f(accel_g[0], accel_g[2]);
-    float accel_roll = atan2f(accel_g[1], accel_g[2]);
+    float acceleration_pitch = atan2f(acceleration_g[0], acceleration_g[2]);
+    float acceleration_roll = atan2f(acceleration_g[1], acceleration_g[2]);
     if (!have_tilt) {
-        o.pitch_rad = accel_pitch;
-        o.roll_rad = accel_roll;
+        o.pitch_rad = acceleration_pitch;
+        o.roll_rad = acceleration_roll;
         have_tilt = true;
         return;
     }
     float w = dt / (TILT_TAU_S + dt);
     // Nose up is a negative rotation about the left (y) axis; left side up is positive about x.
-    o.pitch_rad = (1 - w) * (o.pitch_rad - gyro_dps[1] * RAD_PER_DEG * dt) + w * accel_pitch;
-    o.roll_rad = (1 - w) * (o.roll_rad + gyro_dps[0] * RAD_PER_DEG * dt) + w * accel_roll;
+    o.pitch_rad = (1 - w) * (o.pitch_rad - gyro_dps[1] * RAD_PER_DEG * dt) + w * acceleration_pitch;
+    o.roll_rad = (1 - w) * (o.roll_rad + gyro_dps[0] * RAD_PER_DEG * dt) + w * acceleration_roll;
 }
 
 // The average of IMU_RECORD_SAMPLES counts that add up to total: the nearest count,
@@ -138,35 +138,35 @@ static void update_record(const imu_counts_t *c, uint32_t t_us) {
     if (summed == 0) { first_us = t_us; offsets_us = 0; }
     offsets_us += t_us - first_us;
     for (int i = 0; i < 3; i++) {
-        sum[i] += c->accel[i];
+        sum[i] += c->acceleration[i];
         sum[3 + i] += c->gyro[i];
     }
     if (++summed < IMU_RECORD_SAMPLES) return;
-    imu_record_t *r = &made[made_n++ % ODOM_IMU_KEPT];
+    imu_record_t *r = &made[made_n++ % ODOMETRY_IMU_KEPT];
     r->t_us = first_us + (offsets_us + IMU_RECORD_SAMPLES / 2) / IMU_RECORD_SAMPLES;
     for (int i = 0; i < 3; i++) {
-        r->accel[i] = average(sum[i]);
+        r->acceleration[i] = average(sum[i]);
         r->gyro[i] = average(sum[3 + i]);
     }
     memset(sum, 0, sizeof sum);
     summed = 0;
-    if (made_n - taken_n > ODOM_IMU_KEPT) { // the oldest not taken are lost, counted
-        lost_n += made_n - taken_n - ODOM_IMU_KEPT;
-        taken_n = made_n - ODOM_IMU_KEPT;
+    if (made_n - taken_n > ODOMETRY_IMU_KEPT) { // the oldest not taken are lost, counted
+        lost_n += made_n - taken_n - ODOMETRY_IMU_KEPT;
+        taken_n = made_n - ODOMETRY_IMU_KEPT;
     }
 }
 
-uint32_t odom_imu_lost(void) { return lost_n; }
+uint32_t odometry_imu_lost(void) { return lost_n; }
 
-uint32_t odom_imu_skipped(void) { return skipped_n; }
+uint32_t odometry_imu_skipped(void) { return skipped_n; }
 
-bool odom_imu_take(imu_record_t *r) {
+bool odometry_imu_take(imu_record_t *r) {
     if (taken_n == made_n) return false;
-    *r = made[taken_n++ % ODOM_IMU_KEPT];
+    *r = made[taken_n++ % ODOMETRY_IMU_KEPT];
     return true;
 }
 
-void odom_update(void) {
+void odometry_update(void) {
     imu_sample_t s;
     imu_counts_t counts;
     if (!imu_ok || !imu_read(&s, &counts)) return;
@@ -177,11 +177,11 @@ void odom_update(void) {
     if (dt <= 0) return;
     if (dt > MAX_DT_S) dt = MAX_DT_S;
 
-    float accel_g[3], gyro_dps[3];
-    to_robot_frame(&s, accel_g, gyro_dps);
+    float acceleration_g[3], gyro_dps[3];
+    to_robot_frame(&s, acceleration_g, gyro_dps);
     update_heading(gyro_dps[2], dt); // first: the wheel step uses this step's turn
     update_wheels(dt);
-    update_tilt(accel_g, gyro_dps, dt);
+    update_tilt(acceleration_g, gyro_dps, dt);
 }
 
-const odom_t *odom_get(void) { return &o; }
+const odometry_t *odometry_get(void) { return &o; }

@@ -22,17 +22,17 @@
 static bool connected;
 static wire_command_t inbox[32];
 static int inbox_n, inbox_at;
-static uint8_t out[64][WIRE_MSG_MAX]; // the control messages sent
+static uint8_t out[64][WIRE_MESSAGE_MAX]; // the control messages sent
 static int out_n;
 bool link_pc_connected(void) { return connected; }
 void link_pc_print_status(void) {}
-bool link_send_control(const uint8_t *msg, uint32_t len) {
-    wire_msg_t m;
-    assert(wire_take(msg, len, &m) == (int32_t)len && out_n < 64);
-    memcpy(out[out_n++], msg, len);
+bool link_pc_send_control(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len && out_n < 64);
+    memcpy(out[out_n++], message, len);
     return true;
 }
-bool link_received(wire_command_t *c) {
+bool link_pc_received(wire_command_t *c) {
     if (inbox_at == inbox_n) return false;
     *c = inbox[inbox_at++];
     return true;
@@ -42,20 +42,20 @@ static void pc_sends(uint32_t n, const char *text) {
     snprintf(inbox[inbox_n].text, sizeof inbox[inbox_n].text, "%s", text);
     inbox_n++;
 }
-static wire_msg_t sent(int i) { wire_msg_t m; assert(i < out_n && wire_take(out[i], WIRE_MSG_MAX, &m) > 0); return m; }
+static wire_message_t sent(int i) { wire_message_t m; assert(i < out_n && wire_take(out[i], WIRE_MESSAGE_MAX, &m) > 0); return m; }
 static wire_answer_t answer_sent(int i) {
-    wire_msg_t m = sent(i);
+    wire_message_t m = sent(i);
     wire_answer_t a;
     assert(wire_decode_answer(&m, &a));
     return a;
 }
 
 // --- body ---
-static odom_report_t odom = {.x_m = 0.43f, .y_m = -0.04f, .yaw_rad = 0.5f};
+static odometry_report_t odometry = {.x_m = 0.43f, .y_m = -0.04f, .yaw_rad = 0.5f};
 static status_report_t body_st;
 static bool motors;
 bool body_connected(void) { return true; }
-const odom_report_t *body_odom(void) { return &odom; }
+const odometry_report_t *body_odometry(void) { return &odometry; }
 const status_report_t *body_status(void) { return &body_st; }
 void body_motors(bool on) { motors = on; }
 uint32_t body_imu_received(void) { return 0; }
@@ -96,15 +96,15 @@ int move_post_ms(void) { return post; }
 // --- the rest ---
 char __end__, __HeapLimit; // the linker's, for "RAM free"
 static int clears;
-static uint32_t snap_asked;
-static snapshot_sent_t snap_gone;
-static bool snap_has_gone;
+static uint32_t snapshot_asked;
+static snapshot_sent_t snapshot_gone;
+static bool snapshot_has_gone;
 void cell_map_clear(void) { clears++; }
 int tof_hz(void) { return 10; }
 float tof_frames_per_s(void) { return 10; }
-void loop_stats_print(void) {}
-void snapshot_request(snapshot_why_t why, uint32_t command) { assert(why == SNAP_COMMAND); snap_asked = command; }
-bool snapshot_sent(snapshot_sent_t *s) { if (!snap_has_gone) return false; snap_has_gone = false; *s = snap_gone; return true; }
+void loop_statistics_print(void) {}
+void snapshot_request(snapshot_why_t why, uint32_t command) { assert(why == SNAPSHOT_COMMAND); snapshot_asked = command; }
+bool snapshot_sent(snapshot_sent_t *s) { if (!snapshot_has_gone) return false; snapshot_has_gone = false; *s = snapshot_gone; return true; }
 void snapshot_print_status(void) {}
 
 static void loop(int ms) {
@@ -163,9 +163,9 @@ int main(void) {
     out_n = 0;
     pc_sends(5, "snap");
     loop(1);
-    assert(snap_asked == 5 && out_n == 0);
-    snap_gone = (snapshot_sent_t){.command = 5, .seq = 41, .x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 0.75f};
-    snap_has_gone = true;
+    assert(snapshot_asked == 5 && out_n == 0);
+    snapshot_gone = (snapshot_sent_t){.command = 5, .sequence = 41, .x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 0.75f};
+    snapshot_has_gone = true;
     loop(1);
     a = answer_sent(0);
     assert(a.n == 5 && a.has == WIRE_HAS_SNAPSHOT && a.snapshot == 41 && a.x_m == 1.25f && a.yaw_rad == 0.75f);

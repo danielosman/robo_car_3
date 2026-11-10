@@ -18,7 +18,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "camera.h"
-#include "watch_obs.h"
+#include "watch_observation.h"
 #include "mounting.h"
 
 #define WATCH_CAMERA_COLS 20
@@ -36,7 +36,7 @@ bool watch_camera_ready(void); // the backgrounds are learned
 // Feeds one frame; fills up to max observations, the most blocks first, and returns
 // how many; -1 when the frame wasn't used (skipped to keep ~15 a second, the
 // exposure adjusting, the view being learned): it says nothing about movement.
-int watch_camera_add(const camera_frame_t *frame, watch_obs_t *obs, int max);
+int watch_camera_add(const camera_frame_t *frame, watch_observation_t *observations, int max);
 uint32_t watch_camera_exposure_adjustments(void); // while still, since power-up
 
 // For printing, per block (row by row, as the robot sees it): its background and

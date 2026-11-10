@@ -14,15 +14,15 @@ int main(void) {
     clock_start();
     stdio_init_all();
     drive_init();
-    bool imu_ok = odom_init(&ROBOT_MOUNTING);
+    bool imu_ok = odometry_init(&ROBOT_MOUNTING);
     brain_init(imu_ok);
 
     absolute_time_t next_control = get_absolute_time();
     for (;;) {
-        odom_update();
+        odometry_update();
         if (time_reached(next_control)) {
             next_control = make_timeout_time_us(CONTROL_PERIOD_US);
-            drive_update(odom_get());
+            drive_update(odometry_get());
         }
         brain_update();
     }

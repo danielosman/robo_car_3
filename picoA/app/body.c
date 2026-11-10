@@ -7,24 +7,24 @@
 
 #define DRIVE_PERIOD_US   (LINK_DRIVE_TIMEOUT_US / 5) // a lost DRIVE or two doesn't stop the robot
 #define MOTORS_RETRY_US   200000
-#define REPORT_TIMEOUT_US (10 * LINK_ODOM_PERIOD_US)
+#define REPORT_TIMEOUT_US (10 * LINK_ODOMETRY_PERIOD_US)
 // Clock offset (PicoA - PicoB): the smallest arrival delay over the last few
 // seconds is the one with no waiting in buffers or loops. Blocks of 1 s, so the
 // estimate follows the clocks drifting apart.
 #define OFFSET_BLOCK_US   1000000
 #define OFFSET_BLOCKS     4
 #define OFFSET_JUMP_US    100000  // a bigger change means PicoB restarted its clock: start over
-// The shortest possible delay: an ODOM frame on the wire (COBS, type, sequence,
+// The shortest possible delay: an ODOMETRY frame on the wire (COBS, type, sequence,
 // CRC and the delimiter add 6 bytes).
-#define ODOM_WIRE_US      ((uint32_t)((sizeof(odom_report_t) + 6) * 10 * 1000000ull / LINK_BAUD))
+#define ODOMETRY_WIRE_US      ((uint32_t)((sizeof(odometry_report_t) + 6) * 10 * 1000000ull / LINK_BAUD))
 
 static bool greeted;
 static bool motors_wanted;
 static uint8_t motors_request; // numbers our MOTORS requests; PicoB echoes the last one it acted on
-static drive_msg_t drive;
-static odom_report_t odom;
-static struct { odom_report_t report; uint32_t t_us; } kept[BODY_ODOM_KEPT]; // report n at n % BODY_ODOM_KEPT
-static uint32_t odom_count;
+static drive_message_t drive;
+static odometry_report_t odometry;
+static struct { odometry_report_t report; uint32_t t_us; } kept[BODY_ODOMETRY_KEPT]; // report n at n % BODY_ODOMETRY_KEPT
+static uint32_t odometry_count;
 static status_report_t status;
 static imu_record_t imu[BODY_IMU_KEPT]; // record n at n % BODY_IMU_KEPT
 static uint32_t imu_kept, imu_taken, imu_lost;
@@ -35,9 +35,9 @@ static bool clock_known;
 
 static void restart_clock(void) { clock_known = false; blocks_full = 0; }
 
-// A time on PicoB's clock on PicoA's: the offset holds the smallest delay of an ODOM,
+// A time on PicoB's clock on PicoA's: the offset holds the smallest delay of an ODOMETRY,
 // which includes its time on the wire.
-static uint32_t on_picoa_clock(uint32_t picob_us) { return picob_us + offset_us - ODOM_WIRE_US; }
+static uint32_t on_picoa_clock(uint32_t picob_us) { return picob_us + offset_us - ODOMETRY_WIRE_US; }
 
 // d = arrival on PicoA's clock - PicoB's clock at sending. The two clocks wrap at
 // the same time, so differences of uint32 values stay right across wraps.
@@ -65,17 +65,17 @@ static void track_clock(uint32_t d, uint32_t now_us) {
 }
 
 static void send_hello(bool is_reply) {
-    hello_msg_t h = {.version = LINK_PROTOCOL_VERSION, .is_reply = is_reply};
-    link_send(MSG_HELLO, &h, sizeof h);
+    hello_message_t h = {.version = LINK_PROTOCOL_VERSION, .is_reply = is_reply};
+    link_send(MESSAGE_HELLO, &h, sizeof h);
 }
 
 static void send_motors(void) {
-    motors_msg_t m = {.on = motors_wanted, .request = motors_request};
-    link_send(MSG_MOTORS, &m, sizeof m);
+    motors_message_t m = {.on = motors_wanted, .request = motors_request};
+    link_send(MESSAGE_MOTORS, &m, sizeof m);
     next_motors = make_timeout_time_us(MOTORS_RETRY_US);
 }
 
-static void on_hello(const hello_msg_t *h) {
+static void on_hello(const hello_message_t *h) {
     if (h->version != LINK_PROTOCOL_VERSION) {
         printf("PicoB protocol v%u, mine v%d: reflash both Picos\n", h->version, LINK_PROTOCOL_VERSION);
         greeted = false;
@@ -87,25 +87,25 @@ static void on_hello(const hello_msg_t *h) {
     if (!h->is_reply) send_hello(true);
 }
 
-static void on_message(const link_msg_t *m) {
+static void on_message(const link_message_t *m) {
     switch (m->type) {
-    case MSG_HELLO:
-        if (m->len == sizeof(hello_msg_t)) on_hello((const hello_msg_t *)m->body);
+    case MESSAGE_HELLO:
+        if (m->len == sizeof(hello_message_t)) on_hello((const hello_message_t *)m->body);
         break;
-    case MSG_ODOM:
-        if (m->len == sizeof odom) {
-            memcpy(&odom, m->body, sizeof odom);
+    case MESSAGE_ODOMETRY:
+        if (m->len == sizeof odometry) {
+            memcpy(&odometry, m->body, sizeof odometry);
             last_report = get_absolute_time();
-            track_clock(time_us_32() - odom.t_us, time_us_32());
-            odom_count++;
-            kept[odom_count % BODY_ODOM_KEPT].report = odom;
-            kept[odom_count % BODY_ODOM_KEPT].t_us = body_odom_time_us();
+            track_clock(time_us_32() - odometry.t_us, time_us_32());
+            odometry_count++;
+            kept[odometry_count % BODY_ODOMETRY_KEPT].report = odometry;
+            kept[odometry_count % BODY_ODOMETRY_KEPT].t_us = body_odometry_time_us();
         }
         break;
-    case MSG_STATUS:
+    case MESSAGE_STATUS:
         if (m->len == sizeof status) memcpy(&status, m->body, sizeof status);
         break;
-    case MSG_IMU:
+    case MESSAGE_IMU:
         // Kept only once PicoB has greeted us with our version and its clock is known
         // (its first report, again after it restarts): before, PicoA can't place it.
         if (m->len == sizeof(imu_record_t) && greeted && clock_known) {
@@ -118,7 +118,7 @@ static void on_message(const link_msg_t *m) {
             }
         }
         break;
-    case MSG_LOG:
+    case MESSAGE_LOG:
         printf("B: %.*s\n", m->len, (const char *)m->body);
         break;
     default:
@@ -133,7 +133,7 @@ void body_init(void) {
 }
 
 void body_update(void) {
-    link_msg_t m;
+    link_message_t m;
     while (link_receive(&m)) on_message(&m);
 
     if (!greeted) {
@@ -145,13 +145,13 @@ void body_update(void) {
     }
     if (time_reached(next_drive)) {
         next_drive = make_timeout_time_us(DRIVE_PERIOD_US);
-        link_send(MSG_DRIVE, &drive, sizeof drive);
+        link_send(MESSAGE_DRIVE, &drive, sizeof drive);
     }
     // PicoB acted on our last request, then switched the motors off by itself
     // (its LOG says why): respect that. Switching them on again is a decision for
     // whoever called body_motors().
-    bool acted_on = odom.motors_request == motors_request;
-    if (motors_wanted && acted_on && !odom.motors_on && odom.stop_reason != STOP_NONE) {
+    bool acted_on = odometry.motors_request == motors_request;
+    if (motors_wanted && acted_on && !odometry.motors_on && odometry.stop_reason != STOP_NONE) {
         motors_wanted = false;
         memset(&drive, 0, sizeof drive);
     }
@@ -165,16 +165,16 @@ bool body_connected(void) {
            absolute_time_diff_us(last_report, get_absolute_time()) < REPORT_TIMEOUT_US;
 }
 
-const odom_report_t *body_odom(void) { return &odom; }
+const odometry_report_t *body_odometry(void) { return &odometry; }
 
-uint32_t body_odom_time_us(void) { return on_picoa_clock(odom.t_us); }
+uint32_t body_odometry_time_us(void) { return on_picoa_clock(odometry.t_us); }
 
-uint32_t body_odom_count(void) { return odom_count; }
+uint32_t body_odometry_count(void) { return odometry_count; }
 
-bool body_odom_get(uint32_t n, odom_report_t *report, uint32_t *t_us) {
-    if (n == 0 || n > odom_count || odom_count - n >= BODY_ODOM_KEPT) return false;
-    *report = kept[n % BODY_ODOM_KEPT].report;
-    *t_us = kept[n % BODY_ODOM_KEPT].t_us;
+bool body_odometry_get(uint32_t n, odometry_report_t *report, uint32_t *t_us) {
+    if (n == 0 || n > odometry_count || odometry_count - n >= BODY_ODOMETRY_KEPT) return false;
+    *report = kept[n % BODY_ODOMETRY_KEPT].report;
+    *t_us = kept[n % BODY_ODOMETRY_KEPT].t_us;
     return true;
 }
 

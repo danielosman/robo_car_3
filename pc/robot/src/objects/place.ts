@@ -36,7 +36,7 @@ export interface Placed {
   cx: number | null; cy: number | null; width: number | null; depth: number | null; angle: number | null;
 }
 
-export interface SnapPoseLike { x: number; y: number; yaw: number; pitch: number }
+export interface SnapshotPoseLike { x: number; y: number; yaw: number; pitch: number }
 
 // Where the ray through picture point (px, py) (pixels, continuous: 0 the top left
 // corner, 160 the right edge) meets the floor, in the robot frame; null if it doesn't
@@ -50,7 +50,7 @@ export function floorPoint(px: number, py: number, pitch: number, cam: CameraGeo
   return [cam.x + k * fwd, cam.y + k * left];
 }
 
-export function place(d: Pick<Detection, "label" | "bbox">, pose: SnapPoseLike, cam: CameraGeometry): Placed {
+export function place(d: Pick<Detection, "label" | "bbox">, pose: SnapshotPoseLike, cam: CameraGeometry): Placed {
   // The box is y first on 0-1000 (labels.ts): [ymin, xmin, ymax, xmax]. ymin isn't used.
   const [, x1, y2, x2] = d.bbox;
   const none = (floor: Floor, distanceM: number | null = null): Placed =>

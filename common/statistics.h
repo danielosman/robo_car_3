@@ -2,13 +2,13 @@
 // Order statistics of a handful of floats (tens to a few hundred): no allocation.
 #include <stdlib.h>
 
-static inline int stats_compare(const void *a, const void *b) {
+static inline int statistics_compare(const void *a, const void *b) {
     float x = *(const float *)a, y = *(const float *)b;
     return (x > y) - (x < y);
 }
 
 // Sorts v[0..n) ascending.
-static inline void sort_values(float *v, int n) { qsort(v, (size_t)n, sizeof v[0], stats_compare); }
+static inline void sort_values(float *v, int n) { qsort(v, (size_t)n, sizeof v[0], statistics_compare); }
 
 // The k-th smallest of v[0..n) (k = 0: the smallest). Reorders v: afterwards v[k]
 // is that value, nothing before it is bigger and nothing after it smaller.

@@ -3,7 +3,7 @@
 #include "pico/stdlib.h"
 #include "clock_start.h"
 #include "units.h"
-#include "geom.h"
+#include "geometry.h"
 #include "stamp.h"
 #include "body.h"
 #include "camera.h"
@@ -13,7 +13,7 @@
 #include "watch.h"
 
 #define LOG_PERIOD_US 500000 // while movement goes on
-#define MAX_OBS 4
+#define MAX_OBSERVATIONS 4
 
 // One detector's movement as the log shows it.
 typedef struct {
@@ -33,7 +33,7 @@ static uint32_t strongest_us; // ...measured then
 void watch_stamp(void) { printf("%8.1f ", (double)((float)(clock_since_start_us() / 1000) / 1000.0f)); }
 
 static bool robot_still(void) {
-    return !body_connected() || body_odom()->stationary;
+    return !body_connected() || body_odometry()->stationary;
 }
 
 bool watch_init(const mounting_t *m) { return watch_camera_init(m); }
@@ -52,7 +52,7 @@ static tof_view_t tof_view(const posed_frame_t *f) {
 
 static float turn_dps; // the last ToF frame's turn rate, for the log
 
-static void log_movement(detector_log_t *d, const watch_obs_t *obs, int n) {
+static void log_movement(detector_log_t *d, const watch_observation_t *observations, int n) {
     uint32_t now = time_us_32();
     if (n == 0) {
         if (d->moving && logging) { watch_stamp(); printf("Movement (%s) ended\n", d->name); }
@@ -66,7 +66,7 @@ static void log_movement(detector_log_t *d, const watch_obs_t *obs, int n) {
     watch_stamp();
     printf("Movement (%s):", d->name);
     for (int k = 0; k < n; k++) {
-        const watch_obs_t *o = &obs[k];
+        const watch_observation_t *o = &observations[k];
         float bearing_deg = bearing_rad(o->where) * DEG_PER_RAD;
         float up_deg = asinf(o->where[2]) * DEG_PER_RAD;
         printf("%s %d %s, %+.0f deg (+ = left), %+.0f deg up", k ? ";" : "", o->cells, d->cells,
@@ -126,14 +126,14 @@ void watch_add(const posed_frame_t *pf) {
     const tof_frame_t *f = &pf->frame;
     tof_view_t view = last_view = tof_view(pf);
     turn_dps = (view.yaw_end_rad - view.yaw_start_rad) / ((float)f->period_us * 1e-6f) * DEG_PER_RAD;
-    watch_obs_t obs[MAX_OBS];
-    int n = watch_tof_add(f, &view, obs, MAX_OBS);
-    log_movement(&tof_log, obs, n);
+    watch_observation_t observations[MAX_OBSERVATIONS];
+    int n = watch_tof_add(f, &view, observations, MAX_OBSERVATIONS);
+    log_movement(&tof_log, observations, n);
     moving = n > 0;
-    if (moving) { strongest_rad = bearing_rad(obs[0].where); strongest_us = f->t_us; }
+    if (moving) { strongest_rad = bearing_rad(observations[0].where); strongest_us = f->t_us; }
     // Diagnosis (robot test 9 Oct: the robot twitched towards one-zone blobs at the
     // edges): the zone's reading and its background.
-    if (logging && n > 0 && obs[0].cells == 1)
+    if (logging && n > 0 && observations[0].cells == 1)
         for (int z = 0; z < TOF_ZONES; z++)
             if (watch_tof_moved(z))
                 printf("         zone row %d col %d: reads %u mm (%s), background %u mm (0: nothing)\n", z / TOF_COLS + 1,
@@ -142,16 +142,16 @@ void watch_add(const posed_frame_t *pf) {
                        (unsigned)watch_tof_background_mm(z)); // 1-8 (README)
     // The tracker follows directions as the robot sees them: only while it stands still.
     if (!still || !watch_tof_ready()) return;
-    track_event_t e = tracker_add(obs, n, f->t_us);
+    track_event_t e = tracker_add(observations, n, f->t_us);
     log_target(e, f->t_us);
 }
 
 static void update_camera(void) {
     camera_frame_t f;
     if (!camera_frame(&f) || !still) return;
-    watch_obs_t obs[MAX_OBS];
-    int n = watch_camera_add(&f, obs, MAX_OBS);
-    if (n >= 0) log_movement(&camera_log, obs, n);
+    watch_observation_t observations[MAX_OBSERVATIONS];
+    int n = watch_camera_add(&f, observations, MAX_OBSERVATIONS);
+    if (n >= 0) log_movement(&camera_log, observations, n);
     if (watch_camera_exposure_adjustments() != adjustments) {
         adjustments = watch_camera_exposure_adjustments();
         if (camera_log.moving) log_movement(&camera_log, 0, 0);

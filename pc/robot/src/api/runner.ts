@@ -17,32 +17,32 @@ export interface Runner { run(c: Command): Promise<Outcome> }
 // command is answered once its snapshot is stored, so it can be read right away.
 export class StoredSnapshots {
   private boot = "";
-  private seqs = new Set<number>();
+  private sequences = new Set<number>();
   private last: number | null = null;
   private waiters = new Map<number, (() => void)[]>();
 
-  add(boot: string, seq: number): void {
-    if (boot !== this.boot) { this.boot = boot; this.seqs.clear(); this.last = null; }
-    this.seqs.add(seq);
-    this.last = Math.max(this.last ?? 0, seq);
-    if (this.seqs.size > 100) this.seqs.delete(this.seqs.values().next().value!);
-    for (const wake of this.waiters.get(seq) ?? []) wake();
-    this.waiters.delete(seq);
+  add(boot: string, sequence: number): void {
+    if (boot !== this.boot) { this.boot = boot; this.sequences.clear(); this.last = null; }
+    this.sequences.add(sequence);
+    this.last = Math.max(this.last ?? 0, sequence);
+    if (this.sequences.size > 100) this.sequences.delete(this.sequences.values().next().value!);
+    for (const wake of this.waiters.get(sequence) ?? []) wake();
+    this.waiters.delete(sequence);
   }
 
   // The newest snapshot stored, of the newest boot; null before the first.
   newest(): number | null { return this.last; }
 
-  // True once snapshot seq is stored; false if it isn't within ms.
-  stored(seq: number, ms: number): Promise<boolean> {
-    if (this.seqs.has(seq)) return Promise.resolve(true);
+  // True once snapshot sequence is stored; false if it isn't within ms.
+  stored(sequence: number, ms: number): Promise<boolean> {
+    if (this.sequences.has(sequence)) return Promise.resolve(true);
     return new Promise(resolve => {
       const wake = () => { clearTimeout(timer); resolve(true); };
       const timer = setTimeout(() => {
-        this.waiters.set(seq, (this.waiters.get(seq) ?? []).filter(w => w !== wake));
+        this.waiters.set(sequence, (this.waiters.get(sequence) ?? []).filter(w => w !== wake));
         resolve(false);
       }, Math.max(0, ms));
-      this.waiters.set(seq, [...(this.waiters.get(seq) ?? []), wake]);
+      this.waiters.set(sequence, [...(this.waiters.get(sequence) ?? []), wake]);
     });
   }
 }

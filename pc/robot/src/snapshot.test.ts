@@ -33,7 +33,7 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(whole.length, 5);
   assert.ok(a.skipped >= 14);
   const s = whole.map(parseSnapshot);
-  assert.deepEqual(s.map(x => x.seq), [1, 2, 3, 4, 5]);
+  assert.deepEqual(s.map(x => x.sequence), [1, 2, 3, 4, 5]);
   assert.deepEqual(s.map(x => x.why), ["server connected", "command", "command", "server connected", "command"]);
   const first = s[0];
   assert.equal(first.mode, "manual");
@@ -52,7 +52,7 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(first.camera!.width * first.camera!.height, first.camera!.pixels.length);
   assert.equal(first.camera!.pixels[10], (10 * 13) & 255);
   assert.equal(first.color!.raw[15], 0xaf);
-  assert.equal(first.window!.orgX, -30);
+  assert.equal(first.window!.originX, -30);
   assert.equal(first.tiles.length, 2);
   assert.equal(first.features!.cameraNumber, 77);
   assert.deepEqual(first.features!.features[0], { id: 9, age: 3, flags: 0, x: 12.5, y: 100.25, dx: -0.5, dy: 0.75, strength: 128 / 255, match: 230 / 255 });
@@ -106,24 +106,24 @@ test("a grey PNG", () => {
 });
 
 test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_tests.sh first" }, async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "snaps-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "snaps-"));
   try {
-    const { store, boot: b } = await storeWithSnapshots(dir);
+    const { store, boot: b } = await storeWithSnapshots(directory);
     const boot = b.id;
     const folder = folderNameAt(Date.UTC(2026, 9, 14, 10, 0, 0)); // the boot's folder: when its first snapshot arrived
-    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "boots.json"), "utf8")), { [boot]: folder });
-    assert.ok(existsSync(path.join(dir, "camera", folder, "1.png")));
+    assert.deepEqual(JSON.parse(readFileSync(path.join(directory, "boots.json"), "utf8")), { [boot]: folder });
+    assert.ok(existsSync(path.join(directory, "camera", folder, "1.png")));
     // Stored again: replaced, not added.
     const again = parseSnapshot(new SnapshotAssembler().push(firmware())[0]);
-    await store.importSnapshot(b, b.stamp().msg, again, new SnapshotAssembler().push(firmware())[0], Date.UTC(2026, 9, 14, 10), null);
+    await store.importSnapshot(b, b.stamp().messageNumber, again, new SnapshotAssembler().push(firmware())[0], Date.UTC(2026, 9, 14, 10), null);
     assert.deepEqual(await store.query("SELECT count(*) AS n FROM snapshots"), [{ n: "5" }]);
 
-    const boots = await listBoots(store, new BootFolders(dir));
+    const boots = await listBoots(store, new BootFolders(directory));
     assert.equal(boots.length, 1);
     assert.equal(boots[0].folder, folder);
     assert.equal(Number(boots[0].snapshots), 5);
     const list = await listSnapshots(store, boot);
-    assert.deepEqual(list.map(r => Number(r.seq)), [1, 2, 3, 4, 5]);
+    assert.deepEqual(list.map(r => Number(r.sequence)), [1, 2, 3, 4, 5]);
     assert.equal(list[1].action, "drive");
     assert.equal(list[1].end_reason, "obstacle");
     assert.equal(list[2].has_image, true);
@@ -152,15 +152,15 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     // The map then: snapshot 1 has the two first tiles; snapshot 3 changed one (newest wins);
     // 5 has every tile the robot has (42).
     const m1 = (await snapshotMap(store, boot, 1))!;
-    assert.equal(m1.window!.orgX, -30);
+    assert.equal(m1.window!.originX, -30);
     assert.equal(m1.window!.columns[30 * 60 + 31], COLUMN.BLOCKED);
     assert.equal(m1.tiles.length, 2);
     const t1 = m1.tiles.find(t => t.tx === -2)!;
     assert.equal(t1.columns[5 * 20 + 10], COLUMN.BLOCKED);
     const m3 = (await snapshotMap(store, boot, 3))!;
     const t3 = m3.tiles.find(t => t.tx === -2)!;
-    assert.equal(t3.seq, 3);
+    assert.equal(t3.sequence, 3);
     assert.equal(t3.columns[5 * 20 + 10], COLUMN.OPEN);
     assert.equal((await snapshotMap(store, boot, 5))!.tiles.length, 42);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

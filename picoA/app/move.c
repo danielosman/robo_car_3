@@ -15,10 +15,10 @@ static const char *const print_name[] = {"Drive", "Rotate", "Go to", "Watch"}; /
 typedef struct {
     uint32_t number, command;
     move_kind_t kind;
-    float param;
+    float parameter;
     bool acted;                 // the act phase began (start is set)
     bool obstacle;              // the act phase ended before an obstacle
-    odom_report_t start;        // the robot when the act phase began
+    odometry_report_t start;        // the robot when the act phase began
     uint32_t sent, dropped;     // its frames
     uint32_t imu_sent, imu_dropped;      // its imu batches
 } move_t;
@@ -86,48 +86,48 @@ uint8_t move_wire_end(const move_record_t *r) { return (uint8_t)wire_end_of(r->h
 
 // A new move, numbered; the PC told (refused: it ends at once, a running move goes on).
 static move_t numbered_move(move_kind_t k, float p, uint32_t c, bool refused) {
-    move_t m = {.number = ++numbered, .command = c, .kind = k, .param = p};
-    wire_move_start_t s = {.move = m.number, .command = c, .kind = (uint8_t)k, .param = p, .t_us = clock_since_start_us(),
+    move_t m = {.number = ++numbered, .command = c, .kind = k, .parameter = p};
+    wire_move_start_t s = {.move = m.number, .command = c, .kind = (uint8_t)k, .parameter = p, .t_us = clock_since_start_us(),
                            .pre_ms = (uint16_t)pre_ms, .post_ms = (uint16_t)post_ms, .flags = refused ? WIRE_MOVE_REFUSED : 0};
-    uint8_t msg[WIRE_HEADER + WIRE_MOVE_START_SIZE];
-    uint32_t n = wire_encode_move_start(&s, msg);
-    link_send_control(msg, n);
+    uint8_t message[WIRE_HEADER + WIRE_MOVE_START_SIZE];
+    uint32_t n = wire_encode_move_start(&s, message);
+    link_pc_send_control(message, n);
     return m;
 }
 
 // Move m has ended: its record, and the PC told.
 static void ended(const move_t *m, move_end_t how) {
-    const odom_report_t *o = body_odom();
+    const odometry_report_t *o = body_odometry();
     uint8_t stop = how == MOVE_END_SAFETY_STOP ? o->stop_reason : STOP_NONE;
     endings++;
     last = (move_record_t){
         .move = m->number, .command = m->command, .kind = m->kind, .how = how, .stop_reason = stop,
         .moved_m = m->acted ? hypotf(o->x_m - m->start.x_m, o->y_m - m->start.y_m) : 0,
         .rotated_rad = m->acted ? o->yaw_rad - m->start.yaw_rad : 0,
-        .goal_m = m->kind == MOVE_GOTO ? m->param : 0,
+        .goal_m = m->kind == MOVE_GOTO ? m->parameter : 0,
         .frames_sent = m->sent, .frames_dropped = m->dropped, .imu_sent = m->imu_sent, .imu_dropped = m->imu_dropped,
     };
     ended_queue[(endings - 1) % MOVE_ENDED_KEPT] = last;
     wire_move_end_t e = {.move = m->number, .end = move_wire_end(&last), .t_us = clock_since_start_us(), .frames_sent = m->sent,
                          .frames_dropped = m->dropped, .moved_m = last.moved_m, .rotated_rad = last.rotated_rad, .imu_sent = m->imu_sent,
                          .imu_dropped = m->imu_dropped};
-    uint8_t msg[WIRE_HEADER + WIRE_MOVE_END_SIZE];
-    uint32_t n = wire_encode_move_end(&e, msg);
-    link_send_control(msg, n);
+    uint8_t message[WIRE_HEADER + WIRE_MOVE_END_SIZE];
+    uint32_t n = wire_encode_move_end(&e, message);
+    link_pc_send_control(message, n);
 }
 
 // The imu records waiting, as one batch to the bulk lane; counted.
 static void send_batch(void) {
     if (!batch.n) return;
-    static uint8_t msg[WIRE_HEADER + WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD];
+    static uint8_t message[WIRE_HEADER + WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD];
     // Evenly spaced (move_imu() starts a new batch at a gap): the period is the first
     // to the last record's time over n - 1, rounded; the nominal one for one record.
     uint32_t span = batch.records[batch.n - 1].t_us - batch.records[0].t_us;
     batch.move = cur.number;
     batch.t_us = clock_since_start_of(batch.records[0].t_us);
     batch.period_us = (uint16_t)(batch.n > 1 ? (span + (batch.n - 1) / 2u) / (batch.n - 1u) : IMU_RECORD_PERIOD_US);
-    uint32_t n = wire_encode_imu_batch(&batch, msg);
-    if (link_send_bulk(msg, n)) cur.imu_sent++;
+    uint32_t n = wire_encode_imu_batch(&batch, message);
+    if (link_pc_send_bulk(message, n)) cur.imu_sent++;
     else cur.imu_dropped++;
     batch.n = 0;
 }
@@ -137,7 +137,7 @@ static void send_batch(void) {
 static void finish(move_end_t how) {
     send_batch();
     phase = IDLE;
-    running_actor->end(body_odom(), how);
+    running_actor->end(body_odometry(), how);
     ended(&cur, how);
     printf("%s %lu: %lu ToF frames sent, %lu dropped; %lu imu batches sent, %lu dropped\n", print_name[cur.kind],
            (unsigned long)cur.number, (unsigned long)cur.sent, (unsigned long)cur.dropped, (unsigned long)cur.imu_sent,
@@ -173,9 +173,9 @@ void move_stop(void) { end_now(MOVE_END_STOPPED, "by command", true); }
 
 void move_tof(const posed_frame_t *f) {
     if (phase == IDLE) return;
-    static uint8_t msg[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX];
-    uint32_t n = wire_encode_tof(TOF_USE_MAP, cur.number, clock_since_start_of(f->frame.t_us), f, msg);
-    if (link_send_bulk(msg, n)) cur.sent++;
+    static uint8_t message[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX];
+    uint32_t n = wire_encode_tof(TOF_USE_MAP, cur.number, clock_since_start_of(f->frame.t_us), f, message);
+    if (link_pc_send_bulk(message, n)) cur.sent++;
     else cur.dropped++;
 }
 
@@ -191,7 +191,7 @@ void move_imu(const imu_record_t *r) {
 
 void move_update(void) {
     if (phase == IDLE) return;
-    const odom_report_t *o = body_odom();
+    const odometry_report_t *o = body_odometry();
     if (!body_connected()) { end_now(MOVE_END_PICOB_LOST, "PicoB not connected", true); return; }
     if (phase != STARTING && !o->motors_on) {
         printf("%s stopped: PicoB switched the motors off (%s)\n", print_name[cur.kind], stop_reason_text(o->stop_reason));

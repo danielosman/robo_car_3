@@ -77,7 +77,7 @@ uint32_t wire_header(uint8_t *out, uint8_t type, uint16_t len) {
     return WIRE_HEADER;
 }
 
-int32_t wire_take(const uint8_t *bytes, uint32_t len, wire_msg_t *m) {
+int32_t wire_take(const uint8_t *bytes, uint32_t len, wire_message_t *m) {
     if (len < 1) return 0;
     wire_type_info_t info;
     if (!wire_info(bytes[0], &info)) return WIRE_UNKNOWN_TYPE;
@@ -86,7 +86,7 @@ int32_t wire_take(const uint8_t *bytes, uint32_t len, wire_msg_t *m) {
     if (n > info.max) return WIRE_TOO_LONG;
     if (n < info.min) return WIRE_TOO_SHORT;
     if (len < WIRE_HEADER + (uint32_t)n) return 0;
-    *m = (wire_msg_t){.type = bytes[0], .payload = bytes + WIRE_HEADER, .len = n};
+    *m = (wire_message_t){.type = bytes[0], .payload = bytes + WIRE_HEADER, .len = n};
     return WIRE_HEADER + n;
 }
 
@@ -99,7 +99,7 @@ const char *wire_error_text(int32_t error) {
     }
 }
 
-static bool is(const wire_msg_t *m, uint8_t type, uint16_t len) { return m->type == type && m->len == len; }
+static bool is(const wire_message_t *m, uint8_t type, uint16_t len) { return m->type == type && m->len == len; }
 
 // --- the payloads ---
 
@@ -111,7 +111,7 @@ uint32_t wire_encode_hello(const wire_hello_t *h, uint8_t *out) {
     return WIRE_HEADER + WIRE_HELLO_SIZE;
 }
 
-bool wire_decode_hello(const wire_msg_t *m, wire_hello_t *h) {
+bool wire_decode_hello(const wire_message_t *m, wire_hello_t *h) {
     if (!is(m, WIRE_HELLO, WIRE_HELLO_SIZE)) return false;
     h->version = m->payload[0];
     h->boot_id = read32(m->payload + 1);
@@ -126,7 +126,7 @@ uint32_t wire_encode_console(const char *text, uint32_t n, uint8_t *out) {
     return WIRE_HEADER + n;
 }
 
-bool wire_decode_console(const wire_msg_t *m, char *text) {
+bool wire_decode_console(const wire_message_t *m, char *text) {
     if (m->type != WIRE_CONSOLE || m->len > WIRE_CONSOLE_MAX) return false;
     memcpy(text, m->payload, m->len);
     text[m->len] = 0;
@@ -148,7 +148,7 @@ uint32_t wire_encode_answer(const wire_answer_t *a, uint8_t *out) {
     return WIRE_HEADER + WIRE_ANSWER_SIZE;
 }
 
-bool wire_decode_answer(const wire_msg_t *m, wire_answer_t *a) {
+bool wire_decode_answer(const wire_message_t *m, wire_answer_t *a) {
     if (!is(m, WIRE_ANSWER, WIRE_ANSWER_SIZE)) return false;
     const uint8_t *p = m->payload;
     *a = (wire_answer_t){.n = read32(p), .end = p[4], .has = p[5], .x_m = readf(p + 6), .y_m = readf(p + 10),
@@ -168,7 +168,7 @@ uint32_t wire_encode_status(const wire_status_t *s, uint8_t *out) {
     return WIRE_HEADER + WIRE_STATUS_SIZE;
 }
 
-bool wire_decode_status(const wire_msg_t *m, wire_status_t *s) {
+bool wire_decode_status(const wire_message_t *m, wire_status_t *s) {
     if (!is(m, WIRE_STATUS, WIRE_STATUS_SIZE)) return false;
     const uint8_t *p = m->payload;
     s->x_m = readf(p);
@@ -187,7 +187,7 @@ uint32_t wire_encode_move_start(const wire_move_start_t *s, uint8_t *out) {
     set32(p, s->move);
     set32(p + 4, s->command);
     p[8] = s->kind;
-    setf(p + 9, s->param);
+    setf(p + 9, s->parameter);
     set64(p + 13, s->t_us);
     set16(p + 21, s->pre_ms);
     set16(p + 23, s->post_ms);
@@ -195,10 +195,10 @@ uint32_t wire_encode_move_start(const wire_move_start_t *s, uint8_t *out) {
     return WIRE_HEADER + WIRE_MOVE_START_SIZE;
 }
 
-bool wire_decode_move_start(const wire_msg_t *m, wire_move_start_t *s) {
+bool wire_decode_move_start(const wire_message_t *m, wire_move_start_t *s) {
     if (!is(m, WIRE_MOVE_START, WIRE_MOVE_START_SIZE)) return false;
     const uint8_t *p = m->payload;
-    *s = (wire_move_start_t){.move = read32(p), .command = read32(p + 4), .kind = p[8], .param = readf(p + 9),
+    *s = (wire_move_start_t){.move = read32(p), .command = read32(p + 4), .kind = p[8], .parameter = readf(p + 9),
                              .t_us = read64(p + 13), .pre_ms = read16(p + 21), .post_ms = read16(p + 23), .flags = p[25]};
     return true;
 }
@@ -217,7 +217,7 @@ uint32_t wire_encode_move_end(const wire_move_end_t *e, uint8_t *out) {
     return WIRE_HEADER + WIRE_MOVE_END_SIZE;
 }
 
-bool wire_decode_move_end(const wire_msg_t *m, wire_move_end_t *e) {
+bool wire_decode_move_end(const wire_message_t *m, wire_move_end_t *e) {
     if (!is(m, WIRE_MOVE_END, WIRE_MOVE_END_SIZE)) return false;
     const uint8_t *p = m->payload;
     *e = (wire_move_end_t){.move = read32(p), .end = p[4], .t_us = read64(p + 5), .frames_sent = read32(p + 13),
@@ -237,14 +237,14 @@ uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out) {
     for (int i = 0; i < b->n; i++) {
         uint8_t *r = p + WIRE_IMU_BATCH_HEADER + i * WIRE_IMU_RECORD;
         for (int k = 0; k < 3; k++) {
-            set16(r + 2 * k, (uint16_t)b->records[i].accel[k]);
+            set16(r + 2 * k, (uint16_t)b->records[i].acceleration[k]);
             set16(r + 6 + 2 * k, (uint16_t)b->records[i].gyro[k]);
         }
     }
     return WIRE_HEADER + len;
 }
 
-bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b) {
+bool wire_decode_imu_batch(const wire_message_t *m, wire_imu_batch_t *b) {
     if (m->type != WIRE_IMU_BATCH || m->len < WIRE_IMU_BATCH_HEADER) return false;
     const uint8_t *p = m->payload;
     uint8_t n = p[14];
@@ -257,7 +257,7 @@ bool wire_decode_imu_batch(const wire_msg_t *m, wire_imu_batch_t *b) {
         const uint8_t *r = p + WIRE_IMU_BATCH_HEADER + i * WIRE_IMU_RECORD;
         b->records[i].t_us = 0;
         for (int k = 0; k < 3; k++) {
-            b->records[i].accel[k] = (int16_t)read16(r + 2 * k);
+            b->records[i].acceleration[k] = (int16_t)read16(r + 2 * k);
             b->records[i].gyro[k] = (int16_t)read16(r + 6 + 2 * k);
         }
     }
@@ -268,7 +268,7 @@ uint32_t wire_encode_tof(tof_use_t use, uint32_t move, uint64_t t_us, const pose
     uint8_t *p = out + WIRE_HEADER;
     set32(p, move);
     set64(p + 4, t_us);
-    uint32_t n = WIRE_TOF_HEADER + tof_pack(use, f, p + WIRE_TOF_HEADER);
+    uint32_t n = WIRE_TOF_HEADER + tof_format_pack(use, f, p + WIRE_TOF_HEADER);
     wire_header(out, tof_format_message_type(tof_format_of(use)), (uint16_t)n);
     return WIRE_HEADER + n;
 }
@@ -296,7 +296,7 @@ uint32_t wire_encode_command(const wire_command_t *c, uint8_t *out) {
     return WIRE_HEADER + 4 + n;
 }
 
-bool wire_decode_command(const wire_msg_t *m, wire_command_t *c) {
+bool wire_decode_command(const wire_message_t *m, wire_command_t *c) {
     if (m->type != WIRE_COMMAND || m->len < 5) return false;
     uint32_t n = m->len - 4u;
     if (!command_text_ok((const char *)m->payload + 4, n)) return false;

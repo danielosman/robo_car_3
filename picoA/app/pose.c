@@ -1,7 +1,7 @@
 #include <math.h>
 #include "pico/stdlib.h"
 #include "stamp.h"
-#include "geom.h"
+#include "geometry.h"
 #include "body.h"
 #include "pose.h"
 
@@ -22,12 +22,12 @@ static uint32_t taken;          // body's reports taken so far
 // Every report body has received since the last call, even several in one loop
 // iteration.
 void pose_update(void) {
-    uint32_t n = body_odom_count();
-    if (n - taken > BODY_ODOM_KEPT) taken = n - BODY_ODOM_KEPT; // the older ones are gone
+    uint32_t n = body_odometry_count();
+    if (n - taken > BODY_ODOMETRY_KEPT) taken = n - BODY_ODOMETRY_KEPT; // the older ones are gone
     while (taken != n) {
-        odom_report_t o;
+        odometry_report_t o;
         uint32_t t_us;
-        if (!body_odom_get(++taken, &o, &t_us)) continue; // no longer kept
+        if (!body_odometry_get(++taken, &o, &t_us)) continue; // no longer kept
         newest = (newest + 1) % POSE_HISTORY;
         if (count < POSE_HISTORY) count++;
         history[newest] = (sample_t){

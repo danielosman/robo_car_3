@@ -20,13 +20,13 @@ const zones = Array.from({ length: 64 }, () => ({ distanceMm: 500, signal: 9, si
 const frame = (number: number): PosedFrame => ({ number, robotClockUs: number * 100000, periodUs: 100000, x: 0, y: 0, yaw: 0, pitch: 0, turn: 0,
                                                  still: true, poseKnown: true, beyondMm: 2550, zones });
 const start = (move: number, kind: string, refused: boolean): MoveStart =>
-  ({ move, command: move, kind, param: 1, tUs: move * 1000, preMs: 200, postMs: 200, refused });
+  ({ move, command: move, kind, parameter: 1, tUs: move * 1000, preMs: 200, postMs: 200, refused });
 const end = (move: number, how: string, sent: number) =>
   encodeMoveEnd({ move, end: how, tUs: move * 1000 + 500, framesSent: sent, framesDropped: 0, moved: 0, rotated: 0, imuSent: 0, imuDropped: 0 });
 
 // n imu records of move, PicoA's time from t0, 9615 µs apart.
 const imu = (move: number, t0: number, n: number) => encodeImuBatch({ move, records: Array.from({ length: n }, (_, i) =>
-  ({ tUs: t0 + i * 9615, accel: [i, 0, 16384] as [number, number, number], gyro: [0, 0, i] as [number, number, number] })) });
+  ({ tUs: t0 + i * 9615, acceleration: [i, 0, 16384] as [number, number, number], gyro: [0, 0, i] as [number, number, number] })) });
 
 async function connect(port: number, bootId: string): Promise<net.Socket> {
   const s = net.connect(port, "127.0.0.1");
@@ -36,10 +36,10 @@ async function connect(port: number, bootId: string): Promise<net.Socket> {
 }
 
 test("refused moves and a second hello of the same boot, stored as main.ts stores them", async () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), "ingest-"));
+  const directory = mkdtempSync(path.join(os.tmpdir(), "ingest-"));
   const link = new RobotLink({ robotPort: 0, announceTo: ["127.0.0.1"], announcePort: 9, heartbeatEveryMs: 100 });
-  const store = new Store(path.join(dir, "robot2.duckdb")), notes: string[] = [];
-  const stored = ingest(link, store, { recordingsDir: dir, bootFolders: new BootFolders(dir), note: n => notes.push(n) });
+  const store = new Store(path.join(directory, "robot2.duckdb")), notes: string[] = [];
+  const stored = ingest(link, store, { recordingsDirectory: directory, bootFolders: new BootFolders(directory), note: n => notes.push(n) });
   try {
     const port = await link.start();
     let robot = await connect(port, "1234abcd");
@@ -54,12 +54,12 @@ test("refused moves and a second hello of the same boot, stored as main.ts store
     robot.destroy();
     await stored.idle();
     assert.deepEqual(notes.filter(n => n.includes("NOT")), []);
-    const frames = await store.query("SELECT number, move, msg FROM frames ORDER BY number");
-    assert.deepEqual(frames, [{ number: "10", move: 1, msg: 2 }, { number: "11", move: 1, msg: 6 }, { number: "12", move: 1, msg: 7 }]);
-    assert.deepEqual(await store.query("SELECT move, msg, count(*) AS n FROM imu GROUP BY move, msg ORDER BY msg"),
-      [{ move: 1, msg: 3, n: "10" }, { move: 1, msg: 9, n: "4" }]);
+    const frames = await store.query("SELECT number, move, message_number FROM frames ORDER BY number");
+    assert.deepEqual(frames, [{ number: "10", move: 1, message_number: 2 }, { number: "11", move: 1, message_number: 6 }, { number: "12", move: 1, message_number: 7 }]);
+    assert.deepEqual(await store.query("SELECT move, message_number, count(*) AS n FROM imu GROUP BY move, message_number ORDER BY message_number"),
+      [{ move: 1, message_number: 3, n: "10" }, { move: 1, message_number: 9, n: "4" }]);
     const moves = await store.query(`SELECT move, kind, refused, "end" FROM moves ORDER BY move`);
     assert.deepEqual(moves, [{ move: 1, kind: "watch", refused: false, end: "ok" }, { move: 2, kind: "drive", refused: true, end: "obstacle" }]);
     assert.deepEqual(await store.query("SELECT messages FROM boots"), [{ messages: 9 }]);
-  } finally { link.stop(); rmSync(dir, { recursive: true, force: true }); }
+  } finally { link.stop(); rmSync(directory, { recursive: true, force: true }); }
 });

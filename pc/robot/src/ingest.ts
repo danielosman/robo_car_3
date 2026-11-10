@@ -13,7 +13,7 @@ import { loadMounting, type Mounting } from "./mounting.ts";
 import { parseSnapshot, savePicture, type Snapshot } from "./snapshot.ts";
 
 export interface IngestOptions {
-  recordingsDir: string;
+  recordingsDirectory: string;
   bootFolders: BootFolders;
   note: (text: string) => void;
   mounting?: () => Mounting;                  // the copy a new boot gets (default: common/mounting.json now)
@@ -40,12 +40,12 @@ export function ingest(robot: RobotLink, store: Store, o: IngestOptions): { idle
     const ms = Date.now();
     let s: Snapshot;
     try { s = parseSnapshot(bytes); } catch (err) { o.note(`a snapshot NOT kept: ${(err as Error).message}`); return; }
-    inOrder(`snapshot ${s.seq}`, async b => {
-      const msg = b.stamp(ms).msg;
+    inOrder(`snapshot ${s.sequence}`, async b => {
+      const messageNumber = b.stamp(ms).messageNumber;
       let picture: string | null = null;
-      try { picture = savePicture(o.recordingsDir, o.bootFolders.folderForBoot(s.bootId, ms), s); }
-      catch (err) { o.note(`snapshot ${s.seq}: picture NOT saved: ${(err as Error).message}`); }
-      await store.importSnapshot(b, msg, s, bytes, ms, picture);
+      try { picture = savePicture(o.recordingsDirectory, o.bootFolders.folderForBoot(s.bootId, ms), s); }
+      catch (err) { o.note(`snapshot ${s.sequence}: picture NOT saved: ${(err as Error).message}`); }
+      await store.importSnapshot(b, messageNumber, s, bytes, ms, picture);
       o.stored?.(s);
     });
   });
