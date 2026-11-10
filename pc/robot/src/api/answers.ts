@@ -18,6 +18,7 @@ export type Result = "ok" | "obstacle" | "limited" | "stopped" | "safety_stop" |
 export interface PoseOut { x: number; y: number; yaw: number }
 export interface Answer {
   command: string; result: Result; why?: string; pose?: PoseOut; moved?: number; rotated?: number; snapshot?: number;
+  printout?: string[]; // report: the robot's status lines
 }
 // How a command ended, before it is named: the answer without its command.
 export type Outcome = Omit<Answer, "command">;

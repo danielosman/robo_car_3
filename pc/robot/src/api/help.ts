@@ -56,6 +56,9 @@ const ACTIONS_HELP: Record<string, string> = {
   clear_map: "robot clear_map\n\nClears the map. The path on the map starts again from here.",
   mode: "robot mode idle|manual\n\nidle: the robot stands with the motors off. manual: commands steer it (after power-up).\n" +
         "A move in idle switches to manual.",
+  report: "robot report\n\nAsks the robot for its status printout (its word status) and answers it as printout: the link to\n" +
+          "PicoB, the WiFi and the server lanes (what was dropped), the loop's worst time, the ToF rate, RAM free, the\n" +
+          "moves ended, the IMU records (received, lost, dropped). Everything the robot prints is also in robot log.",
   check: "robot check <moves>\n\nSays what drive, rotate and goto would do on the newest snapshot's map. Nothing moves.\n" +
          "Each move is checked from where the one before would end. The answers look like steer's.\n" +
          "  robot check d80 r90 g120,40",
@@ -73,6 +76,7 @@ Queued, one at a time, in order:
   robot clear_map                  Clears the map.
   robot mode idle|manual           Sets the mode.
   robot config pre_ms|post_ms <ms> How long the robot stands still before / after each move.
+  robot report                     The robot's own counters: link, loop time, ToF rate, RAM, IMU.
   robot stop                       Stops at once, skipping the queue; drops what waits.
 
 At once:

@@ -264,7 +264,7 @@
         "what": "not the frame itself: the map's cells of the tiles leaving the window, 4 bits a column (a tile: 20 × 20 columns)",
         "bytes": 200,
         "rate": { "text": "when the window moves", "path": "picoA/app/cell_map.c", "code": "while (x_m >= ((float)tile_x + 0.5f) * TILE_M + FOLLOW_M) scroll(1, 0);" },
-        "path": "picoA/app/cell_map.c", "code": "if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy, 0));" },
+        "path": "picoA/app/cell_map.c", "code": "if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy));" },
       { "at": "picoA.house_map.house_map_put" },
       { "at": "picoA.house_map.house_map_tile", "path": "picoA/app/snapshot.c", "code": "house_map_tile(i, &tx, &ty, &columns);" },
       { "change": "add", "name": "into the snapshot", "at": "picoA.snapshot.snapshot_update",

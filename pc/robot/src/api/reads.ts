@@ -14,7 +14,7 @@ import { FEATURE } from "../snapshot.ts";
 import { CAMERA } from "./firmware.ts";
 import { poseOut } from "./answers.ts";
 import { displayRgb } from "./colour.ts";
-import { MAP_LEGEND, RobotMap } from "./map.ts";
+import { RobotMap } from "./map.ts";
 import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
 import type { Chat } from "../objects/model.ts";
@@ -85,6 +85,15 @@ async function moveOf(store: Store, bootFolders: BootFolders, args: string[], us
 }
 const atMostOne = (args: string[], usage: string) => { if (args.length > 1) throw new ReadError(`usage: robot ${usage}`, 400); };
 
+// How to read robot map's answer (picoA/app/cell_map.h, house_map.h).
+const MAP_FORMAT = {
+  cell: "10 cm; cell (ix, iy) covers x ix*10 to ix*10+10 cm, y iy*10 to iy*10+10 cm, in the map frame",
+  window: "the cell at index i of each layer is ix = origin_cell_x + floor(i / cells_y), iy = origin_cell_y + i % cells_y",
+  cell_byte: "bits 0-1 the state: 0 unknown, 1 free, 2 occupied; bits 2-3 the doubt; bits 4-7 the confidence, 0-15",
+  tile: "20 x 20 cells; tile (tx, ty) starts at cell (tx*20-10, ty*20-10); columns[i] is cell (start_x + floor(i / 20), start_y + i % 20)",
+  tile_column: "0 unknown, 1 blocked (L1 occupied), 2 overhang (L2 occupied, L1 not), 3 no floor (G free), 4 drivable (G occupied, L1 and L2 free), 5 open (L1 and L2 free, G unknown)",
+};
+
 export const READS: Record<string, Read> = {
   status: {
     usage: "status",
@@ -100,10 +109,10 @@ export const READS: Record<string, Read> = {
   },
   map: {
     usage: "map [n] [--png]",
-    help: "Shows the map at snapshot n (default: the newest): the 6 × 6 m around the robot, one character per\n" +
-          "10 cm. The top row is the largest x (forward from where the robot started), the left column the largest\n" +
-          "y (left). x_top and y_left say where the top-left cell is. --png writes the same as a picture and gives\n" +
-          "its file.",
+    help: "The robot's map at snapshot n (default: the newest), as the robot holds it: the window (6 × 6 m around\n" +
+          "the robot, 10 cm cells) as three layers of cell bytes, G (the floor), L1 (3-13 cm), L2 (13-23 cm), and\n" +
+          "the whole-house tiles outside it. format says how to read them. --png draws the window as a picture\n" +
+          "(on the PC) and gives its file.",
     async run({ store, recordingsDirectory, bootFolders }, args, flags) {
       atMostOne(args, this.usage);
       const id = await findSnapshot(store, args[0]), map = await mapOf(store, id);
@@ -113,8 +122,15 @@ export const READS: Record<string, Read> = {
         await writeFile(file, map.png()!);
         return { snapshot: id.sequence, file };
       }
-      const g = map.grid()!, r = map.view.robot;
-      return { snapshot: id.sequence, pose: r && poseOut(r), x_top: g.xTop, y_left: g.yLeft, rows: g.rows, legend: MAP_LEGEND };
+      const w = map.view.window!, r = map.view.robot, n = w.cellsX * w.cellsY;
+      const layer = (k: number) => [...w.cells.subarray(k * n, (k + 1) * n)];
+      return {
+        snapshot: id.sequence, pose: r && poseOut(r),
+        window: { origin_cell_x: w.originX, origin_cell_y: w.originY, cells_x: w.cellsX, cells_y: w.cellsY,
+                  G: layer(0), L1: layer(1), L2: layer(2) },
+        tiles: map.view.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: t.columns })),
+        format: MAP_FORMAT,
+      };
     },
   },
   tof: {

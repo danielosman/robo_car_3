@@ -26,7 +26,9 @@ import { COMPACT_BEYOND_MM } from "./tof_format.ts";
 const BOOT = /^[0-9a-f]{8}$/;
 
 export interface MapView {
-  window: { originX: number; originY: number; cellsX: number; cellsY: number; columns: number[]; confidence: number[] } | null;
+  // cells: the robot's bytes as it holds them (cell_map.h): layers G, L1, L2 one after the other, each
+  // [ix * cellsY + iy]; columns and confidence are computed from them.
+  window: { originX: number; originY: number; cellsX: number; cellsY: number; cells: Buffer; columns: number[]; confidence: number[] } | null;
   tiles: { tx: number; ty: number; sequence: number; columns: number[] }[];
   robot: Pose | null;          // the snapshot's pose
   path: { x: number; y: number }[];
@@ -36,7 +38,7 @@ export interface MapView {
 export function mapViewOf(s: Snapshot): MapView {
   const w = s.window;
   return {
-    window: w && { originX: w.originX, originY: w.originY, cellsX: w.cellsX, cellsY: w.cellsY, ...windowColumns(w) },
+    window: w && { originX: w.originX, originY: w.originY, cellsX: w.cellsX, cellsY: w.cellsY, cells: w.cells, ...windowColumns(w) },
     tiles: s.tiles.map(t => ({ tx: t.tx, ty: t.ty, sequence: s.sequence, columns: tileColumns(t) })),
     robot: s.pose && { x: s.pose.x, y: s.pose.y, yaw: s.pose.yaw },
     path: [],
@@ -94,7 +96,8 @@ export async function snapshotMap(store: Store, boot: string, sequence: number):
     let window: MapView["window"] = null;
     if (h.map_cells !== null) {
       const w = { originX: Number(h.map_origin_cx), originY: Number(h.map_origin_cy), cellsX: Number(h.map_cells_x), cellsY: Number(h.map_cells_y) };
-      window = { ...w, ...windowColumns({ ...w, layers: 3, cells: bytes(h.map_cells) }) };
+      const cells = bytes(h.map_cells);
+      window = { ...w, cells, ...windowColumns({ ...w, layers: 3, cells }) };
     }
     return {
       window,
@@ -104,6 +107,13 @@ export async function snapshotMap(store: Store, boot: string, sequence: number):
       path,
     };
   });
+}
+
+// The map for the page: the columns it draws, without the robot's cell bytes.
+function pageMap(view: MapView | null) {
+  if (!view?.window) return view;
+  const w = view.window;
+  return { ...view, window: { originX: w.originX, originY: w.originY, cellsX: w.cellsX, cellsY: w.cellsY, columns: w.columns, confidence: w.confidence } };
 }
 
 // Answers the snapshot requests; false if the URL isn't one of them. directory: recordings/.
@@ -126,7 +136,7 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map|\/objects)?$/.exec(url.pathname);
     if (one) {
       const boot = one[1], sequence = Number(one[2]);
-      const body = one[3] === "/map" ? await snapshotMap(store, boot, sequence) : one[3] === "/objects" ? await pageObjects(store, boot, sequence)
+      const body = one[3] === "/map" ? pageMap(await snapshotMap(store, boot, sequence)) : one[3] === "/objects" ? await pageObjects(store, boot, sequence)
         : await snapshotDetail(store, boot, sequence);
       if (body) send(200, body); else send(404, { error: "no such snapshot" });
       return true;

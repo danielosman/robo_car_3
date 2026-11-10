@@ -14,6 +14,7 @@ import { help } from "./help.ts";
 import { formatJson } from "./json.ts";
 import { READS, ReadError, TextAnswer, findSnapshot, mapOf, type ApiContext } from "./reads.ts";
 import { OBJECT_COMMANDS } from "../objects/api.ts";
+import type { LogItem } from "../log.ts";
 
 const JSON_TYPE = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
 const json = (lines: string, status = 200) => new Response(`${lines}\n`, { status, headers: JSON_TYPE });
@@ -75,13 +76,22 @@ export function createApi(ctx: ApiContext): Hono {
     ctx.live.setStill(m[1] === "pre" ? Number(m[2]) : now.preMs, m[1] === "post" ? Number(m[2]) : now.postMs);
   }
 
-  // Into the queue (stop past it); each answer streams back as its command ends.
+  // Into the queue (stop past it); each answer streams back as its command ends. A
+  // report's answer carries the robot's text that came while it waited (its printout).
   function queued(commands: Command[], sender: Sender, nowait: boolean): Response {
     let open = true;
+    const text: string[] = [];
+    const listen = (item: LogItem) => { if (item.kind === "text") text.push(item.text); };
+    const reports = commands.some(c => c.name === "report");
+    if (reports) ctx.log.on("item", listen);
     const stream = new ReadableStream<string>({
       start(controller) {
         const write = (a: Answer) => {
           stillSet(a);
+          if (a.command === "report") {
+            ctx.log.off("item", listen);
+            if (a.result === "ok") a = { ...a, printout: text.join("").split("\n").filter(l => l) };
+          }
           if (open) controller.enqueue(`${line(a)}\n`);
         };
         const close = () => { if (open) { open = false; controller.close(); } };

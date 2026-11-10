@@ -1,5 +1,4 @@
 #include <math.h>
-#include <stdio.h>
 #include <string.h>
 #include "tof_rays.h"
 #include "cell_map.h"
@@ -267,7 +266,7 @@ void cell_map_add(const posed_frame_t *f) {
     around_the_robot(f->x_m, f->y_m);
 }
 
-static column_t column_of(int ix, int iy, float min_confidence);
+static column_t column_of(int ix, int iy);
 
 // A column from the whole-house map as cells, so confident they lose to any measurement.
 static void restore(int ix, int iy, column_t c) {
@@ -303,7 +302,7 @@ static void scroll(int dx, int dy) {
         for (int iy = 0; iy < GRID; iy++) {
             bool leaving = (dx > 0 && ix < TILE) || (dx < 0 && ix >= GRID - TILE) ||
                            (dy > 0 && iy < TILE) || (dy < 0 && iy >= GRID - TILE);
-            if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy, 0));
+            if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy));
         }
     shift(grid, dx, dy, 0);
     shift(hit_z, dx, dy, NO_HIT_Z);
@@ -340,16 +339,10 @@ cell_state3_t cell_map_cell(float x_m, float y_m, int layer, float *confidence) 
     return (cell_state3_t)C_STATE(c);
 }
 
-static int layer_state(int ix, int iy, int layer, float min_confidence) {
-    uint8_t c = grid[layer][ix][iy];
-    return (float)C_CONF(c) / 15 + 1e-3f < min_confidence ? CELL_STATE_UNKNOWN : C_STATE(c);
-}
-
 // A column of the window (window indexes).
-static column_t column_of(int ix, int iy, float min_confidence) {
+static column_t column_of(int ix, int iy) {
     if (!in_grid(ix, iy, 0)) return COLUMN_UNKNOWN;
-    int g = layer_state(ix, iy, 0, min_confidence), l1 = layer_state(ix, iy, 1, min_confidence);
-    int l2 = layer_state(ix, iy, 2, min_confidence);
+    int g = C_STATE(grid[0][ix][iy]), l1 = C_STATE(grid[1][ix][iy]), l2 = C_STATE(grid[2][ix][iy]);
     if (l1 == CELL_STATE_OCCUPIED) return COLUMN_BLOCKED;
     if (l2 == CELL_STATE_OCCUPIED) return COLUMN_OVERHANG;
     if (g == CELL_STATE_FREE) return COLUMN_NO_FLOOR;
@@ -358,11 +351,11 @@ static column_t column_of(int ix, int iy, float min_confidence) {
 }
 
 // A world column: the window's inside it, the whole-house map's outside.
-static column_t column_at(int cx, int cy, float min_confidence) {
-    return in_window(cx, cy) ? column_of(cx - origin_x, cy - origin_y, min_confidence) : house_map_get(cx, cy);
+static column_t column_at(int cx, int cy) {
+    return in_window(cx, cy) ? column_of(cx - origin_x, cy - origin_y) : house_map_get(cx, cy);
 }
 
-column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m), 0); }
+column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m)); }
 
 float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m) {
     float nearest = max_m;
@@ -370,7 +363,7 @@ float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float ha
     float wx = fabsf(dy) * half_width_m, wy = fabsf(dx) * half_width_m; // the path's half width along x and y
     for (int ix = cell_of(fminf(ends_x[0], ends_x[1]) - wx); ix <= cell_of(fmaxf(ends_x[0], ends_x[1]) + wx); ix++)
         for (int iy = cell_of(fminf(ends_y[0], ends_y[1]) - wy); iy <= cell_of(fmaxf(ends_y[0], ends_y[1]) + wy); iy++) {
-            column_t c = column_at(ix, iy, 0);
+            column_t c = column_at(ix, iy);
             if (c != COLUMN_BLOCKED && c != COLUMN_OVERHANG) continue;
             float along_lo = 1e9f, along_hi = -1e9f, side_lo = 1e9f, side_hi = -1e9f;
             for (int k = 0; k < 4; k++) { // the cell's corners in the path's frame
@@ -384,36 +377,4 @@ float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float ha
             nearest = fminf(nearest, fmaxf(along_lo, 0));
         }
     return nearest;
-}
-
-#define PRINT_GRID 40 // 4 m
-
-void cell_map_print(const pose_t *robot, float min_confidence) {
-    int rx = cell_of(robot->x_m), ry = cell_of(robot->y_m);
-    int ax = cell_of(robot->x_m + 0.3f * cosf(robot->yaw_rad)), ay = cell_of(robot->y_m + 0.3f * sinf(robot->yaw_rad));
-    printf("Map (9 rays per zone), 4 x 4 m around the robot, 10 cm cells, cells under %.0f %% confidence hidden;\n"
-           "up = where the robot faced when the scan started. ## blocked (3-13 cm), '' overhang (13-23 cm),\n"
-           "? no floor (rays went through its place), . drivable (floor seen, free above), : free, floor not seen,\n"
-           "blank unknown, () robot, ** 30 cm ahead of it.\n", (double)(min_confidence * 100));
-    printf("+");
-    for (int i = 0; i < PRINT_GRID; i++) printf("--");
-    printf("+\n");
-    for (int ix = rx + PRINT_GRID / 2 - 1; ix >= rx - PRINT_GRID / 2; ix--) {
-        char line[2 * PRINT_GRID + 3];
-        int n = 0;
-        line[n++] = '|';
-        for (int iy = ry + PRINT_GRID / 2 - 1; iy >= ry - PRINT_GRID / 2; iy--) {
-            static const char *const symbol[] = {"  ", "##", "''", "? ", ". ", ": "};
-            const char *s = ix == rx && iy == ry ? "()" : ix == ax && iy == ay ? "**"
-                          : symbol[column_at(ix, iy, min_confidence)];
-            line[n++] = s[0];
-            line[n++] = s[1];
-        }
-        line[n++] = '|';
-        line[n] = '\0';
-        printf("%s\n", line);
-    }
-    printf("+");
-    for (int i = 0; i < PRINT_GRID; i++) printf("--");
-    printf("+\n");
 }

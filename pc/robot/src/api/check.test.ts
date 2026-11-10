@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { SnapshotAssembler, parseSnapshot } from "../snapshot.ts";
+import { COLUMN, SnapshotAssembler, parseSnapshot } from "../snapshot.ts";
 import { mapViewOf } from "../snapshots_api.ts";
 import { parseSteer, type Command } from "./commands.ts";
 import { checkMoves } from "./check.ts";
@@ -48,15 +48,9 @@ test("check: drive, rotate, goto, each from where the one before ends", { skip }
   assert.match(turn.warning ?? "", /an obstacle within 15 cm/);
 });
 
-test("the map as rows: one character a column, the robot, the path, the top-left corner", { skip }, () => {
-  const view = firstMap().view;
-  const g = new RobotMap({ ...view, robot: { x: 0.55, y: -0.05, yaw: 0 }, path: [{ x: 0, y: -0.05 }, { x: 0.55, y: -0.05 }] }).grid()!;
-  assert.equal(g.rows.length, 60);
-  assert.ok(g.rows.every(r => r.length === 60));
-  assert.deepEqual([g.xTop, g.yLeft], [290, 290]); // the window is -300…299 cm
-  const at = (cx: number, cy: number) => g.rows[29 - cx][29 - cy];
-  assert.equal(at(0, 1), "#");
-  assert.equal(at(5, -1), "R");
-  assert.equal(at(8, -1), "*");
-  assert.equal(at(2, -1), "o");
+test("the map's columns: computed from the robot's cell bytes, the window -300…299 cm", { skip }, () => {
+  const map = firstMap(), w = map.view.window!;
+  assert.deepEqual([w.originX, w.originY, w.cellsX, w.cellsY, w.cells.length], [-30, -30, 60, 60, 3 * 3600]);
+  assert.equal(map.column(0, 1), COLUMN.BLOCKED);
+  assert.equal(w.cells[3600 + (0 + 30) * 60 + (1 + 30)] & 3, 2); // its L1 cell occupied
 });

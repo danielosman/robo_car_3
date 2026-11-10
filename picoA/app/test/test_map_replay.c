@@ -2,7 +2,7 @@
 // (picoA/app/test/data/*.frames, exported from the old recordings (tag data-v1): each frame
 // as the robot's map received it; one target per zone, frames_file.h) through
 // picoA/app/cell_map.c, each frame packed and unpacked for the map use first, as on
-// the robot. Prints each scan's columns by kind (≥ 10 % confident) for the CHANGELOG. Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
+// the robot. Prints each scan's columns by kind for the CHANGELOG. Daniel's room: a cup ~45 cm ahead, a box to the left, his office chair
 // on wheels to the right, a cupboard behind; from scan 3 on the robot started 30 cm
 // further left (the cup then ahead-right). Each object must have a blocked or
 // overhang column in its region; nothing may be blocked within 30 cm of the robot
@@ -59,7 +59,7 @@ static int load(const char *take) {
 }
 
 static bool solid_at(float x, float y) {
-    column_t c = column_at(cell_of(x), cell_of(y), 0.1f); // as the viewer and replay compare: ≥ 10 % confident
+    column_t c = column_at(cell_of(x), cell_of(y)); // as the robot sees it when it drives
     return c == COLUMN_BLOCKED || c == COLUMN_OVERHANG;
 }
 
@@ -104,7 +104,7 @@ int main(void) {
         }
         int kinds[6] = {0};
         for (int ix = 0; ix < GRID; ix++)
-            for (int iy = 0; iy < GRID; iy++) kinds[column_of(ix, iy, 0.1f)]++;
+            for (int iy = 0; iy < GRID; iy++) kinds[column_of(ix, iy)]++;
         printf(" [blocked %d, overhang %d, no floor %d, drivable %d, open %d]", kinds[COLUMN_BLOCKED],
                kinds[COLUMN_OVERHANG], kinds[COLUMN_NO_FLOOR], kinds[COLUMN_DRIVABLE], kinds[COLUMN_OPEN]);
         int near = solid_near(0.3f);

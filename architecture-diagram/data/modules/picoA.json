@@ -671,11 +671,6 @@
         "name": "cell_map_obstacle_along",
         "kind": "function",
         "code": "float cell_map_obstacle_along("
-      },
-      {
-        "name": "cell_map_print",
-        "kind": "function",
-        "code": "void cell_map_print("
       }
     ]
   },

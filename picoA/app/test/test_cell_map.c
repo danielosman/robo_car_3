@@ -240,7 +240,6 @@ int main(void) {
     reset_scene();
     walls(2.0f);
     scan_at(0, 0);
-    cell_map_print(&home, 0);
     int false_blocked = count(-1.7f, 1.7f, -1.7f, 1.7f, COLUMN_BLOCKED);
     // Standing still, the floor is seen where rays end on it: in rings at each row's
     // distance (about 20, 30, 45 and 70 cm); between them it is free, floor not seen.
@@ -265,7 +264,6 @@ int main(void) {
     add_box(0.6f, 0.8f, -0.1f, 0.1f, 0, 0.1f);
     add_box(-0.3f, 0.3f, 0.6f, 0.9f, 0.16f, 0.21f);
     scan_at(0, 0);
-    cell_map_print(&home, 0);
     // The box's front face is seen (its back half hides behind it). Under the table,
     // KNOWN: the 4th row's cone touches the table's underside ~0.8 m away, so all its
     // rays stop there and the lower ones end in L1: false "blocked" that no ray from
@@ -318,7 +316,6 @@ int main(void) {
     walls(2.0f);
     drop_x = 0.5f;
     scan_at(0, 0);
-    cell_map_print(&home, 0);
     int beyond = count(0.6f, 1.5f, -1.0f, 1.0f, COLUMN_DRIVABLE);
     printf("stairs down 50 cm ahead: %d drivable columns beyond the edge, %d marked no floor\n", beyond,
            count(0.5f, 1.9f, -1.9f, 1.9f, COLUMN_NO_FLOOR));
@@ -328,7 +325,6 @@ int main(void) {
     // A hallway: nothing within 4 m but the floor. No obstacles anywhere.
     reset_scene();
     scan_at(0, 0);
-    cell_map_print(&home, 0);
     printf("hallway: %d blocked columns\n", count(-3, 3, -3, 3, COLUMN_BLOCKED));
     assert(count(-3, 3, -3, 3, COLUMN_BLOCKED) == 0);
     printf("ok: a far floor with nothing in range shows no obstacles\n");

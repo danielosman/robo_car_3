@@ -17,8 +17,11 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   framed messages over one TCP connection, moves, the new database, raw IMU at
   104 Hz, move numbers in frames, 64-bit times). Committed and pushed; the tag
   `data-v1` marks the last commit before them.
-- **Next: step 4i**, one measurement run on the robot (Daniel), then step 5 (the PC
-  cell map).
+- **Next: step 4i**, one measurement run, run by the agent (Daniel flashes both Picos
+  and switches the robot on), then step 5 (the PC cell map). Added for it (10 Nov):
+  `robot report` (the robot's status printout as the answer); `robot map` returns the
+  robot's raw cell bytes, not a text drawing; `cell_map_print()` and its confidence
+  filter left the robot (only host tests used them).
 - **4h done 10 Nov** (both Picos and the PC): whole words in names (section 11).
   Not committed.
 - **4f done 10 Nov** (both Picos, link version 7): the wheel distances are out of
@@ -475,21 +478,42 @@ bytes change)
   drivers' registers, the PCB's nets (`ENC_LF_*`), the model's `bbox`. The CHANGELOG
   and doc/archive keep the old names.
 
-**4i. One measurement run** (both Picos flashed once; Daniel runs it; the only robot
-test before step 9)
-- Why it stays without the IMU change: nothing of steps 1-4 has run on the robot
-  (new link, framing, moves, 10 Hz ToF, imu batches, the new database), and steps 5
-  and 7 are built and tested on stored drives, which don't exist yet in the new
-  database. Finding a step 1-4 bug in step 9 would mean redoing 5-8's checks.
-- Everything 4f-4h changed, and every open question that needs the robot, in one
-  run: the README's robot tests for steps 1-4 (collected in "Robot tests after the
-  data-flow rework"), plus:
-  - drives and turns around a room with obstacles, for steps 5 and 7 to build on;
-  - the floor rows at the ToF's 9 cm, the camera's tilt and f (section 14), the
-    worst WiFi spot (frames and imu batches dropped).
-- The data stays in the database; each decision is written here and in the
-  CHANGELOG. Then steps 5-8 need no robot; step 9 is the final flash and the robot
-  test of what changed after 4i.
+**4i. One measurement run, run by the agent** (both Picos flashed once by Daniel; the
+only robot test before step 9)
+- Daniel: flashes both Picos (`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`),
+  puts the robot on the floor with ~50 cm free all round, switches it on. Nothing else.
+- The agent: starts the server (`npm start` in `pc/robot`, in the background), then
+  only `./robot` commands. `robot report` (new, 10 Nov: the robot's `status` printout
+  as the answer) gives the robot's counters; `robot log` gives everything it printed
+  (PicoB's lines as "B: ...").
+- The test, small moves only:
+  1. `robot report`: connected, link version 7 (no "protocol v6" line), ToF 10 Hz,
+     IMU records growing, nothing dropped, RAM free.
+  2. `robot tof`: the floor rows 8 / 7 / 6 at ~27 / 37 / 61 cm (the ToF at 9 cm).
+  3. A look round in 30° steps: `robot steer r30` twelve times, a snap after each
+     (auto_snap): twelve camera pictures, looked at, to find the box and plan the
+     drive; then `robot map`: the robot's cell bytes (layers G, L1, L2);
+     the agent reads them with a script (L1 occupied where the walls are, none on
+     the open floor) and draws with `robot map --png` when a picture helps.
+  4. `robot steer d20 r90 r-90 d-20`: four moves, each answered ok, a snap after each.
+  5. For each move: `robot frames <boot> <move>` (frames sent = stored, 0 dropped)
+     and its imu line (0 missing); `robot imu` on a turn: `gz` large during it, ~0
+     before and after; `az` ~16400.
+  6. Drive to an obstacle: the box (somewhere in a drivable area), found in the
+     pictures and the map of the look round. `robot check` the way there,
+     turn to face it, drive towards it: the drive stops ~15 cm before it
+     ("obstacle"). Then it must show on every view of it:
+     - the robot's map (`robot map`): L1 occupied cells just ahead of the pose;
+     - the map picture (`robot map --png`, looked at): the obstacle in front of the
+       robot's mark;
+     - the ToF frame (`robot tof`): the middle columns' upper rows at ~15-25 cm;
+     - the camera (`robot camera`, looked at): the object in the middle of the
+       picture.
+  7. `robot report` again and `robot log 200`: the counters after the moves, no
+     errors, no "refused".
+- The data stays in `robot2.duckdb` (the turn and the moves for steps 5 and 7). What
+  isn't checked here (watching people, the worst WiFi spot, the tilt stop, the
+  camera's tilt) waits for step 9's test.
 
 **5. The PC cell map** (PC)
 

@@ -55,6 +55,3 @@ column_t cell_map_column(float x_m, float y_m);
 // cm early for one across it); max_m if none is closer. Unknown columns don't count;
 // outside the window, the whole-house map's columns do.
 float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m);
-// 4 x 4 m around the robot, x (forward at the scan's start) up, y left; cells set by
-// a measurement less confident than min_confidence count as unknown.
-void cell_map_print(const pose_t *robot, float min_confidence);

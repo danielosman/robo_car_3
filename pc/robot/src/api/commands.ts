@@ -1,6 +1,7 @@
 // The commands that go into the queue (doc/CLI_API_PLAN.md): the moves, given to
 // `robot steer` ("d50 r30 g120,40 w60"), and the other actions, each its own
-// command (snap, stop, clear_map, mode idle|manual, config pre_ms|post_ms <ms>). A
+// command (snap, stop, clear_map, mode idle|manual, config pre_ms|post_ms <ms>,
+// report). A
 // command is a name and its values: numbers, or a word's index (mode idle/manual =
 // 0/1; config pre_ms/post_ms = 0/1, then the ms). Written in answers as typed
 // ("steer d50", "mode idle", "config pre_ms 300"), and to the robot long and
@@ -13,7 +14,7 @@
 import { LIMITS, SPEED } from "./firmware.ts";
 
 export type MoveName = "drive" | "rotate" | "goto" | "watch";
-export type CommandName = MoveName | "snap" | "stop" | "clear_map" | "mode" | "config";
+export type CommandName = MoveName | "snap" | "stop" | "clear_map" | "mode" | "config" | "report";
 // auto: a snap the API added after a move (auto_snap).
 export interface Command { name: CommandName; values: number[]; auto?: boolean }
 
@@ -34,8 +35,10 @@ export const MOVES: readonly MoveSpec[] = [
 ];
 // The other actions: their words, if they take one (config's then takes ms).
 export const ACTIONS: Record<Exclude<CommandName, MoveName>, readonly string[] | null> = {
-  snap: null, stop: null, clear_map: null, mode: ["idle", "manual"], config: ["pre_ms", "post_ms"],
+  snap: null, stop: null, clear_map: null, mode: ["idle", "manual"], config: ["pre_ms", "post_ms"], report: null,
 };
+// The robot's word where it isn't the command's name: report asks it for its status printout.
+const ROBOT_WORD: Partial<Record<CommandName, string>> = { report: "status" };
 
 const MOVE = new Map(MOVES.map(m => [m.name, m]));
 const isMoveName = (n: CommandName): n is MoveName => MOVE.has(n as MoveName);
@@ -96,11 +99,11 @@ export function commandText(c: Command): string {
 
 // To the robot, in a command message with its number: "drive 50", "goto 120 40",
 // "mode idle", "config pre_ms 300", "snap". The robot's words are the command names
-// (picoA/app/commands.h).
+// (picoA/app/commands.h), but for report (ROBOT_WORD).
 export function robotText(c: Command): string {
   const words = isMoveName(c.name) ? null : ACTIONS[c.name];
   const values = words ? [words[c.values[0]], ...c.values.slice(1).map(String)] : c.values.map(String);
-  return [c.name, ...values].join(" ");
+  return [ROBOT_WORD[c.name] ?? c.name, ...values].join(" ");
 }
 
 export const isMove = (c: Command) => isMoveName(c.name);

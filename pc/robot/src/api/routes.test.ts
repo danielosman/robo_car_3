@@ -27,9 +27,11 @@ const skip = noFirmware;
 class EchoRobot extends EventEmitter {
   lines: string[] = [];
   end = "ok";
+  printed: (text: string) => void = () => {}; // the robot's console text, into the log
   sendCommand(n_: number, text: string): boolean {
     const line = `${text} #${n_}`;
     this.lines.push(line);
+    if (text === "status") this.printed("Link to PicoB: ok\nToF: 10 Hz set, 10.0 frames a second\n");
     const n = Number(/#(\d+)$/.exec(line)![1]), snap = line.startsWith("snap") ? 5 : null;
     setTimeout(() => this.emit("done", { n, end: line.startsWith("drive") ? this.end : "ok", pose: { x: 0.43, y: -0.04, yaw: 0 },
                                          movedM: 0.31, rotatedDeg: 0, goalM: null, snapshot: snap }), 5);
@@ -97,6 +99,19 @@ test("steer and the actions: one JSON line per command as it ends; refused; stop
   } finally { await done(); }
 });
 
+test("report: the robot's status word; its printout in the answer and in the log", { skip }, async () => {
+  const { post, robot, log, done } = await setUp();
+  try {
+    log.text("before\n");
+    robot.printed = text => log.text(text);
+    const r = await post("report");
+    assert.equal(robot.lines.at(-1), "status #1");
+    assert.equal(r.text, `{"command":"report","result":"ok","printout":["Link to PicoB: ok","ToF: 10 Hz set, 10.0 frames a second"]}\n`);
+    assert.ok(log.tail(5).some(l => l.includes("ToF: 10 Hz set")));
+    assert.equal((await post("report", "now")).status, 400);
+  } finally { await done(); }
+});
+
 test("check on the newest snapshot's map", { skip }, async () => {
   const { post, done } = await setUp();
   try {
@@ -117,9 +132,11 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
       running: null, waiting: [], newest_snapshot: 5 }); // no safety peaks since step 4c
     const map = await read("map", "1");
     assert.equal(map.snapshot, 1);
-    assert.equal(map.rows.length, 60);
-    assert.ok(map.rows.join("").includes("#"));
-    assert.equal(map.legend["#"], "blocked (3-13 cm high)");
+    // The robot's bytes: three layers of 60 × 60 cells; somewhere L1 occupied (an obstacle).
+    assert.deepEqual([map.window.cells_x, map.window.cells_y, map.window.origin_cell_x], [60, 60, -30]);
+    for (const layer of ["G", "L1", "L2"]) assert.equal(map.window[layer].length, 3600);
+    assert.ok(map.window.L1.some((b: number) => (b & 3) === 2));
+    assert.ok(map.format.cell_byte.startsWith("bits 0-1 the state"));
     const png = (await read("map", "1", "?png")).file;
     assert.equal(png, path.join(directory, "map", png.split(path.sep).at(-2), "1.png"));
     assert.ok(existsSync(png));

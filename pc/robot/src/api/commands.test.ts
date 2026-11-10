@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { ACTIONS, MOVES, commandText, parseAction, parseSteer, robotText, timeLimitMs, withSnaps, type Command } from "./commands.ts";
+import { ACTIONS, MOVES, commandText, parseAction, parseSteer, robotText, timeLimitMs, withSnaps, type Command, type CommandName } from "./commands.ts";
 import { LIMITS } from "./firmware.ts";
 import { MOVE_KINDS } from "../wire.ts";
 
@@ -70,11 +70,12 @@ test("to the robot; a snap after each move; time limits", () => {
 // the robot's words, robotText): read from picoA/app, as firmware.ts reads the limits.
 const picoA = (file: string) => readFileSync(new URL(`../../../../picoA/app/${file}`, import.meta.url), "utf8");
 
-test("the robot's words: commands.c takes every command the PC sends, and only status besides (typed on USB)", () => {
+test("the robot's words: commands.c takes every command the PC sends, and nothing besides", () => {
   const c = picoA("commands.c");
   const robot = new Set([...c.matchAll(/IS\("(\w+)/g), ...c.matchAll(/IS_WORD\("(\w+)"\)/g)].map(m => m[1]));
-  const pc = [...MOVES.map(m => m.name), ...Object.keys(ACTIONS)];
-  assert.deepEqual([...robot].sort(), [...pc, "status"].sort());
+  const pc = [...MOVES, ...Object.keys(ACTIONS).map(name => ({ name: name as CommandName, values: [] }))]
+    .map(c => robotText({ name: c.name, values: c.name === "mode" || c.name === "config" ? [0] : [] }).split(" ")[0]);
+  assert.deepEqual([...robot].sort(), [...new Set(pc)].sort()); // report is the robot's status
   // the words some commands take: mode idle|manual, config pre_ms|post_ms
   const words = new Set([...c.matchAll(/strcmp\(word, "(\w+)"\)/g)].map(m => m[1]));
   assert.deepEqual([...words].sort(), Object.values(ACTIONS).flatMap(w => w ?? []).sort());
