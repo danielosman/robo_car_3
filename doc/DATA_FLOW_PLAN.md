@@ -119,7 +119,8 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 **Maps**
 - **The robot keeps only its 6 × 6 m cell map**, to stop before obstacles and before
   floor it hasn't identified (**floor first**, step 6). No whole-house map on the
-  robot; it doesn't send its map (from step 6).
+  robot; from step 6 it sends its map only when asked (`robot map --robot`), not in
+  snapshots.
 - **The PC builds two maps**, in the odometry frame from power-up: the **cell map**
   (the robot's C code in a helper program, whole house; also the free-floor map)
   and the **line map** (TypeScript, [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). They
@@ -238,7 +239,7 @@ the PC only divides by 10^6.
 | Lane | Robot → PC | PC → robot |
 |---|---|---|
 | control | hello (boot, build, wire version), console line, answer, status, move start, move end, map cleared | command, heartbeat (every 2 s) |
-| bulk | tof frame, imu batch, snapshot part | — |
+| bulk | tof frame, imu batch, snapshot part; the map window when asked (step 6) | — |
 
 - **Control** (16 KB) never blocks the loop; when full, its oldest messages go
   (counted). Status goes only while control is empty, so it never piles up.
@@ -457,8 +458,17 @@ and 7)
    - each frame marks the cells under the robot's footprint as floor;
    - drive and go to stop 15 cm before an obstacle **or unidentified floor** (unknown
      or "no floor"). Today unknown counts as free.
-3. Robot test (to the list): out of the window and back; towards a table edge (held):
-   it stops. Expect some false stops on the waxed floor beyond ~1 m.
+3. **The robot's map when asked** (Daniel, 10 Nov): `robot map --robot` sends a
+   command; the robot answers with its window (its origin cell, the 3 layers of cell
+   bytes, 10.8 KB) in one bulk message, only then. The PC shows it as `robot map`
+   shows the PC's (cell bytes and `format`, `--png`), with the robot's pose. For
+   debugging a stop: the map the robot itself drove by.
+4. **A whole-building PNG** (Daniel, 10 Nov): `robot map [n] --png` draws all of the
+   PC's map at snapshot n (the window and every tile seen), not only the 6 × 6 m
+   window, with the path and the robot. `--robot --png` draws the robot's window.
+5. Robot test (to the list): out of the window and back; towards a table edge (held):
+   it stops. Expect some false stops on the waxed floor beyond ~1 m. `robot map
+   --robot` during it: the robot's window; `robot map --png`: the whole building.
 
 Where to start (state after step 5):
 - **The stop rule** is `picoA/app/room.h` (`room_m`, `room_drive`): `behaviour.c`
@@ -478,12 +488,24 @@ Where to start (state after step 5):
 - **The snapshot** (`snapshot.c`: `SEC_WINDOW`, `SEC_TILES`, `SNAPSHOT_VERSION` 2 → 3)
   loses the window and the tiles (~11 KB). On the PC they are read in `snapshot.ts`,
   `store.ts` (`map_*` columns, `snapshot_tiles`), `snapshots_api.ts` `snapshotMap`
-  (`robot map --robot`), `snapshot.test.ts`, `test_snapshot.c`. `robot map --robot`
-  then works only on older snapshots (or goes: ask Daniel). Then `snapshot.ts`
-  `columnOf` / `windowColumns` (the last TS copy of `column_of()`) can go: the
-  helper's `V` answer can send the column classes.
-- **Flash:** PicoA only (link and wire versions unchanged unless a message changes);
-  done in step 9 with everything else.
+  (`robot map --robot` today), `snapshot.test.ts`, `test_snapshot.c`. Then
+  `snapshot.ts` `columnOf` / `windowColumns` (the last TS copy of `column_of()`) can
+  go: the helper's `V` answer can send the column classes.
+- **The robot's map when asked:** a new command word in `commands.c` and a new bulk
+  message in `wire.h` / `wire.ts` (one message: the length field is 2 B, the bulk lane
+  40 KB). **No new buffer for it:** messages are built in a buffer and then copied
+  into the lane (`link_pc_send_bulk(message, len)`), and a 10.8 KB one would take
+  back a third of the ~31 KB step 6 frees. Send it as two pieces instead (a small
+  header, then `cell_map_window()`'s cells where they are: e.g. a
+  `link_pc_send_bulk` that takes two), so the saving stays ~31 KB (section 9).
+  `link.ts` gives it to the waiting `robot map --robot` (`reads.ts`), which
+  answers an error when the robot isn't connected or doesn't answer. The old
+  snapshots' window (`snapshotMap`) can go with it.
+- **The whole-building PNG:** `api/map.ts` `mapPng` draws only `view.window` today;
+  it needs the tiles too (`view.tiles`, 20 × 20 columns each) and a picture as big as
+  what is known.
+- **Flash:** PicoA only, with a server of the same wire version (4 → 5: the new
+  message); done in step 9 with everything else.
 
 **7. The line map** (PC) — [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md): points and verdicts
 from the helper's `rays`; one ToF row's zones joined into lines; lines in bands L1,
