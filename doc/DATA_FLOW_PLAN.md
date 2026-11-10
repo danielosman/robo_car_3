@@ -17,8 +17,10 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   framed messages over one TCP connection, moves, the new database, raw IMU at
   104 Hz, move numbers in frames, 64-bit times). Committed and pushed; the tag
   `data-v1` marks the last commit before them.
-- **Next: step 4i**, one measurement run, run by the agent (Daniel flashes both Picos
-  and switches the robot on), then step 5 (the PC cell map). Added for it (10 Nov):
+- **4i run 10 Nov** (boot `cc0e4e65`, 15 moves; results in section 11, 4i). Steps
+  1-4 work on the robot. The shiny floor reads as "no floor" beyond ~50 cm: step 6 trusts it only up
+  close (section 14).
+- **Next: step 5** (the PC cell map). Added for it (10 Nov):
   `robot report` (the robot's status printout as the answer); `robot map` returns the
   robot's raw cell bytes, not a text drawing; `cell_map_print()` and its confidence
   filter left the robot (only host tests used them).
@@ -511,7 +513,25 @@ only robot test before step 9)
        picture.
   7. `robot report` again and `robot log 200`: the counters after the moves, no
      errors, no "refused".
-- The data stays in `robot2.duckdb` (the turn and the moves for steps 5 and 7). What
+- **Results, 10 Nov (boot `cc0e4e65`):**
+  - All 15 moves answered ok (the last "obstacle", as meant); every ToF frame sent
+    was stored (0 dropped, 0 lost); imu: 0 missing, 0 dropped anywhere; `gz` ~2000-2400
+    during a turn, ~-40 standing (the bias), `az` ~16700. Link version 7, WiFi -60 dBm,
+    nothing dropped on control or bulk (TCP refused 1 write); loop max 88 ms (vision
+    63 ms); RAM free 51 KB; ToF 10.1-10.4 Hz.
+  - Floor rows 27 / 37 / ~60 cm: the ToF's 9 cm is right.
+  - The box (~8 cm high): the ToF saw it at ~95 cm, the map didn't mark it until
+    ~45 cm (far away its zone spans the floor too: unsure); then `robot check d40` said
+    obstacle after 6 cm, the drive stopped itself after 7 cm, the box ~31-35 cm from
+    the ToF. The map (L1 cells 30-40 cm ahead), the ToF and the camera agree.
+  - The shiny parquet: much of the room beyond ~50 cm is "no floor" (G free) on the
+    map (the map picture: mostly purple). Step 6's floor first would stop there.
+  - Each 30° turn turned ~31° (+1° each, 419° for 418° asked).
+  - Rows 1-3 of the right columns often read ~31-37 cm, unsure, in every direction:
+    something of the robot in the ToF's view, or crosstalk (to look at).
+  - A second look round (moves 16-27) from beside the box: 12 turns ok, nothing
+    lost.
+- The data stays in `robot2.duckdb` (the turns and the moves for steps 5 and 7). What
   isn't checked here (watching people, the worst WiFi spot, the tilt stop, the
   camera's tilt) waits for step 9's test.
 
@@ -592,3 +612,6 @@ tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2
 3. Decided 8 Nov: no abbreviations anywhere (4h, snapshot's `snapshot_*` types too); one
    measurement run (4i), then the final flash (9); PicoB's messages stay separate.
    Decided 10 Nov: 4e and 4g dropped; the IMU stays at 416 Hz.
+4. **The shiny floor** (4i): beyond ~50 cm the parquet reads as "no floor". Decided
+   10 Nov: step 6 trusts "no floor" only up close (the limit from the stored drives);
+   farther it counts as unknown.
