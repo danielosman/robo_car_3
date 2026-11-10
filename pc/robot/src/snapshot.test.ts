@@ -3,9 +3,9 @@
 // pieces of any size and read (the ToF section a compact frame); a damaged one or one
 // of another version refused; the map's columns from the window's cells and the
 // tiles' 4-bit columns; the PNG; and the snapshots stored in DuckDB and served as the
-// page asks: the boots, the timeline, one snapshot with its zones (each in the world,
-// by the boot's mounting) and 8 x 8 grid, the map then (the newest of each tile up to
-// it, since the last clear). Run with `npm test`.
+// page asks: the boots, the timeline, one snapshot with its zones (for the page each in
+// the world, placed by the PC's cell map helper) and 8 x 8 grid, the robot's map then
+// (the newest of each tile up to it, since the last clear). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import zlib from "node:zlib";
@@ -13,10 +13,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { COLUMN, SnapshotAssembler, columnOf, grayPng, parseSnapshot, tileColumns, windowColumns } from "./snapshot.ts";
-import { listBoots, listSnapshots, snapshotDetail, snapshotMap } from "./snapshots_api.ts";
+import { listBoots, listSnapshots, snapshotDetail, snapshotForPage, snapshotMap } from "./snapshots_api.ts";
+import { CellMaps } from "./maps/cell_map.ts";
+import { loadMounting } from "./mounting.ts";
 import { BootFolders, folderNameAt } from "./boot_folders.ts";
 import { FIRMWARE_SNAPSHOTS, storeWithSnapshots } from "./test_store.ts";
-import { loadMounting } from "./mounting.ts";
 import { rowCol, zoneAt } from "./tof_format.ts";
 
 const have = existsSync(FIRMWARE_SNAPSHOTS);
@@ -132,20 +133,27 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     assert.equal(one.snapshot.why, "command");
     assert.equal(one.snapshot.image, path.join("camera", folder, "2.png"));
     assert.equal(one.zones.length, 64);
-    // Each valid zone in the world (the boot's mounting, the frame's pose); the others not.
-    const m = loadMounting();
-    for (const z of one.zones) {
-      const valid = z.kind === "sure";
-      assert.equal(z.x === null, !valid);
-      if (!valid) continue;
-      assert.ok(Math.abs(Number(z.z) - m.tof.z_m) < Number(z.distance_mm) / 1000 + 1e-3); // within its distance of the sensor's height
-    }
     // The grid: row 1, column 1 reads sensor zone 56: 56 % 3 = 2 targets, 5.6 m: beyond.
     assert.deepEqual(one.grid[0][0], { mm: 2550, kind: "sure", beyond: true });
     assert.equal(sensorZone(zoneAt(1, 8)), 0);
     assert.equal(one.grid[0][7], null); // row 1, column 8: sensor zone 0, no target
     assert.equal(one.grid.flat().filter(c => c).length, Array.from({ length: 64 }, (_, z) => (z % 3 ? 1 : 0)).reduce((a: number, c) => a + c, 0));
     assert.equal(await snapshotDetail(store, boot, 99), null);
+    // For the page: each valid zone in the world (the helper's tof_rays, the frame's pose),
+    // the others null; row 1 looks higher than row 8, column 1 further left than column 8.
+    const maps = new CellMaps(store);
+    try {
+      const page = (await snapshotForPage(store, maps, boot, 2))!, m = loadMounting(), pose = one.snapshot;
+      const seen = (z: Record<string, unknown>) => {
+        const dx = Number(z.x) - Number(pose.tof_x), dy = Number(z.y) - Number(pose.tof_y), along = Math.hypot(dx, dy);
+        return { up: Math.atan2(Number(z.z) - m.tof.z_m, along), left: Math.atan2(dy, dx) - Number(pose.tof_yaw) };
+      };
+      for (const z of page.zones) assert.equal(z.x === null, z.kind !== "sure");
+      const valid = page.zones.filter(z => z.x !== null), mean = (zs: typeof valid, k: "up" | "left") => zs.reduce((a, z) => a + seen(z)[k], 0) / zs.length;
+      assert.ok(mean(valid.filter(z => Number(z.row) === 1), "up") > mean(valid.filter(z => Number(z.row) === 8), "up"));
+      assert.ok(mean(valid.filter(z => Number(z.col) === 1), "left") > mean(valid.filter(z => Number(z.col) === 8), "left"));
+      assert.equal(await snapshotForPage(store, maps, boot, 99), null);
+    } finally { maps.close(); }
     assert.equal(one.features.length, 2);
     assert.equal(one.features[0].x, 12.5);
 

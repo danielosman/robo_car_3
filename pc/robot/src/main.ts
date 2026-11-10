@@ -24,6 +24,7 @@ import { getRequestListener } from "@hono/node-server";
 import { ROBOT_PORT, RobotLink, broadcastAddresses, type LivePose } from "./link.ts";
 import { DB_PATH, RECORDINGS_DIRECTORY, Store } from "./store.ts";
 import { handleSnapshotApi } from "./snapshots_api.ts";
+import { CellMaps } from "./maps/cell_map.ts";
 import { ingest } from "./ingest.ts";
 import { BootFolders } from "./boot_folders.ts";
 import { Log } from "./log.ts";
@@ -54,6 +55,7 @@ async function main(): Promise<void> {
   const bootFolders = new BootFolders(RECORDINGS_DIRECTORY);  // the robot's boot ids to our folder names
   const store = new Store(DB_PATH);
   store.onError = err => note(`the robot's data NOT stored: ${err.message}`);
+  const maps = new CellMaps(store, note);  // the PC's cell map, built from the store when read
   const live = new LiveRobot();
   const stored = new StoredSnapshots();
   const announceTo = process.env.ANNOUNCE_TO ? process.env.ANNOUNCE_TO.split(",") : [];
@@ -73,7 +75,7 @@ async function main(): Promise<void> {
   robot.on("mapCleared", () => note("the robot's map was cleared (its own 6 x 6 m map; the PC's are kept)"));
   const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
   const chat = openAiChat(MODEL_API, MODEL, note);
-  const api = getRequestListener(createApi({ store, live, queue, log, snapshots: stored, config: { autoSnap: true },
+  const api = getRequestListener(createApi({ store, maps, live, queue, log, snapshots: stored, config: { autoSnap: true },
                                               recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, chat, modelName: MODEL }).fetch);
   await robot.start();
   if (!wireCheck()) note("wire: the message table is wrong (two types share a number, or a ToF format is too big; wire.ts, tof_format.ts): the robot's messages can't be read");
@@ -86,7 +88,7 @@ async function main(): Promise<void> {
   };
   const server = http.createServer(async (req, res) => {
     if (/^\/api\/robot(\/|$|\?)/.test(req.url ?? "")) { await api(req, res); return; }
-    if (await handleSnapshotApi(req, res, store, RECORDINGS_DIRECTORY, bootFolders)) return;
+    if (await handleSnapshotApi(req, res, store, RECORDINGS_DIRECTORY, bootFolders, maps)) return;
     const file = files[new URL(req.url ?? "/", "http://localhost").pathname];
     if (!file) { res.writeHead(404); res.end("not found"); return; }
     try {

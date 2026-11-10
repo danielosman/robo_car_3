@@ -1,7 +1,7 @@
 // Tests for routes.ts, the API over HTTP, end to end below the socket: steer and the
 // actions stream one JSON line per command as each ends; a command the API can't take
 // is refused with nothing queued; stop, no-wait, auto_snap, config pre_ms / post_ms to
-// the robot; check on the newest snapshot's map; the reads on the firmware test's
+// the robot; check on the PC's map at the newest snapshot; the reads on the firmware test's
 // snapshots in a fresh database (frames on a move stored there too).
 // Run with `npm test`.
 import { test } from "node:test";
@@ -10,7 +10,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { noFirmware, storeWithSnapshots } from "../test_store.ts";
+import { noFirmware, snapshotAgain, storeWithSnapshots } from "../test_store.ts";
 import { Log } from "../log.ts";
 import { LiveRobot } from "../live.ts";
 import { livePose } from "../link.ts";
@@ -19,6 +19,7 @@ import { CommandQueue } from "./queue.ts";
 import { createApi } from "./routes.ts";
 import type { Chat } from "../objects/model.ts";
 import { BootFolders } from "../boot_folders.ts";
+import { CellMaps } from "../maps/cell_map.ts";
 
 const skip = noFirmware;
 
@@ -49,13 +50,14 @@ async function setUp(chat?: Chat) {
   live.setBoot(boot.id);
   live.setPose(livePose({ type: "status", x: 0.43, y: -0.04, yaw: 30 * Math.PI / 180, mode: "manual", action: "", rssi: -58 }));
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
-  const app = createApi({ store, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
+  const maps = new CellMaps(store);
+  const app = createApi({ store, maps, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
                           chat, modelName: "gemma-fake" });
   const post = async (command: string, body = "", query = "") => {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });
     return { status: r.status, text: await r.text() };
   };
-  const done = async () => { rmSync(directory, { recursive: true, force: true }); };
+  const done = async () => { maps.close(); rmSync(directory, { recursive: true, force: true }); };
   return { post, robot, log, directory, done, store, boot, live };
 }
 
@@ -112,9 +114,19 @@ test("report: the robot's status word; its printout in the answer and in the log
   } finally { await done(); }
 });
 
-test("check on the newest snapshot's map", { skip }, async () => {
-  const { post, done } = await setUp();
+test("check on the PC's map at the newest snapshot", { skip }, async () => {
+  const { post, done, store, boot, directory } = await setUp();
   try {
+    // The newest snapshot (5, stored again) comes after frames of a wall 50 cm ahead of
+    // where it says the robot is: a 1 m drive stops before it.
+    const [p] = await store.query(`SELECT x, y, yaw FROM snapshots WHERE boot_id = '${boot.id}' AND sequence = 5`);
+    const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 500, signal: 50, sigmaMm: 5, kind: k < 32 ? "sure" as const : "unsure" as const, targets: 1 }));
+    for (let n = 1; n <= 3; n++) void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: n * 100000, frame: { number: n, robotClockUs: n * 100000,
+      periodUs: 100000, x: Number(p.x), y: Number(p.y), yaw: Number(p.yaw), pitch: 0, turn: 0, still: true, poseKnown: true, beyondMm: 2550, zones } }));
+    await snapshotAgain(store, boot, directory, 5);
+    const [blocked] = (await post("check", "d100")).text.trim().split("\n").map(l => JSON.parse(l));
+    assert.equal(blocked.result, "obstacle");
+    assert.ok(blocked.moved > 10 && blocked.moved < 35, String(blocked.moved));
     const lines = (await post("check", "r90 d20")).text.trim().split("\n").map(l => JSON.parse(l));
     assert.equal(lines.length, 2);
     assert.equal(lines[0].command, "steer r90");
@@ -130,16 +142,21 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     const status = await read("status");
     assert.deepEqual(status, { connected: true, boot: boot.id, pose: { x: 43, y: -4, yaw: 30 }, mode: "manual", moving: null, wifi: -58,
       running: null, waiting: [], newest_snapshot: 5 }); // no safety peaks since step 4c
+    // The PC's map: no frames stored here, so nothing known yet but the floor under the robot.
     const map = await read("map", "1");
-    assert.equal(map.snapshot, 1);
-    // The robot's bytes: three layers of 60 × 60 cells; somewhere L1 occupied (an obstacle).
+    assert.deepEqual([map.snapshot, map.map], [1, "pc"]);
     assert.deepEqual([map.window.cells_x, map.window.cells_y, map.window.origin_cell_x], [60, 60, -30]);
     for (const layer of ["G", "L1", "L2"]) assert.equal(map.window[layer].length, 3600);
-    assert.ok(map.window.L1.some((b: number) => (b & 3) === 2));
+    assert.ok(!map.window.L1.some((b: number) => (b & 3) === 2));
     assert.ok(map.format.cell_byte.startsWith("bits 0-1 the state"));
+    // The robot's own, as it sent it: somewhere L1 occupied (an obstacle).
+    const own = await read("map", "1", "?robot");
+    assert.equal(own.map, "robot");
+    assert.ok(own.window.L1.some((b: number) => (b & 3) === 2));
     const png = (await read("map", "1", "?png")).file;
     assert.equal(png, path.join(directory, "map", png.split(path.sep).at(-2), "1.png"));
     assert.ok(existsSync(png));
+    assert.ok((await read("map", "1", "?png&robot")).file.endsWith("1-robot.png"));
     const tofText = (await post("tof", "1")).text;
     assert.match(tofText, /"distance": \[\n {4}\[/); // a matrix, one row a line
     const tof = JSON.parse(tofText);

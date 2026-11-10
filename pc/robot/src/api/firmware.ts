@@ -1,6 +1,6 @@
 // Numbers the API shares with the robot's firmware, read from its C headers when the
 // server starts, so the two can't drift apart: the commands' limits (commands.h),
-// how a move keeps clear of obstacles (behaviour.h), the speeds (motion.h) and the
+// the robot's size and goto's limits (room.h, behaviour.h), the speeds (motion.h) and the
 // camera's picture (drivers/camera.h). Only plain-number #defines are read; a
 // missing one stops the server.
 import { readFileSync } from "node:fs";
@@ -27,7 +27,8 @@ function header(file: string, names: readonly string[]): Record<string, number> 
 
 const c = header("app/commands.h", ["COMMAND_DRIVE_MAX_CM", "COMMAND_ROTATE_MAX_DEG", "COMMAND_GOTO_MAX_CM",
                                 "COMMAND_WATCH_MIN_S", "COMMAND_WATCH_MAX_S", "COMMAND_STILL_MAX_MS"]);
-const b = header("app/behaviour.h", ["STOP_BEFORE_M", "EDGE_M", "HALF_WIDTH_M", "PATH_HALF_M", "GOTO_MAX_M"]);
+const r = header("app/room.h", ["EDGE_M", "HALF_WIDTH_M"]);
+const b = header("app/behaviour.h", ["GOTO_MAX_M", "GOTO_THERE_M"]);
 const m = header("app/motion.h", ["MOTION_SPEED_MPS", "MOTION_TURN_RADPS"]);
 const cam = header("drivers/camera.h", ["CAMERA_WIDTH", "CAMERA_HEIGHT"]);
 
@@ -37,11 +38,11 @@ export const LIMITS = {
   watchMinS: c.COMMAND_WATCH_MIN_S, watchMaxS: c.COMMAND_WATCH_MAX_S, stillMaxMs: c.COMMAND_STILL_MAX_MS,
 } as const;
 
-// A move stops stopBeforeM before an obstacle on the map, measured from the front or
-// back edge (edgeM from the centre), looking along a strip pathHalfM to each side; a
-// goto goes at most gotoMaxM. The robot is halfWidthM to each side (m).
+// The robot's front and back edges are edgeM from its centre, its sides halfWidthM; a goto
+// goes at most gotoMaxM, and not at all to a point closer than gotoThereM (m). Where a
+// move stops before an obstacle is the robot's own rule, asked through the helper.
 export const MOVE = {
-  stopBeforeM: b.STOP_BEFORE_M, edgeM: b.EDGE_M, halfWidthM: b.HALF_WIDTH_M, pathHalfM: b.PATH_HALF_M, gotoMaxM: b.GOTO_MAX_M,
+  edgeM: r.EDGE_M, halfWidthM: r.HALF_WIDTH_M, gotoMaxM: b.GOTO_MAX_M, gotoThereM: b.GOTO_THERE_M,
 } as const;
 
 // Full speed driving (m/s) and turning (rad/s).

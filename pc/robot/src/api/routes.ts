@@ -12,7 +12,7 @@ import type { Answer, Sender } from "./answers.ts";
 import { checkMoves } from "./check.ts";
 import { help } from "./help.ts";
 import { formatJson } from "./json.ts";
-import { READS, ReadError, TextAnswer, findSnapshot, mapOf, type ApiContext } from "./reads.ts";
+import { READS, ReadError, TextAnswer, findSnapshot, type ApiContext } from "./reads.ts";
 import { OBJECT_COMMANDS } from "../objects/api.ts";
 import type { LogItem } from "../log.ts";
 
@@ -59,9 +59,10 @@ export function createApi(ctx: ApiContext): Hono {
   async function check(commands: Command[]): Promise<Response> {
     if (commands.some(cmd => cmd.name === "watch")) return json(line({ command: "check", result: "failed", why: "watch can't be checked" }), 400);
     try {
-      const map = await mapOf(ctx.store, await findSnapshot(ctx.store, undefined));
-      if (!map.view.robot) return json(line({ error: "the newest snapshot has no pose (PicoB not connected)" }), 404);
-      return json(checkMoves(commands, map, map.view.robot).map(line).join("\n"));
+      const id = await findSnapshot(ctx.store, undefined);
+      const answers = await ctx.maps.atSnapshot(id.boot, id.sequence, async (map, pose) => pose && checkMoves(commands, map, pose));
+      if (!answers) return json(line({ error: "the newest snapshot has no pose (PicoB not connected)" }), 404);
+      return json(answers.map(line).join("\n"));
     } catch (err) {
       if (err instanceof ReadError) return json(line({ error: err.message }), err.status);
       throw err;

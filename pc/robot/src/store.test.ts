@@ -1,5 +1,4 @@
-// Tests for store.ts: a zone's world position (hand-computed cases, the boot's
-// mounting); a boot's moves, frames and zones written as they arrive and read back
+// Tests for store.ts: a boot's moves, frames and zones written as they arrive and read back
 // (robot frames' reading, the fake robot's replay in the order they came); a frame
 // that comes after its move's end under the move it names; each boot keeps its own
 // copy of the mounting, also when the server starts again (and its messages are
@@ -14,38 +13,16 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DB_FILE, DB_PATH, Store, tofGeometry, worldPoint } from "./store.ts";
+import { DB_FILE, DB_PATH, Store } from "./store.ts";
 import { loadMounting, type Mounting } from "./mounting.ts";
 import { WIRE_VERSION, type ImuBatch } from "./wire.ts";
 import type { PosedFrame, Zone } from "./tof_format.ts";
 import type { LivePose } from "./link.ts";
 
-const DEG = Math.PI / 180;
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
 const now = loadMounting();
 // A mounting from before the PCB was lifted: the ToF at 7 cm, the camera at 8.8 cm.
 const before: Mounting = { ...now, tof: { ...now.tof, z_m: 0.07 }, camera: { ...now.camera, z_m: 0.088 } };
-
-test("world points: the boot's mounting, the robot turned and moved", () => {
-  const g = tofGeometry(before), Z = 0.07, still = { x: 0, y: 0, yaw: 0, pitch: 0 };
-  assert.deepEqual(g.sensorM, [before.tof.x_m, before.tof.y_m, Z]);
-  // Row 4, column 4 (1-8): half a zone up and half a zone left of straight ahead.
-  const h = 2.8125 * DEG;
-  let [x, y, z] = worldPoint(g, still, 4, 4, 1);
-  close(x, before.tof.x_m + Math.cos(h) * Math.cos(h));
-  close(y, before.tof.y_m + Math.cos(h) * Math.sin(h));
-  close(z, Z + Math.sin(h));
-  // The robot at (1, 2), turned 90° left: forward is +y, left is -x.
-  [x, y] = worldPoint(g, { x: 1, y: 2, yaw: 90 * DEG, pitch: 0 }, 4, 4, 1);
-  close(x, 1 - before.tof.y_m - Math.cos(h) * Math.sin(h));
-  close(y, 2 + before.tof.x_m + Math.cos(h) * Math.cos(h));
-  // The bottom row (8) is 3.5 zones down; at the distance where that ray meets the floor, z = 0.
-  [, , z] = worldPoint(g, still, 8, 4, Z / Math.sin(3.5 * 5.625 * DEG));
-  close(z, 0);
-  // Nose up by half a zone: row 5's ray (half a zone down) becomes level.
-  [, , z] = worldPoint(g, { ...still, pitch: h }, 5, 4, 1);
-  close(z, Z);
-});
 
 const zones = (mm: number): Zone[] => Array.from({ length: 64 }, (_, k) =>
   ({ distanceMm: k % 9 ? mm + k : 0, signal: k, sigmaMm: 3, kind: k % 9 ? "sure" : "nothing", targets: k % 9 ? 1 : 0 }));

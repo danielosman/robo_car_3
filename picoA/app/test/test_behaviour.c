@@ -26,6 +26,7 @@
 #include "../tof_rays.c"
 #include "../tof_format.c"
 #include "../cell_map.c"
+#include "../room.c"
 #include "../house_map.c"
 #include "../wire.c"
 #include "../move.c"

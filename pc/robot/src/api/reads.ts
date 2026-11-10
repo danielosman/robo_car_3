@@ -1,5 +1,6 @@
 // The commands that run at once, never queued (doc/CLI_API_PLAN.md): `robot <name>
-// [args]`, each answering one JSON object. status is the robot now; map, tof,
+// [args]`, each answering one JSON object. status is the robot now; map (the PC's cell
+// map, or with --robot the robot's own), tof,
 // camera, light and features read a snapshot (its number, or the newest); frames a
 // move's frames, imu its imu records (text, or --json); log the log; config the settings (auto_snap is
 // set here; pre_ms and post_ms go to the robot through the queue: routes.ts). Units:
@@ -9,12 +10,13 @@ import path from "node:path";
 import type { Store } from "../store.ts";
 import type { LiveRobot } from "../live.ts";
 import type { Log } from "../log.ts";
-import { snapshotDetail, snapshotMap } from "../snapshots_api.ts";
+import { cellMapAt, snapshotDetail, snapshotMap, type MapView } from "../snapshots_api.ts";
 import { FEATURE } from "../snapshot.ts";
 import { CAMERA } from "./firmware.ts";
 import { poseOut } from "./answers.ts";
 import { displayRgb } from "./colour.ts";
-import { RobotMap } from "./map.ts";
+import { mapPng } from "./map.ts";
+import type { CellMaps } from "../maps/cell_map.ts";
 import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
 import type { Chat } from "../objects/model.ts";
@@ -23,12 +25,12 @@ import { framesJson, framesText, imuJson, imuText } from "./frames.ts";
 
 export interface Config { autoSnap: boolean }
 export interface ApiContext {
-  store: Store; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDirectory: string;
+  store: Store; maps: CellMaps; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDirectory: string;
   bootFolders: BootFolders;  // the robot's boot ids to our folder names (map --png)
   chat?: Chat; modelName?: string;  // the vision model for robot detect (objects/)
 }
 export interface Read {
-  usage: string;  // "map [n] [--png]"
+  usage: string;  // "map [n] [--robot] [--png]"
   help: string;   // a few simple sentences
   // req: the request as it came, for a command whose argument isn't words (detect_save's
   // JSON) or whose flags carry a value (--by=<name>: query.by)
@@ -63,10 +65,11 @@ export async function findSnapshot(store: Store, arg: string | undefined): Promi
   });
 }
 
-export async function mapOf(store: Store, id: SnapshotId): Promise<RobotMap> {
-  const view = await snapshotMap(store, id.boot, id.sequence);
+// The map at a snapshot: the PC's cell map, or (robot) the robot's own as it sent it.
+async function mapAt(ctx: ApiContext, id: SnapshotId, robot: boolean): Promise<MapView> {
+  const view = robot ? await snapshotMap(ctx.store, id.boot, id.sequence) : await cellMapAt(ctx.store, ctx.maps, id.boot, id.sequence);
   if (!view?.window) throw new ReadError(`snapshot ${id.sequence} has no map`);
-  return new RobotMap(view);
+  return view;
 }
 
 async function snapshotRow(store: Store, id: SnapshotId) {
@@ -108,27 +111,28 @@ export const READS: Record<string, Read> = {
     },
   },
   map: {
-    usage: "map [n] [--png]",
-    help: "The robot's map at snapshot n (default: the newest), as the robot holds it: the window (6 × 6 m around\n" +
-          "the robot, 10 cm cells) as three layers of cell bytes, G (the floor), L1 (3-13 cm), L2 (13-23 cm), and\n" +
-          "the whole-house tiles outside it. format says how to read them. --png draws the window as a picture\n" +
-          "(on the PC) and gives its file.",
-    async run({ store, recordingsDirectory, bootFolders }, args, flags) {
+    usage: "map [n] [--robot] [--png]",
+    help: "The map at snapshot n (default: the newest): the PC's, built from the ToF frames that came before it by\n" +
+          "the robot's own map code. The window (6 × 6 m around the robot, 10 cm cells) as three layers of cell bytes,\n" +
+          "G (the floor), L1 (3-13 cm), L2 (13-23 cm), and the whole-house tiles outside it. format says how to read\n" +
+          "them. --robot: the robot's own map instead, as it sent it in the snapshot; the two are close, not equal\n" +
+          "(the robot also maps while it stands). --png draws the window as a picture (on the PC) and gives its file.",
+    async run(ctx, args, flags) {
       atMostOne(args, this.usage);
-      const id = await findSnapshot(store, args[0]), map = await mapOf(store, id);
+      const robot = flags.has("robot"), id = await findSnapshot(ctx.store, args[0]), map = await mapAt(ctx, id, robot);
       if (flags.has("png")) {
-        const file = path.join(recordingsDirectory, "map", bootFolders.folderForBoot(id.boot), `${id.sequence}.png`);
+        const file = path.join(ctx.recordingsDirectory, "map", ctx.bootFolders.folderForBoot(id.boot), `${id.sequence}${robot ? "-robot" : ""}.png`);
         await mkdir(path.dirname(file), { recursive: true });
-        await writeFile(file, map.png()!);
-        return { snapshot: id.sequence, file };
+        await writeFile(file, mapPng(map)!);
+        return { snapshot: id.sequence, map: robot ? "robot" : "pc", file };
       }
-      const w = map.view.window!, r = map.view.robot, n = w.cellsX * w.cellsY;
+      const w = map.window!, r = map.robot, n = w.cellsX * w.cellsY;
       const layer = (k: number) => [...w.cells.subarray(k * n, (k + 1) * n)];
       return {
-        snapshot: id.sequence, pose: r && poseOut(r),
+        snapshot: id.sequence, map: robot ? "robot" : "pc", pose: r && poseOut(r),
         window: { origin_cell_x: w.originX, origin_cell_y: w.originY, cells_x: w.cellsX, cells_y: w.cellsY,
                   G: layer(0), L1: layer(1), L2: layer(2) },
-        tiles: map.view.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: t.columns })),
+        tiles: map.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: t.columns })),
         format: MAP_FORMAT,
       };
     },

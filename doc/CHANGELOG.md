@@ -5,6 +5,70 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5)
+
+Steps of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Both Picos flashed once (commit
+`6583e88`) for the measurement run; step 5's PicoA change (`room.h`) is not flashed yet.
+
+- **Dropped (Daniel), to finish the plan sooner:** step 4e's discussions (who reads
+  the IMU, PicoA's layers, PicoB's reflexes, the IMU's rate) and step 4g (interfaces
+  take what they use). The IMU stays at 416 Hz on PicoB; both stay written down in the
+  plan for later.
+- **4f, the link (both Picos, link version 6 → 7):** the wheel distances left the
+  odometry report (45 → 37 B; nothing on PicoA read them; UART PicoB → PicoA ~4.9 →
+  ~4.5 KB/s). One rule for IMU records PicoA can't place yet, on PicoA: `body` keeps a
+  record only once PicoB has greeted with the same version and its clock is known;
+  PicoB sends from the start. Looked at and kept: the report's time is its send time
+  (~0.1° at a fast turn); PicoB's three messages stay separate.
+- **4h, whole words in names** everywhere (both Picos and the PC; no wire bytes
+  changed): `odom` → `odometry`, `msg` → `message`, `snap_*` → `snapshot`, `obs` →
+  `observations`, `stats` → `statistics`, `seq` → `sequence`, and more; the store's
+  `message_number`. Kept: acronyms, unit endings, outside names (Pico SDK, lwIP, the ULD).
+- **For agent-run robot tests:** `robot report` answers with the robot's status
+  printout; `robot map` gave the robot's raw cell bytes (layers G, L1, L2) with a
+  `format`; the `##` text map left the robot and the PC.
+- **pc/robot dependencies:** DuckDB 2, ESLint 10, typescript-eslint 8.72; TypeScript
+  stays 6.0.3 (typescript-eslint takes nothing newer); `minimatch` forced to 11:
+  `npm audit` clean.
+- **4i, the measurement run, run by the agent** (boot `cc0e4e65`, moves 1-27): Daniel
+  flashed and switched on; the agent used only `./robot`. `report`, `tof`, a 12 × 30°
+  look round with pictures, `steer d20 r90 r-90 d-20`, each move's frames and imu,
+  then a drive to a box, and a second look round from beside it. Results: all moves
+  answered ok (the last "obstacle", as meant); nothing dropped or lost; link 7, WiFi
+  -60 dBm, loop max 88 ms (vision 63), RAM free 51 KB, ToF 10.1-10.4 Hz; floor rows
+  27 / 37 / ~60 cm (the ToF's 9 cm right). The box (~8 cm): seen at ~95 cm, on the
+  map from ~45 cm; `check d40` said obstacle after 6 cm, the drive stopped after 7.
+  Found: the waxed parquet reads as "no floor" beyond ~50 cm (decided: step 6 trusts
+  "no floor" only up close); 30° turns turn ~31°; rows 1-3 of the right columns read
+  ~31-37 cm everywhere (the robot itself in view, or crosstalk).
+- **Step 5, the PC's cell map:** the robot's map code (`cell_map.c`, `tof_rays.c`,
+  `house_map.c`, `tof_format.c`) in a helper program on the Mac
+  (`pc/robot/native/cell_map_helper.c`, built with `cc` by the server), one per boot.
+  - Changed from the plan: the map is built from the stored frames when read, not fed
+    live: one path for live, after a restart and back in time, no race with ingest.
+  - The page, `robot map` (`--robot`: the robot's own) and `robot check` use it.
+    Gone: `worldPoint`, `RobotMap`'s lookups, check's copy of the stop rule; the
+    `snapshot_zones` x, y, z columns (dropped on open; placed when read).
+  - The stop rule moved from `behaviour.c` into `picoA/app/room.h` (Daniel's choice of
+    three: one copy, kept two, or no `robot check`): the robot drives by it, the
+    helper compiles it. The robot behaves the same, except that "nothing in the way"
+    is now exact (it could come back a hair short in float math).
+  - On boot `cc0e4e65` the PC's map and the robot's agree on ~98 % of known cells
+    (the robot also maps while standing); at snapshot 15 `check d40` says obstacle
+    after 6 cm, as the robot's own check did.
+  - Found while checking: the helper's 32-bit answers made "nothing found" come back
+    just under the limit, so `check` said obstacle on open floor. Fixed.
+  - First review: going back in time replayed every frame (~0.8 s) and the page's
+    timeline queued one replay per position; now the map is rebuilt only when frames
+    must be taken out and the last 16 maps are kept (~60 ms). Also: one owner of "the
+    map at snapshot n"; the page's ToF dots from the snapshot's own frame; tests for
+    the dots, check on the right map, the whole-house tiles, back in time.
+  - Second review: a helper dying mid-write could crash the server (its stdin's error
+    unhandled); now an error for the caller. The helper's console lines are
+    line-buffered; `room_gap_m` gives `behaviour.c`'s printed gaps. Kept: a drive of
+    1 cm or less on open floor is refused as "obstacle" (older than step 5).
+  - Reviews are run by a fresh subagent that reads the guide itself (AGENTS.md).
+
 ## 8 Nov 2026: step 4c re-review fixes; robot height 13 cm
 
 - A fresh review of step 4c passed. Fixes: PicoB counts partial imu records dropped

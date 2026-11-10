@@ -22,13 +22,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// How a move keeps clear of obstacles on the map. The PC's --check reads these
-// (pc/robot/src/api/firmware.ts): plain numbers only.
-#define STOP_BEFORE_M    0.15f     // a move stops this far before an obstacle on the map...
-#define EDGE_M           0.095f    // ...measured from the front (back) edge, this far from the centre
-#define HALF_WIDTH_M     0.1175f   // the robot's half width
-#define PATH_HALF_M      0.1675f   // HALF_WIDTH_M plus 5 cm: the path a move checks
+// How far a move goes before an obstacle on the map: room.h. The PC's robot check reads
+// these (pc/robot/src/api/firmware.ts): plain numbers only.
 #define GOTO_MAX_M       3.0f      // a goal farther away: the robot goes this far towards it
+#define GOTO_THERE_M     0.05f     // a goal closer than this: already there
 
 void behaviour_drive(float distance_m, uint32_t command);
 void behaviour_rotate(float angle_rad, uint32_t command);

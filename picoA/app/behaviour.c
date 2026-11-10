@@ -7,7 +7,7 @@
 #include "body.h"
 #include "motion.h"
 #include "pose.h"
-#include "cell_map.h"
+#include "room.h"
 #include "watch.h"
 #include "move.h"
 #include "behaviour.h"
@@ -58,18 +58,20 @@ static void begin(action_t a, float g, float parameter, uint32_t number) {
     goal = g;
 }
 
-// A move along direction (+1 forward, -1 back) from o: how far the edge on that side is from
-// the nearest obstacle on the map in its path (blocked or overhang), looking at most
-// look_m past the stop point; unknown cells count as free.
-static float obstacle_gap_m(const odometry_report_t *o, float direction, float look_m) {
-    return cell_map_obstacle_along(o->x_m, o->y_m, direction * cosf(o->yaw_rad), direction * sinf(o->yaw_rad), PATH_HALF_M,
-                                   EDGE_M + STOP_BEFORE_M + look_m) - EDGE_M;
+// A move along direction (+1 forward, -1 back) from o: how much room it has, and the gap
+// to the obstacle for the console (room.h).
+static float room_from(const odometry_report_t *o, float direction, float look_m) {
+    return room_m(o->x_m, o->y_m, o->yaw_rad, direction, look_m);
+}
+static float gap_from(const odometry_report_t *o, float direction, float look_m) {
+    return room_gap_m(o->x_m, o->y_m, o->yaw_rad, direction, look_m);
 }
 
 void behaviour_drive(float distance_m, uint32_t number) {
     const char *side = distance_m > 0 ? "ahead" : "behind";
-    float gap_m = obstacle_gap_m(body_odometry(), distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
-    if (gap_m <= STOP_BEFORE_M + 0.01f) {
+    const odometry_report_t *o = body_odometry();
+    if (room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m).moved_m <= 0) {
+        float gap_m = gap_from(o, distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
         printf("Drive: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
                (double)(STOP_BEFORE_M * 100));
         move_refused(MOVE_DRIVE, distance_m, number, MOVE_END_OBSTACLE);
@@ -88,7 +90,7 @@ void behaviour_rotate(float angle_rad, uint32_t number) {
 void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t number) {
     const odometry_report_t *o = body_odometry();
     float dx = x_m - o->x_m, dy = y_m - o->y_m, d = hypotf(dx, dy), goal_m = d;
-    if (d - stop_m < 0.05f) {
+    if (d - stop_m < GOTO_THERE_M) {
         printf("Go to: already there (%.0f cm away)\n", (double)(d * 100));
         move_refused(MOVE_GOTO, goal_m, number, MOVE_END_DONE);
         return;
@@ -186,7 +188,7 @@ static void say_done(const odometry_report_t *o) {
     float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
     if (action == DRIVE && obstacle_stop) {
         float direction = goal < 0 ? -1.0f : 1.0f;
-        printf("Drive stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(obstacle_gap_m(o, direction, 0.1f) * 100),
+        printf("Drive stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(gap_from(o, direction, 0.1f) * 100),
                direction > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
         return;
     }
@@ -194,7 +196,7 @@ static void say_done(const odometry_report_t *o) {
         float off = hypotf(goal_x - o->x_m, goal_y - o->y_m);
         if (obstacle_stop)
             printf("Go to stopped: obstacle %.0f cm ahead (map), %.0f cm from the goal\n",
-                   (double)(obstacle_gap_m(o, 1.0f, 0.1f) * 100), (double)(off * 100));
+                   (double)(gap_from(o, 1.0f, 0.1f) * 100), (double)(off * 100));
         else printf("Go to done: %.1f s; at (%+.0f, %+.0f) cm, %.0f cm from the goal\n",
                     (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f), (double)(o->x_m * 100),
                     (double)(o->y_m * 100), (double)(off * 100));
@@ -218,9 +220,9 @@ static bool go_to(const odometry_report_t *o) {
     }
     float c = cosf(o->yaw_rad), s = sinf(o->yaw_rad);
     float remaining_m = c * dx + s * dy - goal_stop_m; // along the way: never circles around it
-    float room_m = obstacle_gap_m(o, 1.0f, fmaxf(remaining_m, 0)) - STOP_BEFORE_M;
-    obstacle_stop = room_m < remaining_m;
-    if (obstacle_stop) remaining_m = room_m;
+    float room = room_from(o, 1.0f, fmaxf(remaining_m, 0));
+    obstacle_stop = room < remaining_m;
+    if (obstacle_stop) remaining_m = room;
     if (remaining_m <= 0) return true;
     float w = fmaxf(-GOTO_STEER_RADPS, fminf(GOTO_STEER_RADPS, GOTO_STEER * error_rad));
     body_drive(motion_speed(remaining_m), w);
@@ -251,9 +253,9 @@ static bool step(const odometry_report_t *o) {
         float direction = goal < 0 ? -1.0f : 1.0f;
         // Checked every time: the map grows as the robot drives.
         float remaining_m = fabsf(goal) - hypotf(o->x_m - start.x_m, o->y_m - start.y_m);
-        float room_m = obstacle_gap_m(o, direction, fmaxf(remaining_m, 0)) - STOP_BEFORE_M;
-        obstacle_stop = room_m < remaining_m;
-        if (obstacle_stop) remaining_m = room_m;
+        float room = room_from(o, direction, fmaxf(remaining_m, 0));
+        obstacle_stop = room < remaining_m;
+        if (obstacle_stop) remaining_m = room;
         if (remaining_m <= 0) return true;
         body_drive(motion_speed(direction * remaining_m), 0);
         return false;

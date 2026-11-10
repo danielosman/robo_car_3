@@ -1,6 +1,7 @@
 // For the tests: the firmware's own snapshots (build/test_snapshot.snap, written by
 // ./run_tests.sh) stored in a fresh database, as the server stores them when they
-// arrive (store.ts: the boot opened from a hello, each snapshot with its bytes).
+// arrive (store.ts: the boot opened from a hello, each snapshot with its bytes); one
+// stored again later.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,4 +29,12 @@ export async function storeWithSnapshots(directory: string, mounting: Mounting =
     await store.importSnapshot(boot, boot.stamp(ms).messageNumber, s, bytes, ms, savePicture(directory, folders.folderForBoot(s.bootId, ms), s));
   }
   return { store, boot };
+}
+
+// The firmware's snapshot `sequence` stored again, as if it came now: after whatever the
+// boot sent since (frames stored meanwhile come before it, for the PC's cell map).
+export async function snapshotAgain(store: Store, boot: Boot, directory: string, sequence: number): Promise<void> {
+  const bytes = firmwareSnapshots().find(b => parseSnapshot(b).sequence === sequence)!, s = parseSnapshot(bytes), ms = Date.now();
+  await store.flush();
+  await store.importSnapshot(boot, boot.stamp(ms).messageNumber, s, bytes, ms, savePicture(directory, new BootFolders(directory).folderForBoot(s.bootId, ms), s));
 }

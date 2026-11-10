@@ -622,6 +622,34 @@
     ]
   },
   {
+    "id": "picoA.room",
+    "name": "room",
+    "origin": "picoA",
+    "path": "picoA/app/room.h",
+    "members": [
+      {
+        "name": "room_m",
+        "kind": "function",
+        "code": "float room_m("
+      },
+      {
+        "name": "room_gap_m",
+        "kind": "function",
+        "code": "float room_gap_m("
+      },
+      {
+        "name": "room_drive_t",
+        "kind": "type",
+        "code": "} room_drive_t;"
+      },
+      {
+        "name": "room_drive",
+        "kind": "function",
+        "code": "room_drive_t room_drive("
+      }
+    ]
+  },
+  {
     "id": "picoA.cell_map",
     "name": "cell_map",
     "origin": "picoA",

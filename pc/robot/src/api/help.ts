@@ -59,7 +59,7 @@ const ACTIONS_HELP: Record<string, string> = {
   report: "robot report\n\nAsks the robot for its status printout (its word status) and answers it as printout: the link to\n" +
           "PicoB, the WiFi and the server lanes (what was dropped), the loop's worst time, the ToF rate, RAM free, the\n" +
           "moves ended, the IMU records (received, lost, dropped). Everything the robot prints is also in robot log.",
-  check: "robot check <moves>\n\nSays what drive, rotate and goto would do on the newest snapshot's map. Nothing moves.\n" +
+  check: "robot check <moves>\n\nSays what drive, rotate and goto would do on the PC's map at the newest snapshot. Nothing moves.\n" +
          "Each move is checked from where the one before would end. The answers look like steer's.\n" +
          "  robot check d80 r90 g120,40",
 };

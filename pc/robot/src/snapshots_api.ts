@@ -1,12 +1,11 @@
 // The viewer's snapshot data (doc/ARCHITECTURE.md, the PC; snapshot.ts):
 //   GET /api/boots                         each boot with snapshots: its folder name, how many, first and last
 //   GET /api/snapshots?boot=<id>           a boot's snapshots for the timeline: when, why, the action, the pose
-//   GET /api/snapshots/<boot>/<sequence>        one snapshot: its row, the ToF frame (its 64 zones, each also in the world;
-//                                          the 8 x 8 grid), the camera features
-//   GET /api/snapshots/<boot>/<sequence>/map    the robot's map then: the window's columns over the whole-house
-//                                          map's tiles as they were (the newest of each tile up to this
-//                                          snapshot since the map was last cleared), where the robot was,
-//                                          and the path it drove since the map was last cleared
+//   GET /api/snapshots/<boot>/<sequence>        one snapshot: its row, the ToF frame (its 64 zones, each also in the world,
+//                                          placed by the PC's cell map helper; the 8 x 8 grid), the camera features
+//   GET /api/snapshots/<boot>/<sequence>/map    the PC's cell map then (maps/cell_map.ts: the boot's frames that came
+//                                          before the snapshot): its window's columns over its whole-house
+//                                          tiles, where the robot was, and the path it drove since power-up
 //   GET /api/snapshots/<boot>/<sequence>/objects  what robot detect found in its picture, and the boot's
 //                                          objects on the map up to it (objects/api.ts)
 //   GET /camera/<boot>/<sequence>.png           the camera picture (its file: camera/<boot's folder>/)
@@ -17,11 +16,12 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
 import type { Pose } from "./link.ts";
-import { tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
+import { parseSnapshot, tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
+import type { CellMaps, CellMapView } from "./maps/cell_map.ts";
 import { pageObjects } from "./objects/db.ts";
 import type { BootFolders } from "./boot_folders.ts";
 import { loadMounting } from "./mounting.ts";
-import { COMPACT_BEYOND_MM } from "./tof_format.ts";
+import { COMPACT_BEYOND_MM, zoneAt } from "./tof_format.ts";
 
 const BOOT = /^[0-9a-f]{8}$/;
 
@@ -29,7 +29,7 @@ export interface MapView {
   // cells: the robot's bytes as it holds them (cell_map.h): layers G, L1, L2 one after the other, each
   // [ix * cellsY + iy]; columns and confidence are computed from them.
   window: { originX: number; originY: number; cellsX: number; cellsY: number; cells: Buffer; columns: number[]; confidence: number[] } | null;
-  tiles: { tx: number; ty: number; sequence: number; columns: number[] }[];
+  tiles: { tx: number; ty: number; sequence?: number; columns: number[] }[];  // sequence: the snapshot that brought it (the robot's map)
   robot: Pose | null;          // the snapshot's pose
   path: { x: number; y: number }[];
 }
@@ -69,7 +69,7 @@ export async function snapshotDetail(store: Store, boot: string, sequence: numbe
     FROM snapshots WHERE snapshot_id = '${id}'`);
   if (!row) return null;
   const zones = await store.query(`SELECT row, col, distance_mm, kind, signal, sigma_mm, targets,
-    round(x, 3) AS x, round(y, 3) AS y, round(z, 3) AS z FROM snapshot_zones WHERE snapshot_id = '${id}' ORDER BY row, col`);
+    FROM snapshot_zones WHERE snapshot_id = '${id}' ORDER BY row, col`);
   // The grid as the robot sees it (row 1 at the top, column 1 on the left): each zone's
   // reading and how sure (sure, less_sure, unsure); null: nothing in range.
   const grid: ({ mm: number; kind: string; beyond: boolean } | null)[][] = Array.from({ length: 8 }, () => Array(8).fill(null));
@@ -83,6 +83,9 @@ export async function snapshotDetail(store: Store, boot: string, sequence: numbe
   return { snapshot: row, zones, grid, features };
 }
 
+// The robot's own map at a snapshot (robot map --robot): the window it sent in it, over the
+// whole-house tiles as they were (the newest of each up to it since the robot's map was
+// last cleared), and the path since then.
 export async function snapshotMap(store: Store, boot: string, sequence: number): Promise<MapView | null> {
   if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
   const path = await store.path(boot, sequence);
@@ -109,6 +112,41 @@ export async function snapshotMap(store: Store, boot: string, sequence: number):
   });
 }
 
+// A map's cells as the page and robot map show them.
+export function mapViewOfCells(v: CellMapView, robot: Pose | null, path: MapView["path"]): MapView {
+  return {
+    window: { originX: v.originX, originY: v.originY, cellsX: v.cellsX, cellsY: v.cellsY, cells: v.cells, ...windowColumns({ ...v, layers: 3 }) },
+    tiles: v.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: tileColumns(t) })),
+    robot, path,
+  };
+}
+
+// The PC's cell map at a snapshot: the boot's frames that came before it, the snapshot's
+// pose, the path since power-up.
+export async function cellMapAt(store: Store, maps: CellMaps, boot: string, sequence: number): Promise<MapView | null> {
+  if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
+  const at = await maps.viewAtSnapshot(boot, sequence);
+  return at && mapViewOfCells(at.view, at.pose, await store.path(boot, sequence, false));
+}
+
+// A snapshot for the page: snapshotDetail, each zone with its reading in the world (x, y,
+// z, m; null without a pose or a valid reading), placed by the PC's cell map helper from
+// the snapshot's own ToF frame.
+export async function snapshotForPage(store: Store, maps: CellMaps, boot: string, sequence: number) {
+  const d = await snapshotDetail(store, boot, sequence);
+  if (!d) return null;
+  const [row] = await store.read(async c => (await c.runAndReadAll("SELECT bytes FROM snapshots WHERE boot_id = $1 AND sequence = $2",
+    [boot, sequence])).getRowObjects());
+  const frame = parseSnapshot(bytes(row.bytes)).tof;
+  const rays = frame ? await maps.rays(boot, frame) : [];
+  const round = (v: number) => Number(v.toFixed(3));
+  const zones = d.zones.map((z): Record<string, unknown> => {
+    const r = rays[zoneAt(Number(z.row), Number(z.col))];
+    return { ...z, x: r ? round(r.point[0]) : null, y: r ? round(r.point[1]) : null, z: r ? round(r.point[2]) : null };
+  });
+  return { ...d, zones };
+}
+
 // The map for the page: the columns it draws, without the robot's cell bytes.
 function pageMap(view: MapView | null) {
   if (!view?.window) return view;
@@ -118,7 +156,7 @@ function pageMap(view: MapView | null) {
 
 // Answers the snapshot requests; false if the URL isn't one of them. directory: recordings/.
 export async function handleSnapshotApi(req: http.IncomingMessage, res: http.ServerResponse, store: Store, directory: string,
-                                        bootFolders: BootFolders): Promise<boolean> {
+                                        bootFolders: BootFolders, maps: CellMaps): Promise<boolean> {
   if (req.method !== "GET") return false;
   const url = new URL(req.url ?? "/", "http://localhost");
   const send = (code: number, body: unknown) => {
@@ -136,8 +174,8 @@ export async function handleSnapshotApi(req: http.IncomingMessage, res: http.Ser
     const one = /^\/api\/snapshots\/([0-9a-f]{8})\/(\d+)(\/map|\/objects)?$/.exec(url.pathname);
     if (one) {
       const boot = one[1], sequence = Number(one[2]);
-      const body = one[3] === "/map" ? pageMap(await snapshotMap(store, boot, sequence)) : one[3] === "/objects" ? await pageObjects(store, boot, sequence)
-        : await snapshotDetail(store, boot, sequence);
+      const body = one[3] === "/map" ? pageMap(await cellMapAt(store, maps, boot, sequence)) : one[3] === "/objects" ? await pageObjects(store, boot, sequence)
+        : await snapshotForPage(store, maps, boot, sequence);
       if (body) send(200, body); else send(404, { error: "no such snapshot" });
       return true;
     }

@@ -12,9 +12,9 @@
 //              it), time, and the IMU's raw counts in the sensor's axes (training data)
 //   status     the robot's status messages (4 a second): the path driven
 //   snapshots  one per snapshot, its bytes as they came, its pose, action, camera and
-//              colour reading; snapshot_zones (its ToF frame, each zone also in the
-//              world), snapshot_features, snapshot_tiles; the robot's map window as a
-//              BLOB (until step 6); the picture a PNG beside the database
+//              colour reading; snapshot_zones (its ToF frame), snapshot_features,
+//              snapshot_tiles; the robot's map window as a BLOB (until step 6); the
+//              picture a PNG beside the database
 //   detect_runs, detections, map_objects, object_detections: objects (objects/db.ts)
 // Times: t_us and t_s are since power-up (µs as sent, s); robot_clock_us is PicoA's
 // 32-bit clock (it wraps every 71.6 min), kept only where the robot's own bytes hold
@@ -27,10 +27,10 @@ import { DuckDBInstance, timestampValue, type DuckDBAppender, type DuckDBConnect
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { snapshotId, type Snapshot } from "./snapshot.ts";
-import { Boot, type TofRow, type ImuBatchRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
 import type { Pose } from "./link.ts";
+import { Boot, type TofRow, type ImuBatchRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
 import type { Mounting } from "./mounting.ts";
-import { KINDS, isValid, rowCol, type Kind, type PosedFrame } from "./tof_format.ts";
+import { KINDS, rowCol, type Kind, type PosedFrame } from "./tof_format.ts";
 import { IMU_RECORD_PERIOD_US, type Hello, type ImuBatch, type ImuRecord, type TofMessage, type Vec3 } from "./wire.ts";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -81,9 +81,12 @@ CREATE TABLE IF NOT EXISTS snapshots (                -- picoA/app/snapshot.c
   lux DOUBLE, cie_x DOUBLE, cie_y DOUBLE, color_x DOUBLE, color_y DOUBLE, color_z DOUBLE, color_raw BLOB,
   map_origin_cx INTEGER, map_origin_cy INTEGER, map_cells_x INTEGER, map_cells_y INTEGER, map_cells BLOB, -- [layer][x][y], one byte a cell
   tiles INTEGER);
-CREATE TABLE IF NOT EXISTS snapshot_zones (           -- the snapshot's ToF frame; x, y, z: the zone's reading in the world
+CREATE TABLE IF NOT EXISTS snapshot_zones (           -- the snapshot's ToF frame (in the world: maps/cell_map.ts, rays)
   snapshot_id VARCHAR, row TINYINT, col TINYINT, distance_mm SMALLINT, kind VARCHAR, signal SMALLINT, sigma_mm SMALLINT,
-  targets TINYINT, x DOUBLE, y DOUBLE, z DOUBLE);       -- m, the map frame; NULL without a pose or a valid reading
+  targets TINYINT);
+ALTER TABLE snapshot_zones DROP COLUMN IF EXISTS x;  -- until 10 Nov: each zone in the world, now placed when read
+ALTER TABLE snapshot_zones DROP COLUMN IF EXISTS y;
+ALTER TABLE snapshot_zones DROP COLUMN IF EXISTS z;
 CREATE TABLE IF NOT EXISTS snapshot_features (        -- the camera features of the snapshot's picture (picoA/app/vision.h);
   snapshot_id VARCHAR, id INTEGER, age INTEGER, flags INTEGER,  -- flags: 1 new, 2 missed, 4 lost, 8 left the image
   x DOUBLE, y DOUBLE, dx DOUBLE, dy DOUBLE, strength DOUBLE, match DOUBLE); -- px, as the robot sees the picture (x right, y down)
@@ -108,26 +111,6 @@ CREATE TABLE IF NOT EXISTS map_objects (  -- the shapes on the map, m and rad in
   cx DOUBLE, cy DOUBLE, width DOUBLE, depth DOUBLE, angle DOUBLE);
 CREATE TABLE IF NOT EXISTS object_detections (object_id VARCHAR, snapshot_id VARCHAR, n INTEGER);  -- which boxes made an object
 `;
-
-// Where the ToF sensor sits and how its zones lie, from the boot's mounting.
-export interface TofGeometry { sensorM: [number, number, number]; zoneRad: number; rows: number; columns: number }
-export const tofGeometry = (m: Mounting): TofGeometry =>
-  ({ sensorM: [m.tof.x_m, m.tof.y_m, m.tof.z_m], zoneRad: m.tof.zone_deg * Math.PI / 180, rows: 8, columns: 8 });
-
-// A frame's pose: where the robot was, and its nose-up pitch.
-export type PitchedPose = Pose & { pitch: number };
-
-// Where a zone's reading is in the world, as the robot's code places it (tof_rays.c):
-// the ray at row, col (1-8) points (row - 4.5) zone angles below level (less the
-// robot's nose-up pitch) and (4.5 - col) to the left; the sensor sits at sensorM in
-// the robot frame; distance along the ray. (Step 5 moves this to the PC's helper.)
-export function worldPoint(g: TofGeometry, pose: PitchedPose, row: number, col: number, distanceM: number): [number, number, number] {
-  const down = (row - (g.rows + 1) / 2) * g.zoneRad - pose.pitch, left = ((g.columns + 1) / 2 - col) * g.zoneRad;
-  const dx = Math.cos(down) * Math.cos(left), dy = Math.cos(down) * Math.sin(left), dz = -Math.sin(down);
-  const rx = g.sensorM[0] + distanceM * dx, ry = g.sensorM[1] + distanceM * dy;
-  const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
-  return [pose.x + c * rx - s * ry, pose.y + s * rx + c * ry, g.sensorM[2] + distanceM * dz];
-}
 
 // A timestamp in the PC's local time (as the database keeps them), in µs.
 const localUs = (ms: number) => BigInt(Math.round((ms - new Date(ms).getTimezoneOffset() * 60000) * 1000));
@@ -304,7 +287,6 @@ export class Store {
   async importSnapshot(boot: Boot, messageNumber: number, s: Snapshot, bytes: Buffer, arrivalMs: number, image: string | null): Promise<void> {
     const id = snapshotId(s.bootId, s.sequence);
     const p = s.pose, t = s.tof, cam = s.camera, col = s.color, w = s.window;
-    const g = tofGeometry(boot.mounting);
     await this.flush(); // the path and the frames up to it go in first
     await this.use(async c => {
       await c.run("BEGIN TRANSACTION");
@@ -335,10 +317,6 @@ export class Store {
         const [row, colN] = rowCol(k);
         zs.appendVarchar(id); zs.appendTinyInt(row); zs.appendTinyInt(colN); zs.appendSmallInt(z.distanceMm); zs.appendVarchar(z.kind);
         zs.appendSmallInt(z.signal); zs.appendSmallInt(z.sigmaMm); zs.appendTinyInt(z.targets);
-        if (t.poseKnown && isValid(z)) {
-          const [x, y, zz] = worldPoint(g, { x: t.x, y: t.y, yaw: t.yaw, pitch: t.pitch }, row, colN, z.distanceMm / 1000);
-          zs.appendDouble(x); zs.appendDouble(y); zs.appendDouble(zz);
-        } else { zs.appendNull(); zs.appendNull(); zs.appendNull(); }
         zs.endRow();
       });
       zs.closeSync();
@@ -363,15 +341,16 @@ export class Store {
 
   // --- reads ---
 
-  // The path driven up to snapshot sequence of a boot, since the map was last cleared before
-  // it: the statuses' x, y (m), oldest first.
-  async path(boot: string, sequence: number): Promise<{ x: number; y: number }[]> {
+  // The path driven up to snapshot sequence of a boot: the statuses' x, y (m), oldest
+  // first; since the robot's map was last cleared before it, or (sinceClear false) since
+  // power-up.
+  async path(boot: string, sequence: number, sinceClear = true): Promise<{ x: number; y: number }[]> {
     return this.use(async c => {
       const rows = (await c.runAndReadAll(`
         WITH s AS (SELECT message_number, map_clears FROM snapshots WHERE boot_id = $1 AND sequence = $2),
              cleared AS (SELECT max(message_number) AS m FROM snapshots WHERE boot_id = $1 AND map_clears < (SELECT map_clears FROM s))
         SELECT x, y FROM status WHERE boot_id = $1 AND message_number <= (SELECT message_number FROM s)
-          AND message_number >= coalesce((SELECT m FROM cleared), 0) ORDER BY message_number`, [boot, sequence])).getRowObjects();
+          AND message_number >= coalesce(CASE WHEN $3 THEN (SELECT m FROM cleared) END, 0) ORDER BY message_number`, [boot, sequence, sinceClear])).getRowObjects();
       return rows.map(r => ({ x: Number(r.x), y: Number(r.y) }));
     });
   }
@@ -392,6 +371,32 @@ export class Store {
       const zones = (await c.runAndReadAll(`SELECT z.* FROM zones z JOIN frames f ON f.boot_id = z.boot_id AND f.number = z.number
         WHERE f.boot_id = $1 AND f.move = $2 ORDER BY z.number, z.row, z.col`, [boot, move])).getRowObjects();
       return { move: moveRow(m), frames: framesOf(frames, zones), imu: await imuCount(c, boot, move) };
+    });
+  }
+
+  // A boot's frames with message numbers after `after`, up to `upTo`, in the order they
+  // came (the PC's cell map: maps/cell_map.ts).
+  async framesBetween(boot: string, after: number, upTo: number): Promise<StoredFrame[]> {
+    return this.use(async c => {
+      const range = [boot, after, upTo];
+      const frames = (await c.runAndReadAll(`SELECT * FROM frames WHERE boot_id = $1 AND message_number > $2 AND message_number <= $3
+        ORDER BY message_number`, range)).getRowObjects();
+      const zones = (await c.runAndReadAll(`SELECT z.* FROM zones z JOIN frames f ON f.boot_id = z.boot_id AND f.number = z.number
+        WHERE f.boot_id = $1 AND f.message_number > $2 AND f.message_number <= $3 ORDER BY z.number, z.row, z.col`, range)).getRowObjects();
+      return framesOf(frames, zones);
+    });
+  }
+
+  // A snapshot as the PC's cell map needs it: the message number of the boot's last frame
+  // before it (0: none), and the robot's pose in it (null: PicoB not connected); null if
+  // there is no such snapshot.
+  async snapshotFrames(boot: string, sequence: number): Promise<{ lastFrame: number; pose: Pose | null } | null> {
+    return this.use(async c => {
+      const [r] = (await c.runAndReadAll(`SELECT x, y, yaw, (SELECT coalesce(max(f.message_number), 0) FROM frames f
+        WHERE f.boot_id = s.boot_id AND f.message_number < s.message_number) AS last_frame
+        FROM snapshots s WHERE boot_id = $1 AND sequence = $2`, [boot, sequence])).getRowObjects();
+      if (!r) return null;
+      return { lastFrame: Number(r.last_frame), pose: r.x === null ? null : { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) } };
     });
   }
 

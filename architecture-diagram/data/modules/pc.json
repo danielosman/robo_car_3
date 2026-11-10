@@ -426,26 +426,6 @@
     "path": "pc/robot/src/store.ts",
     "members": [
       {
-        "name": "TofGeometry",
-        "kind": "type",
-        "code": "interface TofGeometry"
-      },
-      {
-        "name": "tofGeometry",
-        "kind": "function",
-        "code": "const tofGeometry ="
-      },
-      {
-        "name": "PitchedPose",
-        "kind": "type",
-        "code": "type PitchedPose"
-      },
-      {
-        "name": "worldPoint",
-        "kind": "function",
-        "code": "function worldPoint("
-      },
-      {
         "name": "MoveRow",
         "kind": "type",
         "code": "interface MoveRow"
@@ -538,7 +518,7 @@
       {
         "name": "Store.path",
         "kind": "function",
-        "code": "async path(boot: string, sequence: number): Promise<{ x: number; y: number }[]> {"
+        "code": "async path(boot: string, sequence: number, sinceClear = true)"
       },
       {
         "name": "Store.hasBoot",
@@ -549,6 +529,16 @@
         "name": "Store.moveFrames",
         "kind": "function",
         "code": "async moveFrames(boot: string, move: number): Promise<{ move: MoveRow; frames: StoredFrame[]; imu: ImuCount } | null> {"
+      },
+      {
+        "name": "Store.framesBetween",
+        "kind": "function",
+        "code": "async framesBetween(boot: string, after: number, upTo: number)"
+      },
+      {
+        "name": "Store.snapshotFrames",
+        "kind": "function",
+        "code": "async snapshotFrames("
       },
       {
         "name": "Store.moveImu",
@@ -614,36 +604,43 @@
     "id": "pc.cell_map",
     "name": "cell_map",
     "origin": "pc",
-    "status": "planned",
-    "plan": {
-      "path": "doc/DATA_FLOW_PLAN.md",
-      "code": "| step 5:"
-    },
-    "summary": "The PC's cell map: the robot's cell_map.c, tof_rays.c and house_map.c in a helper program, whole house.",
+    "path": "pc/robot/src/maps/cell_map.ts",
+    "summary": "The PC's cell map: the robot's cell_map.c, tof_rays.c, house_map.c, tof_format.c and room.c in a helper program (native/cell_map_helper.c), one per boot, built from the boot's stored frames when read.",
     "members": [
       {
-        "name": "open",
-        "kind": "function"
+        "name": "CellMapView",
+        "kind": "type",
+        "code": "export interface CellMapView"
       },
       {
-        "name": "add",
-        "kind": "function"
+        "name": "ZoneRays",
+        "kind": "type",
+        "code": "export type ZoneRays"
       },
       {
-        "name": "pathClear",
-        "kind": "function"
+        "name": "CellMap",
+        "kind": "type",
+        "code": "export interface CellMap {"
       },
       {
-        "name": "rays",
-        "kind": "function"
+        "name": "CellMaps",
+        "kind": "type",
+        "code": "export class CellMaps"
       },
       {
-        "name": "clear",
-        "kind": "function"
+        "name": "CellMaps.atSnapshot",
+        "kind": "function",
+        "code": "async atSnapshot<T>("
       },
       {
-        "name": "tiles",
-        "kind": "function"
+        "name": "CellMaps.viewAtSnapshot",
+        "kind": "function",
+        "code": "async viewAtSnapshot("
+      },
+      {
+        "name": "CellMaps.rays",
+        "kind": "function",
+        "code": "async rays(boot: string, frame: PosedFrame)"
       }
     ]
   },

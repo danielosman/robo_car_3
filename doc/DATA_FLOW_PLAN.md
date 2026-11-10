@@ -13,39 +13,30 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 
 ## 1. Where we are
 
-- **Done:** steps 1-4 (mounting file, ToF at 10 Hz, the ToF pipeline on the robot,
-  framed messages over one TCP connection, moves, the new database, raw IMU at
-  104 Hz, move numbers in frames, 64-bit times), and 10 Nov:
-  - **4f** (both Picos, link version 7): wheel distances out of the odometry report
-    (37 B); one rule for early IMU records, on PicoA (`body`).
-  - **4h** (both Picos and the PC): whole words in names (section 11, 4h).
-  - **For agent-run robot tests** (PicoA and the PC): `robot report` (the robot's
-    status printout as the answer); `robot map` gives the robot's raw cell bytes
-    (layers G, L1, L2) and `format` says how to read them; the `##` text map is gone
-    from the robot (`cell_map_print`) and the PC.
-  - **pc/robot dependencies** updated (DuckDB 2, ESLint 10, typescript-eslint 8.72;
-    TypeScript stays 6.0.3, typescript-eslint takes nothing newer; `minimatch` forced
-    to 11 in `overrides`: `npm audit` clean).
-  - **4i, the measurement run**, run by the agent (boot `cc0e4e65`, moves 1-27):
-    steps 1-4 work on the robot; results and findings in section 11, 4i.
+- **Done:** steps 1-5: the mounting file, ToF at 10 Hz, the ToF pipeline on the
+  robot, one TCP connection with framed messages, moves, the new database, raw IMU at
+  104 Hz, link version 7, whole-word names, `robot report`, the measurement run (4i:
+  its facts in section 11), and the PC's cell map (step 5: section 11).
 - **Dropped 10 Nov (Daniel), to finish the plan sooner:** step 4e's discussions and
   step 4g (interfaces). The IMU stays at 416 Hz on PicoB; the PC keeps its 104 Hz
   records. Odometry, `drive` and PicoA's layout stay as they are.
-- **Next: step 5, the PC cell map** (section 11). Its data: boot `cc0e4e65` in
-  `pc/robot/recordings/robot2.duckdb` (two 12 × 30° look rounds, a 60 cm drive and a
-  drive stopped by a box). Then 6 (floor first: "no floor" trusted only up close,
-  section 14), 7 line map, 8 map switch, 9 docs, the final flash, the robot test.
+- **Next: step 6**, the robot's map window only, floor first (section 11, step 6:
+  where to start). Then 7 line map, 8 map switch, 9 docs, the final flash, the robot
+  test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
-  A PicoA change from now on is tested on the robot in step 9 (or flashed earlier if
-  Daniel wants).
-- **Checks** (all green at `42fe8e1`): `./run_tests.sh`, `tools/lint.sh`, `cmake --build
-  build` (0 warnings); in `pc/robot`: `npm test`, `npm run typecheck`.
-- **Commits:** on `main`, none pushed since `694d476` (Daniel pushes). No
-  `Co-Authored-By` lines (README, "Git conventions").
-- **Docs behind the code:** ARCHITECTURE, README, TODO and CHANGELOG don't show
-  4d-4i and 10 Nov's changes (the README's robot tests still speak of `##` maps, link
-  version 6, wire version 3). Where they disagree with this plan, this plan and the
-  code are right. They are brought up to date once, in step 9.
+  A PicoA change from now on (step 5's `room.h` is the first) is tested on the robot
+  in step 9 (or flashed earlier if Daniel wants).
+- **Checks** (all green with step 5): `./run_tests.sh`, `tools/lint.sh`, `cmake
+  --build build` (0 warnings); in `pc/robot`: `npm test`, `npm run typecheck`. `npm
+  test` and the server build the cell map helper themselves (`cc`, into
+  `build/host/cell_map_helper`).
+- **Commits:** on `main`; pushed up to step 5's commit. Commit and push only when
+  Daniel says. No `Co-Authored-By` lines (README, "Git conventions").
+- **Docs behind the code:** ARCHITECTURE, README and TODO don't show 4d-5 (the
+  README's robot tests still speak of `##` maps, link version 6, wire version 3;
+  nothing on the PC's cell map or `room.h`). Where they disagree with this plan, this
+  plan and the code are right. They are brought up to date once, in step 9. The
+  CHANGELOG is up to date (history goes there, not here).
 - **8 Nov, the architecture diagram** (`architecture-diagram/`, its README): the
   modules and 11 flows as boxes and ribbons, checked against the code by `npm run
   resolve` (in `tools/lint.sh`); its findings are in data/README.md. Its next change:
@@ -59,16 +50,17 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   run dev` in `architecture-diagram/` (http://127.0.0.1:5173/, `#flow=<id>` for one
   flow). An agent reads only `architecture-diagram/data/` (its README first). After
   a code change, `tools/lint.sh` lists stale references.
-- **Each step:** built in the main session from this plan; then one review by a fresh
+- **Each step:** built in the main session from this plan; then a review by a fresh
   subagent that reads the guide itself (`~/code/home-page/sources/skills/
-  strategic-code-review.md`; it changes) and only reports; the fixes; then Daniel
-  says whether to commit.
+  strategic-code-review.md`; it changes) and only reports (AGENTS.md); the fixes;
+  Daniel may ask for a second fresh review; then Daniel says whether to commit.
 - **Simple first:** a rare case returns an error, is counted or is ignored; it isn't
   handled unless a robot test shows it matters. Tests cover the promised behaviour,
   not every corner.
 - **Each step ends** green (the checks above), with this plan's section 1 updated,
-  and says which Picos it changes. The other docs wait for step 9: until then this
-  overrides the README's "After a step" and robot-test rules.
+  its history in the CHANGELOG (not in this plan: AGENTS.md, "Docs"), and says which
+  Picos it changes. The other docs wait for step 9: until then this overrides the
+  README's "After a step" and robot-test rules.
 - **Robot tests are run by the agent**, not by Daniel by hand: Daniel flashes the
   Picos (`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`), runs `npm start`
   in `pc/robot` (or asks the agent to) and switches the robot on. The agent then uses
@@ -78,7 +70,8 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
     notes);
   - moves: `robot steer r30 d20 ...` (a snap after each), `robot check` first;
     small moves, `robot stop` at once if anything looks wrong;
-  - reads: `robot tof [n]`, `robot map [n]` (raw bytes: read them with a small script),
+  - reads: `robot tof [n]`, `robot map [n]` (the PC's map at snapshot n, raw bytes:
+    read them with a small script; `--robot` the robot's own from the snapshot),
     `robot map --png` and `robot camera [n]` (PNG files: open and look at them),
     `robot frames <boot> <move>`, `robot imu <boot> <move>`;
   - to look round, turn in 30° steps (12 × `r30`), not one 390° turn: a camera picture
@@ -144,7 +137,7 @@ Each box is one module; each arrow carries one named piece of data (section 5).
 VL53 ─► tof ─(tof_frame)─► pose_stamp ─(posed_frame)─► tof_format ─┬─(map use)───► cell_map ─► move checks (drive, go to)
                                 ▲                      pack/unpack  ├─(watch use)─► watch
                         pose ───┘ pose_at(t)                       └─(bytes, during a move)─► link_pc ══TCP══► link ─► wire ─(posed_frame)─┬─► store
-                                                                                                                                      ├─► cell_map (helper, step 5)
+                                                                                                                                      ├─► cell_map (helper, read from the store)
                                                                                                                                       └─► line_map (step 7)
 ```
 
@@ -167,7 +160,7 @@ hello, answer, console line, status, move start / end, map cleared, snapshot par
 
 ```
 common/mounting.json ─► CMake (robot_mounting.h) ─► main.c ─► tof_init, tof_rays_init, watch_camera, odometry_init
-common/mounting.json ─► PC start ─► boot (a copy per boot) ─► objects; cell_map helper (step 5)
+common/mounting.json ─► PC start ─► boot (a copy per boot) ─► objects; cell_map helper
 ```
 
 The robot's own map and watch read the frame **after** packing and unpacking: the
@@ -287,6 +280,7 @@ What each hides, and its interface. Built unless marked (step N).
 | `watch` (parts `watch_tof`, `watch_camera`, `tracker`, `change_grid`) | backgrounds, blobs, the target | `watch_add(&posed)`, `watch_update()`, the target |
 | `move` | the phases, counts, frame and imu batch sending | `move_start(kind, parameter, command, actor)`, `move_refused()`, `move_stop()`, `move_update()`, `move_tof()`, `move_imu()`, `move_next_ended()` |
 | `behaviour` | how each action drives | three functions per action (begin, step, end) for `move` |
+| `room` | the robot's size; where a drive stops before an obstacle on the map (pure; the PC's helper compiles it too) | `room_m()`, `room_gap_m()`, `room_drive()` |
 | `wire` | the envelope and payloads (ToF bytes from `tof_format`) | pure encode / decode |
 | `link_pc` | WiFi, finding the server, TCP, the two lanes, drop counts | `link_pc_send_control()`, `link_pc_send_bulk()` (true or false), `link_pc_connection()`, `link_pc_received()` |
 | `snapshot` | its layout (camera, colour, features, compact tof frame, map window and tiles until step 6) | `snapshot_request()`; parts to bulk |
@@ -309,9 +303,9 @@ What each hides, and its interface. Built unless marked (step N).
 | `api/frames.ts` | `robot frames`, `robot imu` text and JSON (stored of sent, dropped, lost, missing) | |
 | `fakerobot.ts` | a robot on the wire; replays a stored boot | |
 | `objects/place.ts` | camera placement | takes the boot's camera geometry |
-| step 5: `maps/cell_map.ts` + `native/cell_map_helper.c` | the helper program (robot `cell_map.c`, `tof_rays.c`, `house_map.c`, compiled on the Mac) | `open(boot)`, `add(posed)`, `pathClear()`, `rays(posed)`, `clear()`, tiles |
+| `maps/cell_map.ts` + `native/cell_map_helper.c` | the helper program (robot `cell_map.c`, `tof_rays.c`, `house_map.c`, `tof_format.c`, `room.c`, built with cc once per server run), one per boot; built from the boot's stored frames when read; the last 16 maps read kept | `atSnapshot(boot, n, (m, pose) => ...)`: `drive` (room.h's rule), `obstacleWithin`, `view`; `viewAtSnapshot(boot, n)`; `rays(boot, frame)` |
 | step 7: `maps/line_map/` | lines, bands, quadtree | `add(posed, rays)`, lines in view |
-| `api/map.ts`, `api/check.ts`, `store.ts` `worldPoint` | TS copies of robot code | replaced by the helper in step 5 |
+| `api/map.ts`, `api/check.ts` | the map as a PNG; check: a goto's turn and limit (`behaviour.h`'s numbers), a turn's warning; where a drive stops is the helper's (`room.h`) | |
 
 ## 9. Budgets
 
@@ -388,41 +382,6 @@ written into this plan)
      data: link 7 → 8 (STATUS, the records; 4i flashed 7), wire 4 → 5 (a record is
      one sample, not 4; `boots.wire_version` tells which).
 
-**4f. Done 10 Nov.** The link: simplifications the architecture diagram found (both Picos; link
-version 6 → 7, so PicoA and PicoB go together)
-1. **Wheel distances out of the odometry report.** `odometry_report_t` carries
-   `wheel_left_m` and `wheel_right_m` (8 of its 45 B, 50 times a second: 0.4 KB/s of
-   the UART); nothing on PicoA reads them. Drop them from the report, and from
-   `odometry_t` too (only the report and `test_odometry.c` read them; `drive` uses the
-   speeds, `wheel_*_mps`). The test checks a side's distance through x instead.
-   The wheels aren't lost: every wheel step goes into x, y and the speeds on PicoB,
-   and the pose's changes are the training answer (IMU windows in, pose change out).
-   The totals would add only the wheels' own idea of the turn (left minus right,
-   against the gyro's yaw: skid), which nothing plans to use. `test_odometry.c`
-   already checks x and the side speeds; only its two distance asserts go. UART
-   PicoB → PicoA ~4.9 → ~4.5 KB/s (section 9); the glossary's odometry_report too.
-2. **One rule for IMU records PicoA can't place yet.** PicoB holds them back until
-   PicoA has greeted it with the same link version (`brain.c` `send_imu`,
-   `greeted`), and PicoA drops them until it knows PicoB's clock (`body.c`,
-   `clock_known`: PicoB's first report, and again after PicoB restarts). One rule,
-   on PicoA: `body` keeps a record only when PicoB has greeted it with the same
-   version and its clock is known; PicoB sends from the start. Harmless at start-up:
-   PicoA doesn't read the link during its ~2 s start (the ToF's firmware), its 1 KB
-   receive buffer already overflows on reports alone (start-up `rx_bad`, `rx_lost`
-   grow), and PicoB never waits. `test_brain.c` and `test_body.c` change.
-
-Looked at and kept: `odometry_report_t.t_us` is the send time, not when the odometry was
-measured (up to 2.4 ms earlier). PicoA learns the clocks' offset from the send time,
-so measuring time would need a second field; ~0.1° at a fast turn isn't worth it.
-
-Also looked at and kept: **one combined message from PicoB.** PicoB sends ODOMETRY
-(50 Hz), IMU (104 Hz) and STATUS (2 Hz) as separate messages; PicoA sends DRIVE every
-50 ms (also PicoB's safety heartbeat: no DRIVE for 250 ms stops the motors) and
-MOTORS on a change. Folding the IMU records into the 50 Hz report would save 6 B of
-framing per record (~0.6 KB/s of the UART's ~100 KB/s; ~5 KB/s used), but makes the
-report variable in length and ties control data (odometry, read by `move` and
-`pose`) to training data (IMU, only passed on to the PC). Not worth it.
-
 **4g. Dropped 10 Nov** (kept below for later; not part of this plan)
 
 Interfaces take what they use (spec first; then PicoB, PicoA, the PC, one at a
@@ -456,114 +415,38 @@ time)
     in `drive.h`, which then no longer needs `odometry.h`; PicoB's `main` fills it.
   - `watch` reads only `stationary` of the odometry report (`watch.c`, via `body_odometry()`).
 
-**4h. Done 10 Nov.** Whole words in names, everywhere (both Picos and the PC; no wire
-bytes change)
-- A module's prefix is its name, and names are whole words.
-- Renamed: `odom` → `odometry` (`odometry_t`, `odometry_report_t`, `body_odometry*`,
-  `MESSAGE_ODOMETRY`); `ENC_` → `ENCODER_`; `msg` → `message` (`link_messages.h`,
-  `MESSAGE_*`, `link_message_t`, `wire_message_t`); `SNAP_` / `snap_*_t` / the PC's
-  `Snap*` → `snapshot` (the command word `snap` stays, and `auto_snap`, `autoSnap`,
-  `withSnaps` that name it); `obs` → `observations` (`watch_observation.h`,
-  `watch_observation_t`); `link_pc_send_control`, `link_pc_send_bulk`,
-  `link_pc_received`; `tof_format_pack`, `tof_format_unpack`.
-- Found by the scan and renamed too: `stats` → `statistics` (`loop_statistics`,
-  `statistics.h`, `link_statistics_t`); `geom.h` → `geometry.h`; `seq` → `sequence`;
-  `accel` → `acceleration`; `dir` → `direction` (C) and `directory` (PC, folders);
-  `org` → `origin` (`origin_cx`, `originX`); `param` → `parameter`; `cols` → `columns`;
-  `prev_pose` → `previous_pose`; `down_frac`, `left_frac` → `_fraction`;
-  `link_pc_status_fn` → `link_pc_status_function`; the page's `snaps` → `snapshots`.
-- The PC's store: the message number is `message_number` (`start_message_number`,
-  `end_message_number`; `messageNumber` in TS); also the columns `sequence`,
-  `snapshot_id`, `parameter`, `map_origin_cx`, `map_origin_cy`. `robot2.duckdb` didn't
-  exist yet, so nothing needs converting. `robot imu --json` says `acceleration` (was
-  `accel`); the page's URLs are unchanged.
-- Kept: the acronyms (IMU, ToF, PC, UART, CRC, COBS, VL53, ULD; in the glossary); unit
-  endings (`_us`, `_mps`, `_px`); `init`, `n`, `len`, `min`, `max`, `rx`, `tx`; `info`
-  (a word); other local variables (`buf`, `ctx`, `err`, `rec`); outside names: the
-  Pico SDK, lwIP (`err_t`, `LINK_STATS`, `tcp_*_fn`), Hono (`req.param`), the ULD, the
-  drivers' registers, the PCB's nets (`ENC_LF_*`), the model's `bbox`. The CHANGELOG
-  and doc/archive keep the old names.
+**What the measurement run showed** (4i, boot `cc0e4e65` in `robot2.duckdb`: two
+12 × 30° look rounds, a 60 cm drive, a drive stopped by a box; the data for steps 6
+and 7)
+- Steps 1-4 work on the robot: nothing dropped or lost (frames, imu), link version
+  7, loop max 88 ms, RAM free 51 KB, ToF 10.1-10.4 Hz; `gz` ~-40 standing (the
+  bias), `az` ~16700.
+- Floor rows 8 / 7 / 6 at 27 / 37 / ~60 cm: the ToF's 9 cm is right.
+- A box ~8 cm high: seen by the ToF at ~95 cm, on the map only from ~45 cm (far away
+  its zone spans the floor too: unsure); the drive stopped ~15 cm before it.
+- **The shiny parquet:** much of the room beyond ~50 cm is "no floor" (G free) on the
+  map (section 14, 4).
+- Each 30° turn turns ~31°.
+- Rows 1-3 of the right columns often read ~31-37 cm, unsure, in every direction:
+  something of the robot in the ToF's view, or crosstalk (to look at).
+- Not checked yet (step 9): watching people, the worst WiFi spot, the tilt stop, the
+  camera's tilt.
 
-**4i. One measurement run, run by the agent** (both Picos flashed once by Daniel; the
-only robot test before step 9)
-- Daniel: flashes both Picos (`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`),
-  puts the robot on the floor with ~50 cm free all round, switches it on. Nothing else.
-- The agent: starts the server (`npm start` in `pc/robot`, in the background), then
-  only `./robot` commands. `robot report` (new, 10 Nov: the robot's `status` printout
-  as the answer) gives the robot's counters; `robot log` gives everything it printed
-  (PicoB's lines as "B: ...").
-- The test, small moves only:
-  1. `robot report`: connected, link version 7 (no "protocol v6" line), ToF 10 Hz,
-     IMU records growing, nothing dropped, RAM free.
-  2. `robot tof`: the floor rows 8 / 7 / 6 at ~27 / 37 / 61 cm (the ToF at 9 cm).
-  3. A look round in 30° steps: `robot steer r30` twelve times, a snap after each
-     (auto_snap): twelve camera pictures, looked at, to find the box and plan the
-     drive; then `robot map`: the robot's cell bytes (layers G, L1, L2);
-     the agent reads them with a script (L1 occupied where the walls are, none on
-     the open floor) and draws with `robot map --png` when a picture helps.
-  4. `robot steer d20 r90 r-90 d-20`: four moves, each answered ok, a snap after each.
-  5. For each move: `robot frames <boot> <move>` (frames sent = stored, 0 dropped)
-     and its imu line (0 missing); `robot imu` on a turn: `gz` large during it, ~0
-     before and after; `az` ~16400.
-  6. Drive to an obstacle: the box (somewhere in a drivable area), found in the
-     pictures and the map of the look round. `robot check` the way there,
-     turn to face it, drive towards it: the drive stops ~15 cm before it
-     ("obstacle"). Then it must show on every view of it:
-     - the robot's map (`robot map`): L1 occupied cells just ahead of the pose;
-     - the map picture (`robot map --png`, looked at): the obstacle in front of the
-       robot's mark;
-     - the ToF frame (`robot tof`): the middle columns' upper rows at ~15-25 cm;
-     - the camera (`robot camera`, looked at): the object in the middle of the
-       picture.
-  7. `robot report` again and `robot log 200`: the counters after the moves, no
-     errors, no "refused".
-- **Results, 10 Nov (boot `cc0e4e65`):**
-  - All 15 moves answered ok (the last "obstacle", as meant); every ToF frame sent
-    was stored (0 dropped, 0 lost); imu: 0 missing, 0 dropped anywhere; `gz` ~2000-2400
-    during a turn, ~-40 standing (the bias), `az` ~16700. Link version 7, WiFi -60 dBm,
-    nothing dropped on control or bulk (TCP refused 1 write); loop max 88 ms (vision
-    63 ms); RAM free 51 KB; ToF 10.1-10.4 Hz.
-  - Floor rows 27 / 37 / ~60 cm: the ToF's 9 cm is right.
-  - The box (~8 cm high): the ToF saw it at ~95 cm, the map didn't mark it until
-    ~45 cm (far away its zone spans the floor too: unsure); then `robot check d40` said
-    obstacle after 6 cm, the drive stopped itself after 7 cm, the box ~31-35 cm from
-    the ToF. The map (L1 cells 30-40 cm ahead), the ToF and the camera agree.
-  - The shiny parquet: much of the room beyond ~50 cm is "no floor" (G free) on the
-    map (the map picture: mostly purple). Step 6's floor first would stop there.
-  - Each 30° turn turned ~31° (+1° each, 419° for 418° asked).
-  - Rows 1-3 of the right columns often read ~31-37 cm, unsure, in every direction:
-    something of the robot in the ToF's view, or crosstalk (to look at).
-  - A second look round (moves 16-27) from beside the box: 12 turns ok, nothing
-    lost.
-- The data stays in `robot2.duckdb` (the turns and the moves for steps 5 and 7). What
-  isn't checked here (watching people, the worst WiFi spot, the tilt stop, the
-  camera's tilt) waits for step 9's test.
-
-**5. The PC cell map** (PC)
-
-Where to start: today the page draws the robot's map from snapshots (the window and
-whole-house tiles in each snapshot: `api/map.ts`, `snapshots_api.ts`, `public/app.js`);
-`robot map` gives the snapshot's window as the robot's raw cell bytes (`reads.ts`,
-`MAP_FORMAT`), `--png` a picture drawn on the PC; `robot check` (`api/check.ts`) and `store.ts` `worldPoint` copy
-robot rules in TypeScript. `picoA/app/test/test_map_replay.c` shows how to build
-`cell_map.c` on the Mac with the host stubs (`run_tests.sh` has its command line);
-the stored frames come back with `store.moveFrames()` / `store.replay()`.
-
-1. `native/cell_map_helper.c`: the robot's `cell_map.c`, `tof_rays.c`, `house_map.c`
-   built on the Mac (cc, as the host tests are); fed posed frames over a pipe (the
-   compact format's bytes: `tof_format_unpack()` reads them); started per boot with that
-   boot's mounting; whole house (window plus tiles).
-2. `maps/cell_map.ts`: `open(boot)` rebuilds from the store after a server restart;
-   `add`, `pathClear`, `rays` (point, heights, verdict per zone, for the line map),
-   `clear`, tiles to draw.
-3. The page draws the PC's map; `robot map` (raw cells, as today, but the helper's
-   whole-house map) and `robot check` ask the helper; the TS copies of robot code go
-   (`api/map.ts` lookups, `check.ts` stop rules, `worldPoint`).
-4. `robot map --robot`: the robot's own window from the snapshot (today's `robot map`),
-   for debugging. The two maps are close, not equal (the robot also maps idle frames;
-   Pico and Mac round differently).
-5. Checked on boot `cc0e4e65` (4i): the helper's map against the robot's window at
-   snapshots 13 and 16 (the box 30-40 cm ahead at 16), and the map picture looked at.
+**5. The PC cell map: done** (how it is now; the code is in section 8)
+- The robot's own map code (`cell_map.c`, `tof_rays.c`, `house_map.c`,
+  `tof_format.c`, `room.c`) runs in a helper on the Mac, one per boot with its
+  mounting. A boot's map is built from its stored frames when read: "the map at
+  snapshot n" is the map of the frames that came before snapshot n. It is never
+  cleared by the robot's `clear_map`.
+- The page draws it (the path since power-up); the page's ToF dots are placed by the
+  helper. `robot map [n]` is the PC's map; `--robot` the robot's own from the snapshot.
+  `robot check` uses the PC's map at the newest snapshot and its pose.
+- The stop rule (where a drive stops before an obstacle) is `picoA/app/room.h`, one
+  copy: the robot drives by it, the helper compiles it, `robot check` asks it.
+- The PC's map and the robot's agree on ~98 % of known cells (4i, snapshots 13, 16):
+  the robot also maps while standing, which it doesn't send.
+- Known: a drive of 1 cm or less on open floor is refused as "obstacle".
+- Left for step 6: `snapshot.ts` `columnOf` / `windowColumns` copy C `column_of()`.
 
 **6. The robot's map: window only, floor first** (PicoA, helper)
 1. `house_map` leaves the robot (a tile hook in `cell_map`: the robot forgets, the
@@ -576,6 +459,31 @@ the stored frames come back with `store.moveFrames()` / `store.replay()`.
      or "no floor"). Today unknown counts as free.
 3. Robot test (to the list): out of the window and back; towards a table edge (held):
    it stops. Expect some false stops on the waxed floor beyond ~1 m.
+
+Where to start (state after step 5):
+- **The stop rule** is `picoA/app/room.h` (`room_m`, `room_drive`): `behaviour.c`
+  drives by it, the PC's helper compiles it, `robot check` asks it. Today it looks up
+  `cell_map_obstacle_along()` (blocked and overhang columns only). Floor first changes
+  what counts there (unknown and close "no floor" too), so `robot check` follows by
+  itself. `test_behaviour.c` and `pc/robot/src/maps/cell_map.test.ts` test it.
+- **"No floor" only up close** (section 14, 4): measure the limit on boot `cc0e4e65`
+  first (the helper replays it: section 12), e.g. at which distance its "no floor"
+  columns turn out drivable later.
+- **The seed floor** goes in `cell_map_clear()` (main.c and `clear_map` in
+  commands.c call it; the helper calls it at start and to go back in time), so the
+  helper has it too. A clear on the robot re-seeds around where it is (section 3).
+- **The tile hook:** the helper compiles `house_map.c` and keeps the tiles; the robot
+  doesn't (CMakeLists `app/house_map.c` goes; 20 KB). `cell_map.c` hands what scrolls
+  out to a hook and starts what scrolls in as unknown on the robot.
+- **The snapshot** (`snapshot.c`: `SEC_WINDOW`, `SEC_TILES`, `SNAPSHOT_VERSION` 2 → 3)
+  loses the window and the tiles (~11 KB). On the PC they are read in `snapshot.ts`,
+  `store.ts` (`map_*` columns, `snapshot_tiles`), `snapshots_api.ts` `snapshotMap`
+  (`robot map --robot`), `snapshot.test.ts`, `test_snapshot.c`. `robot map --robot`
+  then works only on older snapshots (or goes: ask Daniel). Then `snapshot.ts`
+  `columnOf` / `windowColumns` (the last TS copy of `column_of()`) can go: the
+  helper's `V` answer can send the column classes.
+- **Flash:** PicoA only (link and wire versions unchanged unless a message changes);
+  done in step 9 with everything else.
 
 **7. The line map** (PC) — [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md): points and verdicts
 from the helper's `rays`; one ToF row's zones joined into lines; lines in bands L1,
@@ -596,7 +504,10 @@ tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2
 - `robot imu <boot> <move> [--json]`: the imu records; "missing (gaps)" must be 0.
 - The page shows any snapshot's compact tof frame.
 - `fakerobot` replays a stored boot to a test server (README).
-- Step 5: the helper rebuilds any boot's map from the store; `robot map --robot`.
+- The PC's cell map rebuilds any boot's map at any snapshot from the store (`robot map
+  <n>`, the page's timeline); `robot map --robot` the robot's own (snapshots before step 6).
+- Measure the robot's map code on stored data: a script with `CellMaps` (as in
+  `maps/cell_map.test.ts`) on `recordings/robot2.duckdb`, boot `cc0e4e65`.
 
 ## 13. Known issues (in TODO.md too)
 
