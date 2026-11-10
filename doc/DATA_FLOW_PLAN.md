@@ -15,49 +15,41 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 
 - **Done:** steps 1-4 (mounting file, ToF at 10 Hz, the ToF pipeline on the robot,
   framed messages over one TCP connection, moves, the new database, raw IMU at
-  104 Hz, move numbers in frames, 64-bit times). Committed and pushed; the tag
-  `data-v1` marks the last commit before them.
-- **4i run 10 Nov** (boot `cc0e4e65`, 15 moves; results in section 11, 4i). Steps
-  1-4 work on the robot. The shiny floor reads as "no floor" beyond ~50 cm: step 6 trusts it only up
-  close (section 14).
-- **Next: step 5** (the PC cell map). Added for it (10 Nov):
-  `robot report` (the robot's status printout as the answer); `robot map` returns the
-  robot's raw cell bytes, not a text drawing; `cell_map_print()` and its confidence
-  filter left the robot (only host tests used them).
-- **4h done 10 Nov** (both Picos and the PC): whole words in names (section 11).
-  Not committed.
-- **4f done 10 Nov** (both Picos, link version 7): the wheel distances are out of
-  the odometry report (45 → 37 B) and `odometry_t`; PicoB sends imu records from its start,
-  and `body` keeps one only when PicoB greeted it with the same version and its
-  clock is known.
-- **Then:** 6 the robot's map (window only, floor first), 7 line map, 8 map switch on
-  the page, 9 final docs, the final flash, the robot test list. Versions: link 7 (4f).
+  104 Hz, move numbers in frames, 64-bit times), and 10 Nov:
+  - **4f** (both Picos, link version 7): wheel distances out of the odometry report
+    (37 B); one rule for early IMU records, on PicoA (`body`).
+  - **4h** (both Picos and the PC): whole words in names (section 11, 4h).
+  - **For agent-run robot tests** (PicoA and the PC): `robot report` (the robot's
+    status printout as the answer); `robot map` gives the robot's raw cell bytes
+    (layers G, L1, L2) and `format` says how to read them; the `##` text map is gone
+    from the robot (`cell_map_print`) and the PC.
+  - **pc/robot dependencies** updated (DuckDB 2, ESLint 10, typescript-eslint 8.72;
+    TypeScript stays 6.0.3, typescript-eslint takes nothing newer; `minimatch` forced
+    to 11 in `overrides`: `npm audit` clean).
+  - **4i, the measurement run**, run by the agent (boot `cc0e4e65`, moves 1-27):
+    steps 1-4 work on the robot; results and findings in section 11, 4i.
 - **Dropped 10 Nov (Daniel), to finish the plan sooner:** step 4e's discussions and
-  step 4g (interfaces). The IMU stays at 416 Hz on PicoB (best for the pose on a
-  wheeled robot); the PC keeps its 104 Hz records. Odometry, `drive` and PicoA's
-  layout stay as they are.
-- **Checks** (all green now): `./run_tests.sh`, `tools/lint.sh`, `cmake --build
+  step 4g (interfaces). The IMU stays at 416 Hz on PicoB; the PC keeps its 104 Hz
+  records. Odometry, `drive` and PicoA's layout stay as they are.
+- **Next: step 5, the PC cell map** (section 11). Its data: boot `cc0e4e65` in
+  `pc/robot/recordings/robot2.duckdb` (two 12 × 30° look rounds, a 60 cm drive and a
+  drive stopped by a box). Then 6 (floor first: "no floor" trusted only up close,
+  section 14), 7 line map, 8 map switch, 9 docs, the final flash, the robot test.
+- **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
+  A PicoA change from now on is tested on the robot in step 9 (or flashed earlier if
+  Daniel wants).
+- **Checks** (all green at `42fe8e1`): `./run_tests.sh`, `tools/lint.sh`, `cmake --build
   build` (0 warnings); in `pc/robot`: `npm test`, `npm run typecheck`.
-- **Nothing flashed, no robot tests run.** Both Picos are flashed twice: for the
-  measurement run (4i) and at the end (9). PicoA, PicoB and the server always go
-  together.
-- **Docs behind the code:** ARCHITECTURE, README, TODO and CHANGELOG don't yet show
-  the last simplification (move numbers in frames, 64-bit times, the simpler
-  `link_pc`) nor all of 8 Nov's clean-up (below). Where they disagree with this plan, this plan and the code are right.
-  They are brought up to date once, in step 9.
+- **Commits:** on `main`, none pushed since `694d476` (Daniel pushes). No
+  `Co-Authored-By` lines (README, "Git conventions").
+- **Docs behind the code:** ARCHITECTURE, README, TODO and CHANGELOG don't show
+  4d-4i and 10 Nov's changes (the README's robot tests still speak of `##` maps, link
+  version 6, wire version 3). Where they disagree with this plan, this plan and the
+  code are right. They are brought up to date once, in step 9.
 - **8 Nov, the architecture diagram** (`architecture-diagram/`, its README): the
   modules and 11 flows as boxes and ribbons, checked against the code by `npm run
-  resolve` (in `tools/lint.sh`). Its findings (data/README.md, "Findings") led to
-  this session's clean-up: the `/console` page and two dead functions gone
-  (`link_pc_settled`, `move_busy`), PC types named as the wire names them, the
-  server checks the wire table at start, a test ties the PC's command words and
-  move kinds to the robot's C; and to steps 4e-4i. Its next change: the side bar
-  shows the fields of what each step carries (its README, "Next").
-- **8 Nov, names (from the architecture diagram's findings):** PicoA and the server
-  changed together, no wire bytes: the move kind is `rotate` (was `turn`) in status,
-  snapshots and the database; the robot's command word is `snap` (was `snapshot`);
-  console lines say "Drive:", "Rotate:". PicoB unchanged. Flash PicoA with the server
-  of the same commit (in step 9 anyway).
+  resolve` (in `tools/lint.sh`); its findings are in data/README.md. Its next change:
+  the side bar shows the fields of what each step carries (its README, "Next").
 
 ## 2. How to continue
 
@@ -66,19 +58,31 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 - **The architecture diagram** is how Daniel and an agent look at the design: `npm
   run dev` in `architecture-diagram/` (http://127.0.0.1:5173/, `#flow=<id>` for one
   flow). An agent reads only `architecture-diagram/data/` (its README first). After
-  a code change, `tools/lint.sh` lists stale references; while filling it, look for
-  dead code, flow errors and two names for one thing ("Findings").
-- **Each step:** built in the main session from this plan; one review pass after it
-  (the guide in AGENTS.md, "Code review"); the fixes; then the next step.
+  a code change, `tools/lint.sh` lists stale references.
+- **Each step:** built in the main session from this plan; then one review by a fresh
+  subagent that reads the guide itself (`~/code/home-page/sources/skills/
+  strategic-code-review.md`; it changes) and only reports; the fixes; then Daniel
+  says whether to commit.
 - **Simple first:** a rare case returns an error, is counted or is ignored; it isn't
   handled unless a robot test shows it matters. Tests cover the promised behaviour,
   not every corner.
 - **Each step ends** green (the checks above), with this plan's section 1 updated,
   and says which Picos it changes. The other docs wait for step 9: until then this
   overrides the README's "After a step" and robot-test rules.
-- **No robot tests between steps** but one: the measurement run (4i) gathers every
-  unknown at once. Otherwise everything is checked by host tests, PC tests and
-  review, and the robot is flashed again only at the end (9).
+- **Robot tests are run by the agent**, not by Daniel by hand: Daniel flashes the
+  Picos (`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`), runs `npm start`
+  in `pc/robot` (or asks the agent to) and switches the robot on. The agent then uses
+  only `./robot` in `pc/robot`:
+  - `robot status` (connected, boot, pose), `robot report` (the robot's counters),
+    `robot log N` (everything the robot printed, PicoB's as "B: ...", the server's
+    notes);
+  - moves: `robot steer r30 d20 ...` (a snap after each), `robot check` first;
+    small moves, `robot stop` at once if anything looks wrong;
+  - reads: `robot tof [n]`, `robot map [n]` (raw bytes: read them with a small script),
+    `robot map --png` and `robot camera [n]` (PNG files: open and look at them),
+    `robot frames <boot> <move>`, `robot imu <boot> <move>`;
+  - to look round, turn in 30° steps (12 × `r30`), not one 390° turn: a camera picture
+    every 30°, to plan and to check.
 - **Commit only when Daniel says** (README). To review one step, diff against the
   last commit.
 - Long test runs: cap them with a time limit, and never read large generated data
@@ -537,9 +541,10 @@ only robot test before step 9)
 
 **5. The PC cell map** (PC)
 
-Where to start: today the page and `robot map` draw the robot's map from snapshots
-(the window and whole-house tiles in each snapshot: `api/map.ts`, `snapshots_api.ts`,
-`public/app.js`); `robot check` (`api/check.ts`) and `store.ts` `worldPoint` copy
+Where to start: today the page draws the robot's map from snapshots (the window and
+whole-house tiles in each snapshot: `api/map.ts`, `snapshots_api.ts`, `public/app.js`);
+`robot map` gives the snapshot's window as the robot's raw cell bytes (`reads.ts`,
+`MAP_FORMAT`), `--png` a picture drawn on the PC; `robot check` (`api/check.ts`) and `store.ts` `worldPoint` copy
 robot rules in TypeScript. `picoA/app/test/test_map_replay.c` shows how to build
 `cell_map.c` on the Mac with the host stubs (`run_tests.sh` has its command line);
 the stored frames come back with `store.moveFrames()` / `store.replay()`.
@@ -551,10 +556,14 @@ the stored frames come back with `store.moveFrames()` / `store.replay()`.
 2. `maps/cell_map.ts`: `open(boot)` rebuilds from the store after a server restart;
    `add`, `pathClear`, `rays` (point, heights, verdict per zone, for the line map),
    `clear`, tiles to draw.
-3. The page draws the PC's map; `robot map` and `robot check` ask the helper; the TS
-   copies of robot code go (`api/map.ts` lookups, `check.ts` stop rules, `worldPoint`).
-4. `robot map --robot`: the robot's own window, read for debugging. The two maps are
-   close, not equal (the robot also maps idle frames; Pico and Mac round differently).
+3. The page draws the PC's map; `robot map` (raw cells, as today, but the helper's
+   whole-house map) and `robot check` ask the helper; the TS copies of robot code go
+   (`api/map.ts` lookups, `check.ts` stop rules, `worldPoint`).
+4. `robot map --robot`: the robot's own window from the snapshot (today's `robot map`),
+   for debugging. The two maps are close, not equal (the robot also maps idle frames;
+   Pico and Mac round differently).
+5. Checked on boot `cc0e4e65` (4i): the helper's map against the robot's window at
+   snapshots 13 and 16 (the box 30-40 cm ahead at 16), and the map picture looked at.
 
 **6. The robot's map: window only, floor first** (PicoA, helper)
 1. `house_map` leaves the robot (a tile hook in `cell_map`: the robot forgets, the
