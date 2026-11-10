@@ -76,8 +76,6 @@ static void update_wheels(float dt) {
     // the counting steps and evens out a wheel that slips for a moment.
     float dl = 0.5f * (step_m[ENC_LEFT_FRONT] + step_m[ENC_LEFT_REAR]);
     float dr = 0.5f * (step_m[ENC_RIGHT_FRONT] + step_m[ENC_RIGHT_REAR]);
-    o.wheel_left_m += dl;
-    o.wheel_right_m += dr;
     o.wheel_left_mps = 0.5f * (o.wheel_mps[ENC_LEFT_FRONT] + o.wheel_mps[ENC_LEFT_REAR]);
     o.wheel_right_mps = 0.5f * (o.wheel_mps[ENC_RIGHT_FRONT] + o.wheel_mps[ENC_RIGHT_REAR]);
     o.v_mps = 0.5f * (o.wheel_left_mps + o.wheel_right_mps);

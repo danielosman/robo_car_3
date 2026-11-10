@@ -33,7 +33,7 @@
         "path": "picoA/app/body.c", "code": "track_clock(time_us_32() - odom.t_us, time_us_32());" },
       { "at": "picoA.body.body_odom_get", "path": "picoA/app/pose.c", "code": "if (!body_odom_get(++taken, &o, &t_us)) continue;" },
       { "change": "pick", "name": "history", "at": "picoA.pose.pose_update",
-        "what": "each report into the pose history (~1.3 s): roll, wheel distances and the motors' state dropped",
+        "what": "each report into the pose history (~1.3 s): roll and the motors' state dropped",
         "keeps": ["x_m", "y_m", "yaw_rad", "pitch_rad", "v_mps", "w_radps", "stationary"], "bytes": 32,
         "path": "picoA/app/pose.c", "code": ".pose = {o.x_m, o.y_m, o.yaw_rad, o.pitch_rad}," },
       { "change": "turn", "name": "interpolate", "at": "picoA.pose.pose_stamp",

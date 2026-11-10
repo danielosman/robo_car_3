@@ -280,6 +280,15 @@ int main(void) {
     assert(!body_imu_take(&got));
     printf("ok: imu records kept until taken (the newest %d), the lost counted\n", BODY_IMU_KEPT);
 
+    // PicoB with another version: its clock is still known, but its records are dropped.
+    b_hello(LINK_PROTOCOL_VERSION + 1, false);
+    body_update();
+    received0 = body_imu_received();
+    fake_link_deliver(MSG_IMU, &rec, sizeof rec);
+    body_update();
+    assert(!body_imu_take(&got) && body_imu_received() == received0);
+    printf("ok: imu records dropped from a PicoB with another version\n");
+
     printf("OK: body greets, repeats DRIVE, re-sends MOTORS, respects safety stops, times out, syncs clocks, keeps imu records\n");
     return 0;
 }

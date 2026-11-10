@@ -189,21 +189,19 @@ int main(void) {
     assert(!o->stationary);
     assert(fabsf(o->x_m - 0.5f) < 0.005f && fabsf(o->y_m) < 0.001f);
     assert(fabsf(o->v_mps - 0.1f) < 0.002f);
-    assert(fabsf(o->wheel_left_m - 0.5f) < 0.001f && fabsf(o->wheel_right_m - 0.5f) < 0.001f);
     assert(fabsf(o->wheel_mps[ENC_LEFT_REAR] - 0.1f) < 0.002f && fabsf(o->wheel_mps[ENC_RIGHT_REAR] - 0.1f) < 0.002f);
     printf("straight 50 cm: x %.1f cm, y %.1f cm\n", (double)(o->x_m * 100), (double)(o->y_m * 100));
 
     // A side's distance is the average of its front and rear wheel: the rear-left
     // wheel spinning 10 % faster (slipping) moves the left side 5 % further.
     simulate(1, 0, 0, 0);
-    float left0 = o->wheel_left_m, right0 = o->wheel_right_m, x_before = o->x_m;
+    float x_before = o->x_m;
     rear_left_slip = 1.1f;
     simulate(1, 0.1f, 0.1f, 0);
-    assert(fabsf(o->wheel_left_m - left0 - 0.105f) < 0.001f && fabsf(o->wheel_right_m - right0 - 0.1f) < 0.001f);
     assert(fabsf(o->wheel_left_mps - 0.105f) < 0.002f && fabsf(o->wheel_mps[ENC_LEFT_REAR] - 0.11f) < 0.002f);
     assert(fabsf(o->x_m - x_before - 0.1025f) < 0.001f);
     rear_left_slip = 1;
-    printf("rear-left wheel 10 %% faster: left side %.1f cm for 10 cm\n", (double)((o->wheel_left_m - left0) * 100));
+    printf("rear-left wheel 10 %% faster: moved %.2f cm for 10 cm\n", (double)((o->x_m - x_before) * 100));
 
     // Turn left in place, 90 deg at 30 deg/s (wheels opposite): position stays put.
     simulate(1, 0, 0, 0);

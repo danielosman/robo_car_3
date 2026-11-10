@@ -1,7 +1,7 @@
 // Host test for picoB/app/brain.c: the greeting and version lock, MOTORS and
 // DRIVE, the safety stops (no DRIVE, drive faults) reported once, repeated MOTORS
 // requests not undoing a stop, no IMU, the report rates, and the imu records (each
-// sent as made, in order, only once greeted; the odom report without the peaks),
+// sent as made, in order, from the start; the odom report without the peaks and wheel distances),
 // against a fake link with the test playing PicoA and a fake `drive`. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoB/app/test/stubs -Icommon/test/fakes -Icommon -o build/test_brain picoB/app/test/test_brain.c && build/test_brain
 #include <assert.h>
@@ -96,11 +96,12 @@ int main(void) {
     fake_now_us = FAKE_CLOCK_WRAP_US - 3000000; // the clock wraps during the test
     brain_init(true);
 
-    // The odom report lost the peaks (jolt and tilt, 16 B); an imu record is 16 B.
-    assert(sizeof(odom_report_t) == 45 && sizeof(imu_record_t) == 16);
+    // The odom report lost the peaks (jolt and tilt, 16 B) and the wheel distances (8 B);
+    // an imu record is 16 B.
+    assert(sizeof(odom_report_t) == 37 && sizeof(imu_record_t) == 16);
 
     // Before PicoA greets: HELLO once a second, ODOM at 50 Hz, STATUS at 2 Hz; MOTORS
-    // ignored; the imu records are taken (none pile up) but not sent.
+    // ignored; the imu records are sent as made (PicoA decides which it keeps).
     a_motors(true, ++request);
     run(2000);
     assert(sent[MSG_HELLO] == 2 && hello_replies == 0);
@@ -109,7 +110,7 @@ int main(void) {
     assert(last_status.imu_lost == 7); // odometry's queue overflow count reaches PicoA
     assert(last_status.imu_skipped == 5); // and the records dropped after a skipped sample
     assert(!drive_on && last_odom.motors_request == 0);
-    assert(sent[MSG_IMU] == 0 && n_made == 200 && n_taken == n_made);
+    assert(sent[MSG_IMU] == 200 && imu_out_of_order == 0 && n_made == 200 && n_taken == n_made);
 
     // The wrong protocol version: answered, but the motors stay off.
     reset_counts();
@@ -194,13 +195,13 @@ int main(void) {
     assert(!drive_on && last_odom.motors_request == request && last_odom.imu_error);
     assert(strcmp(last_log, "No IMU: motors stay off") == 0);
 
-    // The wrong version again: no more imu records (PicoA can't take them).
+    // The wrong version again: the imu records still go (PicoA drops them).
     a_hello(LINK_PROTOCOL_VERSION + 1, false);
     run(10);
     reset_counts();
     run(500);
-    assert(sent[MSG_IMU] == 0 && n_taken == n_made);
+    assert(sent[MSG_IMU] == 50 && n_taken == n_made);
 
-    printf("OK: brain greets, applies MOTORS and DRIVE, stops safely and reports each stop once, sends the imu records once greeted\n");
+    printf("OK: brain greets, applies MOTORS and DRIVE, stops safely and reports each stop once, sends the imu records from the start\n");
     return 0;
 }

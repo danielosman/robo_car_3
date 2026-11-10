@@ -27,9 +27,9 @@ uint32_t body_odom_count(void);
 bool body_odom_get(uint32_t n, odom_report_t *report, uint32_t *t_us);
 const status_report_t *body_status(void); // latest status (2 Hz); all zero until the first one
 // PicoB's imu records (104 a second), their t_us turned into PicoA's clock as they
-// arrive (as body_odom_time_us()). Records that come before PicoB's clock is known
-// (before its first report after a hello) are dropped. The oldest not yet taken;
-// false if none waits. The newest BODY_IMU_KEPT wait (~0.3 s); older ones not taken
+// arrive (as body_odom_time_us()). Kept only once PicoB has greeted us with our
+// version and its clock is known (its first report after a hello); others are
+// dropped. The oldest not yet taken; false if none waits. The newest BODY_IMU_KEPT wait (~0.3 s); older ones not taken
 // are lost, counted.
 #define BODY_IMU_KEPT 32
 bool body_imu_take(imu_record_t *r);

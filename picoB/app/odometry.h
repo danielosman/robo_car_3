@@ -17,7 +17,6 @@ typedef struct {
     float v_mps, w_radps;    // forward speed, turn rate
     float pitch_rad, roll_rad;
     float wheel_left_mps, wheel_right_mps; // each side, front and rear averaged, + = forward
-    float wheel_left_m, wheel_right_m;     // each side's total distance, + = forward
     float wheel_mps[ENC_COUNT];            // each wheel on its own, + = forward
     bool stationary;         // wheels and gyro still for 0.5 s
     float gyro_bias_radps;   // subtracted from the yaw gyro: power-up calibration plus re-measurements while still

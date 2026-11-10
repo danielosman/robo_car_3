@@ -30,7 +30,7 @@ typedef struct {
 void link_init(void);
 bool link_send(uint8_t type, const void *body, size_t len);
 // Next intact message, if one has arrived. Call often: the receive buffer (1 KB) holds
-// ~10 ms of a full-speed stream, ~200 ms of PicoB's traffic (~4.9 KB/s); bytes beyond
+// ~10 ms of a full-speed stream, ~230 ms of PicoB's traffic (~4.5 KB/s); bytes beyond
 // it are lost (the damaged frame counts in rx_bad, the missing ones in rx_lost).
 bool link_receive(link_msg_t *msg);
 link_stats_t link_stats(void);

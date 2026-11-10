@@ -2,9 +2,10 @@
 // PicoA (the brain) as PicoB sees it: the link protocol from PicoB's side.
 // Answers PicoA's greeting and keeps the motors off until the protocol versions
 // match; applies MOTORS and DRIVE to `drive`; reports odometry and status on
-// time, and each imu record as odometry makes it (once greeted). Safety stops: switches the motors off by itself when DRIVE commands stop
-// arriving or `drive` reports a fault, and keeps them off until PicoA asks again
-// with a new MOTORS request. Each stop is reported once, as a log line.
+// time, and each imu record as odometry makes it (from the start). Safety stops:
+// switches the motors off by itself when DRIVE commands stop arriving or `drive`
+// reports a fault, and keeps them off until PicoA asks again with a new MOTORS
+// request. Each stop is reported once, as a log line.
 #include <stdbool.h>
 
 void brain_init(bool imu_ok);  // starts the link; without an IMU the motors stay off

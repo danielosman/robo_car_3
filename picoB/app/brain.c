@@ -102,7 +102,6 @@ static void send_odom(void) {
         .x_m = o->x_m, .y_m = o->y_m, .yaw_rad = o->yaw_rad,
         .v_mps = o->v_mps, .w_radps = o->w_radps,
         .pitch_rad = o->pitch_rad, .roll_rad = o->roll_rad,
-        .wheel_left_m = o->wheel_left_m, .wheel_right_m = o->wheel_right_m,
         .stationary = o->stationary,
         .motors_on = drive_enabled(),
         .stop_reason = stop_reason,
@@ -112,12 +111,11 @@ static void send_odom(void) {
     link_send(MSG_ODOM, &r, sizeof r);
 }
 
-// Each imu record as it is made (104 a second), once PicoA has greeted us (before,
-// they are taken and dropped: PicoA can't place them on its clock yet anyway).
+// Each imu record as it is made (104 a second), from the start: PicoA decides which
+// it can keep (body.c).
 static void send_imu(void) {
     imu_record_t r;
-    while (odom_imu_take(&r))
-        if (greeted) link_send(MSG_IMU, &r, sizeof r);
+    while (odom_imu_take(&r)) link_send(MSG_IMU, &r, sizeof r);
 }
 
 static void send_status(void) {

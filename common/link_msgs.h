@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define LINK_PROTOCOL_VERSION 6
+#define LINK_PROTOCOL_VERSION 7
 
 // Timing both sides rely on.
 #define LINK_HELLO_PERIOD_US   1000000 // HELLO repeats until answered
@@ -27,7 +27,7 @@ enum {
     MSG_ODOM,      // B -> A, odom_report_t, every LINK_ODOM_PERIOD_US
     MSG_LOG,       // B -> A, text without terminator; PicoA prints it in its debug log
     MSG_STATUS,    // B -> A, status_report_t, every LINK_STATUS_PERIOD_US
-    MSG_IMU,       // B -> A, imu_record_t, one each IMU_RECORD_PERIOD_US (once PicoA has greeted)
+    MSG_IMU,       // B -> A, imu_record_t, one each IMU_RECORD_PERIOD_US, from PicoB's start
 };
 
 typedef struct __attribute__((packed)) {
@@ -72,7 +72,6 @@ typedef struct __attribute__((packed)) {
     float yaw_rad;           // not wrapped: a full left turn adds 2π
     float v_mps, w_radps;
     float pitch_rad, roll_rad;
-    float wheel_left_m, wheel_right_m; // each side's total distance (front and rear averaged), + = forward
     bool stationary;         // wheels and gyro still for 0.5 s
     bool motors_on;
     uint8_t stop_reason;     // STOP_*: why PicoB switched the motors off by itself

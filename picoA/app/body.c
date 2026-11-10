@@ -106,7 +106,9 @@ static void on_message(const link_msg_t *m) {
         if (m->len == sizeof status) memcpy(&status, m->body, sizeof status);
         break;
     case MSG_IMU:
-        if (m->len == sizeof(imu_record_t) && clock_known) {
+        // Kept only once PicoB has greeted us with our version and its clock is known
+        // (its first report, again after it restarts): before, PicoA can't place it.
+        if (m->len == sizeof(imu_record_t) && greeted && clock_known) {
             imu_record_t *r = &imu[imu_kept++ % BODY_IMU_KEPT];
             memcpy(r, m->body, sizeof *r);
             r->t_us = on_picoa_clock(r->t_us);
