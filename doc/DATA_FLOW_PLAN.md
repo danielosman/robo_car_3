@@ -22,10 +22,14 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   are not part of the remaining work. Their design ideas have a separate home in
   [ARCHITECTURE_REFACTOR_PLAN.md](ARCHITECTURE_REFACTOR_PLAN.md), starting with
   PicoB's odometry acting as the IMU data distributor.
-- **Step 7, the line map:** its design and state are in
-  [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md). The way lines are made changed while
-  building; Daniel has not confirmed that yet (section 14, 2).
-- **Next: step 8**, the map switch. Then 9 docs, the final flash, the robot test.
+- **Step 7, the line map:** built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)), but not
+  what Daniel wants: he wants one closed outline per band that is corrected over
+  time and used against pose drift.
+- **Next: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)**, agreed in general by Daniel
+  (11 Nov), not built: a simulator first (its step S), then the outline, the walls
+  and the pose correction (A-D), then the page (E, the old step 8). A fresh
+  session starts at its "For the fresh session". Then 9 docs, the final flash,
+  the robot test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
   PicoA changes since then (step 5's `room.h`, step 6's map, snapshot v3 and wire v5)
   are tested on the robot in step 9 (or flashed earlier if Daniel wants).
@@ -363,9 +367,9 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.5 K
 
 ## 11. Steps left
 
-**7. The line map** (PC) — built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). Left: Daniel's
-yes to the changed way of making lines (section 14, 2), and tuning its limits on
-a drive where the robot really drives (the stored one mostly turns on the spot).
+**7. The line map** (PC) — built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). Daniel wants
+a closed outline and drift correction instead: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)
+(agreed in general; its steps S, A-E come next, and E is step 8).
 
 Real-data limits to keep in mind:
 - Floor rows 8 / 7 / 6 meet the floor at about 27 / 37 / 60 cm with the 9 cm mount.
@@ -421,8 +425,7 @@ then the agent runs the tests via `./robot` (section 2).
 ## 14. Open questions for Daniel
 
 1. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
-2. **Line map:** lines are made from the collected hit points when read, not merged
-   from each frame's pieces as confirmed (LINE_MAP_PLAN.md, "Changed while
-   building"). OK?
+2. **Outline map:** [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md), "Open for Daniel": a
+   real drive, once its step C has passed in the simulator.
 3. **Step 6 robot validation** is still due in Step 9. Passing host tests and reviews
    does not establish that floor-first driving is safe on the real floor.

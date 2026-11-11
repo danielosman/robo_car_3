@@ -4,6 +4,10 @@ Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Confirmed by Daniel on 11 Nov 
 the way lines are made changed while building (see "Changed while building").
 The earlier draft is [LINE_MAP_PLAN_OLD.md](LINE_MAP_PLAN_OLD.md) (not built).
 
+**11 Nov, after Daniel looked at the result:** this is not what he wants. The
+proposal that follows it is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). This file
+still describes the code as built.
+
 ## In short
 
 The PC turns the robot's stored ToF frames into lines: walls, furniture fronts, boxes.
