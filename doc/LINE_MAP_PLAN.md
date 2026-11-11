@@ -16,12 +16,16 @@ map is built: from the frames stored before the step you pick. `robot map --png
 | Substep | What | State |
 |---|---|---|
 | a | Sights: a frame's zones as flat wedges (`sights.ts`); the helper gives the sensor's position | done |
-| b | Pieces: one row's hits joined into straight pieces (`pieces.ts`) | done, then removed in c (not used any more) |
 | c + d | Spots and see-through (`line_map.ts`); lines through the spots (`straight.ts`) | done |
-| e | The reader (a boot's line maps at a snapshot) and `robot map --png --lines [--no-cells]` | built, in review |
+| e | The reader (a boot's line maps at a snapshot) and `robot map --png --lines [--no-cells]` | done |
 
-Each substep ends with tests green, a fresh reviewer, this table updated and a commit
-(no push). Step 7 changes no Pico: nothing to flash.
+Each substep was reviewed by a fresh reviewer and committed (not pushed); the history
+is in [CHANGELOG.md](CHANGELOG.md), 11 Nov. Step 7 changes no Pico: nothing to flash.
+
+**Left:**
+- Daniel's yes to the changed way of making lines (next section).
+- Tuning the limits on a drive where the robot really drives.
+- The page shows the lines in step 8 (DATA_FLOW_PLAN.md).
 
 ## Decisions (Daniel)
 
@@ -57,6 +61,8 @@ where the surfaces are. So:
 - Ramer-Douglas-Peucker: not used any more. It needs points in order along a
   shape; a cloud of points from many frames has no order.
 - `pieces.ts` (substep b) is removed.
+
+What was tried is in the CHANGELOG. Once Daniel has said yes, this section goes.
 
 ## The parts
 
@@ -118,14 +124,18 @@ hit at its end or none.
 | Hits closer than 1.2 m | 35 %; they lie within about 5 cm of each other |
 | Hits farther than 1.2 m | 65 %; smeared 20-30 cm along the ray |
 | Lines per band (L1 / L2 / above) | 23 / 29 / 58, median 34 cm long |
-| Building the three maps for the whole drive | about 1 s |
+| Building the three maps for the whole drive | under 1 s (0.9 s the first read, 0.4 s after) |
 
 ## Tests
 
 - `straight.ts`: a wall, a corner, two walls side by side, a doorway, clutter.
 - `line_map.ts`: a wall seen three times; a close look against a far one; a thing
   that went away; a sight passing over; a wedge's edge.
-- The stored drive replayed, drawn over the cell map (`robot map --png --lines`).
+- `index.ts`: through the real store and helper: a wall in the stored frames is a
+  line in each band; none before its frames; the picture with the lines over the
+  cells, and alone.
+- By hand, not a test: the stored drive drawn over the cell map
+  (`robot map --png --lines`).
 
 ## Known limits
 
@@ -142,5 +152,5 @@ hit at its end or none.
 - Odometry drifts: a wall seen again after a long drive may become two lines.
 - The limits (strip width, gap, frames to stand, score cap) are first guesses,
   tuned on one stored drive in which the robot mostly turned on the spot.
-- Building takes about 1 s for 774 frames and is done again on every read: fine
-  for `robot map`; step 8's slider should keep the last maps read.
+- The maps are built again on every read (the time is in the numbers above): fine
+  for `robot map`; step 8 keeps the last maps read only if the slider feels slow.

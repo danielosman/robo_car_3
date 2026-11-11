@@ -672,20 +672,18 @@
     "id": "pc.line_map",
     "name": "line_map",
     "origin": "pc",
-    "status": "planned",
-    "plan": {
-      "path": "doc/DATA_FLOW_PLAN.md",
-      "code": "| step 7:"
-    },
-    "summary": "A map of lines in height bands, from the cell map helper's rays (LINE_MAP_PLAN.md).",
+    "path": "pc/robot/src/maps/line_map/index.ts",
+    "summary": "The PC's line maps (doc/LINE_MAP_PLAN.md): a boot's lines at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), line_map.ts (one band's hits in 5 cm spots, see-through), straight.ts (straight lines through the spots).",
     "members": [
       {
-        "name": "add",
-        "kind": "function"
+        "name": "BandLines",
+        "kind": "type",
+        "code": "export interface BandLines"
       },
       {
-        "name": "linesInView",
-        "kind": "function"
+        "name": "lineMapsAt",
+        "kind": "function",
+        "code": "export async function lineMapsAt("
       }
     ]
   }

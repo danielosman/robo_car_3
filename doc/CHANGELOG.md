@@ -58,6 +58,20 @@ Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the design is in
     counting a frame once. Written down as known limits: a still robot forgets
     slowly (only a wedge's middle half sees through); heights are the wedge's.
 
+- **Substep e, the reader and the picture** (`maps/line_map/index.ts`:
+  `lineMapsAt()`, built from the store at a snapshot like the cell map, no cache;
+  `api/map.ts`; `robot map [n] --png --lines [--no-cells]`, files `<n>-lines.png`
+  and `<n>-lines-only.png`). On boot `cc0e4e65` at snapshot 28 the lines lie on
+  the cell map's blocked columns: 23 / 29 / 58 lines in L1 / L2 / above. The
+  architecture diagram's line map module is marked built.
+  - Review (fresh subagent): fine to commit. Taken: one build time in the docs
+    (measured 0.9 s, then 0.4 s; the docs said 2 s); `BandName` as a type, so a
+    renamed band fails the typecheck instead of vanishing from the picture; the
+    plans cut to state and what is left. Left: `lineMapsAt() ?? []` in `reads.ts`
+    (null can't happen there).
+  - No separate end-of-step review was run: substep e's reviewer also checked the
+    whole step's docs and state.
+
 ## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5), the robot's window-only map and floor first (step 6)
 
 Steps of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Both Picos flashed once (commit

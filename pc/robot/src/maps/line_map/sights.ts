@@ -11,7 +11,8 @@ import { isBeyond, type PosedFrame } from "../../tof_format.ts";
 import type { ZoneRays } from "../cell_map.ts";
 
 // The height bands, the cell map's layers L1 and L2 (picoA/app/cell_map.c) and all above.
-export interface Band { name: string; lowM: number; highM: number }
+export type BandName = "L1" | "L2" | "above";
+export interface Band { name: BandName; lowM: number; highM: number }
 export const BANDS: readonly Band[] = [
   { name: "L1", lowM: 0.03, highM: 0.13 },      // blocks the robot
   { name: "L2", lowM: 0.13, highM: 0.23 },      // an overhang

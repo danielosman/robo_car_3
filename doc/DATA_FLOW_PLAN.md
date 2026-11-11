@@ -13,19 +13,19 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 
 ## 1. Where we are
 
-- **Built:** steps 1-6, including the PC's whole-house cell map and PicoA's
-  window-only, floor-first map. Step 6 is not flashed. Its implementation and two
-  fresh reviews are complete; history is in
-  [CHANGELOG.md](CHANGELOG.md), the 10 Nov entry.
+- **Built:** steps 1-7, including the PC's whole-house cell map, PicoA's
+  window-only, floor-first map, and the PC's line maps (step 7, PC only). Step 6 is
+  not flashed. History is in [CHANGELOG.md](CHANGELOG.md), the 10 and 11 Nov entries.
 - **Current versions:** PicoA–PicoB link 7, robot–PC wire 5, snapshot 3. PicoB reads
   the IMU at 416 Hz; the PC receives and stores averaged records at 104 Hz.
   Odometry, `drive` and PicoA's layout stay as they are; the deferred 4e/4g redesigns
   are not part of the remaining work. Their design ideas have a separate home in
   [ARCHITECTURE_REFACTOR_PLAN.md](ARCHITECTURE_REFACTOR_PLAN.md), starting with
   PicoB's odometry acting as the IMU data distributor.
-- **Now: step 7**, the line map, in substeps a-e. Its design and its state are in
-  [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md), "Where we are" (confirmed by Daniel, 11 Nov).
-  Then 8 map switch, 9 docs, the final flash, the robot test.
+- **Step 7, the line map:** its design and state are in
+  [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md). The way lines are made changed while
+  building; Daniel has not confirmed that yet (section 14, 2).
+- **Next: step 8**, the map switch. Then 9 docs, the final flash, the robot test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
   PicoA changes since then (step 5's `room.h`, step 6's map, snapshot v3 and wire v5)
   are tested on the robot in step 9 (or flashed earlier if Daniel wants).
@@ -44,7 +44,7 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   plan and the code are right. They are brought up to date once, in step 9. The
   CHANGELOG is up to date (history goes there, not here).
 - **Architecture diagram:** current through Step 6, independently reviewed:
-  37 modules (one planned), 13 flows, 437 checked references. It shows window/tile
+  37 modules, 13 flows, 438 checked references (the line map has no flow yet). It shows window/tile
   ownership, floor rules, map-free snapshots, and the bulk-window/control-answer
   pose join. `npm run resolve` and `npm run typecheck` pass in
   `architecture-diagram/`. Its separate UI follow-up is in its README, "Next".
@@ -86,9 +86,8 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
     `robot frames <boot> <move>`, `robot imu <boot> <move>`;
   - to look round, turn in 30° steps (12 × `r30`), not one 390° turn: a camera picture
     every 30°, to plan and to check.
-- **Step 7:** read [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md) in full; continue at the
-  first substep not marked done. Daniel asked for a commit (no push) after each
-  substep, once the tests pass and the reviewer agrees.
+- **Step 7 is built:** [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md) says how it works and
+  what is left.
 - **Otherwise commit only when Daniel says** (README).
 - Long test runs: cap them with a time limit, and never read large generated data
   into the agent's context.
@@ -143,12 +142,14 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   robot and PC (helper commands `V` and `K`); do not add a TypeScript copy.
 - **The PC builds two maps**, in the odometry frame from power-up: the **cell map**
   (the robot's C code in a helper program, whole house; also the free-floor map)
-  and the **line map** (TypeScript, [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). They
-  share nothing else. The page switches between them.
+  and the **line maps** (TypeScript, one per height band,
+  [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). They share only the helper's zone
+  geometry. The page switches between them (step 8).
 - **`clear_map`** clears only the robot's 6 × 6 m map (and re-seeds the floor around
   it). The PC's maps are not touched; the robot sends "map cleared" for the log.
 - **Reads:** `robot map [n]` returns the PC's map at a snapshot; `--png` draws its
-  tiles and window together, with the path. `robot check` uses the newest
+  tiles and window together, with the path; `--png --lines` draws the line maps
+  over it, `--png --lines --no-cells` the lines alone. `robot check` uses the newest
   snapshot's cell map and pose, with the shared `room.h` stop rule.
   `robot map --robot [--png]` asks for the robot's live window and pose, without
   PC tiles. A snapshot number with `--robot` is an error. The live window covers
@@ -165,7 +166,7 @@ VL53 ─► tof ─(tof_frame)─► pose_stamp ─(posed_frame)─► tof_forma
                                 ▲                      pack/unpack  ├─(watch use)─► watch
                         pose ───┘ pose_at(t)                       └─(bytes, during a move)─► link_pc ══TCP══► link ─► wire ─(posed_frame)─┬─► store
                                                                                                                                       ├─► cell_map (helper, read from the store)
-                                                                                                                                      └─► line_map (step 7)
+                                                                                                                                      └─► line_map (read from the store; zones placed by the helper)
 ```
 
 **IMU and odometry** (PicoB → PicoA → PC)
@@ -207,7 +208,7 @@ Each name once; the same word in C (`snake_case_t`) and TS (`CamelCase`).
 | **use** | what a frame is packed for: map, watch, snapshot | — | `tof_format` |
 | **rays** | a zone's rays in the world; its point, height span and **verdict** (floor / obstacle / unsure) | `tof_rays` | `cell_map`; on the PC also `line_map` (through the helper) |
 | **cell_map** | 10 cm cells in layers G (ground), L1 (3-13 cm), L2 (13-23 cm) | `cell_map` | `move`, the page |
-| **line_map** | lines in bands L1, L2, above (over 23 cm) | `line_map` (PC) | the page |
+| **line_map** | straight lines in bands L1, L2, above (over 23 cm), one map a band | `maps/line_map` (PC) | `robot map --png --lines`; the page (step 8) |
 | **imu_sample** | one IMU reading, 416 Hz, float and raw counts, sensor frame | PicoB `imu` | `odometry` |
 | **wheel_counts** | the four encoder counts | PicoB `encoder` | `odometry` |
 | **odometry_report** | pose (x, y, yaw, pitch, roll), speeds, still, motors on, stop reason (37 B) | PicoB `odometry` | PicoA `body` → `pose` |
@@ -288,7 +289,7 @@ the PC only divides by 10^6.
 
 ## 8. Modules
 
-What each hides, and its interface. Built unless marked (step N).
+What each hides, and its interface. All built.
 
 ### PicoB
 
@@ -336,8 +337,8 @@ What each hides, and its interface. Built unless marked (step N).
 | `fakerobot.ts` | a robot on the wire; replays a stored boot | |
 | `objects/place.ts` | camera placement | takes the boot's camera geometry |
 | `maps/cell_map.ts` + `native/cell_map_helper.c` | the helper program (robot `cell_map.c`, `tof_rays.c`, `house_map.c`, `tof_format.c`, `room.c`, built with cc once per server run), one per boot; built from the boot's stored frames when read; the last 16 maps read kept | `atSnapshot(boot, n, (m, pose) => ...)`: `drive` (room.h's rule), `obstacleWithin`, `view`; `viewAtSnapshot(boot, n)`; `rays(boot, frame)`; `columnsOf(cells)` |
-| step 7: `maps/line_map/` | lines per height band: sights, pieces, merge, see-through (LINE_MAP_PLAN.md) | `lineMapsAt(boot, n)` |
-| `api/map.ts`, `api/check.ts` | the map as a PNG (whole building, or the robot's window); check: a goto's turn and limit (`behaviour.h`'s numbers), a turn's warning; where a drive stops is the helper's (`room.h`) | |
+| `maps/line_map/` | lines per height band: zones as wedges, hits kept in 5 cm spots, see-through, straight lines through the spots when read (LINE_MAP_PLAN.md); built from the boot's stored frames on every read | `lineMapsAt(store, cellMaps, boot, n)` → each band's lines |
+| `api/map.ts`, `api/check.ts` | the map as a PNG (whole building, or the robot's window; the line maps over it or alone); check: a goto's turn and limit (`behaviour.h`'s numbers), a turn's warning; where a drive stops is the helper's (`room.h`) | |
 
 ## 9. Budgets
 
@@ -362,9 +363,9 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.5 K
 
 ## 11. Steps left
 
-**7. The line map** (PC) — [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md): the design, the
-substeps a-e and which are done. Three maps of lines, one per height band, built
-from the stored frames at a snapshot; `robot map --png --lines [--no-cells]`.
+**7. The line map** (PC) — built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). Left: Daniel's
+yes to the changed way of making lines (section 14, 2), and tuning its limits on
+a drive where the robot really drives (the stored one mostly turns on the spot).
 
 Real-data limits to keep in mind:
 - Floor rows 8 / 7 / 6 meet the floor at about 27 / 37 / 60 cm with the 9 cm mount.
@@ -375,7 +376,9 @@ Real-data limits to keep in mind:
   a real obstacle. Odometry drifts; a commanded 30° turn is about 31°.
 
 **8. The map switch** (PC): cell map / line map on the page; the bands in their own
-colours, each can be hidden.
+colours, each can be hidden. `lineMapsAt()` builds the maps again on every read
+(LINE_MAP_PLAN.md, the numbers); if the slider feels slow, keep the last maps
+read, as `CellMaps.viewAtSnapshot()` does.
 
 **9. The flash and the robot test** (both Picos): docs final; the README list of robot
 tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2`,
@@ -393,7 +396,7 @@ then the agent runs the tests via `./robot` (section 2).
 - The page shows any snapshot's compact tof frame.
 - `fakerobot` replays a stored boot to a test server (README).
 - The PC's cell map rebuilds any boot's map at any snapshot from the store (`robot map
-  <n>`, the page's timeline); `robot map --robot` asks the connected robot (or
+  <n>`, the page's timeline); `robot map <n> --png --lines` draws the line maps too; `robot map --robot` asks the connected robot (or
   `fakerobot`) for its window right now.
 - Measure the robot's map code on stored data: a script with `CellMaps` (as in
   `maps/cell_map.test.ts`) on `recordings/robot2.duckdb`, boot `cc0e4e65`.
@@ -418,5 +421,8 @@ then the agent runs the tests via `./robot` (section 2).
 ## 14. Open questions for Daniel
 
 1. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
-2. **Step 6 robot validation** is still due in Step 9. Passing host tests and reviews
+2. **Line map:** lines are made from the collected hit points when read, not merged
+   from each frame's pieces as confirmed (LINE_MAP_PLAN.md, "Changed while
+   building"). OK?
+3. **Step 6 robot validation** is still due in Step 9. Passing host tests and reviews
    does not establish that floor-first driving is safe on the real floor.
