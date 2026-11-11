@@ -1,8 +1,8 @@
-// The line map's input (doc/LINE_MAP_PLAN.md): a ToF frame's zones as sights. A sight is
+// The outline map's input (doc/OUTLINE_MAP_PLAN.md): a ToF frame's zones as sights. A sight is
 // one zone's flat wedge on the floor plan: the sensor at its tip, one zone angle wide,
 // how far it saw through, how high it is along the way, and what it hit at its end, if
-// anything. Only this file knows ToF frames, verdicts and the band heights; the line
-// map itself (line_map.ts) reads sights alone.
+// anything. Only this file knows ToF frames, verdicts and the band heights; the
+// outline map itself (outline_map.ts) reads sights alone.
 //   sightsOf(frame, rays, zoneRad)  the frame's 64 zones as sights, in zone order
 //   inBand(sights, band)            the same sights for one band's map: only the hits that
 //                                   reach the band, their heights cut to it
@@ -56,7 +56,7 @@ function sightOf(frame: PosedFrame, zone: number, r: ZoneRays, zoneRad: number):
   if (rangeM < 1e-3) return null;
   const sigmaM = z.sigmaMm / 1000;
   // A wall seen at an angle is closer at one edge of the wedge than at its middle: by up
-  // to a zone width at 30°, the shallowest angle that still counts (line_map.ts).
+  // to a zone width at 30°, the shallowest angle that still counts (outline_map.ts).
   const margin = Math.max(MARGIN_M, 2 * sigmaM, rangeM * zoneRad);
   const stands = r.verdict === "obstacle" && !isBeyond(frame, z);
   return {

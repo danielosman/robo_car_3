@@ -1,6 +1,7 @@
 # Outline map and drift correction — plan (11 Nov 2026)
 
-Agreed in general by Daniel on 11 Nov; step S (the simulator) is built. It follows the line map
+Agreed in general by Daniel on 11 Nov; steps S (the simulator) and A (the outline)
+are built. It follows the line map
 ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md), step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)),
 which Daniel looked at and found is not what he wants: loose lines, too few of them.
 
@@ -19,10 +20,10 @@ disagree, the less sure one gives way.
 ## For the fresh session
 
 - **Steps S, then A to E in order.** The table in "Steps" says which are done:
-  start at the first that is not.
-- **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3;
-  LINE_MAP_PLAN.md (the code that exists); then `pc/robot/src/maps/line_map/`
-  (`sights.ts`, `line_map.ts`, their tests and `test_sights.ts`).
+  start at the first that is not. **Next: step B**; read "Step B and C: where to
+  start" first.
+- **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
+  `pc/robot/src/maps/outline/` and `pc/robot/src/sim/` with their tests.
 - **Rules as in DATA_FLOW_PLAN.md section 2:** tests first where they make sense, a
   fresh reviewer after each step, this file's table updated, history in the
   CHANGELOG. Commit (no push) after each step, once its tests pass and the
@@ -123,14 +124,19 @@ The raw frames stay as they are. Everything above can be built again from them.
 
 ## How it fits the code
 
-- **Stays:** `sights.ts` (zones as wedges), the helper's zone geometry, the store,
-  `robot map --png --lines [--no-cells]` (it then draws the outline).
-- **Changes:** `line_map.ts` keeps hits in 5 cm spots already; it also gets "seen
-  free" per spot, and the outline is read from that instead of loose lines.
-- **Goes or shrinks:** `straight.ts` (lines through a cloud). A border comes in
-  order, so walls are found along it; Ramer-Douglas-Peucker fits that job.
-- **New:** the outline (border, islands, kinds), the walls (remembered, with
-  sightings), the pose check, three tables.
+Built (step A), in `pc/robot/src/maps/outline/`; the line map's code is gone:
+
+| File | Knows | Interface |
+|---|---|---|
+| `sights.ts` | ToF frames, verdicts, "beyond", the band heights (as before) | `sightsOf()`, `inBand()`, `heightsAt()` |
+| `outline_map.ts` | one band's 5 cm squares: seen free, hits (spots), see-through; which border point lies on which spot | `new OutlineMap(band)`, `add(sights)`, `outline()` |
+| `border.ts` | the closed loops round a set of squares | `connected()`, `bordersOf()` |
+| `shape.ts` | a loop's points as wall, rough and guess edges; no knots | `edgesOf(points)` |
+| `index.ts` | the store and the helper: a boot's outlines at a snapshot; the colours | `outlinesAt()`, `outlineStrokes()` |
+
+- `robot map --png --lines [--no-cells]` draws the outlines.
+- **New in B to D:** the walls (remembered, with sightings), the pose check, three
+  tables.
 - The cell map is untouched. `robot check` keeps using it.
 - PC only. The robot does not get the corrected pose in this plan.
 
@@ -214,7 +220,7 @@ knows the truth, so every step can be measured, not only looked at.
 | `drive.ts` | the moves, the two poses, the drift, the seeded random numbers |
 | `tof.ts` | one frame: what each zone reads, the noise; gives a posed frame and its rays, as the store and the helper do |
 | `scenarios.ts` | the scenarios; `run()` gives each move's frames, sights and truth |
-| `measure.ts` | the numbers (so far: pose error, distance from the true faces) |
+| `measure.ts` | the numbers (so far: pose error, distance from the true faces, closed, the floor's error) |
 | `play.ts` | a scenario through the map under test: what it drew, step by step |
 | `picture.ts`, `main.ts` | the pictures, the slider page, the command |
 
@@ -232,7 +238,7 @@ knows the truth, so every step can be measured, not only looked at.
 - It is only as true as its noise. Limits tuned on it are first guesses; the
   stored drive and later a real drive have the last word.
 - It does not go through the robot's C geometry or the store. The real reader
-  (`lineMapsAt`'s successor) is tested on stored frames as before.
+  (`outlinesAt`) is tested on stored frames as before.
 
 ## Steps
 
@@ -241,12 +247,88 @@ tried in the simulator first, then on the stored drive.
 
 | Step | State | What | To look at |
 |---|---|---|---|
-| S | done | The simulator: room, robot with drift, ToF with noise, pictures with a slider, the numbers; at first it draws the existing line map's lines | `npm run sim -- <scenario>`; the scenarios as tests |
-| A | | The outline: seen-free floor per band, its border and islands, simplified; kinds wall / rough / guess by rule, nothing remembered yet | `robot map --png --lines`: a closed polygon from the 35 cm circle on, step by step with the slider's snapshots |
+| S | done | The simulator: room, robot with drift, ToF with noise, pictures with a slider, the numbers | `npm run sim -- <scenario>`; the scenarios as tests |
+| A | done | The outline: seen-free floor per band, its border and islands, simplified; kinds wall / rough / guess by rule, nothing remembered yet | `robot map --png --lines`: a closed polygon from the 35 cm circle on, step by step with the slider's snapshots |
 | B | | Walls remembered: numbers, how sure, sightings; colour by confidence; the three tables | the same picture, walls brighter as they are seen again; `robot walls` listing them |
 | C | | The pose check: frames checked against walls, corrected poses stored, the map built with them | the same drive drawn with and without correction; the error on returning to the start |
 | D | | Removal with the two-wall rule | a moved box goes; a wall stays when the robot drifts |
 | E | | The page: the outline per band, switchable (the old step 8) | the page |
+
+How the outline is made (step A, as built):
+
+- A square is **seen free** in a band when a wedge passed through it and covered
+  the band's lower part there (things stand on the floor). Closer than 45 cm any
+  wedge counts.
+- A square hit in 3 frames **stands**: it is not free, whatever saw through it.
+  Hits are forgotten by see-through as in the line map.
+- The outline is the border of the free squares joined to the start. Each border
+  point is moved onto the nearest standing spot up to 30 cm beyond it (sights
+  end a margin before what they hit).
+- Edges between hits: straight for 40 cm or more, hits within 3 cm: **wall**.
+  Otherwise **rough**. No hit, or hits more than 30 cm apart: **guess**.
+- Where a loop cuts through itself it is cut at the crossing point; the shorter
+  way round (in metres) goes. Loops crossing each other are not prevented; the
+  simulator finds none.
+- The flag stays `--lines` and the files `-lines.png`, on purpose (the plan's name
+  for the picture).
+
+What the outline does and does not show (measured in the simulator):
+
+| Fact | Number |
+|---|---|
+| Without noise: walls off the true walls | under 1 cm |
+| Without noise: floor drawn that isn't there | 0 |
+| With noise, no drift: floor the robot saw that is inside the outline | over 80 % |
+| Loops open, or crossing, in all 7 scenarios at every step | 0 |
+| The stored drive (boot `cc0e4e65`, 774 frames): built in | 1.1 s |
+
+- **L1's floor is known to about 1.65 m only.** Only row 5 looks along the floor.
+  Farther walls are hit but stay outside L1's outline until the robot is closer.
+- **Far walls are rough, not walls.** Beyond 1.2 m the hits smear, so no stretch is
+  straight to 3 cm. In the `square` room (walls 1.5 m away) there is no wall edge
+  with noise on. Step B has to find walls there another way (a line through many
+  smeared hits), or step C has nothing to correct against.
+- **A thing never looked at is a guess island** (the pouf in `loop`).
+- **A table top is seen from below:** its far edge shows as a thin shape, not as
+  an island, until the robot has seen round it.
+- On the stored drive the outlines are closed and follow the cell map's floor;
+  nearly all edges are rough or guess (the robot turned on the spot, things are far).
+
+### Step B and C: where to start
+
+Not built. A proposal from the session that built S and A, thought through but
+not tried; the reviewer of step A agrees with the first three points.
+
+- **Walls are their own small store, per band** (a new `walls.ts`): C reads it for
+  every frame. `outline()` is too heavy for that and stays for drawing.
+- **Sightings come straight from a frame's sights**, not from edges: the hits of
+  one frame that lie on a wall. A spot does not keep who saw it.
+- **A new wall** comes from an outline edge of kind wall that is on no known wall
+  (looked for every few frames, not every frame).
+- **The far-wall problem first** (see the limits above): with noise the `square`
+  room has no wall edge. Try the planned rule on `loop` (walls 1 m away). If
+  `square` needs it, add an unsure kind of new wall: a long rough stretch
+  (1 m or more) whose hits fit a line to about 5 cm.
+- **A wall:** a point on it, its direction, its two ends, and how sure its
+  position across and its direction are (a 2 × 2 covariance).
+- **One measurement per wall per frame:** through the frame's hits on the wall,
+  how far their middle lies off it and, if they span enough, their slope against
+  it; each with its spread (a hit closer than 1.2 m and still: about 2 cm; else
+  about 8 cm; across the wedge: its width).
+- **Who is blamed:** that measurement moves the wall by the wall's share of the
+  doubt and (step C) the pose by the pose's share. A measurement more than about
+  3 spreads off is not used: a new thing.
+- **The pose's doubt** grows with every turn and distance (as a spread that adds
+  up, since the drift is mostly a steady 3 %, not random), and shrinks at each
+  check. A new wall starts with the pose's doubt added to its own.
+- **Drawing:** border points within about 6 cm of a known wall are put on its line
+  before the edges are made. So a known wall stays straight when seen from far,
+  and the edge carries the wall's number and how sure it is (brightness).
+- **One object on top** (a mapper): the three outline maps, the walls, the pose.
+  It takes a frame's odometry pose and sights, places the sights by the corrected
+  pose, and feeds maps and walls. `play.ts` and `outlinesAt` call it.
+- **The tables** are written when `robot walls` builds a boot's walls.
+- Move the colours out of `index.ts` when colour by confidence comes.
 
 - B and C are separate steps, but C comes straight after B: Daniel's point that
   frequent correction keeps the errors small is the reason the walls exist.
@@ -272,11 +354,15 @@ tried in the simulator first, then on the stored drive.
 
 ## Open technical points
 
+- The outline is the floor joined to the start. Floor that standing things cut
+  off from the start is not drawn, also where the robot is now (a door closed
+  behind it). For step D.
 - The simulator does not smear a reading that ends on the floor, also while
   moving. Whether the real sensor does: boot `cc0e4e65` can tell.
 - How fast the pose's "how sure" should fall with driving and turning: first
   numbers from the stored drives (a 30° turn is about 31°).
 - The border's simplifying limits (how rough is "rough") and the wall rule (40 cm,
-  3 cm): tuned on the real drive.
+  3 cm): tuned on the real drive. With the simulator's far noise (7 cm) rough
+  edges are jagged by about 10 cm.
 - Building takes longer than the line map's 1 s once poses are corrected frame by
   frame; the tables double as a cache for the slider.

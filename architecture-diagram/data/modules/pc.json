@@ -669,21 +669,21 @@
     ]
   },
   {
-    "id": "pc.line_map",
-    "name": "line_map",
+    "id": "pc.outline",
+    "name": "outline",
     "origin": "pc",
-    "path": "pc/robot/src/maps/line_map/index.ts",
-    "summary": "The PC's line maps (doc/LINE_MAP_PLAN.md): a boot's lines at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), line_map.ts (one band's hits in 5 cm spots, see-through), straight.ts (straight lines through the spots).",
+    "path": "pc/robot/src/maps/outline/index.ts",
+    "summary": "The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read: the closed border of the floor seen free, and an island round each thing in it. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), outline_map.ts (one band's 5 cm squares: seen free, hits, see-through), border.ts (the loops round the free squares), shape.ts (the loops as wall, rough and guess edges).",
     "members": [
       {
-        "name": "BandLines",
+        "name": "BandOutline",
         "kind": "type",
-        "code": "export interface BandLines"
+        "code": "export interface BandOutline"
       },
       {
-        "name": "lineMapsAt",
+        "name": "outlinesAt",
         "kind": "function",
-        "code": "export async function lineMapsAt("
+        "code": "export async function outlinesAt("
       }
     ]
   }

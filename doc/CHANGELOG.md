@@ -33,6 +33,37 @@ The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flas
     to 45 loose lines a band, fanned out by the drift. The simulator shows the
     problem the plan is about.
 
+- **Step A, the outline** (`pc/robot/src/maps/outline/`; `line_map.ts`,
+  `straight.ts` and `lineMapsAt` removed, `sights.ts` moved over). One closed
+  outline per band and an island round each thing, as wall, rough and guess edges.
+  `robot map --png --lines` and the simulator draw it.
+  - How the gap before a wall is closed was thought through first (sights end a
+    margin before what they hit). Considered: seeing free up to the hit (leaks
+    behind walls seen at an angle), filling squares between floor and hits (thin
+    fingers towards far hits). Built: border points are moved onto the nearest
+    standing spot beyond them.
+  - Tried and changed on the simulator: moved points ran back and forth along a
+    wall (136 edges for a square room): a spot met again within 8 points drops the
+    points between. Hits one zone apart at 1.5 m were not joined (gap limit 15 cm):
+    30 cm now. The band "above" stayed a circle (no wedge covers it closer than
+    40 cm): closer than 45 cm any wedge counts. Moved points made small knots at
+    box corners and door posts (up to 47 crossings a scenario): a loop is cut at
+    the crossing point, after simplifying.
+  - Which wedges see a band's floor free: those covering the band's lower part.
+    With "any overlap" a wedge grazing a box's top called the box's inside free.
+    With a stricter rule a ring between two rows' reach stayed unseen.
+  - Review (fresh subagent): fine to commit after one fix, taken: cutting a knot
+    kept the side with more edges, so a jagged knot could win over a room of four
+    long walls; now the longer side in metres stays (a test holds it). Also taken:
+    a hit in the start square gave no outline at all (the start square never
+    stands now); a comment that said the opposite of the code; tests for an island
+    and for the start square. Dropped as overkill: the "same spot again" rule
+    round a loop's end (the numbers stay the same without it). Written into the
+    plan: loops crossing each other are not prevented; floor cut off from the
+    start is not drawn; the reviewer's design notes for B and C.
+  - On the stored drive (boot `cc0e4e65`): 17 to 23 loops a band, closed, built in
+    1.1 s; 1.6 m of wall in all, the rest rough or guess.
+
 ## 11 Nov 2026: the line map (step 7), substep by substep
 
 Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the design is in

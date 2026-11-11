@@ -10,7 +10,7 @@ import { CellMaps } from "../maps/cell_map.ts";
 import { Store } from "../store.ts";
 import { WIRE_VERSION } from "../wire.ts";
 import { noFirmware } from "../test_store.ts";
-import { BANDS, inBand, sightsOf, type Sight } from "../maps/line_map/sights.ts";
+import { BANDS, inBand, sightsOf, type Sight } from "../maps/outline/sights.ts";
 import { loadMounting } from "../mounting.ts";
 import { zoneAt } from "../tof_format.ts";
 import { box, cast, facesAt, wall, type Room } from "./room.ts";
@@ -18,7 +18,7 @@ import { drive, MEASURED_DRIFT, movesOf, NO_DRIFT, randomOf, type Moment, type P
 import { ALL_NOISE, NO_NOISE, tofFrame, ZONE_RAD, type Noise } from "./tof.ts";
 import { run, SCENARIOS, type Scenario } from "./scenarios.ts";
 import { play } from "./play.ts";
-import { offFaces, poseError } from "./measure.ts";
+import { closed, floorError, offFaces, poseError } from "./measure.ts";
 
 const DEG = Math.PI / 180, tof = loadMounting().tof;
 const close = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
@@ -150,17 +150,65 @@ test("a frame's rays are the real helper's: where each zone ends, its heights, i
   } finally { maps.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("the square room without noise or drift: the map's lines lie on the walls, all four, in each band", () => {
-  const played = play(scenario("square", EXACT)), steps = played.map(p => p.step), lines = Object.values(played.at(-1)!.bands);
-  assert.equal(steps.length, 12);
-  assert.deepEqual(poseError(steps.at(-1)!.odometry, steps.at(-1)!.truth), { m: 0, rad: 0 });
-  for (const band of lines) {
-    assert.equal(band.length, 4);
-    for (const l of band) {
-      assert.ok(Math.hypot(l.bx - l.ax, l.by - l.ay) > 2.5);
-      for (const [x, y] of [[l.ax, l.ay], [l.bx, l.by]]) assert.ok(offFaces(steps[0].faces, x, y) < 0.01, `${x}, ${y}`);
-    }
+// What the outline measures against the truth after a scenario's last step, per band (L1, L2, above).
+function measured(s: Scenario) {
+  const played = play(s), last = played.at(-1)!, poses = played.flatMap(p => p.step.frames.filter((_, i) => i % 5 === 0).map(f => f.truth));
+  return { played, last, bands: BANDS.map(band => ({ loops: last.bands[band.name], ...floorError(last.bands[band.name], last.step.faces, band, poses) })) };
+}
+const lengthOf = (e: { ax: number; ay: number; bx: number; by: number }) => Math.hypot(e.bx - e.ax, e.by - e.ay);
+
+test("the square room without noise or drift: one closed outline a band, its walls on the true walls, its floor the room's", () => {
+  const { last, bands } = measured(scenario("square", EXACT));
+  assert.deepEqual(poseError(last.step.odometry, last.step.truth), { m: 0, rad: 0 });
+  bands.forEach((band, i) => {
+    assert.equal(band.loops.length, 1);
+    assert.equal(band.loops[0].island, false);
+    const walls = band.loops[0].edges.filter(e => e.kind === "wall");
+    for (const e of walls) for (const [x, y] of [[e.ax, e.ay], [e.bx, e.by]]) assert.ok(offFaces(last.step.faces, x, y) < 0.01, `${x}, ${y}`);
+    // L1's floor is seen to about 1.65 m only (by row 5): its walls stop short of the corners.
+    assert.ok(walls.reduce((sum, e) => sum + lengthOf(e), 0) > (i === 0 ? 8.5 : 10), BANDS[i].name);
+    assert.equal(band.wrongM2, 0);
+    assert.ok(band.seen > (i === 0 ? 0.9 : 0.98), `${BANDS[i].name} ${band.seen}`);
+  });
+});
+
+test("the box and the table without noise: the legs are islands in every band; the box is in L1 only", () => {
+  const { bands } = measured(scenario("things", EXACT));
+  const nearBox = (e: { ax: number; ay: number }) => e.ax > 0.6 && e.ax < 1.1 && e.ay > 0.2 && e.ay < 0.7;
+  bands.forEach((band, i) => {
+    assert.ok(band.loops.filter(l => l.island).length >= 4, BANDS[i].name);
+    assert.equal(band.loops.flatMap(l => l.edges).some(e => e.kind !== "guess" && nearBox(e)), i === 0, BANDS[i].name);
+  });
+});
+
+test("every scenario, with all noise and drift: at every step each band's loops are closed and never cross", () => {
+  for (const s of SCENARIOS)
+    for (const { bands } of play(s))
+      for (const band of BANDS) {
+        const loops = bands[band.name];
+        assert.deepEqual(closed(loops), { open: 0, crossings: 0 }, `${s.name} ${band.name}`);
+        assert.equal(loops.filter(l => !l.island).length, 1, `${s.name} ${band.name}`);
+      }
+});
+
+test("the outline with noise: it covers most of the floor the robot saw, and little else", () => {
+  for (const name of ["square", "loop"]) {
+    const { bands } = measured(scenario(name, { drift: NO_DRIFT }));
+    bands.forEach((band, i) => {
+      assert.ok(band.seen > 0.8, `${name} ${BANDS[i].name} seen ${band.seen}`);
+      assert.ok(band.wrongM2 < 0.06 * band.areaM2, `${name} ${BANDS[i].name} wrong ${band.wrongM2} of ${band.areaM2}`);
+    });
   }
+});
+
+test("through the door the outline grows; in the big room it ends in a guess at the sensor's reach", () => {
+  const { played, bands } = measured(scenario("door", EXACT));
+  const areaAt = (step: number) => floorError(played[step].bands.above, played[step].step.faces, BANDS[2], [played[0].step.truth]).areaM2;
+  assert.ok(areaAt(11) > 8 && areaAt(11) < 10.5, `${areaAt(11)}`);   // the first room, and a little through the door
+  assert.ok(bands[2].areaM2 > 17, `${bands[2].areaM2}`);                // both rooms: 18 m2
+  const big = measured(scenario("big")).bands[2];
+  assert.ok(big.loops[0].edges.every(e => e.kind === "guess"));
+  for (const e of big.loops[0].edges) assert.ok(Math.hypot(e.ax, e.ay) > 1.9 && Math.hypot(e.ax, e.ay) < 2.6, `${Math.hypot(e.ax, e.ay)}`);
 });
 
 test("with the measured drift a full turn ends about 11° off; odometry doesn't see it", () => {

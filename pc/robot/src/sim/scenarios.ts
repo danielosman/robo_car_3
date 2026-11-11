@@ -5,7 +5,7 @@
 //   run(scenario)    the drive: each move's frames (as the real reader gets them) and the truth
 import type { PosedFrame } from "../tof_format.ts";
 import type { ZoneRays } from "../maps/cell_map.ts";
-import { sightsOf, type Sight } from "../maps/line_map/sights.ts";
+import { sightsOf, type Sight } from "../maps/outline/sights.ts";
 import { box, facesAt, round, wall, type Face, type Room } from "./room.ts";
 import { drive, MEASURED_DRIFT, movesOf, randomOf, type Drift, type Pose } from "./drive.ts";
 import { ALL_NOISE, tofFrame, ZONE_RAD, type Noise } from "./tof.ts";

@@ -44,7 +44,7 @@ is several boxes: watch is six (`watch`, `watch_tof`, `watch_camera`, `watch_obs
 - Not: the bring-up firmware, `pc/bringup`, tests and test helpers, `lwipopts.h`,
   `wifi_config*.h`, the camera's register headers (`hm0360_*.h`), the ST library in
   `picoA/drivers/lib`.
-- A folder can be one module: `maps/line_map/` is a box, its path the folder's `index.ts`.
+- A folder can be one module: `maps/outline/` is a box, its path the folder's `index.ts`.
 - Planned: the modules in DATA_FLOW_PLAN.md section 8 marked "step N" (none now).
 
 ## References
@@ -246,6 +246,6 @@ Found so far:
   command from the viewer to a move and its answer; a drive checked against the map
   (`drive-check`), the PC's cell map (`pc-cell-map`), and the robot's map on demand
   (`robot-map`, with `map-answer` supplying its live pose).
-- **Planned parts** (DATA_FLOW_PLAN.md sections 4 and 8): none now. The line map
-  (`maps/line_map/`, step 7) is built; it has no flow of its own yet.
+- **Planned parts** (DATA_FLOW_PLAN.md sections 4 and 8): none now. The outline map
+  (`maps/outline/`, OUTLINE_MAP_PLAN.md) is being built; it has no flow of its own yet.
 - **After a code change:** `tools/lint.sh` runs the check; fix what it reports.

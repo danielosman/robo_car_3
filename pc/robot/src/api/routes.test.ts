@@ -171,7 +171,7 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     assert.equal(png, path.join(directory, "map", png.split(path.sep).at(-2), "1.png"));
     assert.ok(existsSync(png));
     assert.ok((await read("map", "", "?png&robot")).file.endsWith("robot.png"));
-    // The PC's line maps over the cells, or alone; only with --png, never the robot's.
+    // The PC's outline maps over the cells, or alone; only with --png, never the robot's.
     const lined = (await read("map", "1", "?png&lines")).file, linesOnly = (await read("map", "1", "?png&lines&nocells")).file;
     assert.ok(lined.endsWith(`${path.sep}1-lines.png`) && existsSync(lined));
     assert.ok(linesOnly.endsWith(`${path.sep}1-lines-only.png`) && existsSync(linesOnly));

@@ -2,21 +2,17 @@
 // three panels side by side (L1, L2, above). Each shows the room as it truly is at that
 // band's heights (grey), the true robot (green), the odometry robot (blue), and what
 // the map under test drew for the band. Map frame as `robot map --png`: x up, y left.
-//   stepPicture(room faces, poses, each band's lines)  the PNG
+//   stepPicture(room faces, poses, each band's strokes)  the PNG (the outline's colours: maps/outline/index.ts)
 //   sliderPage(title, captions)                        index.html: a slider over step-<n>.png
 import { rgbPng } from "../snapshot.ts";
-import { BANDS, type BandName } from "../maps/line_map/sights.ts";
+import { BANDS, type BandName } from "../maps/outline/sights.ts";
+import type { Rgb, Stroke } from "../maps/outline/index.ts";
 import type { Face } from "./room.ts";
 import type { Pose } from "./drive.ts";
 
-export type Rgb = readonly [number, number, number];
-// A line to draw, in metres.
-export interface Stroke { ax: number; ay: number; bx: number; by: number; rgb: Rgb }
 
 const PX_PER_M = 100, MARGIN_M = 0.3, GAP_PX = 12;
 const BACK: Rgb = [0x15, 0x15, 0x15], ROOM: Rgb = [0x70, 0x70, 0x70], TRUE: Rgb = [0x5f, 0xe0, 0x8a], ODOMETRY: Rgb = [0x5a, 0x8d, 0xff];
-// The bands' colours, as `robot map --png --lines` (api/map.ts).
-export const BAND_RGB: Record<BandName, Rgb> = { L1: [0xff, 0xff, 0xff], L2: [0xf2, 0xe2, 0x4a], above: [0x30, 0xd0, 0xd0] };
 const ROBOT_M = 0.1; // the robot is drawn as a circle this wide across, with a line along its heading
 
 export interface StepDrawing { faces: Face[]; truth: Pose; odometry: Pose; corrected?: Pose; bands: Record<BandName, Stroke[]> }

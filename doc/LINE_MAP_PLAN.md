@@ -5,8 +5,9 @@ the way lines are made changed while building (see "Changed while building").
 The earlier draft is [LINE_MAP_PLAN_OLD.md](LINE_MAP_PLAN_OLD.md) (not built).
 
 **11 Nov, after Daniel looked at the result:** this is not what he wants. The
-proposal that follows it is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). This file
-still describes the code as built.
+plan that follows it is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). Its step A
+removed `line_map.ts`, `straight.ts` and `lineMapsAt`; `sights.ts` lives on in
+`maps/outline/`. This file describes the line map as it was built.
 
 ## In short
 

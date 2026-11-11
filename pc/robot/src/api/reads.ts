@@ -16,7 +16,7 @@ import { CAMERA } from "./firmware.ts";
 import { poseOut } from "./answers.ts";
 import { displayRgb } from "./colour.ts";
 import { mapPng } from "./map.ts";
-import { lineMapsAt } from "../maps/line_map/index.ts";
+import { outlinesAt } from "../maps/outline/index.ts";
 import type { CellMaps } from "../maps/cell_map.ts";
 import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
@@ -117,12 +117,14 @@ export const READS: Record<string, Read> = {
           "the robot's own map code. The window (6 × 6 m around the robot, 10 cm cells) as three layers of cell bytes,\n" +
           "G (the floor), L1 (3-13 cm), L2 (13-23 cm), and the whole-house tiles outside it. format says how to read\n" +
           "them. --robot asks the connected robot for its own 6 × 6 m window right now. --png draws the whole map\n" +
-          "(or, with --robot, the robot's window) as a picture and gives its file. --png --lines draws the PC's line\n" +
-          "maps over it (white: L1, 3-13 cm; yellow: L2, 13-23 cm; cyan: above); with --no-cells, the lines alone.",
+          "(or, with --robot, the robot's window) as a picture and gives its file. --png --lines draws the PC's outline\n" +
+          "maps over it: per height band (white: L1, 3-13 cm; yellow: L2, 13-23 cm; cyan: above) the closed border of the\n" +
+          "floor seen free, and an island round each thing in it; bright: a wall, medium: a rough edge, faint: a guess\n" +
+          "(nothing seen there yet). With --no-cells, the outlines alone.",
     async run(ctx, args, flags) {
       atMostOne(args, this.usage);
       const withLines = flags.has("lines"), withCells = !flags.has("nocells");
-      if (withLines && (!flags.has("png") || flags.has("robot"))) throw new ReadError("--lines draws the PC's line maps: use it with --png, without --robot", 400);
+      if (withLines && (!flags.has("png") || flags.has("robot"))) throw new ReadError("--lines draws the PC's outline maps: use it with --png, without --robot", 400);
       if (!withCells && !withLines) throw new ReadError("--no-cells leaves nothing to draw: use it with --png --lines", 400);
       if (flags.has("robot")) {
         if (args.length) throw new ReadError("--robot asks the robot now (it takes no snapshot number)", 400);
@@ -149,9 +151,9 @@ export const READS: Record<string, Read> = {
       if (flags.has("png")) {
         const name = `${id.sequence}${withLines ? (withCells ? "-lines" : "-lines-only") : ""}.png`;
         const file = path.join(ctx.recordingsDirectory, "map", ctx.bootFolders.folderForBoot(id.boot), name);
-        const lines = withLines ? await lineMapsAt(ctx.store, ctx.maps, id.boot, id.sequence) ?? [] : [];
+        const outlines = withLines ? await outlinesAt(ctx.store, ctx.maps, id.boot, id.sequence) ?? [] : [];
         await mkdir(path.dirname(file), { recursive: true });
-        await writeFile(file, mapPng(map, { cells: withCells, lines }));
+        await writeFile(file, mapPng(map, { cells: withCells, outlines }));
         return { snapshot: id.sequence, map: "pc", file };
       }
       const w = map.window, r = map.robot, n = w.cellsX * w.cellsY;

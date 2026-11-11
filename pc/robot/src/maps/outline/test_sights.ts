@@ -1,4 +1,4 @@
-// Hand-made sights for the line map's tests: no helper, no ToF frame.
+// Hand-made sights for the outline map's tests: no helper, no ToF frame.
 import { heightsAt, type Sight } from "./sights.ts";
 
 export const DEG = Math.PI / 180, ZONE = 5.625 * DEG;

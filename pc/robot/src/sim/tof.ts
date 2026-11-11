@@ -2,7 +2,7 @@
 // angle each, the sensor where the mounting puts it. It measures the room from the
 // robot's true pose and hands the reading on placed by the odometry pose, in the form
 // the real reader gets from the store and the helper: a posed frame and its zones'
-// rays. So sightsOf() (maps/line_map/sights.ts) and all after it is the real code.
+// rays. So sightsOf() (maps/outline/sights.ts) and all after it is the real code.
 //   tofFrame(faces, moment, number, noise, random)  one frame and its rays
 // A zone reads what its middle ray meets at the zone's heights (a thing, the floor or
 // "beyond"); if that ray met nothing, the nearest thing the rays beside it met (a thin

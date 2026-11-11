@@ -26,8 +26,9 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   what Daniel wants: he wants one closed outline per band that is corrected over
   time and used against pose drift.
 - **Next: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)**, agreed in general by Daniel
-  (11 Nov), not built: a simulator first (its step S), then the outline, the walls
-  and the pose correction (A-D), then the page (E, the old step 8). A fresh
+  (11 Nov), being built (its table of steps says how far): a simulator first (its
+  step S), then the outline, the walls and the pose correction (A-D), then the page
+  (E, the old step 8). The line map's code is replaced by `maps/outline/`. A fresh
   session starts at its "For the fresh session". Then 9 docs, the final flash,
   the robot test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
