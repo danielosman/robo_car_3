@@ -20,7 +20,8 @@
 //   'K' cells (3 x 60 x 60 B)   each column's class and confidence       -> 60 x 60 B columns, 60 x 60 B confidence
 //   'R' frame (277 B, compact)  each zone's reading in the world (tof_rays_of): 64 x
 //                               verdict u8 (255: no valid reading or no pose), the
-//                               point x, y, z, the lowest and highest ray end (f32)
+//                               point x, y, z, the lowest and highest ray end, the
+//                               sensor x, y, z (f32)
 // The map code's own console lines (printf) go to stderr. EOF ends it.
 #include <math.h>
 #include <stdio.h>
@@ -121,12 +122,13 @@ static void view(void) {
 static void rays(const posed_frame_t *f) {
     for (int i = 0; i < TOF_ZONES; i++) {
         uint8_t verdict = NO_VERDICT;
-        float v[5] = {0};
+        float v[8] = {0};
         if (f->pose_known && tof_valid(&f->frame.zone[i])) {
             tof_rays_t r;
             tof_rays_of(f, i, (float)f->frame.zone[i].distance_mm / 1000.0f, &r);
             verdict = (uint8_t)r.verdict;
             v[0] = r.point[0]; v[1] = r.point[1]; v[2] = r.point[2]; v[3] = r.low_m; v[4] = r.high_m;
+            v[5] = r.origin[0]; v[6] = r.origin[1]; v[7] = r.origin[2];
         }
         put(&verdict, 1);
         put(v, sizeof v);

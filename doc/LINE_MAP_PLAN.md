@@ -1,183 +1,120 @@
-# Line map on the PC — plan (draft, 7 Nov 2026)
+# Line map on the PC — plan
 
-A map of lines, built on the PC from the robot's compact ToF frames. Not built yet;
-it is step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md) and needs the PC cell map's
-helper (step 5) for its rays. Nothing here is decided until Daniel confirms it
-before step 7. The robot keeps its own cell map for driving; this map is the PC's.
+Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Confirmed by Daniel on 11 Nov 2026.
+The earlier draft is [LINE_MAP_PLAN_OLD.md](LINE_MAP_PLAN_OLD.md) (not built).
 
-## Is it doable?
+## In short
 
-Yes. Walls, furniture fronts and boxes are flat or nearly flat, and one ToF row sees
-them as up to 8 points side by side. Joining those points gives lines. A lone point
-gives a short line as wide as its zone. Coming closer makes the zones narrower and
-the distances surer, so a close look can correct a far one.
+The PC turns the robot's stored ToF frames into lines: walls, furniture fronts, boxes.
+It keeps three separate maps, one per height band, and builds them the way the cell
+map is built: from the frames stored before the step you pick. `robot map --png
+--lines` draws them; the page shows them in step 8.
 
-Limits to accept:
+## Where we are
 
-- A zone is 5.6° wide, so a short line is as wide as the zone at that distance:
+| Substep | What | State |
+|---|---|---|
+| a | Sights: a frame's zones as flat wedges (`sights.ts`); the helper gives the sensor's position | done |
+| b | Pieces: one row's hits joined into straight pieces (`pieces.ts`) | next |
+| c | Merge: pieces into a band's lines (`line_map.ts`) | |
+| d | See-through: wedges remove what isn't there (`line_map.ts`) | |
+| e | The reader (a boot's line maps at a snapshot) and `robot map --png --lines [--no-cells]` | |
 
-  | Distance | Zone width |
-  |---|---|
-  | 0.5 m | 5 cm |
-  | 1 m | 10 cm |
-  | 2 m | 20 cm |
-  | 2.5 m | 25 cm |
+Each substep ends with tests green, a fresh reviewer, this table updated and a commit
+(no push). Step 7 changes no Pico: nothing to flash.
 
-  A 2 cm chair leg at 1 m becomes a 10 cm line.
-- Round things (the pouf) become short broken lines.
-- Lines say where things are, not what is free. Free floor is the PC's cell map's
-  job (DATA_FLOW_PLAN.md); the two maps share only the frame they are drawn in.
+## Decisions (Daniel)
 
-## What comes in
-
-Per ToF frame, a **posed_frame** (DATA_FLOW_PLAN.md, sections 5-6) and its
-**rays** from the cell map helper:
-
-- posed_frame: frame number, time, the robot's pose then (x, y, yaw, pitch), still
-  or moving; per zone: distance in cm (0 nothing, 255 beyond 2.54 m), signal (capped
-  at 255), sigma in mm, **kind** (sure / less sure / unsure / nothing), and how many
-  targets the sensor saw. One target per zone: the first with status 5, 6 or 9.
-- rays: per zone its point in the world, the heights its wedge covers there, and the
-  cell map's **verdict** (floor / obstacle / unsure). The line map does no geometry
-  of its own: the helper runs the robot's C code, so both maps judge a reading the
-  same way.
-
-## Part 1: points
-
-- Each zone of kind sure or less sure gives one point (from the helper's rays).
-- By the verdict:
-  - **floor**: not used for lines;
-  - **obstacle**: a point for lines;
-  - **unsure**, and zones of kind unsure or nothing: ignored (but they still clear,
-    part 4).
-- Each point keeps its uncertainty: across the ray, half a zone (d × tan 2.8°);
-  along the ray, the sigma (at least 1 cm, the distance's step).
-
-## Part 2: lines from one frame
-
-- Work row by row, left to right, over the obstacle points.
-- Grow a line while the next point fits it: its distance from the line is under a
-  limit (for example the larger of 3 cm and 2 × sigma), and there is no jump in
-  depth between the two zones.
-- When the next point doesn't fit, end the line and start a new one.
-- A line through several points goes through their centres. Its two ends go out by
-  half a zone, to the zone borders: the end zones saw the surface across their whole
-  width.
-- A point that fits no neighbour becomes a short line across its zone, at right
-  angles to the ray, from border to border (the 5.6° borders).
-- Each end is marked:
-  - **real end**: the next zone reads farther or sees nothing, so the object ends
-    there (within half a zone);
-  - **open end**: the edge of the view (column 1 or 8), or the next zone is unsure.
-    The thing may go on.
-- The same wall seen by several rows gives nearly the same line on the floor plan.
-  Lines from different rows that match are joined into one, keeping the lowest and
-  highest point seen.
-
-## Rows and height bands
-
-All 8 rows are used (the cell map uses all 64 zones too). Rows are the unit for
-**fitting** lines in one frame, but not for **keeping** them:
-
-- A row is a cone, not a level slice: row 3 sees a wall 16 cm up at 0.5 m and 39 cm
-  up at 2 m. A map per row would hold the same wall in different rows as the robot
-  drives, never merged, and its meaning would change with distance and pitch.
-- So each line goes into a **height band** by the heights its zones cover (the
-  whole zone, not only its centre ray: at 2 m a zone is ~20 cm tall), the cell
-  map's bands:
+- **Three independent maps**, one per band. A wall is stored up to three times.
 
   | Band | Height | Means |
   |---|---|---|
   | L1 | 3-13 cm | blocks the robot |
-  | L2 | 13-23 cm | an overhang; drive stops for it too, as in the cell map |
-  | above | over 23 cm | the robot passes under (table tops); walls seen high |
+  | L2 | 13-23 cm | an overhang |
+  | above | over 23 cm | the robot passes under |
 
-  A line seen across bands goes into each band it reaches.
-- Merging and removing happen within a band. The page draws each band in its own
-  colour, each can be hidden: the "stacked, different colours" view, but by height.
+- **Wedges, not rays.** A zone is one flat triangle on the floor plan: the sensor at
+  its tip, one zone angle (5.6°) wide.
+- **Built from the store at a snapshot**, like the cell map. The slider works the
+  same. No per-frame page view, no update while the robot drives.
+- **`robot map --png`** draws the cell map, as now. `--lines` adds the lines.
+  `--lines --no-cells` draws only the lines. `--no-cells` alone is an error.
+- **No spatial index.** A band's lines are a plain list.
+- `robot check` keeps using the cell map. No pose correction from lines.
 
-## Part 3: into the map
+## The parts
 
-The map is a list of lines in a quadtree (each line by its box, padded by its
-uncertainty). For each new line:
+| File (`pc/robot/src/maps/line_map/`) | Knows | Interface |
+|---|---|---|
+| `sights.ts` | ToF frames, verdicts, "beyond", the band heights | `sightsOf(frame, rays, zoneRad)` → 8 rows of 8 sights; `inBand(rows, band)` → the rows for one band's map; `heightsAt(sight, d)` |
+| `pieces.ts` | how one row's hits become straight pieces | `piecesOf(row)` |
+| `line_map.ts` | one band's lines: merge, see-through | `add(rows)`, `lines()` |
+| `index.ts` | the store and the helper: a boot's three maps at a snapshot | `lineMapsAt(boot, n)` |
 
-- **Find**: look up the lines near it in the quadtree.
-- **Match**: same direction (within ~10°), close enough sideways (within the two
-  lines' uncertainties together), and overlapping or touching along their length.
-- **Merge** a match:
-  - position and direction: an average weighted by sureness. A close reading counts
-    much more than a far one; a reading while still counts more than one while
-    moving.
-  - ends: an open end only grows the line; a real end replaces the old end if it was
-    seen from closer (a smaller zone width there).
-  - the line remembers how often it was seen, when last, and the closest distance it
-    was seen from.
-- **No match**: a new line, shown faint until seen again (or seen twice in one still
-  period).
+- Only `sights.ts` knows ToF data and the bands. The other two read sights alone
+  and are tested with hand-made sights.
+- The helper (`cell_map_helper.c`, request `R`) also returns the sensor's position.
+  No C geometry is copied into TypeScript.
 
-This is how "moving closer corrects the lines": a far line is wide and loose; the
-close look is narrow and sure, and wins.
+## How a map is built
 
-## Part 4: removing what isn't there
+A **sight** is one zone's wedge: the sensor's position, the wedge's direction and
+half width, how far it saw through, how high it is along the way, its weight, and a
+hit at its end or none.
 
-Lines must also go away, all or in part (a moved chair, a person, a far line drawn
-too long). A zone doesn't see along a thin ray: it sees a 5.6° wedge.
+1. **Sights** (`sights.ts`). For each zone with a valid reading:
+   - the seen-through stretch ends a margin before the reading (the larger of 5 cm,
+     2 × sigma, one zone width there), so a wall seen at an angle doesn't remove
+     itself;
+   - a **hit** only if the verdict is obstacle and the reading is not "beyond"; it
+     keeps the heights the zone covers there;
+   - floor, unsure and beyond readings give no hit but still see through;
+   - zones with no valid reading give nothing (24 "nothing" zones in 49,536);
+   - a still, sure reading weighs 1; moving halves it, less sure halves it;
+   - **per band:** a hit goes to each band its heights reach, cut to that band.
+     What a sight saw through is the same for all three maps.
+2. **Pieces** (`pieces.ts`). In one band, one row's hits left to right:
+   - break where a zone has no hit, or two neighbours are farther apart than about
+     two zone widths;
+   - split each run at its worst-fitting point until all fit (Ramer-Douglas-Peucker;
+     limit: the larger of 3 cm, 2 × sigma, a share of the zone width);
+   - a piece's ends go half a zone width past its outer points;
+   - a lone point becomes a stub across its zone.
+3. **Merge** (`line_map.ts`). A piece joins the nearest line that both its ends lie
+   near and whose seen part it touches. Otherwise it starts a new line.
+   - A line keeps weighted sums of its points and is refitted from them. Close and
+     still readings weigh more.
+   - A line keeps a score for each 5 cm step along it. A hit raises the scores of
+     the steps the piece covers.
+4. **See-through** (`line_map.ts`). A sight lowers the score of each step inside its
+   seen-through stretch, if the wedge is there at the heights the step was hit at.
+   A wedge passing over a low box says nothing about the box.
+   - Wedges meeting a line at under 30° are skipped (they slide along it).
+5. **Read.** A line is drawn where its steps have a score above zero and were hit
+   in at least two frames. Steps at zero are forgotten; a line with no steps goes.
 
-- **What a zone clears:** the part of a line inside its wedge, closer than its
-  reading (by more than the uncertainties), and at heights the wedge passed through
-  (a reading passing over a low box to the wall behind says nothing about the box).
-  A zone with nothing in range clears the same way, up to a set distance (the cell
-  map uses 1 m).
-- **Only that part:** a line keeps a short list of stretches along it that zones
-  saw through. The wedge's two edges cut the line at two points; the stretch between
-  them gets a "miss".
-- **Not at once:** a stretch is cut out only after misses from more than one frame
-  (or one still, close look) outweigh the hits there. Then the line gets shorter,
-  splits in two, or goes when nothing is left.
-- **Shallow angles don't count:** a wedge meeting a line at under ~30° slides along
-  it (TODO.md: the wall cleared by a scan).
-- Cost: cutting a line by a wedge is two line crossings; the quadtree gives the few
-  lines near each wedge. Not much more than any removal needs.
+## Numbers from the stored drive (boot `cc0e4e65`, 774 frames)
 
-## Part 5: still periods
+| Fact | Number |
+|---|---|
+| Obstacle points per frame (median) | 20, all in rows 1-6 |
+| Neighbour pairs in a row with a depth jump | 23 % |
+| Obstacle points whose zone spans more than one band | 31 % |
+| Pieces per frame (3 cm limit) | about 12, median 20 cm long |
+| Pieces with 1 or 2 points | about 80 % |
+| The helper's rays for the whole drive | about 0.2 s |
 
-The robot stands still 200 ms after sending starts, before it moves, and keeps
-sending 200 ms after it stops (both settings). The frames while still are the best: no blur, sure pose.
+One frame gives short, weak pieces. The map's quality comes from the merge.
 
-- First version: every frame counts on its own, still frames with a higher weight.
-- Later, if blips show up: take the median per zone over a still period before step
-  1.
+## Tests
 
-## The quadtree
+- Hand-made: a flat wall, a corner, a leg in front of a wall, a wall at a shallow
+  angle, a thing that went away, beyond-range readings (no lines).
+- The stored drive replayed, drawn over the cell map (`robot map --png --lines`).
 
-Asked by: merge (lines near a new line), remove (lines crossed by a ray), drive
-check (lines along a path, as `robot check` does now), drawing (lines in view).
+## Known limits
 
-A few thousand lines for a flat: any index is fast enough. `rbush` (an R-tree, in
-doc/inspiration/) does the same job ready-made; a quadtree of our own is also small.
-To decide when it is built.
-
-## How we test it
-
-- **On stored drives:** the new database keeps every posed frame, so a drive can be
-  run through the line map again after each change, without the robot. (The old
-  recordings are not used: DATA_FLOW_PLAN.md, "Old data".)
-- **Unit tests** on hand-made frames: a flat wall, a corner, a leg in front of a
-  wall, a wall seen at a shallow angle.
-- **Compare** with the PC's cell map of the same frames, drawn under it.
-
-## Order of work
-
-1. Parts 1-2 (points, lines from one frame); drawn per frame on the page.
-2. Part 3 (merge, bands) with the quadtree; a whole drive drawn.
-3. Part 4 (removing).
-4. Live: the same code on the stream from the robot.
-5. Later, if wanted: drive check (`robot check`) on lines instead of cells.
-
-## Open questions
-
-1. **Limits** (fit distance, angle for a match, weights): first guesses above, to be
-   tuned on stored drives.
-2. **The pose drifts.** Merging trusts odometry; a wall seen twice after a long drive
-   may become two lines. Fixing that (matching lines to correct the pose) is a later
-   step, not in this plan.
+- Odometry drifts: a wall seen again after a long drive may become two lines.
+- Two lines that grow into each other are not joined into one.
+- The limits (fit, match, margin, score cap) are first guesses, tuned on the stored
+  drive.

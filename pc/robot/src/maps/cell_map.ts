@@ -36,8 +36,10 @@ export interface CellMapView {
   columns: number[]; confidence: number[];                            // 60 x 60, ix * 60 + iy (picoA/app/cell_map.h)
   tiles: { tx: number; ty: number; columns: Buffer }[];              // the whole-house map outside it, 4 bits a column
 }
-// A zone's reading in the world (picoA/app/tof_rays.h); null: no valid reading, or no pose.
-export type ZoneRays = { verdict: (typeof VERDICTS)[number]; point: [number, number, number]; lowM: number; highM: number } | null;
+// A zone's reading in the world (picoA/app/tof_rays.h): where its centre ray ends, the lowest
+// and highest ray end, the sensor it was measured from; null: no valid reading, or no pose.
+export type ZoneRays = { verdict: (typeof VERDICTS)[number]; point: [number, number, number]; lowM: number; highM: number;
+                         origin: [number, number, number] } | null;
 
 // What robot map, robot check and the page read of a map.
 export interface CellMap {
@@ -135,9 +137,9 @@ class Helper implements CellMap {
 
   async rays(frame: PosedFrame): Promise<ZoneRays[]> {
     const b = await this.ask("R", packTof("compact", frame)), out: ZoneRays[] = [];
-    for (let i = 0, at = 0; i < 64; i++, at += 21) {
+    for (let i = 0, at = 0; i < 64; i++, at += 33) {
       const v = b[at], f = (k: number) => b.readFloatLE(at + 1 + 4 * k);
-      out.push(v === 255 ? null : { verdict: VERDICTS[v], point: [f(0), f(1), f(2)], lowM: f(3), highM: f(4) });
+      out.push(v === 255 ? null : { verdict: VERDICTS[v], point: [f(0), f(1), f(2)], lowM: f(3), highM: f(4), origin: [f(5), f(6), f(7)] });
     }
     return out;
   }

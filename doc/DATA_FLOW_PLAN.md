@@ -23,9 +23,9 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   are not part of the remaining work. Their design ideas have a separate home in
   [ARCHITECTURE_REFACTOR_PLAN.md](ARCHITECTURE_REFACTOR_PLAN.md), starting with
   PicoB's odometry acting as the IMU data distributor.
-- **Next: step 7**, the line map ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md); confirm its
-  draft with Daniel first: section 14, 2). Then 8 map switch, 9 docs, the final flash,
-  the robot test.
+- **Now: step 7**, the line map, in substeps a-e. Its design and its state are in
+  [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md), "Where we are" (confirmed by Daniel, 11 Nov).
+  Then 8 map switch, 9 docs, the final flash, the robot test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
   PicoA changes since then (step 5's `room.h`, step 6's map, snapshot v3 and wire v5)
   are tested on the robot in step 9 (or flashed earlier if Daniel wants).
@@ -86,12 +86,10 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
     `robot frames <boot> <move>`, `robot imu <boot> <move>`;
   - to look round, turn in 30° steps (12 × `r30`), not one 390° turn: a camera picture
     every 30°, to plan and to check.
-- **Step 7 start:** read [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md) in full and confirm
-  the draft with Daniel before implementation. Inspect `maps/cell_map.ts`,
-  `native/cell_map_helper.c`, `tof_rays.h`, `tof_frame.h`, and the existing map
-  tests. Use the current working tree as the baseline; review Step 7 changes
-  against the Step 6 implementation baseline.
-- **Commit only when Daniel says** (README).
+- **Step 7:** read [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md) in full; continue at the
+  first substep not marked done. Daniel asked for a commit (no push) after each
+  substep, once the tests pass and the reviewer agrees.
+- **Otherwise commit only when Daniel says** (README).
 - Long test runs: cap them with a time limit, and never read large generated data
   into the agent's context.
 
@@ -338,7 +336,7 @@ What each hides, and its interface. Built unless marked (step N).
 | `fakerobot.ts` | a robot on the wire; replays a stored boot | |
 | `objects/place.ts` | camera placement | takes the boot's camera geometry |
 | `maps/cell_map.ts` + `native/cell_map_helper.c` | the helper program (robot `cell_map.c`, `tof_rays.c`, `house_map.c`, `tof_format.c`, `room.c`, built with cc once per server run), one per boot; built from the boot's stored frames when read; the last 16 maps read kept | `atSnapshot(boot, n, (m, pose) => ...)`: `drive` (room.h's rule), `obstacleWithin`, `view`; `viewAtSnapshot(boot, n)`; `rays(boot, frame)`; `columnsOf(cells)` |
-| step 7: `maps/line_map/` | lines, bands, quadtree | `add(posed, rays)`, lines in view |
+| step 7: `maps/line_map/` | lines per height band: sights, pieces, merge, see-through (LINE_MAP_PLAN.md) | `lineMapsAt(boot, n)` |
 | `api/map.ts`, `api/check.ts` | the map as a PNG (whole building, or the robot's window); check: a goto's turn and limit (`behaviour.h`'s numbers), a turn's warning; where a drive stops is the helper's (`room.h`) | |
 
 ## 9. Budgets
@@ -364,32 +362,9 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.5 K
 
 ## 11. Steps left
 
-**7. The line map** (PC) — [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md): points and verdicts
-from the helper's `rays`; one ToF row's zones joined into lines; lines in bands L1,
-L2, above; nearby lines merged; a zone's wedge clears the part of a line in front
-of its reading. The detailed plan is still a draft, including the choice of spatial
-index (quadtree or R-tree); do not treat its example limits as final decisions.
-
-Start here in the fresh session:
-- Confirm the draft and its substeps with Daniel. Keep line-map drive checks and
-  pose correction out of this step; `robot check` continues to use the cell map.
-- Use `CellMaps.rays(boot, frame)`: each zone returns `verdict`, `point`, `lowM`,
-  `highM`, or null. Check what the draft needs for wedge edges and uncertainty;
-  extend the helper's output if needed rather than duplicating C geometry in TS.
-  A returned point is not always a hit: use `isBeyond(frame, zone)` from
-  `tof_format.ts` to exclude range bounds from line hits (compact 255 means at
-  least 2.55 m, not an obstacle there). The helper currently returns null for
-  "nothing" zones; extend its geometry output for empty-zone clearing.
-- Use stored frames in `pc/robot/recordings/robot2.duckdb`, boot `cc0e4e65`, as the
-  first real-data fixture. Replay in frame order with that boot's mounting.
-  `maps/cell_map.test.ts` shows how to use the helper and store.
-- Follow the draft's order: per-frame lines; merging and bands; removing stale
-  stretches; live input. Confirm how per-frame previews fit with Step 8's final
-  map switch. Use a fresh reviewer after each substep and again at the end.
-- Test hand-made walls, corners, thin legs, shallow angles and removal, plus
-  beyond-range readings (no false lines) and empty zones (clearing), then replay
-  stored drives. Keep the cell map unchanged as the comparison. Update the diagram
-  data and run all checks before declaring the step complete.
+**7. The line map** (PC) — [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md): the design, the
+substeps a-e and which are done. Three maps of lines, one per height band, built
+from the stored frames at a snapshot; `robot map --png --lines [--no-cells]`.
 
 Real-data limits to keep in mind:
 - Floor rows 8 / 7 / 6 meet the floor at about 27 / 37 / 60 cm with the 9 cm mount.
@@ -443,6 +418,5 @@ then the agent runs the tests via `./robot` (section 2).
 ## 14. Open questions for Daniel
 
 1. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
-2. **Line map:** LINE_MAP_PLAN.md is a draft; confirm it before step 7.
-3. **Step 6 robot validation** is still due in Step 9. Passing host tests and reviews
+2. **Step 6 robot validation** is still due in Step 9. Passing host tests and reviews
    does not establish that floor-first driving is safe on the real floor.

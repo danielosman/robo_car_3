@@ -5,6 +5,26 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 11 Nov 2026: the line map (step 7), substep by substep
+
+Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the design is in
+[LINE_MAP_PLAN.md](LINE_MAP_PLAN.md). PC only: nothing to flash.
+
+- **The plan was redone before coding.** The 7 Nov draft
+  ([LINE_MAP_PLAN_OLD.md](LINE_MAP_PLAN_OLD.md)) was measured on boot `cc0e4e65` (774
+  frames) and simplified with Daniel: three independent maps, one per band; no
+  quadtree; one merge rule instead of three joins; no real and open ends; scores per
+  5 cm step instead of stretch lists; built from the store at a snapshot, no live
+  path; "nothing" zones ignored (24 of 49,536).
+- **Substep a, sights** (`maps/line_map/sights.ts`; the helper's `R` answer also gives
+  the sensor's position, 21 → 33 B a zone). A zone is one flat wedge with its
+  heights along the way. Changed while building: a sight is not cut per band; only
+  its hit is (`inBand`), and see-through will test heights instead. Otherwise a wedge
+  passing under a table top would remove the table's line.
+  - Review (fresh subagent): fine to commit. Taken: `heightsAt()` as the one owner
+    of the wedge's height formula; a test of the 5 cm margin. Left: the caller
+    passes the zone angle; a "beyond" reading also loses the margin (simple first).
+
 ## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5), the robot's window-only map and floor first (step 6)
 
 Steps of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Both Picos flashed once (commit
