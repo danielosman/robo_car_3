@@ -5,6 +5,34 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 11 Nov 2026: the outline map, step by step
+
+The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.
+
+- **Step S, the simulator** (`pc/robot/src/sim/`, `npm run sim -- <scenario>`): a
+  made-up room, a robot with a true and an odometry pose, a ToF with the measured
+  noise, a picture per step with a slider, seven scenarios, nine tests.
+  - It gives posed frames and rays, not sights: the real `sightsOf()` turns them
+    into sights, so only the helper and the store are replaced.
+  - Changed while building: a zone reads what its middle ray meets, not "the
+    nearest thing inside it". The nearest thing pulled a wall seen at an angle up
+    to 5 cm closer, so the no-noise room was not exact.
+  - Changed while building: a zone is hit only at the heights the helper gives it
+    (its rays at 1/6 and 5/6). With the full zone a 10 cm box showed up in L2.
+  - Review (fresh subagent): two things to fix first, both taken. The sim had its
+    own floor/obstacle rule: floor readings smeared while moving became phantom
+    things beside the robot (113 hits closer than 30 cm in the empty big room).
+    Now the robot's rule and heights are copied from `tof_rays.c` and a test
+    compares a frame's rays with the real helper's; floor readings don't smear.
+    The `door` drive took the true robot through the door post: the door is 1.2 m
+    wide now and a test keeps every scenario's robot 20 cm clear of everything.
+  - Also taken: one place for the map under test (`play.ts`); the edge noise only
+    at a jump between neighbouring rays (it also hit slanted walls); the drive and
+    the noise draw from two random sources; `allFaces()`; the command's exit code.
+  - Seen on the pictures: with all noise and drift the line map of today draws 14
+    to 45 loose lines a band, fanned out by the drift. The simulator shows the
+    problem the plan is about.
+
 ## 11 Nov 2026: the line map (step 7), substep by substep
 
 Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the design is in

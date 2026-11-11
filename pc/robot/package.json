@@ -11,6 +11,7 @@
     "start": "node --env-file-if-exists=.env src/main.ts",
     "test": "node --test 'src/**/*.test.ts'",
     "fakerobot": "node src/fakerobot.ts",
+    "sim": "node src/sim/main.ts",
     "place-objects": "node src/objects/place_again.ts",
     "typecheck": "tsc -p .",
     "lint": "eslint ."

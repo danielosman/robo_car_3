@@ -1,6 +1,6 @@
 # Outline map and drift correction — plan (11 Nov 2026)
 
-Agreed in general by Daniel on 11 Nov; nothing is built. It follows the line map
+Agreed in general by Daniel on 11 Nov; step S (the simulator) is built. It follows the line map
 ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md), step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)),
 which Daniel looked at and found is not what he wants: loose lines, too few of them.
 
@@ -18,8 +18,8 @@ disagree, the less sure one gives way.
 
 ## For the fresh session
 
-- **Start at step S** (the simulator), then A to E in order. The table in "Steps"
-  says which are done.
+- **Steps S, then A to E in order.** The table in "Steps" says which are done:
+  start at the first that is not.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3;
   LINE_MAP_PLAN.md (the code that exists); then `pc/robot/src/maps/line_map/`
   (`sights.ts`, `line_map.ts`, their tests and `test_sights.ts`).
@@ -142,8 +142,9 @@ knows the truth, so every step can be measured, not only looked at.
 
 **What it is**
 - `pc/robot/src/sim/`: plain TypeScript, no robot, no store, no helper.
-- It produces **sights** (`sights.ts`), the same input the real reader gives the
-  map. So the map code under test is the real code, not a copy.
+- It produces posed frames and their rays, as the store and the helper give them.
+  The real `sightsOf()` turns them into sights. So the map code under test is the
+  real code, not a copy.
 - `npm run sim -- <scenario>` writes a folder with one picture per step and an
   `index.html` with a slider over them. No server, no new tools.
 - The same scenarios run as tests (`npm test`) with numbers checked.
@@ -164,8 +165,11 @@ knows the truth, so every step can be measured, not only looked at.
   large (30° → 31°); a small error per distance driven; a little random wander.
 
 **The ToF**
-- 8 × 8 wedges of 5.625°, the sensor 9 cm up, as mounted. For each wedge: the
-  nearest thing inside it at the wedge's heights, or "beyond" past 2.54 m.
+- 8 × 8 wedges of 5.625°, the sensor 9 cm up, as mounted. A wedge reads what its
+  middle ray meets at the wedge's heights (a thing beside that ray if it met
+  nothing), the floor, or "beyond" past 2.54 m.
+- Floor, obstacle or unsure is the robot's own rule (`tof_rays.c`), copied; a test
+  holds the copy against the real helper.
 - Noise, from what was measured on boot `cc0e4e65`, each switchable:
   - 1 cm steps of the distance;
   - close and still: within a few cm;
@@ -202,6 +206,28 @@ knows the truth, so every step can be measured, not only looked at.
    the box must go in the first, the walls must stay in both.
 6. A big room (walls beyond 2.5 m): guess edges at the sensor's reach.
 
+**As built** (`pc/robot/src/sim/`, `npm run sim` lists the scenarios)
+
+| File | Knows |
+|---|---|
+| `room.ts` | shapes with heights and steps; a ray's way through them |
+| `drive.ts` | the moves, the two poses, the drift, the seeded random numbers |
+| `tof.ts` | one frame: what each zone reads, the noise; gives a posed frame and its rays, as the store and the helper do |
+| `scenarios.ts` | the scenarios; `run()` gives each move's frames, sights and truth |
+| `measure.ts` | the numbers (so far: pose error, distance from the true faces) |
+| `play.ts` | a scenario through the map under test: what it drew, step by step |
+| `picture.ts`, `main.ts` | the pictures, the slider page, the command |
+
+- `play.ts` is the one place that says which map code runs. `main.ts` draws what it
+  gives; the tests measure it. Each step swaps the map there.
+- A picture has three panels: L1, L2, above. Each shows the room at that band's
+  heights.
+- Scenarios: `square`, `things`, `door`, `loop`, `box-removed`, `box-stays`, `big`.
+  `--no-noise` and `--no-drift` switch those off. Pictures go to
+  `pc/robot/recordings/sim/<scenario>/`.
+- With the measured drift (3 % per turn) a full turn ends 11° off, and the `door`
+  drive ends 58 cm off. That is what step C has to take out.
+
 **Limits of the simulator**
 - It is only as true as its noise. Limits tuned on it are first guesses; the
   stored drive and later a real drive have the last word.
@@ -213,14 +239,14 @@ knows the truth, so every step can be measured, not only looked at.
 Each step ends with something to look at. S comes first; A to D are each built and
 tried in the simulator first, then on the stored drive.
 
-| Step | What | To look at |
-|---|---|---|
-| S | The simulator: room, robot with drift, ToF with noise, pictures with a slider, the numbers; at first it draws the existing line map's lines | `npm run sim -- <scenario>`; the scenarios as tests |
-| A | The outline: seen-free floor per band, its border and islands, simplified; kinds wall / rough / guess by rule, nothing remembered yet | `robot map --png --lines`: a closed polygon from the 35 cm circle on, step by step with the slider's snapshots |
-| B | Walls remembered: numbers, how sure, sightings; colour by confidence; the three tables | the same picture, walls brighter as they are seen again; `robot walls` listing them |
-| C | The pose check: frames checked against walls, corrected poses stored, the map built with them | the same drive drawn with and without correction; the error on returning to the start |
-| D | Removal with the two-wall rule | a moved box goes; a wall stays when the robot drifts |
-| E | The page: the outline per band, switchable (the old step 8) | the page |
+| Step | State | What | To look at |
+|---|---|---|---|
+| S | done | The simulator: room, robot with drift, ToF with noise, pictures with a slider, the numbers; at first it draws the existing line map's lines | `npm run sim -- <scenario>`; the scenarios as tests |
+| A | | The outline: seen-free floor per band, its border and islands, simplified; kinds wall / rough / guess by rule, nothing remembered yet | `robot map --png --lines`: a closed polygon from the 35 cm circle on, step by step with the slider's snapshots |
+| B | | Walls remembered: numbers, how sure, sightings; colour by confidence; the three tables | the same picture, walls brighter as they are seen again; `robot walls` listing them |
+| C | | The pose check: frames checked against walls, corrected poses stored, the map built with them | the same drive drawn with and without correction; the error on returning to the start |
+| D | | Removal with the two-wall rule | a moved box goes; a wall stays when the robot drifts |
+| E | | The page: the outline per band, switchable (the old step 8) | the page |
 
 - B and C are separate steps, but C comes straight after B: Daniel's point that
   frequent correction keeps the errors small is the reason the walls exist.
@@ -246,6 +272,8 @@ tried in the simulator first, then on the stored drive.
 
 ## Open technical points
 
+- The simulator does not smear a reading that ends on the floor, also while
+  moving. Whether the real sensor does: boot `cc0e4e65` can tell.
 - How fast the pose's "how sure" should fall with driving and turning: first
   numbers from the stored drives (a 30° turn is about 31°).
 - The border's simplifying limits (how rough is "rough") and the wall rule (40 cm,
