@@ -6,6 +6,7 @@
 import { commandText, isMove, type Command } from "./commands.ts";
 import type { Answer, Sender } from "./answers.ts";
 import type { Runner } from "./runner.ts";
+import type { MapWindow, Pose } from "../link.ts";
 
 type Tell = (a: Answer) => void;
 interface Job { command: Command; sender: Sender; tell: Tell; settle: () => void }
@@ -35,6 +36,12 @@ export class CommandQueue {
     const command: Command = { name: "stop", values: [] };
     this.dropWaiting("stop");
     this.teller(sender, onAnswer)({ command: "stop", ...(await this.runner.run(command)) });
+  }
+
+  // Asks the robot for its 6 x 6 m sliding window right now (robot map --robot), past
+  // the move queue so it can be read during a move (serialized by runner.askMap).
+  askMap(): Promise<{ window: MapWindow; pose: Pose | null } | { error: string }> {
+    return this.runner.askMap ? this.runner.askMap() : Promise.resolve({ error: "robot not connected" });
   }
 
   state(): QueueState {

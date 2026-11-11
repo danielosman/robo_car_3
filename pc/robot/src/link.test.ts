@@ -11,11 +11,11 @@ import assert from "node:assert/strict";
 import dgram from "node:dgram";
 import net from "node:net";
 import { once } from "node:events";
-import { RobotLink, type DoneRecord, type LivePose, type RobotStatus } from "./link.ts";
+import { RobotLink, type DoneRecord, type LivePose, type MapWindow, type RobotStatus } from "./link.ts";
 import { packTof, unpackTof, type PosedFrame } from "./tof_format.ts";
 import {
-  HAS, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole, encodeHello, encodeMapCleared, encodeMoveEnd, encodeMoveStart,
-  encodeImuBatch, encodeSnapshotPart, encodeStatus, encodeTof, type ImuBatch, type Message, type MoveEnd, type TofMessage, type MoveStart,
+  HAS, MAP_PART_CELLS, MAP_PARTS, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole, encodeHello, encodeMapCleared, encodeMapPart,
+  encodeMoveEnd, encodeMoveStart, encodeImuBatch, encodeSnapshotPart, encodeStatus, encodeTof, type ImuBatch, type Message, type MoveEnd, type TofMessage, type MoveStart,
 } from "./wire.ts";
 
 async function startLink(quietMs = 3000, dropMs = 6000) {
@@ -83,16 +83,17 @@ test("announces itself; hello first; console lines, status, commands, heartbeats
   } finally { link.stop(); }
 });
 
-test("answers, map cleared, moves, tof frames and snapshot parts, whatever the TCP chunks", async () => {
+test("answers, map cleared, map window, moves, tof frames and snapshot parts, whatever the TCP chunks", async () => {
   const { link, port } = await startLink();
   try {
     const snapshots: Buffer[] = [], poses: LivePose[] = [], dones: DoneRecord[] = [], text: string[] = [];
-    const events: string[] = [], starts: MoveStart[] = [], ends: MoveEnd[] = [], frames: PosedFrame[] = [];
+    const events: string[] = [], starts: MoveStart[] = [], ends: MoveEnd[] = [], frames: PosedFrame[] = [], windows: MapWindow[] = [];
     let cleared = 0;
     link.on("moveStart", m => { starts.push(m); events.push(`start ${m.move}`); });
     link.on("moveEnd", m => { ends.push(m); events.push(`end ${m.move}`); });
     link.on("tof", (f: TofMessage) => { frames.push(f.frame); events.push(`${f.format} ${f.frame.number} of ${f.move}`); });
     link.on("snapshot", b => snapshots.push(b));
+    link.on("mapWindow", w => windows.push(w));
     link.on("pose", p => poses.push(p));
     link.on("done", d => dones.push(d));
     link.on("text", t => text.push(t));
@@ -109,16 +110,19 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
     const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 10 * k, signal: k, sigmaMm: 2, kind: k ? "sure" as const : "nothing" as const, targets: k ? 1 : 0 }));
     const tof = (number: number): PosedFrame => ({ number, robotClockUs: 100 * number, periodUs: 100000, x: 1.5, y: -0.25, yaw: 0.5, pitch: 0, turn: 0,
                                                     still: false, poseKnown: true, beyondMm: 2550, zones });
+    const mapCells = Buffer.from(Array.from({ length: MAP_PARTS * MAP_PART_CELLS }, (_, i) => (i * 7 + 1) & 0xff));
+    const mapParts = Array.from({ length: MAP_PARTS }, (_, part) =>
+      encodeMapPart({ part, originCx: -20, originCy: 5, cells: mapCells.subarray(part * MAP_PART_CELLS, (part + 1) * MAP_PART_CELLS) }));
     const stream = Buffer.concat([
       encodeMoveStart(start), encodeTof("compact", 3, 5000, tof(50)), encodeMoveEnd(end), encodeTof("compact", 3, 5100, tof(51)), encodeImuBatch(imu),
       encodeConsole("Go to: ..."),
       encodeAnswer({ n: 4, end: "obstacle", has: HAS.MOVE | HAS.GOAL, x: 1.2, y: -0.35, yaw: -0.25, moved: 1.25, rotated: Math.PI / 2, goal: 4.2, snapshot: 0 }),
       encodeSnapshotPart(snap.subarray(0, 1400)), status(), encodeSnapshotPart(snap.subarray(1400, 2800)), encodeMapCleared(),
-      encodeSnapshotPart(snap.subarray(2800)),
+      encodeSnapshotPart(snap.subarray(2800)), ...mapParts,
       encodeAnswer({ n: 5, end: "ok", has: HAS.SNAPSHOT, x: 1, y: 2, yaw: 0, moved: 0, rotated: 0, goal: 0, snapshot: 41 }),
     ]);
     for (const size of [1, 2, 3, 7, 1000, stream.length]) {
-      snapshots.length = poses.length = dones.length = text.length = cleared = 0;
+      snapshots.length = poses.length = dones.length = text.length = cleared = windows.length = 0;
       events.length = starts.length = ends.length = frames.length = batches.length = 0;
       const r = await robot(port);
       await until(() => link.status.state === "connected");
@@ -126,8 +130,9 @@ test("answers, map cleared, moves, tof frames and snapshot parts, whatever the T
         r.socket.write(stream.subarray(at, at + size));
         if (size < 10 && at % 500 === 0) await new Promise(res => setImmediate(res)); // separate TCP chunks now and then
       }
-      await until(() => dones.length === 2 && snapshots.length === 1 && poses.length === 1 && cleared === 1);
+      await until(() => dones.length === 2 && snapshots.length === 1 && poses.length === 1 && cleared === 1 && windows.length === 1);
       assert.deepEqual(snapshots[0], snap);
+      assert.deepEqual(windows[0], { originX: -20, originY: 5, cellsX: 60, cellsY: 60, cells: mapCells });
       assert.deepEqual(text, ["Go to: ...\n"]);
       assert.deepEqual(events, ["start 3", "compact 50 of 3", "end 3", "compact 51 of 3", "imu 3"]); // in the order they came
       assert.deepEqual(batches, [imu]); // the imu batch's records as they went (times evenly spaced: exact)

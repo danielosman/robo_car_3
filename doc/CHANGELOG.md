@@ -5,15 +5,79 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
-## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5)
+## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5), the robot's window-only map and floor first (step 6)
 
 Steps of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Both Picos flashed once (commit
-`6583e88`) for the measurement run; step 5's PicoA change (`room.h`) is not flashed yet.
+`6583e88`) for the measurement run; steps 5 and 6's PicoA changes are not flashed yet.
+
+- **Step 6, the robot's map: window only, floor first** (PicoA, helper, PC; wire 4 → 5,
+  snapshot 2 → 3):
+  - `house_map` left PicoA (`cell_map_keep_tiles` hook: NULL on the robot, `house_map`
+    in the PC helper); dead dirty-tracking and clear-counter functions left
+    `house_map`. Snapshots lost `SEC_WINDOW`, `SEC_TILES` and `map_clears`
+    (`SNAPSHOT_MAX` 38912 → 22528), freeing ~36 KB of PicoA RAM. On the PC, the
+    `map_*` columns and `snapshot_tiles` table are dropped on open, and `columnOf` /
+    `windowColumns` left `snapshot.ts` (`cell_map_column_of()` in C is the one owner,
+    returned by the helper's `V` and `K` commands).
+  - **Floor first** (decided with Daniel):
+    - `cell_map_clear(x_m, y_m)` centres the window on `(x_m, y_m)` and seeds 35 cm
+      around it as `COLUMN_DRIVABLE` (both at start and on `clear_map`).
+    - Rays passing through G beyond 50 cm (`NO_FLOOR_MAX_M = 0.5f`) are ignored:
+      measured on boot `cc0e4e65` (4i), where all 60 false `COLUMN_NO_FLOOR` columns on
+      the shiny parquet came from row 6 (~55-65 cm), 0 within 50 cm.
+    - `cell_map_obstacle_along` and `room.c` stop 15 cm before `COLUMN_BLOCKED`,
+      `COLUMN_OVERHANG` or `COLUMN_NO_FLOOR` at any distance in both directions, and on
+      a forward drive before unidentified floor (`c != COLUMN_DRIVABLE`) within 25 cm of
+      `(x_m, y_m)` along the path (`FLOOR_LOOK_M = 0.25f`). With 35 cm seeded, a 1 m
+      drive starts (`room_drive` pre-check passes) and checks the floor every frame as
+      it moves.
+  - **`robot map --robot [--png]`:** sends `"map"` to the robot, which sends its
+    10.8 KB window in 9 `WIRE_MAP_PART` bulk messages (1,205 B each, fitting inside
+    `WIRE_PAYLOAD_MAX = 1400` without growing `link_pc`'s ring wrap buffer).
+  - **Whole-building PNG:** `mapPng` in `pc/robot/src/api/map.ts` draws all tiles in
+    `view.tiles` together with `view.window`, the path and the robot.
+  - **Review fixes:** serialized `CommandRunner.askMap()` so concurrent `--robot` map
+    requests cannot race on `"mapWindow"`; made `CellMaps.columnsOf(cells)` independent
+    of DuckDB boot lookup; moved `send_map_window`'s 1.2 KB message buffer in
+    `commands.c` from `static` to the stack; added `"map"` support to `FakeRobot` and
+    `askMap()` tests to `queue.test.ts` and `fakerobot.test.ts`; made `MapView.window`
+    and `mapPng` non-nullable, removed unused `MapView.tiles[].sequence`, and made
+    `mapPng` paint the live window unconditionally over stale tile pixels; cleaned up
+    comments in `cell_map.c`, `test_cell_map.c`, `queue.ts`, `store.ts` and `snapshot.ts`.
+
+- **Architecture diagram checked against step 6:** clarified window and tile ownership,
+  floor seeding and ray limits, map-free snapshots, and the map command's answer/pose
+  join. A fresh review caught the PC map's missing tile bytes (maximum 38,410 B), a
+  startup-only drive flow labelled as also covering running checks, and the missing
+  answer input on the map graph; all three were fixed.
 
 - **Dropped (Daniel), to finish the plan sooner:** step 4e's discussions (who reads
   the IMU, PicoA's layers, PicoB's reflexes, the IMU's rate) and step 4g (interfaces
-  take what they use). The IMU stays at 416 Hz on PicoB; both stay written down in the
-  plan for later.
+  take what they use). The IMU stays at 416 Hz on PicoB.
+  - Deferred ideas, not requirements for steps 7-9: read the IMU once in PicoB's
+    main pipeline and separate recording from odometry; arrange PicoA as sense →
+    world → decide → talk; consider one owner for motor-stop reasons; consider
+    104 Hz sampling (with calibration timing and chip bump interrupts checked).
+  - The interface proposal was to pass either a named piece of data read mostly
+    whole, or a small input owned by the receiver; pipelines would pick the fields.
+    Examples were a `drive_input_t` and watch's stationary flag. No speculative
+    modules or pass-through layers were approved. The full discussion brief is in
+    `doc/DATA_FLOW_PLAN.md` at commit `17b3983`.
+- **Step 6 commit checks:** lint, host C tests, all 77 PC tests, PC typecheck and
+  firmware build passed before committing. PicoA changes remain unflashed.
+- **Architecture ideas restored as open proposals:** created
+  `ARCHITECTURE_REFACTOR_PLAN.md`, separate from Step 7. It starts with PicoB's
+  odometry distributing IMU data: read once in main, then hand samples to odometry
+  and a separate recorder. Also retained PicoA's world-model boundaries, ownership
+  of motor-stop reasons, and smaller receiver-owned inputs. No refactor approved
+  or implemented; changing the IMU rate remains a separate behaviour decision.
+- **Fresh-session handoff for step 7:** refreshed DATA_FLOW_PLAN's current versions,
+  uncommitted/unflashed baseline, diagram counts and review rules. Removed completed
+  work and old discussion briefs from its steps-left list; retained only current
+  contracts, stored-data limits and remaining tests. Step 7 still needs Daniel's
+  confirmation of LINE_MAP_PLAN's draft; no line-map code was started. A fresh
+  review added the helper's hit/clearing caveat: beyond-range points must not make
+  lines, and empty-zone clearing needs helper geometry, with tests for both.
 - **4f, the link (both Picos, link version 6 → 7):** the wheel distances left the
   odometry report (45 → 37 B; nothing on PicoA read them; UART PicoB → PicoA ~4.9 →
   ~4.5 KB/s). One rule for IMU records PicoA can't place yet, on PicoA: `body` keeps a

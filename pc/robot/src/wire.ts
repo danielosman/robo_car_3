@@ -8,13 +8,13 @@
 // Times (tUs) are µs since PicoA's power-up (u64 on the wire): they never wrap.
 import { TOF_FORMATS, packTof, tofFormatOfType, unpackTof, type PosedFrame } from "./tof_format.ts";
 
-export const WIRE_VERSION = 4; // as picoA/app/wire.h; the server refuses a robot with another
+export const WIRE_VERSION = 5; // as picoA/app/wire.h; the server refuses a robot with another
 export const HEADER = 3;
 export const PAYLOAD_MAX = 1400;
 
 export const TYPE = {
   HELLO: 0x01, CONSOLE: 0x02, ANSWER: 0x03, STATUS: 0x04, MAP_CLEARED: 0x05, MOVE_START: 0x06, MOVE_END: 0x07,
-  SNAPSHOT_PART: 0x10, IMU_BATCH: 0x11,
+  SNAPSHOT_PART: 0x10, IMU_BATCH: 0x11, MAP_PART: 0x12,
   COMMAND: 0x20, HEARTBEAT: 0x21,
 } as const;
 
@@ -25,6 +25,7 @@ export interface TypeInfo { lane: Lane; min: number; max: number }
 const HELLO_SIZE = 29, BUILD_LEN = 24, CONSOLE_MAX = 240, ANSWER_SIZE = 34, STATUS_SIZE = 33, MODE_LEN = 8, ACTION_LEN = 12;
 const MOVE_START_SIZE = 26, MOVE_END_SIZE = 37, IMU_BATCH_HEADER = 15, IMU_RECORD = 12, TOF_HEADER = 12;
 export const PART_MAX = 1400, COMMAND_TEXT_MAX = 46;
+export const MAP_PARTS = 9, MAP_PART_CELLS = 1200, MAP_PART_SIZE = 5 + MAP_PART_CELLS;
 export const IMU_BATCH_MAX = 10;          // records in an imu batch
 export const IMU_RECORD_PERIOD_US = 9615; // 4 samples at 416 Hz (common/link_messages.h)
 // An imu record's counts (common/link_messages.h): acceleration 0.061 mg, gyro 8.75 mdps a count.
@@ -40,6 +41,7 @@ const TABLE = new Map<number, TypeInfo>([
   [TYPE.MOVE_END, { lane: LANE.CONTROL, min: MOVE_END_SIZE, max: MOVE_END_SIZE }],
   [TYPE.SNAPSHOT_PART, { lane: LANE.BULK, min: 1, max: PART_MAX }],
   [TYPE.IMU_BATCH, { lane: LANE.BULK, min: IMU_BATCH_HEADER + IMU_RECORD, max: IMU_BATCH_HEADER + IMU_BATCH_MAX * IMU_RECORD }],
+  [TYPE.MAP_PART, { lane: LANE.BULK, min: MAP_PART_SIZE, max: MAP_PART_SIZE }],
   [TYPE.COMMAND, { lane: LANE.TO_ROBOT, min: 5, max: 4 + COMMAND_TEXT_MAX }],
   [TYPE.HEARTBEAT, { lane: LANE.TO_ROBOT, min: 0, max: 0 }],
 ]);
@@ -86,6 +88,7 @@ export type Vec3 = [number, number, number];
 export interface ImuRecord { tUs: number; acceleration: Vec3; gyro: Vec3 }
 // Up to 10 imu records of a move, measured one after the other, evenly spaced.
 export interface ImuBatch { move: number; records: ImuRecord[] }
+export interface MapPart { part: number; originCx: number; originCy: number; cells: Buffer }
 export interface RobotCommand { n: number; text: string }
 // A tof frame of a move, packed in a format (tof_format.ts); tUs: its middle.
 export interface TofMessage { format: string; move: number; tUs: number; frame: PosedFrame }
@@ -100,6 +103,7 @@ export type Message =
   | ({ type: "move_end" } & MoveEnd)
   | { type: "snapshot_part"; bytes: Buffer }
   | ({ type: "imu_batch" } & ImuBatch)
+  | ({ type: "map_part" } & MapPart)
   | ({ type: "command" } & RobotCommand)
   | { type: "heartbeat" }
   | ({ type: "tof" } & TofMessage);
@@ -198,6 +202,10 @@ export function decode(m: RawMessage): Message {
       });
       return { type: "imu_batch", move: p.readUInt32LE(0), records };
     }
+    case TYPE.MAP_PART:
+      need(MAP_PART_SIZE);
+      if (p[0] >= MAP_PARTS) throw new Error(`map part: ${p[0]}`);
+      return { type: "map_part", part: p[0], originCx: p.readInt16LE(1), originCy: p.readInt16LE(3), cells: p.subarray(5) };
     case TYPE.COMMAND: {
       const text = p.subarray(4).toString("latin1");
       if (!commandTextOk(text)) throw new Error(`command: not printable text: ${JSON.stringify(text)}`);
@@ -291,6 +299,15 @@ export function encodeTof(format: string, move: number, tUs: number, frame: Pose
 export function encodeSnapshotPart(bytes: Buffer): Buffer {
   if (bytes.length < 1 || bytes.length > PART_MAX) throw new Error(`a snapshot part is 1-${PART_MAX} B, not ${bytes.length}`);
   return header(TYPE.SNAPSHOT_PART, bytes);
+}
+
+export function encodeMapPart(m: MapPart): Buffer {
+  if (!(m.part >= 0 && m.part < MAP_PARTS) || m.cells.length !== MAP_PART_CELLS)
+    throw new Error(`a map part is part 0-${MAP_PARTS - 1} of ${MAP_PART_CELLS} B`);
+  const p = Buffer.alloc(MAP_PART_SIZE);
+  p[0] = m.part; p.writeInt16LE(m.originCx, 1); p.writeInt16LE(m.originCy, 3);
+  m.cells.copy(p, 5);
+  return header(TYPE.MAP_PART, p);
 }
 
 const commandTextOk = (text: string) => /^[\x20-\x7e]{1,46}$/.test(text);

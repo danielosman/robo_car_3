@@ -17,7 +17,6 @@
 #include "../tof_rays.c"
 #include "../tof_format.c"
 #include "../cell_map.c"
-#include "../house_map.c"
 #include "mounting_before_lift.h"
 #include "frames_file.h"
 
@@ -79,7 +78,7 @@ static int solid_near(float radius_m) {
 }
 
 static void run(int n) {
-    cell_map_clear();
+    cell_map_clear(0, 0);
     for (int i = 0; i < n; i++) {
         uint8_t bytes[TOF_FORMAT_MAX];
         posed_frame_t used;
@@ -111,7 +110,7 @@ int main(void) {
         // f towards the cup: its first obstacle is within a cell of the cup's region.
         const region_t *cup = &s->objects[0];
         float cx = (cup->x0 + cup->x1) / 2, cy = (cup->y0 + cup->y1) / 2, r = hypotf(cx, cy);
-        float to_cup = cell_map_obstacle_along(0, 0, cx / r, cy / r, 0.235f / 2 + 0.05f, 1.5f);
+        float to_cup = cell_map_obstacle_along(0, 0, cx / r, cy / r, 0.235f / 2 + 0.05f, 1.5f, true);
         printf("; blocked within 30 cm: %d; f towards the cup (%.0f cm away): obstacle at %.0f cm\n", near,
                (double)(r * 100), (double)(to_cup * 100));
         assert(to_cup > r - 0.2f && to_cup < r);

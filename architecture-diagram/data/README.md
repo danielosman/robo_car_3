@@ -44,9 +44,8 @@ is several boxes: watch is six (`watch`, `watch_tof`, `watch_camera`, `watch_obs
 - Not: the bring-up firmware, `pc/bringup`, tests and test helpers, `lwipopts.h`,
   `wifi_config*.h`, the camera's register headers (`hm0360_*.h`), the ST library in
   `picoA/drivers/lib`.
-- Planned: the modules in DATA_FLOW_PLAN.md section 8 marked "step N" (the PC's cell
-  map, `maps/cell_map.ts` with its helper; `maps/line_map/`, a folder, one module),
-  and LINE_MAP_PLAN.md.
+- Planned: the modules in DATA_FLOW_PLAN.md section 8 marked "step N" (`maps/line_map/`,
+  a folder, one module), and LINE_MAP_PLAN.md.
 
 ## References
 
@@ -58,7 +57,7 @@ of signatures, comments or line numbers.
   is there twice. To follow one: open the file, search for the string.
 - A member's `path` is its module's, unless given.
 - **Planned** things (`status: planned`) have no code yet: they give `plan`, a
-  reference into a plan (`{ "path": "doc/DATA_FLOW_PLAN.md", "code": "| step 5:" }`),
+  reference into a plan (`{ "path": "doc/DATA_FLOW_PLAN.md", "code": "| step 7:" }`),
   instead of `path` + `code`. A `leaving` thing has both.
 - What the side bar shows for a reference: the comment lines just above it, then
   the declaration up to its `;` or its closing brace. For a struct, the reference is
@@ -76,7 +75,7 @@ of signatures, comments or line numbers.
   "members": [
     { "name": "odometry_update", "kind": "function", "code": "void odometry_update(" },
     { "name": "odometry_get", "kind": "function", "code": "const odometry_t *odometry_get(" },
-    { "name": "odometry_t", "kind": "type", "code": "} odometry_t;", "bytes": 68 }
+    { "name": "odometry_t", "kind": "type", "code": "} odometry_t;", "bytes": 60 }
   ]
 }
 ```
@@ -91,8 +90,8 @@ of signatures, comments or line numbers.
 the ribbon's width, so two people must get the same number:
 
 - **C type:** its `sizeof` on the Pico (32-bit; padding counts). Get it from a small
-  program built with `cc` (as the host tests are), not by head. `odometry_t` is 68,
-  `odometry_report_t` 45 (packed).
+  program built with `cc` (as the host tests are), not by head. `odometry_t` is 60,
+  `odometry_report_t` 37 (packed).
 - **On the wire:** the message's payload. The packed compact ToF frame is 277
   (`TOF_COMPACT_BYTES`); the ToF wire message is 289 (12 B header + 277).
 - **Varying size:** the largest the code allows (an imu batch 135, a snapshot part
@@ -238,13 +237,14 @@ Found so far:
 - By hand or by an agent reading the code, then `npm run resolve` until it is clean.
 - **First:** only the modules the first flows pass through, each with all its
   members; then those flows. The other modules after Daniel's first look. Done
-  8 Nov: 37 modules (2 planned, 1 leaving), 9 flows.
+  8 Nov (updated through step 6): 37 modules (1 planned), 13 flows.
 - **First flows** (done, with `wheel-counts` for odometry's add and `tof-map`,
   `tof-watch` branching off `tof-frame`): `odometry` and `tilt-stop` (above, with the
   part on PicoA); the
   IMU to the PC (`imu_counts_t` → `imu_record_t` → PicoA `body` (PicoA's clock) →
   `move` → imu batch → the store); a ToF frame to the map, watch and the PC; a
-  command from the viewer to a move and its answer.
-- **Planned parts** (DATA_FLOW_PLAN.md sections 4 and 8): the PC's cell map,
-  `maps/line_map/`, `house_map` leaving.
+  command from the viewer to a move and its answer; a drive checked against the map
+  (`drive-check`), the PC's cell map (`pc-cell-map`), and the robot's map on demand
+  (`robot-map`, with `map-answer` supplying its live pose).
+- **Planned parts** (DATA_FLOW_PLAN.md sections 4 and 8): `maps/line_map/` (step 7).
 - **After a code change:** `tools/lint.sh` runs the check; fix what it reports.

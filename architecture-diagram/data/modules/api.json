@@ -52,6 +52,11 @@
         "name": "CommandQueue.state",
         "kind": "function",
         "code": "state(): QueueState {"
+      },
+      {
+        "name": "CommandQueue.askMap",
+        "kind": "function",
+        "code": "askMap(): Promise<{ window: MapWindow; pose: Pose | null } | { error: string }> {"
       }
     ]
   },
@@ -100,6 +105,11 @@
         "name": "CommandRunner.run",
         "kind": "function",
         "code": "async run(c: Command): Promise<Outcome> {"
+      },
+      {
+        "name": "CommandRunner.askMap",
+        "kind": "function",
+        "code": "askMap(): Promise<{ window: MapWindow; pose: Pose | null } | { error: string }> {"
       }
     ]
   },

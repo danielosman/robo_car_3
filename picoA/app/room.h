@@ -13,9 +13,9 @@
 #define ROOM_START_M     0.01f     // a drive with less room than this doesn't start
 
 // From (x, y) facing yaw, driving in direction (+1 forward, -1 back): how far it may go
-// before it is STOP_BEFORE_M from the nearest obstacle on the map (a blocked or overhang
-// column) in its path, measured from its edge on that side. Looks at most look_m far:
-// exactly look_m when nothing is closer. Unknown columns count as free.
+// before it is STOP_BEFORE_M from the nearest obstacle (blocked, overhang, no floor) or
+// close unidentified floor on the map in its path, measured from its edge on that side.
+// Looks at most look_m far: exactly look_m when nothing is closer.
 float room_m(float x_m, float y_m, float yaw_rad, float direction, float look_m);
 // The same as a gap: from the edge to that obstacle (room_m + STOP_BEFORE_M); exactly
 // STOP_BEFORE_M + look_m when nothing is closer. For the robot's console lines.

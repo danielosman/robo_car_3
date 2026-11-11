@@ -4,11 +4,9 @@
 // for while the last is going out comes after it.
 // Each is read back here as the PC reads it: "SNAP", version, length, the sections
 // (the head with the boot id and build given, the pose, the ToF frame as a compact
-// frame of the snapshot use with the pose it was measured at, the camera frame, the colour reading, the map window
-// with its anchor, the dirty tiles of the whole-house map), the CRC. Tiles go once
-// each, then only when changed, all again for a new server; more than fit go with
-// the next snapshot. The camera features of the frame in the snapshot: it waits for
-// vision to process that frame (asking it to), at most 0.3 s.
+// frame of the snapshot use with the pose it was measured at, the camera frame, its
+// features, the colour reading), the CRC. The camera features of the frame in the
+// snapshot: it waits for vision to process that frame (asking it to), at most 0.3 s.
 // The parts go to the bulk lane (snapshot part messages) and wait for room there; a
 // snapshot has gone once its last part is in the lane; one cut by a lost connection
 // is not sent again (its command is still told; the new server gets its own). The test plays body.h, the
@@ -17,12 +15,10 @@
 // repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -IpicoA/drivers -Icommon/test/fakes -Icommon -o build/test_snapshot picoA/app/test/test_snapshot.c -lm && build/test_snapshot
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include "../tof.c"
-#include "../tof_rays.c"
-#include "../cell_map.c"
-#include "../house_map.c"
 #include "../mode.c"
 #include "../tof_format.c"
 #include "../wire.c"
@@ -127,8 +123,6 @@ static parsed_t nth(uint32_t n) {
     return parse(sent + at);
 }
 
-static uint16_t tiles_in(const parsed_t *p) { uint16_t n; memcpy(&n, p->at[SEC_TILES], 2); return n; }
-
 static void loop_ms(int ms) {
     for (int i = 0; i < ms; i++) { fake_now_us += 1000; snapshot_update(); }
 }
@@ -137,9 +131,7 @@ static void loop_ms(int ms) {
 
 int main(void) {
     snapshot_init(BOOT_ID, "Nov  7 2026 19:00:00");
-    tof_rays_init(&ROBOT_MOUNTING);
     assert(tof_init(&ROBOT_MOUNTING.tof, TOF_DEFAULT_HZ));
-    cell_map_clear();
     for (int i = 0; i < CAMERA_WIDTH * CAMERA_HEIGHT; i++) pixels[i] = (uint8_t)(i * 13);
     // A ToF frame: zone z has z % 3 targets (the first one counts), 100 * z mm away.
     for (int z = 0; z < 64; z++) {
@@ -152,10 +144,6 @@ int main(void) {
     tof_frame.pose_known = true;
     snapshot_tof(&tof_frame);
     tof_frame.frame.number = 999; // the snapshot holds the packed frame, not a pointer to this one
-    // The map: a blocked column in the window, and columns in two tiles of the whole-house map.
-    grid[1][30][31] = C_PACK(CELL_STATE_OCCUPIED, 0, 12);
-    house_map_put(-45, 0, COLUMN_BLOCKED);
-    house_map_put(50, 50, COLUMN_DRIVABLE);
 
     // Nothing without a server, even when asked.
     snapshot_request(SNAPSHOT_COMMAND, 0);
@@ -175,7 +163,7 @@ int main(void) {
     snapshot_pose_t pose;
     memcpy(&pose, p.at[SEC_POSE], sizeof pose);
     assert(pose.x_m == 1.25f && pose.y_m == -0.5f && pose.yaw_rad == 0.75f && pose.t_us == 4242 && pose.stationary);
-    assert(!p.at[3]); // no sensor geometry any more: the PC has the mounting
+    assert(!p.at[3] && !p.at[7] && !p.at[8]); // no sensor geometry, map window or tiles in snapshots
     // The ToF section: a compact frame (the snapshot use), its pose in it.
     static posed_frame_t tof;
     assert(p.len[SEC_TOF] == tof_format_size(tof_format_of(TOF_USE_SNAPSHOT)));
@@ -195,22 +183,12 @@ int main(void) {
     snapshot_color_t color;
     memcpy(&color, p.at[SEC_COLOR], sizeof color);
     assert(color.sequence == 9 && color.raw[15] == 0xaf);
-    snapshot_window_t win;
-    memcpy(&win, p.at[SEC_WINDOW], sizeof win);
-    assert(win.origin_cx == -30 && win.origin_cy == -30 && win.cells_x == 60 && win.cells_y == 60 && win.layers == 3);
-    const uint8_t *cells = p.at[SEC_WINDOW] + sizeof win;
-    assert(cells[(1 * 60 + 30) * 60 + 31] == C_PACK(CELL_STATE_OCCUPIED, 0, 12));
-    assert(tiles_in(&p) == 2);
-    snapshot_tile_t tile;
-    memcpy(&tile, p.at[SEC_TILES] + 2, sizeof tile);
-    assert(tile.tx == -2 && tile.ty == 0); // column -45: tile -2 holds -50 … -31
     snapshot_features_t fh;
     memcpy(&fh, p.at[SEC_FEATURES], sizeof fh);
     assert(fh.camera_number == 77 && fh.n == 2 && p.len[SEC_FEATURES] == sizeof fh + 2 * sizeof(snapshot_feature_t));
     snapshot_feature_t f0;
     memcpy(&f0, p.at[SEC_FEATURES] + sizeof fh, sizeof f0);
     assert(f0.id == 9 && f0.age == 3 && f0.x16 == 200 && f0.y16 == 1604 && f0.dx64 == -32 && f0.dy64 == 48 && f0.match == 230);
-    assert((tile.columns[(5 * 20 + 10) / 2] & 15) == COLUMN_BLOCKED);
     printf("ok: a server gets a snapshot at once: %lu bytes, every section as written\n", (unsigned long)p.total);
 
     // An action ending asks for nothing. Asked for by a command: built, its command
@@ -226,11 +204,9 @@ int main(void) {
     p = nth(1);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
     assert(h.sequence == 2 && h.why == SNAPSHOT_COMMAND && strcmp(h.action, "drive") == 0 && h.end_reason == WIRE_END_OBSTACLE);
-    assert(tiles_in(&p) == 0); // all sent already
     assert(snapshot_sent(&told) && told.command == 17 && told.sequence == 2 && told.x_m == 1.25f && told.yaw_rad == 0.75f);
     assert(!snapshot_sent(&told));
-    // Asked again, with a tile changed and the robot driving now.
-    house_map_put(-45, 0, COLUMN_OPEN);
+    // Asked again, with the robot driving now.
     running = "goto";
     mode_set(MODE_IDLE);
     snapshot_request(SNAPSHOT_COMMAND, 18);
@@ -238,24 +214,8 @@ int main(void) {
     p = nth(2);
     memcpy(&h, p.at[SEC_HEAD], sizeof h);
     assert(n_sent == 3 && h.why == SNAPSHOT_COMMAND && strcmp(h.running, "goto") == 0 && h.mode == MODE_IDLE);
-    assert(tiles_in(&p) == 1);
     assert(snapshot_sent(&told) && told.command == 18 && told.sequence == 3);
-    printf("ok: on a command, the command told once it has gone; a changed tile goes again\n");
-
-    // A new server: all the tiles again. More dirty tiles than fit: the rest next time.
-    for (int t = 0; t < 40; t++) house_map_put(t * 20, 0, COLUMN_DRIVABLE);
-    conn = 2;
-    loop_ms(1);
-    p = nth(3);
-    int first = tiles_in(&p);
-    assert(n_sent == 4 && first < house_map_tiles() && p.total <= SNAPSHOT_MAX);
-    snapshot_request(SNAPSHOT_COMMAND, 0);
-    loop_ms(1);
-    p = nth(4);
-    printf("a new server, %d tiles: %d in the first snapshot (%lu bytes), %d in the next\n", house_map_tiles(), first,
-           (unsigned long)nth(3).total, tiles_in(&p));
-    assert(first + tiles_in(&p) == house_map_tiles());
-    printf("ok: a new server gets every tile; what doesn't fit goes with the next\n");
+    printf("ok: on a command, the command told once it has gone\n");
 
     FILE *f = fopen("build/test_snapshot.snap", "wb");
     assert(f);

@@ -1,19 +1,18 @@
 // Tests for snapshot.ts and snapshots_api.ts: the firmware's own snapshots
 // (build/test_snapshot.snap, written by ./run_tests.sh) put back together from
 // pieces of any size and read (the ToF section a compact frame); a damaged one or one
-// of another version refused; the map's columns from the window's cells and the
-// tiles' 4-bit columns; the PNG; and the snapshots stored in DuckDB and served as the
-// page asks: the boots, the timeline, one snapshot with its zones (for the page each in
-// the world, placed by the PC's cell map helper) and 8 x 8 grid, the robot's map then
-// (the newest of each tile up to it, since the last clear). Run with `npm test`.
+// of another version refused; a tile's 4-bit columns; the PNG; and the snapshots
+// stored in DuckDB and served as the page asks: the boots, the timeline, one snapshot
+// with its zones (for the page each in the world, placed by the PC's cell map helper)
+// and 8 x 8 grid. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import zlib from "node:zlib";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { COLUMN, SnapshotAssembler, columnOf, grayPng, parseSnapshot, tileColumns, windowColumns } from "./snapshot.ts";
-import { listBoots, listSnapshots, snapshotDetail, snapshotForPage, snapshotMap } from "./snapshots_api.ts";
+import { COLUMN, SnapshotAssembler, grayPng, parseSnapshot, tileColumns } from "./snapshot.ts";
+import { listBoots, listSnapshots, snapshotDetail, snapshotForPage } from "./snapshots_api.ts";
 import { CellMaps } from "./maps/cell_map.ts";
 import { loadMounting } from "./mounting.ts";
 import { BootFolders, folderNameAt } from "./boot_folders.ts";
@@ -31,11 +30,11 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   const bytes = firmware(), a = new SnapshotAssembler(), whole: Buffer[] = [];
   whole.push(...a.push(Buffer.from("xx garbage SNA"))); // bytes before a snapshot are skipped
   for (let at = 0, n = 1; at < bytes.length; at += n, n = (n * 7) % 3001 + 1) whole.push(...a.push(bytes.subarray(at, at + n)));
-  assert.equal(whole.length, 5);
+  assert.equal(whole.length, 3);
   assert.ok(a.skipped >= 14);
   const s = whole.map(parseSnapshot);
-  assert.deepEqual(s.map(x => x.sequence), [1, 2, 3, 4, 5]);
-  assert.deepEqual(s.map(x => x.why), ["server connected", "command", "command", "server connected", "command"]);
+  assert.deepEqual(s.map(x => x.sequence), [1, 2, 3]);
+  assert.deepEqual(s.map(x => x.why), ["server connected", "command", "command"]);
   const first = s[0];
   assert.equal(first.mode, "manual");
   assert.equal(first.endReason, null);
@@ -53,8 +52,6 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(first.camera!.width * first.camera!.height, first.camera!.pixels.length);
   assert.equal(first.camera!.pixels[10], (10 * 13) & 255);
   assert.equal(first.color!.raw[15], 0xaf);
-  assert.equal(first.window!.originX, -30);
-  assert.equal(first.tiles.length, 2);
   assert.equal(first.features!.cameraNumber, 77);
   assert.deepEqual(first.features!.features[0], { id: 9, age: 3, flags: 0, x: 12.5, y: 100.25, dx: -0.5, dy: 0.75, strength: 128 / 255, match: 230 / 255 });
   assert.equal(first.features!.features[1].flags, 1);
@@ -62,7 +59,6 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   assert.equal(s[1].endReason, "obstacle");
   assert.equal(s[2].running, "goto");
   assert.equal(s[2].mode, "idle");
-  assert.equal(s[3].tiles.length + s[4].tiles.length, 42);
   // Damaged: refused.
   const bad = Buffer.from(whole[0]);
   bad[100] ^= 1;
@@ -70,24 +66,15 @@ test("the firmware's snapshots, put together from pieces of any size, read as wr
   const old = Buffer.from(whole[0]); // an old robot's (version 1): refused, the layout changed
   old[4] = 1;
   old.writeUInt32LE(zlib.crc32(old.subarray(0, old.length - 4)) >>> 0, old.length - 4);
-  assert.throws(() => parseSnapshot(old), /snapshot version 1, this server reads 2/);
+  assert.throws(() => parseSnapshot(old), /snapshot version 1, this server reads 3/);
 });
 
-test("columns: from the window's three cells, from a tile's 4 bits", { skip: !have && "run ./run_tests.sh first" }, () => {
-  const OCC = 2 | 12 << 4, FREE = 1 | 9 << 4;
-  assert.equal(columnOf(0, OCC, 0), COLUMN.BLOCKED);
-  assert.equal(columnOf(0, FREE, OCC), COLUMN.OVERHANG);
-  assert.equal(columnOf(FREE, 0, 0), COLUMN.NO_FLOOR);
-  assert.equal(columnOf(OCC, FREE, FREE), COLUMN.DRIVABLE);
-  assert.equal(columnOf(0, FREE, FREE), COLUMN.OPEN);
-  assert.equal(columnOf(0, FREE, 0), COLUMN.UNKNOWN);
-  const s = parseSnapshot(new SnapshotAssembler().push(firmware())[0]);
-  const w = windowColumns(s.window!);
-  assert.equal(w.columns[30 * 60 + 31], COLUMN.BLOCKED); // the test's blocked cell, 12 of 15 confident
-  assert.equal(w.confidence[30 * 60 + 31], 12);
-  assert.equal(w.columns.filter(c => c !== COLUMN.UNKNOWN).length, 1);
-  const tile = s.tiles.find(t => t.tx === -2)!;
-  assert.equal(tileColumns(tile)[5 * 20 + 10], COLUMN.BLOCKED); // column (-45, 0)
+test("a tile's 4-bit columns", () => {
+  const columns = Buffer.alloc(200);
+  const k = 5 * 20 + 10;
+  columns[k >> 1] = k & 1 ? COLUMN.BLOCKED << 4 : COLUMN.BLOCKED;
+  assert.equal(tileColumns({ columns })[k], COLUMN.BLOCKED);
+  assert.equal(tileColumns({ columns })[0], COLUMN.UNKNOWN);
 });
 
 test("a grey PNG", () => {
@@ -117,14 +104,14 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     // Stored again: replaced, not added.
     const again = parseSnapshot(new SnapshotAssembler().push(firmware())[0]);
     await store.importSnapshot(b, b.stamp().messageNumber, again, new SnapshotAssembler().push(firmware())[0], Date.UTC(2026, 9, 14, 10), null);
-    assert.deepEqual(await store.query("SELECT count(*) AS n FROM snapshots"), [{ n: "5" }]);
+    assert.deepEqual(await store.query("SELECT count(*) AS n FROM snapshots"), [{ n: "3" }]);
 
     const boots = await listBoots(store, new BootFolders(directory));
     assert.equal(boots.length, 1);
     assert.equal(boots[0].folder, folder);
-    assert.equal(Number(boots[0].snapshots), 5);
+    assert.equal(Number(boots[0].snapshots), 3);
     const list = await listSnapshots(store, boot);
-    assert.deepEqual(list.map(r => Number(r.sequence)), [1, 2, 3, 4, 5]);
+    assert.deepEqual(list.map(r => Number(r.sequence)), [1, 2, 3]);
     assert.equal(list[1].action, "drive");
     assert.equal(list[1].end_reason, "obstacle");
     assert.equal(list[2].has_image, true);
@@ -156,19 +143,5 @@ test("stored in DuckDB, served as the page asks", { skip: !have && "run ./run_te
     } finally { maps.close(); }
     assert.equal(one.features.length, 2);
     assert.equal(one.features[0].x, 12.5);
-
-    // The map then: snapshot 1 has the two first tiles; snapshot 3 changed one (newest wins);
-    // 5 has every tile the robot has (42).
-    const m1 = (await snapshotMap(store, boot, 1))!;
-    assert.equal(m1.window!.originX, -30);
-    assert.equal(m1.window!.columns[30 * 60 + 31], COLUMN.BLOCKED);
-    assert.equal(m1.tiles.length, 2);
-    const t1 = m1.tiles.find(t => t.tx === -2)!;
-    assert.equal(t1.columns[5 * 20 + 10], COLUMN.BLOCKED);
-    const m3 = (await snapshotMap(store, boot, 3))!;
-    const t3 = m3.tiles.find(t => t.tx === -2)!;
-    assert.equal(t3.sequence, 3);
-    assert.equal(t3.columns[5 * 20 + 10], COLUMN.OPEN);
-    assert.equal((await snapshotMap(store, boot, 5))!.tiles.length, 42);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

@@ -45,6 +45,7 @@ static void test_table(void) {
     assert(wire_info(WIRE_SNAPSHOT_PART, &i) && i.lane == WIRE_LANE_BULK && i.max == 1400);
     // The imu batch: bulk; 1-10 records of 12 B after 15 B.
     assert(wire_info(WIRE_IMU_BATCH, &i) && i.lane == WIRE_LANE_BULK && i.min == 27 && i.max == 135);
+    assert(wire_info(WIRE_MAP_PART, &i) && i.lane == WIRE_LANE_BULK && i.min == WIRE_MAP_PART_SIZE && i.max == WIRE_MAP_PART_SIZE);
     assert(wire_info(WIRE_COMMAND, &i) && i.lane == WIRE_LANE_TO_ROBOT);
     assert(wire_info(WIRE_HEARTBEAT, &i) && i.lane == WIRE_LANE_TO_ROBOT);
     // The ToF frame: its type and size are tof_format's, after the move and the time.
@@ -173,6 +174,12 @@ static void test_round_trips(void) {
     assert(m.type == WIRE_SNAPSHOT_PART && m.len == WIRE_PART_MAX && !memcmp(m.payload, part, WIRE_PART_MAX));
     assert(wire_encode_snapshot_part(part, 0, message) == 0 && wire_encode_snapshot_part(part, WIRE_PART_MAX + 1, message) == 0);
 
+    wire_map_part_t mp;
+    m = take_whole(message, wire_encode_map_part(8, -30, 10, part, message));
+    assert(wire_decode_map_part(&m, &mp) && mp.part == 8 && mp.origin_cx == -30 && mp.origin_cy == 10 &&
+           !memcmp(mp.cells, part, WIRE_MAP_PART_CELLS));
+    assert(wire_encode_map_part(9, 0, 0, part, message) == 0);
+
     wire_command_t c = {.n = 17, .text = "drive 50"}, c2;
     m = take_whole(message, wire_encode_command(&c, message));
     assert(wire_decode_command(&m, &c2) && c2.n == 17 && !strcmp(c2.text, "drive 50"));
@@ -256,7 +263,7 @@ static void test_envelope(void) {
 
 // --- the golden bytes ---
 
-typedef struct { const char *name; uint8_t bytes[WIRE_HEADER + WIRE_TOF_HEADER + TOF_FORMAT_MAX]; uint32_t len; } sample_t;
+typedef struct { const char *name; uint8_t bytes[WIRE_MESSAGE_MAX]; uint32_t len; } sample_t;
 
 static uint32_t samples(sample_t *out) {
     uint32_t n = 0;
@@ -296,6 +303,9 @@ static uint32_t samples(sample_t *out) {
     out[n] = (sample_t){.name = "tof_compact"}; out[n].len = wire_encode_tof(TOF_USE_MAP, 12, 4300000000ull, &f, out[n].bytes); n++;
     const uint8_t part[] = {'S', 'N', 'A', 'P', 1, 2, 0xfe, 0xff};
     out[n] = (sample_t){.name = "snapshot_part"}; out[n].len = wire_encode_snapshot_part(part, sizeof part, out[n].bytes); n++;
+    uint8_t map_cells[WIRE_MAP_PART_CELLS];
+    for (int i = 0; i < WIRE_MAP_PART_CELLS; i++) map_cells[i] = (uint8_t)(i * 19 + 3);
+    out[n] = (sample_t){.name = "map_part"}; out[n].len = wire_encode_map_part(4, -30, 10, map_cells, out[n].bytes); n++;
     wire_command_t c = {.n = 17, .text = "drive 50"};
     out[n] = (sample_t){.name = "command"}; out[n].len = wire_encode_command(&c, out[n].bytes); n++;
     out[n] = (sample_t){.name = "heartbeat"}; out[n].len = wire_encode_heartbeat(out[n].bytes); n++;
@@ -325,7 +335,7 @@ static void write_golden(void) {
                "# the same samples and must give these bytes, and decode these bytes to them.\n"
                "# Written by build/test_wire --write; read by test_wire.c and wire.test.ts.\n");
     fprintf(f, "version %d\n", WIRE_VERSION);
-    char line[2048];
+    char line[4096];
     table_line(line, sizeof line);
     fprintf(f, "table %s\n", line);
     sample_t s[24];
@@ -358,7 +368,7 @@ static void test_golden(void) {
         snprintf(name, sizeof name, "%s", line);
         if (!strcmp(name, "version")) { version_ok = atoi(rest) == WIRE_VERSION; continue; }
         if (!strcmp(name, "table")) { table_ok = !strcmp(rest, table); continue; }
-        uint8_t bytes[WIRE_HEADER + TOF_FORMAT_MAX];
+        uint8_t bytes[WIRE_MESSAGE_MAX];
         uint32_t len = unhex(rest, bytes);
         bool found = false;
         for (uint32_t i = 0; i < n; i++) {

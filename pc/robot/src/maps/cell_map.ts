@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Store } from "../store.ts";
 import type { Pose } from "../link.ts";
-import type { Mounting } from "../mounting.ts";
+import { loadMounting, type Mounting } from "../mounting.ts";
 import { packTof, type PosedFrame } from "../tof_format.ts";
 
 const REPO = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -33,6 +33,7 @@ const VERDICTS = ["floor", "obstacle", "unsure"] as const;
 export interface CellMapView {
   originX: number; originY: number; cellsX: number; cellsY: number;  // the window, in world cells
   cells: Buffer;                                                      // [layer][ix][iy], one byte a cell
+  columns: number[]; confidence: number[];                            // 60 x 60, ix * 60 + iy (picoA/app/cell_map.h)
   tiles: { tx: number; ty: number; columns: Buffer }[];              // the whole-house map outside it, 4 bits a column
 }
 // A zone's reading in the world (picoA/app/tof_rays.h); null: no valid reading, or no pose.
@@ -104,7 +105,7 @@ class Helper implements CellMap {
   }
 
   add(frame: PosedFrame): Promise<Buffer> { return this.ask("F", packTof("compact", frame)); }
-  clear(): Promise<Buffer> { return this.ask("C"); }
+  clear(x = 0, y = 0): Promise<Buffer> { return this.ask("C", f32(x, y)); }
 
   async drive(x: number, y: number, yaw: number, distanceM: number): Promise<{ movedM: number; obstacle: boolean }> {
     const b = await this.ask("D", f32(x, y, yaw, distanceM)), moved = b.readFloatLE(0), obstacle = b[4] === 1;
@@ -117,11 +118,19 @@ class Helper implements CellMap {
   }
 
   async view(): Promise<CellMapView> {
-    const b = await this.ask("V"), cellBytes = LAYERS * GRID * GRID, tiles: CellMapView["tiles"] = [];
-    for (let i = 0, at = 8 + cellBytes + 2; i < b.readUInt16LE(8 + cellBytes); i++, at += 4 + TILE_BYTES)
+    const b = await this.ask("V"), cellBytes = LAYERS * GRID * GRID, colBytes = GRID * GRID, tiles: CellMapView["tiles"] = [];
+    const tileStart = 8 + cellBytes + 2 * colBytes;
+    for (let i = 0, at = tileStart + 2; i < b.readUInt16LE(tileStart); i++, at += 4 + TILE_BYTES)
       tiles.push({ tx: b.readInt16LE(at), ty: b.readInt16LE(at + 2), columns: Buffer.from(b.subarray(at + 4, at + 4 + TILE_BYTES)) });
     return { originX: b.readInt32LE(0), originY: b.readInt32LE(4), cellsX: GRID, cellsY: GRID,
-             cells: Buffer.from(b.subarray(8, 8 + cellBytes)), tiles };
+             cells: Buffer.from(b.subarray(8, 8 + cellBytes)),
+             columns: [...b.subarray(8 + cellBytes, 8 + cellBytes + colBytes)],
+             confidence: [...b.subarray(8 + cellBytes + colBytes, tileStart)], tiles };
+  }
+
+  async columnsOf(cells: Uint8Array): Promise<{ columns: number[]; confidence: number[] }> {
+    const b = await this.ask("K", cells), colBytes = GRID * GRID;
+    return { columns: [...b.subarray(0, colBytes)], confidence: [...b.subarray(colBytes, 2 * colBytes)] };
   }
 
   async rays(frame: PosedFrame): Promise<ZoneRays[]> {
@@ -148,6 +157,7 @@ export class CellMaps {
   private note: (text: string) => void;
   private keep: number;
   private boots = new Map<string, Promise<BootMap>>();
+  private plain: Helper | null = null;
 
   constructor(store: Store, note: (text: string) => void = () => {}, keep = 2) {
     this.store = store;
@@ -180,7 +190,17 @@ export class CellMaps {
     return (await this.boot(boot)).helper.rays(frame);
   }
 
+  // Each column's class and confidence for a 3 x 60 x 60 window of cells (cell_map_column_of).
+  async columnsOf(cells: Buffer): Promise<{ columns: number[]; confidence: number[] }> {
+    const any = await [...this.boots.values()][0]?.catch(() => null);
+    if (any && !any.helper.dead) return any.helper.columnsOf(cells);
+    if (!this.plain || this.plain.dead) this.plain = new Helper(loadMounting(), this.note);
+    return this.plain.columnsOf(cells);
+  }
+
   close(): void {
+    this.plain?.close();
+    this.plain = null;
     for (const b of this.boots.values()) void b.then(m => m.helper.close(), () => {});
     this.boots.clear();
   }

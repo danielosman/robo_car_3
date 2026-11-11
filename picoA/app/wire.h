@@ -20,6 +20,7 @@
 // | 0x07 | move end      | control      | move n u32; end u8 (wire_end_t); t u64; frames sent u32; frames dropped u32; moved f32 m; rotated f32 rad; imu batches sent u32; imu batches dropped u32 (37 B) |
 // | 0x10 | snapshot part | bulk         | the next 1-1400 bytes of a snapshot (snapshot.h); a snapshot's parts in order |
 // | 0x11 | imu batch     | bulk         | move n u32; first record's t u64; period u16 µs; count u8 (1-10); then per record acceleration x, y, z, gyro x, y, z i16 (raw counts, link_messages.h) (15 + 12 × count B); only during a move (move.h) |
+// | 0x12 | map part      | bulk         | part u8 (0-8); origin_cx, origin_cy i16; then 1200 bytes of the robot's window (cell_map.h, 9 parts = 3 × 60 × 60 B in order) (1205 B) |
 // | 0x40 | tof compact   | bulk         | move n u32; t u64 (the frame's middle); then a compact tof frame (tof_format.h; its types come from tof_format_message_type()) (12 + 277 B); only during a move (move.h) |
 // | 0x20 | command       | to the robot | command n u32; the command's text, 1-46 printable ASCII (commands.h) |
 // | 0x21 | heartbeat     | to the robot | none (every 2 s: the robot closes after 30 s of nothing) |
@@ -39,7 +40,7 @@
 #include "link_messages.h"
 #include "tof_format.h"
 
-#define WIRE_VERSION 4 // up when any payload or the table changes; the PC refuses another
+#define WIRE_VERSION 5 // up when any payload or the table changes; the PC refuses another
 
 #define WIRE_HEADER      3
 #define WIRE_PAYLOAD_MAX 1400 // the longest payload of any message (a snapshot part)
@@ -55,6 +56,7 @@ enum {
     WIRE_MOVE_END = 0x07,
     WIRE_SNAPSHOT_PART = 0x10,
     WIRE_IMU_BATCH = 0x11,
+    WIRE_MAP_PART = 0x12,
     WIRE_COMMAND = 0x20,
     WIRE_HEARTBEAT = 0x21,
 };
@@ -70,6 +72,9 @@ enum {
 #define WIRE_TOF_HEADER    12 // move n, t; the packed frame follows
 #define WIRE_IMU_RECORD    12
 #define WIRE_IMU_BATCH_MAX 10 // records in a batch (~0.1 s)
+#define WIRE_MAP_PARTS     9
+#define WIRE_MAP_PART_CELLS 1200
+#define WIRE_MAP_PART_SIZE (5 + WIRE_MAP_PART_CELLS)
 #define WIRE_MODE_LEN      8
 #define WIRE_ACTION_LEN    12
 #define WIRE_PART_MAX      1400
@@ -199,6 +204,15 @@ uint32_t wire_encode_tof(tof_use_t use, uint32_t move, uint64_t t_us, const pose
 
 // n bytes of a snapshot (1-WIRE_PART_MAX); 0 if n is out of range.
 uint32_t wire_encode_snapshot_part(const uint8_t *bytes, uint32_t n, uint8_t *out);
+
+// One ninth of the robot's 3 × 60 × 60 cell window (part 0..WIRE_MAP_PARTS - 1).
+typedef struct {
+    uint8_t part;
+    int16_t origin_cx, origin_cy;
+    uint8_t cells[WIRE_MAP_PART_CELLS];
+} wire_map_part_t;
+uint32_t wire_encode_map_part(uint8_t part, int16_t origin_cx, int16_t origin_cy, const uint8_t *cells, uint8_t *out);
+bool wire_decode_map_part(const wire_message_t *m, wire_map_part_t *p);
 
 typedef struct {
     uint32_t n;

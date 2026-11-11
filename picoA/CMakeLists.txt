@@ -28,7 +28,7 @@ pico_add_extra_outputs(picoA_bringup)
 # sensor, watching, the actions as moves, console (USB and WiFi), the frames to the PC.
 add_executable(picoA_app app/main.c app/body.c app/pose.c app/tof.c app/tof_rays.c app/tof_format.c app/behaviour.c app/commands.c
     app/link_pc.c app/wire.c app/change_grid.c app/watch_tof.c app/watch_camera.c app/tracker.c app/watch.c app/loop_statistics.c app/cell_map.c
-    app/room.c app/house_map.c app/move.c app/mode.c app/snapshot.c app/vision.c)
+    app/room.c app/move.c app/mode.c app/snapshot.c app/vision.c)
 pico_set_program_name(picoA_app "picoA_app")
 pico_set_program_version(picoA_app "0.1")
 pico_generate_pio_header(picoA_app ${CMAKE_CURRENT_LIST_DIR}/drivers/hm0360.pio)

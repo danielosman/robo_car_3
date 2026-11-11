@@ -10,12 +10,14 @@
 // Requests on stdin, one byte saying which, then its bytes; every request gets one
 // answer on stdout: a u32 length, then that many bytes. Little-endian, floats f32.
 //   'F' frame (277 B, compact)  add it to the map (cell_map_add)        -> nothing
-//   'C'                         clear the map (window and tiles)         -> nothing
+//   'C' x y                     clear the map (window and tiles)         -> nothing
 //   'D' x y yaw distance        a drive on the map now (room_drive)      -> f32 moved, u8 obstacle
 //   'W' x y r                   a blocked or overhang column within r?   -> u8 (0, 1)
 //   'V'                         the map: the window's origin cell (i32 x, y), its
-//                               cells (3 x 60 x 60 B, cell_map_window), the tile count
-//                               (u16), each tile's tx, ty (i16) and columns (200 B)
+//                               cells (3 x 60 x 60 B, cell_map_window), its columns
+//                               (60 x 60 B) and confidence (60 x 60 B, 0-15), the tile
+//                               count (u16), each tile's tx, ty (i16) and columns (200 B)
+//   'K' cells (3 x 60 x 60 B)   each column's class and confidence       -> 60 x 60 B columns, 60 x 60 B confidence
 //   'R' frame (277 B, compact)  each zone's reading in the world (tof_rays_of): 64 x
 //                               verdict u8 (255: no valid reading or no pose), the
 //                               point x, y, z, the lowest and highest ray end (f32)
@@ -32,6 +34,8 @@
 #include "tof_rays.h"
 
 #define NO_VERDICT 255
+#define WINDOW_COLS (CELL_MAP_GRID * CELL_MAP_GRID)
+#define WINDOW_CELLS (CELL_LAYERS * WINDOW_COLS)
 
 static int out_fd; // the answers; stdout itself goes to stderr
 
@@ -50,7 +54,7 @@ static void write_all(const void *buf, size_t n) {
 }
 
 // The answer being built: its bytes, then sent with its length first.
-static uint8_t answer[CELL_LAYERS * CELL_MAP_GRID * CELL_MAP_GRID + 16 + HOUSE_TILES * (4 + HOUSE_TILE_BYTES)];
+static uint8_t answer[WINDOW_CELLS + 2 * WINDOW_COLS + 16 + HOUSE_TILES * (4 + HOUSE_TILE_BYTES)];
 static uint32_t answer_len;
 
 static void put(const void *bytes, size_t n) {
@@ -88,12 +92,21 @@ static bool obstacle_within(float x, float y, float r) {
     return false;
 }
 
+static void put_columns(const uint8_t *cells) {
+    uint8_t cols[WINDOW_COLS], conf[WINDOW_COLS];
+    for (int i = 0; i < WINDOW_COLS; i++)
+        cols[i] = (uint8_t)cell_map_column_of(cells[i], cells[WINDOW_COLS + i], cells[2 * WINDOW_COLS + i], &conf[i]);
+    put(cols, sizeof cols);
+    put(conf, sizeof conf);
+}
+
 static void view(void) {
     int ox, oy;
     const uint8_t *cells = cell_map_window(&ox, &oy);
     int32_t origin[2] = {ox, oy};
     put(origin, sizeof origin);
-    put(cells, CELL_LAYERS * CELL_MAP_GRID * CELL_MAP_GRID);
+    put(cells, WINDOW_CELLS);
+    put_columns(cells);
     uint16_t n = (uint16_t)house_map_tiles();
     put(&n, 2);
     for (int i = 0; i < n; i++) {
@@ -128,9 +141,11 @@ int main(int argc, char **argv) {
     out_fd = dup(1);
     dup2(2, 1);
     setvbuf(stdout, NULL, _IOLBF, 0); // the map code's lines reach the server's log as they come
+    static const cell_map_tiles_t keep = {house_map_clear, house_map_get, house_map_put};
+    cell_map_keep_tiles(&keep);
     mounting_t m = {.tof = {strtof(argv[1], NULL), strtof(argv[2], NULL), strtof(argv[3], NULL), strtof(argv[4], NULL), atoi(argv[5])}};
     tof_rays_init(&m);
-    cell_map_clear();
+    cell_map_clear(0, 0);
     for (;;) {
         uint8_t op;
         read_all(&op, 1);
@@ -138,7 +153,7 @@ int main(int argc, char **argv) {
         float a[4];
         switch (op) {
         case 'F': if (read_frame(&f)) cell_map_add(&f); break;
-        case 'C': cell_map_clear(); break;
+        case 'C': read_floats(a, 2); cell_map_clear(a[0], a[1]); break;
         case 'D': {
             read_floats(a, 4);
             room_drive_t d = room_drive(a[0], a[1], a[2], a[3]);
@@ -154,6 +169,12 @@ int main(int argc, char **argv) {
             break;
         }
         case 'V': view(); break;
+        case 'K': {
+            static uint8_t cells[WINDOW_CELLS];
+            read_all(cells, sizeof cells);
+            put_columns(cells);
+            break;
+        }
         case 'R': if (read_frame(&f)) rays(&f); break;
         default: fprintf(stderr, "cell_map_helper: unknown request %d\n", op); return 1;
         }

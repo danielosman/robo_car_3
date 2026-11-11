@@ -3,9 +3,8 @@
 // to the server in parts on the bulk lane (link_pc.h; snapshot part messages, wire.h)
 // when a command asks for one, and when a server connects: the pose, the last move and how it
 // ended, the mode, the last ToF frame as a compact frame (tof_format.h, the snapshot
-// use: its pose in it), the last camera frame, the colour sensor's last reading, the map
-// window with its anchor, and the whole-house map's tiles that changed since they
-// were last sent (all of them for a new server). One snapshot is built at a time
+// use: its pose in it), the last camera frame, its features, and the colour sensor's last
+// reading. One snapshot is built at a time
 // into a static buffer; one asked for while the last is still going out is built
 // when it has gone (with what the robot knows then). Without a server nothing is
 // built: one is built when a server connects. A part the lane has no room for

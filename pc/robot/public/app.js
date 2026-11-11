@@ -132,8 +132,8 @@ function draw() {
   ctx.strokeStyle = "#666";
   ctx.beginPath(); ctx.arc(ox, oy, 4 * dpr, 0, 2 * Math.PI); ctx.stroke();
 
-  // The path driven up to the snapshot shown (since the map was last cleared), and
-  // where each snapshot was taken (a click on one shows it).
+  // The path driven up to the snapshot shown, and where each snapshot was taken (a click
+  // on one shows it).
   ctx.strokeStyle = "#7aa7d988";
   ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath();
@@ -332,7 +332,6 @@ function showSnapshot() {
   $("pose").innerHTML = s.x === null ? kv([["", "PicoB not connected"]]) : kv([
     ["x, y", `${(s.x * 100).toFixed(1)}, ${(s.y * 100).toFixed(1)} cm`], ["yaw", `${deg(s.yaw)}°`],
     ["pitch, roll", `${deg(s.pitch)}°, ${deg(s.roll)}°`], ["", `${s.stationary ? "still" : "moving"}, motors ${s.motors_on ? "on" : "off"}`],
-    ["map window", `from (${s.map_origin_cx * 10}, ${s.map_origin_cy * 10}) cm`], ["tiles sent", s.tiles],
   ]);
   const ended = s.action ? `${s.action} ${s.end_reason === "done" ? "done" : `ended: ${s.end_reason}`}` : "";
   $("snapshotInfo").innerHTML = kv([

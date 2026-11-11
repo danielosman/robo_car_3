@@ -10,7 +10,7 @@ import path from "node:path";
 import type { Store } from "../store.ts";
 import type { LiveRobot } from "../live.ts";
 import type { Log } from "../log.ts";
-import { cellMapAt, snapshotDetail, snapshotMap, type MapView } from "../snapshots_api.ts";
+import { cellMapAt, snapshotDetail, type MapView } from "../snapshots_api.ts";
 import { FEATURE } from "../snapshot.ts";
 import { CAMERA } from "./firmware.ts";
 import { poseOut } from "./answers.ts";
@@ -65,10 +65,10 @@ export async function findSnapshot(store: Store, arg: string | undefined): Promi
   });
 }
 
-// The map at a snapshot: the PC's cell map, or (robot) the robot's own as it sent it.
-async function mapAt(ctx: ApiContext, id: SnapshotId, robot: boolean): Promise<MapView> {
-  const view = robot ? await snapshotMap(ctx.store, id.boot, id.sequence) : await cellMapAt(ctx.store, ctx.maps, id.boot, id.sequence);
-  if (!view?.window) throw new ReadError(`snapshot ${id.sequence} has no map`);
+// The PC's cell map at a snapshot.
+async function mapAt(ctx: ApiContext, id: SnapshotId): Promise<MapView> {
+  const view = await cellMapAt(ctx.store, ctx.maps, id.boot, id.sequence);
+  if (!view) throw new ReadError(`snapshot ${id.sequence} has no map`);
   return view;
 }
 
@@ -115,21 +115,42 @@ export const READS: Record<string, Read> = {
     help: "The map at snapshot n (default: the newest): the PC's, built from the ToF frames that came before it by\n" +
           "the robot's own map code. The window (6 × 6 m around the robot, 10 cm cells) as three layers of cell bytes,\n" +
           "G (the floor), L1 (3-13 cm), L2 (13-23 cm), and the whole-house tiles outside it. format says how to read\n" +
-          "them. --robot: the robot's own map instead, as it sent it in the snapshot; the two are close, not equal\n" +
-          "(the robot also maps while it stands). --png draws the window as a picture (on the PC) and gives its file.",
+          "them. --robot asks the connected robot for its own 6 × 6 m window right now. --png draws the whole map\n" +
+          "(or, with --robot, the robot's window) as a picture and gives its file.",
     async run(ctx, args, flags) {
       atMostOne(args, this.usage);
-      const robot = flags.has("robot"), id = await findSnapshot(ctx.store, args[0]), map = await mapAt(ctx, id, robot);
-      if (flags.has("png")) {
-        const file = path.join(ctx.recordingsDirectory, "map", ctx.bootFolders.folderForBoot(id.boot), `${id.sequence}${robot ? "-robot" : ""}.png`);
-        await mkdir(path.dirname(file), { recursive: true });
-        await writeFile(file, mapPng(map)!);
-        return { snapshot: id.sequence, map: robot ? "robot" : "pc", file };
+      if (flags.has("robot")) {
+        if (args.length) throw new ReadError("--robot asks the robot now (it takes no snapshot number)", 400);
+        const asked = await ctx.queue.askMap();
+        if ("error" in asked) throw new ReadError(asked.error, 404);
+        const w = asked.window, r = asked.pose ?? ctx.live.pose, n = w.cellsX * w.cellsY;
+        if (flags.has("png")) {
+          const cols = await ctx.maps.columnsOf(w.cells);
+          const folder = ctx.live.boot ? ctx.bootFolders.folderForBoot(ctx.live.boot) : "live";
+          const file = path.join(ctx.recordingsDirectory, "map", folder, "robot.png");
+          await mkdir(path.dirname(file), { recursive: true });
+          await writeFile(file, mapPng({ window: { ...w, ...cols }, tiles: [], robot: r, path: [] }));
+          return { map: "robot", pose: r && poseOut(r), file };
+        }
+        const layer = (k: number) => [...w.cells.subarray(k * n, (k + 1) * n)];
+        return {
+          map: "robot", pose: r && poseOut(r),
+          window: { origin_cell_x: w.originX, origin_cell_y: w.originY, cells_x: w.cellsX, cells_y: w.cellsY,
+                    G: layer(0), L1: layer(1), L2: layer(2) },
+          format: MAP_FORMAT,
+        };
       }
-      const w = map.window!, r = map.robot, n = w.cellsX * w.cellsY;
+      const id = await findSnapshot(ctx.store, args[0]), map = await mapAt(ctx, id);
+      if (flags.has("png")) {
+        const file = path.join(ctx.recordingsDirectory, "map", ctx.bootFolders.folderForBoot(id.boot), `${id.sequence}.png`);
+        await mkdir(path.dirname(file), { recursive: true });
+        await writeFile(file, mapPng(map));
+        return { snapshot: id.sequence, map: "pc", file };
+      }
+      const w = map.window, r = map.robot, n = w.cellsX * w.cellsY;
       const layer = (k: number) => [...w.cells.subarray(k * n, (k + 1) * n)];
       return {
-        snapshot: id.sequence, map: robot ? "robot" : "pc", pose: r && poseOut(r),
+        snapshot: id.sequence, map: "pc", pose: r && poseOut(r),
         window: { origin_cell_x: w.originX, origin_cell_y: w.originY, cells_x: w.cellsX, cells_y: w.cellsY,
                   G: layer(0), L1: layer(1), L2: layer(2) },
         tiles: map.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: t.columns })),

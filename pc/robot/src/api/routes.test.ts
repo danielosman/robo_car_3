@@ -33,6 +33,11 @@ class EchoRobot extends EventEmitter {
     const line = `${text} #${n_}`;
     this.lines.push(line);
     if (text === "status") this.printed("Link to PicoB: ok\nToF: 10 Hz set, 10.0 frames a second\n");
+    if (text === "map") {
+      const cells = Buffer.alloc(3 * 60 * 60);
+      cells[3600 + 35 * 60 + 30] = (10 << 4) | 2; // L1 occupied 50 cm ahead
+      setTimeout(() => this.emit("mapWindow", { originX: -30, originY: -30, cellsX: 60, cellsY: 60, cells }), 3);
+    }
     const n = Number(/#(\d+)$/.exec(line)![1]), snap = line.startsWith("snap") ? 5 : null;
     setTimeout(() => this.emit("done", { n, end: line.startsWith("drive") ? this.end : "ok", pose: { x: 0.43, y: -0.04, yaw: 0 },
                                          movedM: 0.31, rotatedDeg: 0, goalM: null, snapshot: snap }), 5);
@@ -117,13 +122,20 @@ test("report: the robot's status word; its printout in the answer and in the log
 test("check on the PC's map at the newest snapshot", { skip }, async () => {
   const { post, done, store, boot, directory } = await setUp();
   try {
-    // The newest snapshot (5, stored again) comes after frames of a wall 50 cm ahead of
-    // where it says the robot is: a 1 m drive stops before it.
-    const [p] = await store.query(`SELECT x, y, yaw FROM snapshots WHERE boot_id = '${boot.id}' AND sequence = 5`);
-    const zones = Array.from({ length: 64 }, (_, k) => ({ distanceMm: 500, signal: 50, sigmaMm: 5, kind: k < 32 ? "sure" as const : "unsure" as const, targets: 1 }));
-    for (let n = 1; n <= 3; n++) void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: n * 100000, frame: { number: n, robotClockUs: n * 100000,
-      periodUs: 100000, x: Number(p.x), y: Number(p.y), yaw: Number(p.yaw), pitch: 0, turn: 0, still: true, poseKnown: true, beyondMm: 2550, zones } }));
-    await snapshotAgain(store, boot, directory, 5);
+    // The newest snapshot (3, stored again) comes after frames of the floor and a wall
+    // 50 cm ahead of where it says the robot is: a 1 m drive stops before the wall.
+    const [p] = await store.query(`SELECT x, y, yaw FROM snapshots WHERE boot_id = '${boot.id}' AND sequence = 3`);
+    const x = Number(p.x), y = Number(p.y), yaw = Number(p.yaw);
+    for (let n = 1; n <= 3; n++) {
+      const back = (3 - n) * 0.15;
+      const zones = Array.from({ length: 64 }, (_, k) => ({
+        distanceMm: k < 32 ? 500 + Math.round(back * 1000) : k < 56 ? 370 : 270, signal: 50, sigmaMm: 5,
+        kind: k < 32 || k >= 48 ? "sure" as const : "unsure" as const, targets: 1,
+      }));
+      void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: n * 100000, frame: { number: n, robotClockUs: n * 100000,
+        periodUs: 100000, x: x - back * Math.cos(yaw), y: y - back * Math.sin(yaw), yaw, pitch: 0, turn: 0, still: true, poseKnown: true, beyondMm: 2550, zones } }));
+    }
+    await snapshotAgain(store, boot, directory, 3);
     const [blocked] = (await post("check", "d100")).text.trim().split("\n").map(l => JSON.parse(l));
     assert.equal(blocked.result, "obstacle");
     assert.ok(blocked.moved > 10 && blocked.moved < 35, String(blocked.moved));
@@ -142,21 +154,23 @@ test("reads: status, map, tof, camera, light, features, log; errors; help", { sk
     const status = await read("status");
     assert.deepEqual(status, { connected: true, boot: boot.id, pose: { x: 43, y: -4, yaw: 30 }, mode: "manual", moving: null, wifi: -58,
       running: null, waiting: [], newest_snapshot: 5 }); // no safety peaks since step 4c
-    // The PC's map: no frames stored here, so nothing known yet but the floor under the robot.
+    // The PC's map: no frames stored here, so nothing known yet but the 35 cm floor seed.
     const map = await read("map", "1");
     assert.deepEqual([map.snapshot, map.map], [1, "pc"]);
     assert.deepEqual([map.window.cells_x, map.window.cells_y, map.window.origin_cell_x], [60, 60, -30]);
     for (const layer of ["G", "L1", "L2"]) assert.equal(map.window[layer].length, 3600);
+    assert.ok(map.window.G.some((b: number) => (b & 3) === 2));
     assert.ok(!map.window.L1.some((b: number) => (b & 3) === 2));
     assert.ok(map.format.cell_byte.startsWith("bits 0-1 the state"));
-    // The robot's own, as it sent it: somewhere L1 occupied (an obstacle).
-    const own = await read("map", "1", "?robot");
+    // The robot's own, asked from it right now: L1 occupied 50 cm ahead; takes no snapshot number.
+    assert.equal((await post("map", "1", "?robot")).status, 400);
+    const own = await read("map", "", "?robot");
     assert.equal(own.map, "robot");
     assert.ok(own.window.L1.some((b: number) => (b & 3) === 2));
     const png = (await read("map", "1", "?png")).file;
     assert.equal(png, path.join(directory, "map", png.split(path.sep).at(-2), "1.png"));
     assert.ok(existsSync(png));
-    assert.ok((await read("map", "1", "?png&robot")).file.endsWith("1-robot.png"));
+    assert.ok((await read("map", "", "?png&robot")).file.endsWith("robot.png"));
     const tofText = (await post("tof", "1")).text;
     assert.match(tofText, /"distance": \[\n {4}\[/); // a matrix, one row a line
     const tof = JSON.parse(tofText);

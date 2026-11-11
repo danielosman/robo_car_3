@@ -77,7 +77,7 @@
         "name": "odometry_t",
         "kind": "type",
         "code": "} odometry_t;",
-        "bytes": 68
+        "bytes": 60
       },
       {
         "name": "odometry_init",

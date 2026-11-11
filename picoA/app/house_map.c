@@ -4,19 +4,16 @@
 
 typedef struct {
     int16_t tx, ty;
-    bool dirty;
     uint8_t columns[HOUSE_TILE_BYTES];
 } tile_t;
 
 static tile_t tiles[HOUSE_TILES];
 static int n_tiles, last_found; // last_found: the tile found last (columns come in runs)
 static bool full_said;
-static uint32_t clears;
 
 void house_map_clear(void) {
     n_tiles = last_found = 0;
     full_said = false;
-    clears++;
 }
 
 int house_map_tile_of(int cx) {
@@ -64,8 +61,7 @@ bool house_map_put(int cx, int cy, column_t c) {
     }
     bool high;
     uint8_t *b = &t->columns[nibble_at(cx, cy, tx, ty, &high)];
-    uint8_t v = high ? (uint8_t)((*b & 0x0f) | c << 4) : (uint8_t)((*b & 0xf0) | c);
-    if (v != *b) { *b = v; t->dirty = true; }
+    *b = high ? (uint8_t)((*b & 0x0f) | c << 4) : (uint8_t)((*b & 0xf0) | c);
     return true;
 }
 
@@ -76,17 +72,3 @@ void house_map_tile(int i, int16_t *tx, int16_t *ty, const uint8_t **columns) {
     *ty = tiles[i].ty;
     *columns = tiles[i].columns;
 }
-
-int house_map_next_dirty(int i) {
-    for (; i < n_tiles; i++)
-        if (tiles[i].dirty) return i;
-    return -1;
-}
-
-void house_map_sent(int i) { tiles[i].dirty = false; }
-
-void house_map_all_dirty(void) {
-    for (int i = 0; i < n_tiles; i++) tiles[i].dirty = true;
-}
-
-uint32_t house_map_clears(void) { return clears; }

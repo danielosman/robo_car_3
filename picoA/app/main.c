@@ -88,7 +88,7 @@ int main(void) {
     body_init();
     tof_rays_init(&ROBOT_MOUNTING); // before anything that uses the ToF's rays
     bool camera_watch_ok = watch_init(&ROBOT_MOUNTING);
-    cell_map_clear();
+    cell_map_clear(0, 0);
     bool tof_ok = tof_init(&ROBOT_MOUNTING.tof, TOF_DEFAULT_HZ); // ~2 s: uploads the ToF sensor's firmware
     bool camera_ok = camera_init();
     bool color_ok = opt4048_init();

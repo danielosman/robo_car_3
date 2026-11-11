@@ -12,8 +12,7 @@
 //              it), time, and the IMU's raw counts in the sensor's axes (training data)
 //   status     the robot's status messages (4 a second): the path driven
 //   snapshots  one per snapshot, its bytes as they came, its pose, action, camera and
-//              colour reading; snapshot_zones (its ToF frame), snapshot_features,
-//              snapshot_tiles; the robot's map window as a BLOB (until step 6); the
+//              colour reading; snapshot_zones (its ToF frame), snapshot_features; the
 //              picture a PNG beside the database
 //   detect_runs, detections, map_objects, object_detections: objects (objects/db.ts)
 // Times: t_us and t_s are since power-up (µs as sent, s); robot_clock_us is PicoA's
@@ -73,14 +72,19 @@ CREATE TABLE IF NOT EXISTS status (
 CREATE TABLE IF NOT EXISTS snapshots (                -- picoA/app/snapshot.c
   snapshot_id VARCHAR PRIMARY KEY, boot_id VARCHAR, sequence INTEGER, message_number INTEGER, robot_clock_us UBIGINT, arrived_at TIMESTAMP,
   why VARCHAR, action VARCHAR, end_reason VARCHAR, actions_ended INTEGER, running VARCHAR, mode VARCHAR,
-  map_clears INTEGER, build VARCHAR, length INTEGER, bytes BLOB,  -- bytes: the snapshot as it came
+  build VARCHAR, length INTEGER, bytes BLOB,                -- bytes: the snapshot as it came
   x DOUBLE, y DOUBLE, yaw DOUBLE, pitch DOUBLE, roll DOUBLE, v DOUBLE, w DOUBLE, stationary BOOLEAN, motors_on BOOLEAN,
   stop_reason INTEGER,                                      -- NULL: PicoB not connected
   tof_frame_no UBIGINT, tof_x DOUBLE, tof_y DOUBLE, tof_yaw DOUBLE, tof_pitch DOUBLE, -- where the robot was for the ToF frame
   camera_frame_no INTEGER, exposure_ms DOUBLE, gain DOUBLE, image VARCHAR, -- image: the PNG, relative to recordings/
-  lux DOUBLE, cie_x DOUBLE, cie_y DOUBLE, color_x DOUBLE, color_y DOUBLE, color_z DOUBLE, color_raw BLOB,
-  map_origin_cx INTEGER, map_origin_cy INTEGER, map_cells_x INTEGER, map_cells_y INTEGER, map_cells BLOB, -- [layer][x][y], one byte a cell
-  tiles INTEGER);
+  lux DOUBLE, cie_x DOUBLE, cie_y DOUBLE, color_x DOUBLE, color_y DOUBLE, color_z DOUBLE, color_raw BLOB);
+ALTER TABLE snapshots DROP COLUMN IF EXISTS map_clears;     -- until step 6: the map is built on the PC from the ToF frames
+ALTER TABLE snapshots DROP COLUMN IF EXISTS map_origin_cx;
+ALTER TABLE snapshots DROP COLUMN IF EXISTS map_origin_cy;
+ALTER TABLE snapshots DROP COLUMN IF EXISTS map_cells_x;
+ALTER TABLE snapshots DROP COLUMN IF EXISTS map_cells_y;
+ALTER TABLE snapshots DROP COLUMN IF EXISTS map_cells;
+ALTER TABLE snapshots DROP COLUMN IF EXISTS tiles;
 CREATE TABLE IF NOT EXISTS snapshot_zones (           -- the snapshot's ToF frame (in the world: maps/cell_map.ts, rays)
   snapshot_id VARCHAR, row TINYINT, col TINYINT, distance_mm SMALLINT, kind VARCHAR, signal SMALLINT, sigma_mm SMALLINT,
   targets TINYINT);
@@ -90,8 +94,7 @@ ALTER TABLE snapshot_zones DROP COLUMN IF EXISTS z;
 CREATE TABLE IF NOT EXISTS snapshot_features (        -- the camera features of the snapshot's picture (picoA/app/vision.h);
   snapshot_id VARCHAR, id INTEGER, age INTEGER, flags INTEGER,  -- flags: 1 new, 2 missed, 4 lost, 8 left the image
   x DOUBLE, y DOUBLE, dx DOUBLE, dy DOUBLE, strength DOUBLE, match DOUBLE); -- px, as the robot sees the picture (x right, y down)
-CREATE TABLE IF NOT EXISTS snapshot_tiles (           -- whole-house map tiles as they came: 20 x 20 columns, 4 bits each (house_map.h)
-  snapshot_id VARCHAR, boot_id VARCHAR, sequence INTEGER, map_clears INTEGER, tx INTEGER, ty INTEGER, columns BLOB);
+DROP TABLE IF EXISTS snapshot_tiles;
 -- Objects on the map (doc/OBJECTS_PLAN.md, objects/): robot detect on a snapshot's picture. Running detect
 -- again on a snapshot replaces its rows.
 CREATE TABLE IF NOT EXISTS detect_runs (  -- one per snapshot detected: how the model was asked and how it went
@@ -286,11 +289,11 @@ export class Store {
   // PNG, relative to recordings/. Replaces what was there for it.
   async importSnapshot(boot: Boot, messageNumber: number, s: Snapshot, bytes: Buffer, arrivalMs: number, image: string | null): Promise<void> {
     const id = snapshotId(s.bootId, s.sequence);
-    const p = s.pose, t = s.tof, cam = s.camera, col = s.color, w = s.window;
+    const p = s.pose, t = s.tof, cam = s.camera, col = s.color;
     await this.flush(); // the path and the frames up to it go in first
     await this.use(async c => {
       await c.run("BEGIN TRANSACTION");
-      for (const table of ["snapshots", "snapshot_zones", "snapshot_tiles", "snapshot_features"]) await c.run(`DELETE FROM ${table} WHERE snapshot_id = $1`, [id]);
+      for (const table of ["snapshots", "snapshot_zones", "snapshot_features"]) await c.run(`DELETE FROM ${table} WHERE snapshot_id = $1`, [id]);
       const a = await c.createAppender("snapshots");
       const d = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendDouble(v));
       const i = (v: number | null | undefined) => (v === null || v === undefined ? a.appendNull() : a.appendInteger(v));
@@ -298,7 +301,7 @@ export class Store {
       a.appendVarchar(id); a.appendVarchar(s.bootId); a.appendInteger(s.sequence); a.appendInteger(messageNumber); a.appendUBigInt(BigInt(s.robotClockUs));
       a.appendTimestamp(at(arrivalMs));
       t8(s.why); t8(s.action); t8(s.endReason); a.appendInteger(s.actionsEnded); t8(s.running); t8(s.mode);
-      a.appendInteger(s.mapClears); t8(s.build); a.appendInteger(s.length); a.appendBlob(new Uint8Array(bytes));
+      t8(s.build); a.appendInteger(s.length); a.appendBlob(new Uint8Array(bytes));
       for (const v of [p?.x, p?.y, p?.yaw, p?.pitch, p?.roll, p?.v, p?.w]) d(v);
       if (p) { a.appendBoolean(p.stationary); a.appendBoolean(p.motorsOn); a.appendInteger(p.stopReason); }
       else { a.appendNull(); a.appendNull(); a.appendNull(); }
@@ -307,9 +310,6 @@ export class Store {
       i(cam?.number); d(cam ? cam.exposureUs / 1000 : null); d(cam?.gain); t8(image);
       d(col?.lux); d(col?.cie?.x); d(col?.cie?.y); d(col?.xyz?.X); d(col?.xyz?.Y); d(col?.xyz?.Z);
       if (col) a.appendBlob(new Uint8Array(col.raw)); else a.appendNull();
-      i(w?.originX); i(w?.originY); i(w?.cellsX); i(w?.cellsY);
-      if (w) a.appendBlob(new Uint8Array(w.cells)); else a.appendNull();
-      a.appendInteger(s.tiles.length);
       a.endRow();
       a.closeSync();
       const zs = await c.createAppender("snapshot_zones");
@@ -320,13 +320,6 @@ export class Store {
         zs.endRow();
       });
       zs.closeSync();
-      const tl = await c.createAppender("snapshot_tiles");
-      for (const tile of s.tiles) {
-        tl.appendVarchar(id); tl.appendVarchar(s.bootId); tl.appendInteger(s.sequence); tl.appendInteger(s.mapClears);
-        tl.appendInteger(tile.tx); tl.appendInteger(tile.ty); tl.appendBlob(new Uint8Array(tile.columns));
-        tl.endRow();
-      }
-      tl.closeSync();
       const ft = await c.createAppender("snapshot_features");
       for (const f of s.features?.features ?? []) {
         ft.appendVarchar(id); ft.appendInteger(f.id); ft.appendInteger(f.age); ft.appendInteger(f.flags);
@@ -342,15 +335,13 @@ export class Store {
   // --- reads ---
 
   // The path driven up to snapshot sequence of a boot: the statuses' x, y (m), oldest
-  // first; since the robot's map was last cleared before it, or (sinceClear false) since
-  // power-up.
-  async path(boot: string, sequence: number, sinceClear = true): Promise<{ x: number; y: number }[]> {
+  // first, since power-up.
+  async path(boot: string, sequence: number): Promise<{ x: number; y: number }[]> {
     return this.use(async c => {
       const rows = (await c.runAndReadAll(`
-        WITH s AS (SELECT message_number, map_clears FROM snapshots WHERE boot_id = $1 AND sequence = $2),
-             cleared AS (SELECT max(message_number) AS m FROM snapshots WHERE boot_id = $1 AND map_clears < (SELECT map_clears FROM s))
-        SELECT x, y FROM status WHERE boot_id = $1 AND message_number <= (SELECT message_number FROM s)
-          AND message_number >= coalesce(CASE WHEN $3 THEN (SELECT m FROM cleared) END, 0) ORDER BY message_number`, [boot, sequence, sinceClear])).getRowObjects();
+        SELECT x, y FROM status WHERE boot_id = $1
+          AND message_number <= (SELECT message_number FROM snapshots WHERE boot_id = $1 AND sequence = $2)
+        ORDER BY message_number`, [boot, sequence])).getRowObjects();
       return rows.map(r => ({ x: Number(r.x), y: Number(r.y) }));
     });
   }

@@ -26,7 +26,7 @@ static absolute_time_t greeting_time;
 
 static void greet(void) {
     printf("\nPicoA robot firmware. Commands, one per line: drive <cm>, rotate <deg>, goto <x cm> <y cm>,\n"
-           "watch <s>, snap, clear_map, config pre_ms|post_ms <ms>, mode idle|manual, stop, status\n");
+           "watch <s>, snap, map, clear_map, config pre_ms|post_ms <ms>, mode idle|manual, stop, status\n");
 }
 
 static void print_link(void) {
@@ -103,6 +103,17 @@ static void stop(void) {
 
 static bool within(int v, int lo, int hi) { return v >= lo && v <= hi; }
 
+static bool send_map_window(void) {
+    uint8_t message[WIRE_HEADER + WIRE_MAP_PART_SIZE];
+    int ox, oy;
+    const uint8_t *cells = cell_map_window(&ox, &oy);
+    for (uint8_t part = 0; part < WIRE_MAP_PARTS; part++) {
+        uint32_t len = wire_encode_map_part(part, (int16_t)ox, (int16_t)oy, cells + part * WIRE_MAP_PART_CELLS, message);
+        if (!link_pc_send_bulk(message, len)) return false;
+    }
+    return true;
+}
+
 // One command line, its number already taken off. Moves and snapshots are answered
 // when they end (commands_update); the rest at once.
 static void run(const char *line, uint32_t n) {
@@ -125,8 +136,11 @@ static void run(const char *line, uint32_t n) {
         behaviour_watch((float)a, n);
     } else if (IS_WORD("snap")) {
         snapshot_request(SNAPSHOT_COMMAND, n);
+    } else if (IS_WORD("map")) {
+        answer(n, send_map_window() ? WIRE_END_OK : WIRE_END_REFUSED);
     } else if (IS_WORD("clear_map")) {
-        cell_map_clear();
+        const odometry_report_t *o = body_odometry();
+        cell_map_clear(o->x_m, o->y_m);
         printf("Map cleared\n");
         uint8_t message[WIRE_HEADER];
         uint32_t n_message = wire_encode_map_cleared(message);

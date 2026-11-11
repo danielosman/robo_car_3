@@ -67,7 +67,7 @@
         "name": "odometry_report_t",
         "kind": "type",
         "code": "} odometry_report_t;",
-        "bytes": 45
+        "bytes": 37
       },
       {
         "name": "imu_record_t",

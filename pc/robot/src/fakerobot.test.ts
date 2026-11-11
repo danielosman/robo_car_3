@@ -64,6 +64,8 @@ test("the fake robot end to end: hello, commands, answers, snapshots, map cleare
     assert.equal(moved.moved, 5);
     const snap = await t.runner.run(action("snap"));
     assert.deepEqual([snap.result, snap.snapshot], ["ok", t.snapshots[1 % t.snapshots.length].sequence]);
+    const askedMap = await t.runner.askMap();
+    assert.ok("window" in askedMap && askedMap.window.cells.length === 10800);
     assert.equal((await t.runner.run(action("clear_map"))).result, "ok");
     await until(() => t.cleared() === 1);
     const refused = new Promise<DoneRecord>(resolve => t.link.once("done", resolve));

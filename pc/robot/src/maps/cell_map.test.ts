@@ -12,7 +12,9 @@ import { CellMaps, type CellMapView } from "./cell_map.ts";
 import { Store } from "../store.ts";
 import { loadMounting, type Mounting } from "../mounting.ts";
 import { WIRE_VERSION } from "../wire.ts";
-import { windowColumns, tileColumns, COLUMN } from "../snapshot.ts";
+import { tileColumns, COLUMN } from "../snapshot.ts";
+import { cellMapAt } from "../snapshots_api.ts";
+import { mapPng } from "../api/map.ts";
 import { noFirmware, snapshotAgain, storeWithSnapshots } from "../test_store.ts";
 import type { PosedFrame, Zone } from "../tof_format.ts";
 
@@ -60,7 +62,7 @@ test("rays: each zone's reading in the world, with the boot's own mounting", () 
 // A world column of a map: the window's inside it, its tiles' outside.
 function column(v: CellMapView, cx: number, cy: number): number {
   if (cx >= v.originX && cx < v.originX + v.cellsX && cy >= v.originY && cy < v.originY + v.cellsY)
-    return windowColumns({ ...v, layers: 3 }).columns[(cx - v.originX) * v.cellsY + (cy - v.originY)];
+    return v.columns[(cx - v.originX) * v.cellsY + (cy - v.originY)];
   const t = v.tiles.find(t => t.tx === Math.floor((cx + 10) / 20) && t.ty === Math.floor((cy + 10) / 20));
   return t ? tileColumns(t)[(cx - (t.tx * 20 - 10)) * 20 + (cy - (t.ty * 20 - 10))] : COLUMN.UNKNOWN;
 }
@@ -71,38 +73,41 @@ test("a boot's map at a snapshot: a wall ahead, a drive stopped; tiles; back in 
   const maps = new CellMaps(store);
   try {
     // Snapshots 1-3 come first; then frames at the origin facing a wall 50 cm ahead, then
-    // snapshot 5; then frames 3.6 m away (the window follows), then snapshot 4.
+    // snapshot 3 again; then frames 3.6 m away (the window follows), then snapshot 2 again.
     for (let n = 1; n <= 5; n++) void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: n * 100000, frame: frame(n, 500) }));
-    await snapshotAgain(store, boot, directory, 5);
+    await snapshotAgain(store, boot, directory, 3);
     for (let n = 6; n <= 8; n++) void store.tof(boot, boot.tof({ format: "compact", move: 2, tUs: n * 100000, frame: frame(n, 0, 3.6) }));
-    await snapshotAgain(store, boot, directory, 4);
+    await snapshotAgain(store, boot, directory, 2);
     const drive = (sequence: number, metres: number) => maps.atSnapshot(boot.id, sequence, m => m.drive(0, 0, 0, metres));
 
-    // At 5: blocked columns from x 50 cm; a 1 m drive stops 15 cm before them, measured from
+    // At 3: blocked columns from x 50 cm; a 1 m drive stops 15 cm before them, measured from
     // its front edge (9.5 cm from the centre); one backwards doesn't.
-    const ahead = (await drive(5, 1))!;
+    const ahead = (await drive(3, 1))!;
     assert.ok(ahead.obstacle && ahead.movedM > 0.15 && ahead.movedM < 0.3, JSON.stringify(ahead));
-    assert.deepEqual(await drive(5, -1), { movedM: 1, obstacle: false });
-    assert.deepEqual(await drive(5, 0.1), { movedM: 0.1, obstacle: false });
-    assert.equal(await maps.atSnapshot(boot.id, 5, m => m.obstacleWithin(0, 0, 0.3)), false);
-    assert.equal(await maps.atSnapshot(boot.id, 5, m => m.obstacleWithin(0.4, 0, 0.3)), true);
-    const at5 = (await maps.viewAtSnapshot(boot.id, 5))!;
-    assert.deepEqual([at5.view.originX, at5.view.originY, at5.view.cellsX, at5.view.cellsY, at5.view.cells.length, at5.view.tiles.length],
+    assert.deepEqual(await drive(3, -1), { movedM: 1, obstacle: false });
+    assert.deepEqual(await drive(3, 0.1), { movedM: 0.1, obstacle: false });
+    assert.equal(await maps.atSnapshot(boot.id, 3, m => m.obstacleWithin(0, 0, 0.3)), false);
+    assert.equal(await maps.atSnapshot(boot.id, 3, m => m.obstacleWithin(0.4, 0, 0.3)), true);
+    const at3 = (await maps.viewAtSnapshot(boot.id, 3))!;
+    assert.deepEqual([at3.view.originX, at3.view.originY, at3.view.cellsX, at3.view.cellsY, at3.view.cells.length, at3.view.tiles.length],
                      [-30, -30, 60, 60, 3 * 3600, 0]);
-    assert.equal(column(at5.view, 5, 0), COLUMN.BLOCKED);   // x 50-60 cm
-    assert.equal(column(at5.view, 0, 0), COLUMN.DRIVABLE);  // under the robot
-    // At 4: the window moved by two tiles; the wall is in the whole-house tiles now.
-    const at4 = (await maps.viewAtSnapshot(boot.id, 4))!.view;
-    assert.equal(at4.originX, 10);
-    assert.ok(at4.tiles.length > 0);
-    assert.equal(column(at4, 5, 0), COLUMN.BLOCKED);
+    assert.equal(column(at3.view, 5, 0), COLUMN.BLOCKED);   // x 50-60 cm
+    assert.equal(column(at3.view, 0, 0), COLUMN.DRIVABLE);  // under the robot
+    // At 2: the window moved by two tiles; the wall is in the whole-house tiles now, and
+    // the PNG covers both the tile (tx 0: cells -10..9) and the window (cells 10..69).
+    const at2 = (await maps.viewAtSnapshot(boot.id, 2))!.view;
+    assert.equal(at2.originX, 10);
+    assert.ok(at2.tiles.length > 0);
+    assert.equal(column(at2, 5, 0), COLUMN.BLOCKED);
+    const png2 = mapPng((await cellMapAt(store, maps, boot.id, 2))!);
+    assert.deepEqual([png2.readUInt32BE(16), png2.readUInt32BE(20)], [60 * 6, 80 * 6]);
     // Back in time: before any frame nothing ahead; then forward again, the same.
     assert.deepEqual(await drive(1, 1), { movedM: 1, obstacle: false });
-    assert.deepEqual(await drive(5, 1), ahead);
+    assert.deepEqual(await drive(3, 1), ahead);
     assert.equal(await maps.atSnapshot(boot.id, 99, async () => 1), null);
     // A new server: the same map from the store.
     const again = new CellMaps(store);
-    try { assert.deepEqual(await again.atSnapshot(boot.id, 5, m => m.drive(0, 0, 0, 1)), ahead); } finally { again.close(); }
+    try { assert.deepEqual(await again.atSnapshot(boot.id, 3, m => m.drive(0, 0, 0, 1)), ahead); } finally { again.close(); }
   } finally { maps.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 

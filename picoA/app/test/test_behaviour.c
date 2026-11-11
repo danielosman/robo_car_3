@@ -27,7 +27,6 @@
 #include "../tof_format.c"
 #include "../cell_map.c"
 #include "../room.c"
-#include "../house_map.c"
 #include "../wire.c"
 #include "../move.c"
 #include "../behaviour.c"
@@ -375,7 +374,7 @@ int main(void) {
     sim.pitch_rad = -0.9f * RAD_PER_DEG;
     srand(3);
     tof_rays_init(&ROBOT_MOUNTING);
-    cell_map_clear();
+    cell_map_clear(0, 0);
     assert(tof_init(&ROBOT_MOUNTING.tof, TOF_HZ));
     printf("(the ToF at %d Hz)\n", TOF_HZ);
     run(1); // standing still: PicoB reports "stationary"
@@ -528,7 +527,7 @@ int main(void) {
     printf("ok: stop, and a new action replacing the running one\n");
 
     // The map is cleared by C (cell_map_clear), not by a scan.
-    cell_map_clear();
+    cell_map_clear(sim.x_m, sim.y_m);
     assert(cell_map_column(WALL_FRONT - 0.05f, 0) == COLUMN_UNKNOWN);
 
     // Watching, with the person's sighting jitter of several seeds, each trial from

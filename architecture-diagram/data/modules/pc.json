@@ -50,6 +50,12 @@
         "bytes": 34
       },
       {
+        "name": "MapWindow",
+        "kind": "type",
+        "code": "interface MapWindow",
+        "bytes": 10804
+      },
+      {
         "name": "livePose",
         "kind": "function",
         "code": "function livePose("
@@ -167,6 +173,12 @@
         "bytes": 289
       },
       {
+        "name": "MapPart",
+        "kind": "type",
+        "code": "interface MapPart",
+        "bytes": 1205
+      },
+      {
         "name": "Message",
         "kind": "type",
         "code": "type Message"
@@ -250,6 +262,11 @@
         "name": "encodeSnapshotPart",
         "kind": "function",
         "code": "function encodeSnapshotPart("
+      },
+      {
+        "name": "encodeMapPart",
+        "kind": "function",
+        "code": "function encodeMapPart("
       },
       {
         "name": "encodeCommand",
@@ -433,7 +450,8 @@
       {
         "name": "StoredFrame",
         "kind": "type",
-        "code": "interface StoredFrame"
+        "code": "interface StoredFrame",
+        "bytes": 289
       },
       {
         "name": "StoredImu",
@@ -518,7 +536,7 @@
       {
         "name": "Store.path",
         "kind": "function",
-        "code": "async path(boot: string, sequence: number, sinceClear = true)"
+        "code": "async path(boot: string, sequence: number)"
       },
       {
         "name": "Store.hasBoot",
@@ -610,7 +628,8 @@
       {
         "name": "CellMapView",
         "kind": "type",
-        "code": "export interface CellMapView"
+        "code": "export interface CellMapView",
+        "bytes": 38410
       },
       {
         "name": "ZoneRays",
@@ -641,6 +660,11 @@
         "name": "CellMaps.rays",
         "kind": "function",
         "code": "async rays(boot: string, frame: PosedFrame)"
+      },
+      {
+        "name": "CellMaps.columnsOf",
+        "kind": "function",
+        "code": "async columnsOf(cells: Buffer)"
       }
     ]
   },

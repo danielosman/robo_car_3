@@ -7,8 +7,8 @@
 // 10 min 2 m from a box keeps it; someone walking across is gone 3 frames after. A
 // thin leg driven at is blocked, on a cell line or not; a wall seen up close doesn't
 // thicken again when the robot drives away.
-// The whole-house map: columns in tiles, a known class overwrites, unknown keeps,
-// dirty tiles. The window follows the robot down a 7 m hallway by whole tiles (not
+// The whole-house map: columns in tiles, a known class overwrites, unknown keeps.
+// The window follows the robot down a 7 m hallway by whole tiles (not
 // before it is 0.5 m out of the middle tile): a box seen at the start is kept in
 // the whole-house map once it scrolls out, one 5.5 m away is mapped; back at the
 // start the box comes back from the whole-house map, and a scan erases it once it
@@ -56,7 +56,7 @@ static void walls(float half_m) { // a square room, walls 1 m tall
     add_box(-half_m, half_m, -half_m - 0.1f, -half_m, 0, 1);
 }
 
-static void reset_scene(void) { n_boxes = 0; hole.on = false; drop_x = 1e9f; cell_map_clear(); }
+static void reset_scene(void) { n_boxes = 0; hole.on = false; drop_x = 1e9f; cell_map_clear(0, 0); }
 
 static float hit_box(const box_t *b, const float o[3], const float d[3]) {
     float lo[3] = {b->x0, b->y0, b->z0}, hi[3] = {b->x1, b->y1, b->z1}, t0 = 0, t1 = 1e9f;
@@ -169,10 +169,11 @@ static void hand_made_frame(void) {
     static uint8_t direct[CELL_LAYERS * GRID * GRID];
     int ox, oy;
     posed_frame_t f = hand_made();
-    cell_map_clear();
+    cell_map_clear(0, 0);
+    memcpy(direct, cell_map_window(&ox, &oy), sizeof direct);
     f.pose_known = false; // no pose: left out
     cell_map_add(&f);
-    for (int k = 0; k < CELL_LAYERS * GRID * GRID; k++) assert(cell_map_window(&ox, &oy)[k] == 0);
+    assert(memcmp(direct, cell_map_window(&ox, &oy), sizeof direct) == 0);
     f.pose_known = true;
     cell_map_add(&f);
     memcpy(direct, cell_map_window(&ox, &oy), sizeof direct);
@@ -187,16 +188,18 @@ static void hand_made_frame(void) {
     assert(blocked <= 2);
     // The same frame packed and unpacked for the map: the same map, byte for byte (its
     // distances are whole cm under 2.54 m, its pose exact).
-    cell_map_clear();
+    cell_map_clear(0, 0);
     add_as_used(&f);
     assert(memcmp(direct, cell_map_window(&ox, &oy), sizeof direct) == 0);
     printf("ok: a hand-made posed frame; the same map through packing and unpacking\n");
 
-    // "Nothing in range" frees exactly 1 m along its rays (row 5, column 4: 2.8° down).
+    // "Nothing in range" frees 1 m along its rays in L1/L2, and in G only within 50 cm
+    // (row 5, column 4: 2.8° down; row 8, column 4: 19.7° down, crosses G ~25 cm ahead;
+    // row 6, column 4: 8.4° down, crosses G ~60 cm ahead).
     const int ahead = 4 * 8 + 3;
     f = all_unsure();
     f.frame.zone[ahead] = (tof_zone_t){.kind = TOF_NOTHING};
-    cell_map_clear();
+    cell_map_clear(0, 0);
     add_as_used(&f);
     float conf;
     for (float d = 0.4f; d <= 0.86f; d += 0.05f) assert(along(ahead, d, &conf) == CELL_STATE_FREE);
@@ -209,7 +212,7 @@ static void hand_made_frame(void) {
     const int far = 3 * 8 + 0;
     f = all_unsure();
     f.frame.zone[far] = (tof_zone_t){.distance_mm = 3200, .kind = TOF_SURE, .targets = 1};
-    cell_map_clear();
+    cell_map_clear(0, 0);
     add_as_used(&f);
     for (float d = 0.4f; d <= 2.4f; d += 0.05f) assert(along(far, d, &conf) == CELL_STATE_FREE);
     for (float d = 2.7f; d <= 3.2f; d += 0.05f) assert(along(far, d, &conf) == CELL_STATE_UNKNOWN);
@@ -220,7 +223,7 @@ static void hand_made_frame(void) {
     along(far, 0.6f, &sure_conf);
     // Less sure (status 6 or 9): its passes count half, as its readings do.
     f.frame.zone[far].kind = TOF_LESS_SURE;
-    cell_map_clear();
+    cell_map_clear(0, 0);
     add_as_used(&f);
     along(far, 0.6f, &less_conf);
     printf("beyond 2.54 m: free up to 2.55 m, nothing marked to 3.2 m; 0.6 m along: confidence %.2f sure, %.2f less sure\n",
@@ -231,6 +234,8 @@ static void hand_made_frame(void) {
 
 int main(void) {
     tof_rays_init(&ROBOT_MOUNTING);
+    static const cell_map_tiles_t keep = {house_map_clear, house_map_get, house_map_put};
+    cell_map_keep_tiles(&keep);
     srand(1);
     pose_t home = {0, 0, 0, 0};
     hand_made_frame();
@@ -395,7 +400,7 @@ int main(void) {
         scan_at(-1.5f, 0);
         float x = -1.5f;
         for (; x <= 0; x += 0.02f) frame_at((pose_t){x, 0, 0, 0});
-        float stop = cell_map_obstacle_along(0, y0 + 0.01f, 1, 0, 0.235f / 2 + 0.05f, 1.5f);
+        float stop = cell_map_obstacle_along(0, y0 + 0.01f, 1, 0, 0.235f / 2 + 0.05f, 1.5f, true);
         printf("thin leg %s, driven at from 2 m to 55 cm: column %s, f stops at %.0f cm\n",
                on_line ? "on a cell line" : "in a cell's middle",
                cell_map_column(0.56f, y0 + 0.01f) == COLUMN_BLOCKED ? "blocked" : "NOT blocked", (double)(stop * 100));
@@ -437,20 +442,44 @@ int main(void) {
     assert(tx == -3 && ty == 0); // tile -3 holds columns -70 … -51
     // Column (-55, 3) is (15, 13) in its tile: byte (15 * 20 + 13) / 2, the high half.
     assert(columns[(15 * 20 + 13) / 2] >> 4 == COLUMN_OPEN && (columns[(16 * 20 + 13) / 2] >> 4) == COLUMN_DRIVABLE);
-    assert(house_map_next_dirty(0) == 0);
-    house_map_sent(0);
-    assert(house_map_next_dirty(0) == -1);
-    house_map_put(-55, 3, COLUMN_OPEN); // the same: still clean
-    assert(house_map_next_dirty(0) == -1);
-    house_map_put(-55, 3, COLUMN_BLOCKED);
-    assert(house_map_next_dirty(0) == 0);
-    house_map_sent(0);
-    house_map_all_dirty();
-    assert(house_map_next_dirty(0) == 0);
-    uint32_t clears = house_map_clears();
-    cell_map_clear(); // clears the whole-house map too
-    assert(house_map_tiles() == 0 && house_map_clears() == clears + 1);
-    printf("ok: whole-house map: tiles, known overwrites, unknown keeps, dirty tiles\n");
+    cell_map_clear(0, 0); // clears the whole-house map too
+    assert(house_map_tiles() == 0);
+    printf("ok: whole-house map: tiles, known overwrites, unknown keeps\n");
+
+    // Floor first: after cell_map_clear(x, y), 35 cm around (x, y) is seeded drivable so a
+    // drive in any direction has room to start while the floor ahead is still unknown;
+    // a drop (no floor) at any distance stops the path; unidentified floor (open or
+    // unknown) within 25 cm of (x, y) along the path stops it too; ground passes beyond
+    // 50 cm are ignored (shiny floor reflects).
+    cell_map_clear(0, 0);
+    for (int deg = 0; deg < 360; deg += 5) {
+        float rad = (float)deg * RAD_PER_DEG;
+        assert(cell_map_obstacle_along(0, 0, cosf(rad), sinf(rad), 0.1675f, 1.0f, true) == 1.0f);
+    }
+    // Unidentified floor (open) 20 cm ahead (within 25 cm): stops at 20 cm forward, not
+    // backward; 40 cm ahead: does not stop (the robot will see the floor before it gets
+    // within 25 cm).
+    restore(32, 30, COLUMN_OPEN); // cell (2, 0): 20..30 cm ahead
+    grid[0][32][30] = 0;          // G unknown -> COLUMN_OPEN
+    assert(fabsf(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, true) - 0.2f) < 1e-5f);
+    assert(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, false) == 1.0f);
+    cell_map_clear(0, 0);
+    // No floor (a hole/drop) 80 cm ahead: stops at 80 cm even though > 25 cm.
+    grid[0][38][30] = C_PACK(CELL_STATE_FREE, 0, 10);
+    assert(fabsf(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, true) - 0.8f) < 1e-5f);
+    // Ground pass limit: row 8 ("nothing in range", crosses G ~30-45 cm ahead) marks G
+    // free; row 6 ("nothing in range", crosses G ~60-90 cm ahead, > 50 cm) never marks G
+    // free.
+    cell_map_clear(0, 0);
+    posed_frame_t gpass = all_unsure();
+    for (int col = 0; col < 8; col++) {
+        gpass.frame.zone[7 * 8 + col] = (tof_zone_t){.kind = TOF_NOTHING}; // row 8 (< 50 cm)
+        gpass.frame.zone[5 * 8 + col] = (tof_zone_t){.kind = TOF_NOTHING}; // row 6 (> 50 cm)
+    }
+    for (int k = 0; k < 4; k++) add_as_used(&gpass);
+    assert(count(0.2f, 0.5f, -0.3f, 0.3f, COLUMN_NO_FLOOR) > 0);
+    assert(count(0.55f, 1.0f, -0.3f, 0.3f, COLUMN_NO_FLOOR) == 0);
+    printf("ok: floor first: 35 cm seed, close unidentified floor and far drops stop, G passes > 50 cm ignored\n");
 
     // The window follows the robot down a hallway (walls 1 m to each side, an end
     // wall behind the start: rays reading nothing clear only 1 m).

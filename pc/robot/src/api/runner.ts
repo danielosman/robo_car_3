@@ -1,7 +1,7 @@
 // Runs one command on the robot: numbers it, sends it, waits for its answer
 // (and, for a snapshot, for the snapshot to be stored), within its time limit. Never
 // throws: whatever happens is an outcome.
-import type { DoneRecord } from "../link.ts";
+import type { DoneRecord, MapWindow, Pose } from "../link.ts";
 import { robotText, timeLimitMs, type Command } from "./commands.ts";
 import { failed, outcome, type Outcome } from "./answers.ts";
 
@@ -9,9 +9,14 @@ import { failed, outcome, type Outcome } from "./answers.ts";
 export interface RobotConnection {
   sendCommand(n: number, text: string): boolean; // false: not connected
   on(event: "done", listener: (d: DoneRecord) => void): unknown;
+  on(event: "mapWindow", listener: (w: MapWindow) => void): unknown;
+  off?(event: "mapWindow", listener: (w: MapWindow) => void): unknown;
 }
 
-export interface Runner { run(c: Command): Promise<Outcome> }
+export interface Runner {
+  run(c: Command): Promise<Outcome>;
+  askMap?(): Promise<{ window: MapWindow; pose: Pose | null } | { error: string }>;
+}
 
 // The snapshots stored in DuckDB, by number, for the robot's newest boot: a snapshot
 // command is answered once its snapshot is stored, so it can be read right away.
@@ -50,6 +55,7 @@ export class StoredSnapshots {
 export class CommandRunner implements Runner {
   private next = 1;
   private waiting = new Map<number, (d: DoneRecord) => void>();
+  private mapChain: Promise<unknown> = Promise.resolve();
   private robot: RobotConnection;
   private snapshots: StoredSnapshots;
   private limitMs: (c: Command) => number;
@@ -77,5 +83,33 @@ export class CommandRunner implements Runner {
     if (!d) return failed("no answer");
     if (d.snapshot !== null && !(await this.snapshots.stored(d.snapshot, deadline - Date.now()))) return failed("no answer (the snapshot wasn't stored)");
     return outcome(c, d);
+  }
+
+  // Asks the robot for its 6 x 6 m sliding window ("map" command) and waits for the 9
+  // map_part messages and its answer, one request at a time.
+  askMap(): Promise<{ window: MapWindow; pose: Pose | null } | { error: string }> {
+    const run = this.mapChain.then(() => {
+      const n = this.next++, ms = this.limitMs({ name: "snap", values: [] });
+      return new Promise<{ window: MapWindow; pose: Pose | null } | { error: string }>(resolve => {
+        let d: DoneRecord | null = null, w: MapWindow | null = null;
+        const finish = (res: { window: MapWindow; pose: Pose | null } | { error: string }) => {
+          clearTimeout(timer);
+          this.waiting.delete(n);
+          this.robot.off?.("mapWindow", onWindow);
+          resolve(res);
+        };
+        const check = () => {
+          if (d && d.end !== "ok") finish({ error: `the robot's map was ${d.end}` });
+          else if (d && w) finish({ window: w, pose: d.pose });
+        };
+        const onWindow = (win: MapWindow) => { w = win; check(); };
+        const timer = setTimeout(() => finish({ error: "no answer from the robot" }), ms);
+        this.waiting.set(n, done => { d = done; check(); });
+        this.robot.on("mapWindow", onWindow);
+        if (!this.robot.sendCommand(n, "map")) finish({ error: "robot not connected" });
+      });
+    });
+    this.mapChain = run.catch(() => {});
+    return run;
   }
 }

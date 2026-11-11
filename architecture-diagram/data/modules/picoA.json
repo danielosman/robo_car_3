@@ -500,6 +500,21 @@
         "code": "uint32_t wire_encode_snapshot_part("
       },
       {
+        "name": "wire_map_part_t",
+        "kind": "type",
+        "code": "} wire_map_part_t;"
+      },
+      {
+        "name": "wire_encode_map_part",
+        "kind": "function",
+        "code": "uint32_t wire_encode_map_part("
+      },
+      {
+        "name": "wire_decode_map_part",
+        "kind": "function",
+        "code": "bool wire_decode_map_part("
+      },
+      {
         "name": "wire_command_t",
         "kind": "type",
         "code": "} wire_command_t;",
@@ -640,7 +655,8 @@
       {
         "name": "room_drive_t",
         "kind": "type",
-        "code": "} room_drive_t;"
+        "code": "} room_drive_t;",
+        "bytes": 8
       },
       {
         "name": "room_drive",
@@ -654,6 +670,7 @@
     "name": "cell_map",
     "origin": "picoA",
     "path": "picoA/app/cell_map.h",
+    "summary": "PicoA keeps only the 6 × 6 m window. Clear centres it on the current pose and seeds floor within 35 cm. Ground-layer ray passes count only within 50 cm. The PC helper attaches a tile store; PicoA does not.",
     "members": [
       {
         "name": "cell_state3_t",
@@ -664,6 +681,16 @@
         "name": "column_t",
         "kind": "type",
         "code": "} column_t;"
+      },
+      {
+        "name": "cell_map_tiles_t",
+        "kind": "type",
+        "code": "} cell_map_tiles_t;"
+      },
+      {
+        "name": "cell_map_keep_tiles",
+        "kind": "function",
+        "code": "void cell_map_keep_tiles("
       },
       {
         "name": "cell_map_clear",
@@ -689,6 +716,11 @@
         "name": "cell_map_cell",
         "kind": "function",
         "code": "cell_state3_t cell_map_cell("
+      },
+      {
+        "name": "cell_map_column_of",
+        "kind": "function",
+        "code": "column_t cell_map_column_of("
       },
       {
         "name": "cell_map_column",
@@ -755,6 +787,7 @@
     "name": "snapshot",
     "origin": "picoA",
     "path": "picoA/app/snapshot.h",
+    "summary": "Version 3 snapshots hold sensor and run state, not map windows or tiles. The PC rebuilds its map from stored ToF frames; the robot's live window is a separate map request.",
     "members": [
       {
         "name": "snapshot_why_t",
@@ -795,69 +828,6 @@
         "name": "snapshot_print_status",
         "kind": "function",
         "code": "void snapshot_print_status("
-      }
-    ]
-  },
-  {
-    "id": "picoA.house_map",
-    "name": "house_map",
-    "origin": "picoA",
-    "path": "picoA/app/house_map.h",
-    "status": "leaving",
-    "plan": {
-      "path": "doc/DATA_FLOW_PLAN.md",
-      "code": "`house_map` leaves the robot"
-    },
-    "members": [
-      {
-        "name": "house_map_clear",
-        "kind": "function",
-        "code": "void house_map_clear("
-      },
-      {
-        "name": "house_map_get",
-        "kind": "function",
-        "code": "column_t house_map_get("
-      },
-      {
-        "name": "house_map_put",
-        "kind": "function",
-        "code": "bool house_map_put("
-      },
-      {
-        "name": "house_map_tile_of",
-        "kind": "function",
-        "code": "int house_map_tile_of("
-      },
-      {
-        "name": "house_map_tiles",
-        "kind": "function",
-        "code": "int house_map_tiles("
-      },
-      {
-        "name": "house_map_tile",
-        "kind": "function",
-        "code": "void house_map_tile("
-      },
-      {
-        "name": "house_map_next_dirty",
-        "kind": "function",
-        "code": "int house_map_next_dirty("
-      },
-      {
-        "name": "house_map_sent",
-        "kind": "function",
-        "code": "void house_map_sent("
-      },
-      {
-        "name": "house_map_all_dirty",
-        "kind": "function",
-        "code": "void house_map_all_dirty("
-      },
-      {
-        "name": "house_map_clears",
-        "kind": "function",
-        "code": "uint32_t house_map_clears("
       }
     ]
   }

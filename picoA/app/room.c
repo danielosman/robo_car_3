@@ -5,7 +5,8 @@
 // From the edge to the nearest obstacle within STOP_BEFORE_M + look_m; false if none.
 static bool gap(float x_m, float y_m, float yaw_rad, float direction, float look_m, float *gap_m) {
     float look = EDGE_M + STOP_BEFORE_M + look_m;
-    float along = cell_map_obstacle_along(x_m, y_m, direction * cosf(yaw_rad), direction * sinf(yaw_rad), PATH_HALF_M, look);
+    float along = cell_map_obstacle_along(x_m, y_m, direction * cosf(yaw_rad), direction * sinf(yaw_rad), PATH_HALF_M, look,
+                                          direction > 0);
     *gap_m = along - EDGE_M;
     return along < look;
 }

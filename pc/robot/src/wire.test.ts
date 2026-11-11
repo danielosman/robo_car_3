@@ -12,14 +12,15 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  HAS, IMU_RECORD_PERIOD_US, LANE, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeCommand, encodeConsole, encodeHeartbeat,
-  encodeHello, encodeImuBatch, encodeMapCleared, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof, take, typeInfo,
-  wireCheck, type ImuBatch, type ImuRecord, type Message,
+  HAS, IMU_RECORD_PERIOD_US, LANE, MAP_PART_CELLS, MAP_PART_SIZE, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeCommand, encodeConsole,
+  encodeHeartbeat, encodeHello, encodeImuBatch, encodeMapCleared, encodeMapPart, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus,
+  encodeTof, take, typeInfo, wireCheck, type ImuBatch, type ImuRecord, type Message,
 } from "./wire.ts";
 import { KINDS, TOF_COMPACT_BYTES, packTof, unpackTof } from "./tof_format.ts";
 
 const GOLDEN = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../picoA/app/test/data/wire_golden.hex");
 const f = Math.fround;
+const sampleMapCells = Buffer.from(Array.from({ length: MAP_PART_CELLS }, (_, i) => (i * 19 + 3) & 0xff));
 
 // test_wire.c's sample_batch(n): records 9615 µs apart from 5000000123 µs after
 // power-up (past 2^32), counts i × 1000 - 7k and -i × 300 + k; 1 g up on the first,
@@ -71,6 +72,8 @@ const samples: Record<string, { bytes: Buffer; message: Message }> = {
   imu_batch_one: { bytes: encodeImuBatch(sampleBatch(1)), message: { type: "imu_batch", ...sampleBatch(1) } },
   snapshot_part: { bytes: encodeSnapshotPart(Buffer.from([0x53, 0x4e, 0x41, 0x50, 1, 2, 0xfe, 0xff])),
                    message: { type: "snapshot_part", bytes: Buffer.from([0x53, 0x4e, 0x41, 0x50, 1, 2, 0xfe, 0xff]) } },
+  map_part: { bytes: encodeMapPart({ part: 4, originCx: -30, originCy: 10, cells: sampleMapCells }),
+              message: { type: "map_part", part: 4, originCx: -30, originCy: 10, cells: sampleMapCells } },
   command: { bytes: encodeCommand({ n: 17, text: "drive 50" }), message: { type: "command", n: 17, text: "drive 50" } },
   heartbeat: { bytes: encodeHeartbeat(), message: { type: "heartbeat" } },
 };
@@ -133,6 +136,7 @@ test("the table: lanes, the ToF's type from tof_format, no collisions", () => {
   assert.deepEqual(typeInfo(TYPE.MOVE_END), { lane: LANE.CONTROL, min: 37, max: 37 });
   assert.deepEqual(typeInfo(TYPE.STATUS), { lane: LANE.CONTROL, min: 33, max: 33 });
   assert.deepEqual(typeInfo(TYPE.IMU_BATCH), { lane: LANE.BULK, min: 27, max: 135 });
+  assert.deepEqual(typeInfo(TYPE.MAP_PART), { lane: LANE.BULK, min: MAP_PART_SIZE, max: MAP_PART_SIZE });
   assert.deepEqual(typeInfo(0x40), { lane: LANE.BULK, min: 12 + TOF_COMPACT_BYTES, max: 12 + TOF_COMPACT_BYTES }); // move, time, frame
   assert.equal(typeInfo(0x99), null);
   assert.equal(typeInfo("W".charCodeAt(0)), null); // an old robot's text
@@ -151,6 +155,7 @@ test("every message encoded and decoded again", () => {
     { type: "imu_batch", ...sampleBatch(7) },
     { type: "imu_batch", move: 1, records: [{ tUs: 0xffffffff, acceleration: [-32768, 0, 32767], gyro: [1, -1, 0] }] },
     { type: "snapshot_part", bytes: Buffer.alloc(1400, 7) },
+    { type: "map_part", part: 8, originCx: -100, originCy: 200, cells: sampleMapCells },
     { type: "command", n: 3, text: "goto 120 -35" },
     { type: "heartbeat" },
   ];
@@ -165,6 +170,7 @@ test("every message encoded and decoded again", () => {
       case "move_end": return encodeMoveEnd(m);
       case "imu_batch": return encodeImuBatch(m);
       case "snapshot_part": return encodeSnapshotPart(m.bytes);
+      case "map_part": return encodeMapPart(m);
       case "command": return encodeCommand(m);
       case "heartbeat": return encodeHeartbeat();
       default: throw new Error("no encoder");
@@ -180,6 +186,7 @@ test("every message encoded and decoded again", () => {
   assert.throws(() => encodeCommand({ n: 1, text: "drive\n1" }));
   assert.throws(() => encodeCommand({ n: 1, text: "a".repeat(47) }));
   assert.throws(() => encodeSnapshotPart(Buffer.alloc(1401)));
+  assert.throws(() => encodeMapPart({ part: 9, originCx: 0, originCy: 0, cells: sampleMapCells }));
   assert.throws(() => encodeImuBatch({ move: 1, records: [] }), /1-10 records/);
   assert.throws(() => encodeImuBatch({ move: 1, records: sampleBatch(10).records.concat(sampleBatch(1).records) }), /not 11/);
   // Times off the even spacing come back on it: the period from the first to the last.

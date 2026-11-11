@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { Store } from "./store.ts";
 import type { Pose } from "./link.ts";
-import { parseSnapshot, tileColumns, windowColumns, type Snapshot } from "./snapshot.ts";
+import { parseSnapshot, tileColumns } from "./snapshot.ts";
 import type { CellMaps, CellMapView } from "./maps/cell_map.ts";
 import { pageObjects } from "./objects/db.ts";
 import type { BootFolders } from "./boot_folders.ts";
@@ -28,21 +28,10 @@ const BOOT = /^[0-9a-f]{8}$/;
 export interface MapView {
   // cells: the robot's bytes as it holds them (cell_map.h): layers G, L1, L2 one after the other, each
   // [ix * cellsY + iy]; columns and confidence are computed from them.
-  window: { originX: number; originY: number; cellsX: number; cellsY: number; cells: Buffer; columns: number[]; confidence: number[] } | null;
-  tiles: { tx: number; ty: number; sequence?: number; columns: number[] }[];  // sequence: the snapshot that brought it (the robot's map)
+  window: { originX: number; originY: number; cellsX: number; cellsY: number; cells: Buffer; columns: number[]; confidence: number[] };
+  tiles: { tx: number; ty: number; columns: number[] }[];
   robot: Pose | null;          // the snapshot's pose
   path: { x: number; y: number }[];
-}
-
-// The map of one snapshot on its own (its window, the tiles it brought), without a path.
-export function mapViewOf(s: Snapshot): MapView {
-  const w = s.window;
-  return {
-    window: w && { originX: w.originX, originY: w.originY, cellsX: w.cellsX, cellsY: w.cellsY, cells: w.cells, ...windowColumns(w) },
-    tiles: s.tiles.map(t => ({ tx: t.tx, ty: t.ty, sequence: s.sequence, columns: tileColumns(t) })),
-    robot: s.pose && { x: s.pose.x, y: s.pose.y, yaw: s.pose.yaw },
-    path: [],
-  };
 }
 
 const bytes = (v: unknown): Buffer => Buffer.from((v as { bytes: Uint8Array }).bytes);
@@ -58,14 +47,14 @@ export async function listBoots(store: Store, bootFolders: BootFolders) {
 export async function listSnapshots(store: Store, boot: string) {
   if (!BOOT.test(boot)) throw new Error(`not a boot id: ${boot}`);
   return store.query(`SELECT sequence, strftime(arrived_at, '%H:%M:%S') AS arrived, robot_clock_us, why, action, end_reason, running, mode,
-    round(x, 4) AS x, round(y, 4) AS y, round(yaw, 4) AS yaw, image IS NOT NULL AS has_image, round(lux, 1) AS lux, tiles
+    round(x, 4) AS x, round(y, 4) AS y, round(yaw, 4) AS yaw, image IS NOT NULL AS has_image, round(lux, 1) AS lux
     FROM snapshots WHERE boot_id = '${boot}' ORDER BY sequence`);
 }
 
 export async function snapshotDetail(store: Store, boot: string, sequence: number) {
   if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
   const id = `${boot}-${sequence}`;
-  const [row] = await store.query(`SELECT * EXCLUDE (map_cells, color_raw, bytes), strftime(arrived_at, '%Y-%m-%d %H:%M:%S') AS arrived
+  const [row] = await store.query(`SELECT * EXCLUDE (color_raw, bytes), strftime(arrived_at, '%Y-%m-%d %H:%M:%S') AS arrived
     FROM snapshots WHERE snapshot_id = '${id}'`);
   if (!row) return null;
   const zones = await store.query(`SELECT row, col, distance_mm, kind, signal, sigma_mm, targets,
@@ -83,39 +72,10 @@ export async function snapshotDetail(store: Store, boot: string, sequence: numbe
   return { snapshot: row, zones, grid, features };
 }
 
-// The robot's own map at a snapshot (robot map --robot): the window it sent in it, over the
-// whole-house tiles as they were (the newest of each up to it since the robot's map was
-// last cleared), and the path since then.
-export async function snapshotMap(store: Store, boot: string, sequence: number): Promise<MapView | null> {
-  if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
-  const path = await store.path(boot, sequence);
-  return store.read(async c => {
-    const head = (await c.runAndReadAll(`SELECT map_clears, map_origin_cx, map_origin_cy, map_cells_x, map_cells_y, map_cells, x, y, yaw
-      FROM snapshots WHERE boot_id = $1 AND sequence = $2`, [boot, sequence])).getRowObjects();
-    if (!head.length) return null;
-    const h = head[0];
-    const tiles = (await c.runAndReadAll(`SELECT tx, ty, arg_max(sequence, sequence) AS sequence, arg_max(columns, sequence) AS columns FROM snapshot_tiles
-      WHERE boot_id = $1 AND sequence <= $2 AND map_clears = $3 GROUP BY tx, ty ORDER BY tx, ty`, [boot, sequence, Number(h.map_clears)])).getRowObjects();
-    let window: MapView["window"] = null;
-    if (h.map_cells !== null) {
-      const w = { originX: Number(h.map_origin_cx), originY: Number(h.map_origin_cy), cellsX: Number(h.map_cells_x), cellsY: Number(h.map_cells_y) };
-      const cells = bytes(h.map_cells);
-      window = { ...w, cells, ...windowColumns({ ...w, layers: 3, cells }) };
-    }
-    return {
-      window,
-      tiles: tiles.map(t => ({ tx: Number(t.tx), ty: Number(t.ty), sequence: Number(t.sequence),
-                               columns: tileColumns({ tx: 0, ty: 0, columns: bytes(t.columns) }) })),
-      robot: h.x === null ? null : { x: Number(h.x), y: Number(h.y), yaw: Number(h.yaw) },
-      path,
-    };
-  });
-}
-
 // A map's cells as the page and robot map show them.
 export function mapViewOfCells(v: CellMapView, robot: Pose | null, path: MapView["path"]): MapView {
   return {
-    window: { originX: v.originX, originY: v.originY, cellsX: v.cellsX, cellsY: v.cellsY, cells: v.cells, ...windowColumns({ ...v, layers: 3 }) },
+    window: { originX: v.originX, originY: v.originY, cellsX: v.cellsX, cellsY: v.cellsY, cells: v.cells, columns: v.columns, confidence: v.confidence },
     tiles: v.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: tileColumns(t) })),
     robot, path,
   };
@@ -126,7 +86,7 @@ export function mapViewOfCells(v: CellMapView, robot: Pose | null, path: MapView
 export async function cellMapAt(store: Store, maps: CellMaps, boot: string, sequence: number): Promise<MapView | null> {
   if (!BOOT.test(boot) || !Number.isInteger(sequence)) throw new Error("not a snapshot");
   const at = await maps.viewAtSnapshot(boot, sequence);
-  return at && mapViewOfCells(at.view, at.pose, await store.path(boot, sequence, false));
+  return at && mapViewOfCells(at.view, at.pose, await store.path(boot, sequence));
 }
 
 // A snapshot for the page: snapshotDetail, each zone with its reading in the world (x, y,
@@ -149,7 +109,7 @@ export async function snapshotForPage(store: Store, maps: CellMaps, boot: string
 
 // The map for the page: the columns it draws, without the robot's cell bytes.
 function pageMap(view: MapView | null) {
-  if (!view?.window) return view;
+  if (!view) return null;
   const w = view.window;
   return { ...view, window: { originX: w.originX, originY: w.originY, cellsX: w.cellsX, cellsY: w.cellsY, columns: w.columns, confidence: w.confidence } };
 }

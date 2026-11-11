@@ -125,3 +125,26 @@ test("answers: limited, safety stops, refused, an action without a pose", async 
   assert.deepEqual(await run(action("config", "pre_ms 300")[0], { end: "ok" }), { result: "ok" });
   assert.deepEqual(await run(move("d30"), { end: "refused" }), { result: "failed", why: "refused by the robot (robot log says why)" });
 });
+
+test("askMap: window and pose, concurrent calls serialized, refused, not connected", async () => {
+  const robot = new FakeRobot(), runner = new CommandRunner(robot, new StoredSnapshots());
+  const w1 = { originX: -30, originY: -30, cellsX: 60, cellsY: 60, cells: Buffer.alloc(10800, 1) };
+  const w2 = { ...w1, originX: -10, cells: Buffer.alloc(10800, 2) };
+  const first = runner.askMap(), second = runner.askMap();
+  await tick();
+  assert.deepEqual(robot.lines, ["map #1"]); // second waits for first
+  robot.emit("mapWindow", w1);
+  robot.done({ end: "ok" });
+  assert.deepEqual(await first, { window: w1, pose: { x: 0.43, y: -0.04, yaw: Math.PI / 6 } });
+  await tick();
+  assert.deepEqual(robot.lines, ["map #1", "map #2"]);
+  robot.done({ end: "ok" });
+  robot.emit("mapWindow", w2); // either order of mapWindow and done
+  assert.equal(((await second) as { window: typeof w2 }).window.originX, -10);
+  const refused = runner.askMap();
+  await tick();
+  robot.done({ end: "refused" });
+  assert.deepEqual(await refused, { error: "the robot's map was refused" });
+  robot.connected = false;
+  assert.deepEqual(await runner.askMap(), { error: "robot not connected" });
+});

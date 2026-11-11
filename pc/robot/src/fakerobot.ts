@@ -17,8 +17,8 @@ import { parseSnapshot } from "./snapshot.ts";
 import { ROBOT_PORT } from "./link.ts";
 import { DB_PATH, Store, type Replayed } from "./store.ts";
 import {
-  HAS, MOVE_KINDS, PART_MAX, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole, encodeHello, encodeMapCleared,
-  encodeImuBatch, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof,
+  HAS, MAP_PARTS, MAP_PART_CELLS, MOVE_KINDS, PART_MAX, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole,
+  encodeHello, encodeMapCleared, encodeMapPart, encodeImuBatch, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof,
 } from "./wire.ts";
 
 const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, GOTO_MAX_M = 3, STILL_MS = 200;
@@ -202,7 +202,11 @@ export class FakeRobot {
       const towards = Math.atan2(Math.sin(bearing - this.pose.yaw), Math.cos(bearing - this.pose.yaw));
       this.begin("Go to", "goto", n, d, [this.turn(towards), this.drive(Math.min(d, GOTO_MAX_M))], d);
     } else if (text === "snap") this.sendSnapshot(n);
-    else if (text === "clear_map") { this.say("Map cleared\n"); this.socket.write(encodeMapCleared()); this.answer(n, "ok"); }
+    else if (text === "map") {
+      const cells = Buffer.alloc(MAP_PART_CELLS);
+      for (let part = 0; part < MAP_PARTS; part++) this.socket.write(encodeMapPart({ part, originCx: -30, originCy: -30, cells }));
+      this.answer(n, "ok");
+    } else if (text === "clear_map") { this.say("Map cleared\n"); this.socket.write(encodeMapCleared()); this.answer(n, "ok"); }
     else if (/^config (pre|post)_ms \d+$/.test(text)) { this.say(`Config: ${text.slice(7)}\n`); this.answer(n, "ok"); }
     else if (/^mode (idle|manual)$/.test(text)) {
       this.mode = text.slice(5);

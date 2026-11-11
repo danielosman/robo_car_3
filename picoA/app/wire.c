@@ -13,6 +13,7 @@ static const struct { uint8_t type; wire_type_info_t info; } table[] = {
     {WIRE_SNAPSHOT_PART, {WIRE_LANE_BULK, 1, WIRE_PART_MAX}},
     {WIRE_IMU_BATCH, {WIRE_LANE_BULK, WIRE_IMU_BATCH_HEADER + WIRE_IMU_RECORD,
                       WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD}},
+    {WIRE_MAP_PART, {WIRE_LANE_BULK, WIRE_MAP_PART_SIZE, WIRE_MAP_PART_SIZE}},
     {WIRE_COMMAND, {WIRE_LANE_TO_ROBOT, 5, 4 + WIRE_COMMAND_TEXT_MAX}},
     {WIRE_HEARTBEAT, {WIRE_LANE_TO_ROBOT, 0, 0}},
 };
@@ -278,6 +279,25 @@ uint32_t wire_encode_snapshot_part(const uint8_t *bytes, uint32_t n, uint8_t *ou
     wire_header(out, WIRE_SNAPSHOT_PART, (uint16_t)n);
     memcpy(out + WIRE_HEADER, bytes, n);
     return WIRE_HEADER + n;
+}
+
+uint32_t wire_encode_map_part(uint8_t part, int16_t origin_cx, int16_t origin_cy, const uint8_t *cells, uint8_t *out) {
+    if (part >= WIRE_MAP_PARTS) return 0;
+    uint8_t *p = out + wire_header(out, WIRE_MAP_PART, WIRE_MAP_PART_SIZE);
+    p[0] = part;
+    set16(p + 1, (uint16_t)origin_cx);
+    set16(p + 3, (uint16_t)origin_cy);
+    memcpy(p + 5, cells, WIRE_MAP_PART_CELLS);
+    return WIRE_HEADER + WIRE_MAP_PART_SIZE;
+}
+
+bool wire_decode_map_part(const wire_message_t *m, wire_map_part_t *p) {
+    if (!is(m, WIRE_MAP_PART, WIRE_MAP_PART_SIZE) || m->payload[0] >= WIRE_MAP_PARTS) return false;
+    p->part = m->payload[0];
+    p->origin_cx = (int16_t)read16(m->payload + 1);
+    p->origin_cy = (int16_t)read16(m->payload + 3);
+    memcpy(p->cells, m->payload + 5, WIRE_MAP_PART_CELLS);
+    return true;
 }
 
 static bool command_text_ok(const char *text, uint32_t n) {

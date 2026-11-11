@@ -13,7 +13,7 @@ import net from "node:net";
 import os from "node:os";
 import { EventEmitter } from "node:events";
 import { SnapshotAssembler } from "./snapshot.ts";
-import { HAS, TYPE, WIRE_VERSION, WireReader, decode, encodeCommand, encodeHeartbeat, type Hello, type Message } from "./wire.ts";
+import { HAS, MAP_PARTS, TYPE, WIRE_VERSION, WireReader, decode, encodeCommand, encodeHeartbeat, type Hello, type Message } from "./wire.ts";
 
 export const ANNOUNCE_PORT = 4210;
 export const ROBOT_PORT = 4211;
@@ -48,6 +48,9 @@ export interface DoneRecord {
   n: number; end: string; pose: Pose | null; movedM: number | null; rotatedDeg: number | null; goalM: number | null; snapshot: number | null;
 }
 
+// The robot's 6 x 6 m sliding window (9 map_part messages, 3 x 60 x 60 bytes; picoA/app/cell_map.h).
+export interface MapWindow { originX: number; originY: number; cellsX: number; cellsY: number; cells: Buffer }
+
 export function livePose(m: Extract<Message, { type: "status" }>, at = Date.now()): LivePose {
   return { x: m.x, y: m.y, yaw: m.yaw, mode: m.mode, action: m.action, rssi: m.rssi === 0 ? null : m.rssi, at };
 }
@@ -81,7 +84,8 @@ export function broadcastAddresses(): string[] {
 // Events: "status" (RobotStatus), "note" (string: what the server saw), "bytes"
 // (number: a piece of the robot's stream arrived), "hello" (Hello), "text" (string:
 // a console line with its "\n"), "pose" (LivePose: a status), "done" (DoneRecord:
-// an answer), "mapCleared", "snapshot" (Buffer: one whole snapshot, not yet checked),
+// an answer), "mapCleared", "mapWindow" (MapWindow: the robot's 6 x 6 m window when asked),
+// "snapshot" (Buffer: one whole snapshot, not yet checked),
 // "moveStart" (MoveStart), "moveEnd" (MoveEnd), "tof" (TofMessage: a tof frame),
 // "imuBatch" (ImuBatch: up to 10 imu records); frames and imu batches are sent only during
 // a move, each under its move's number. Each in the order it came.
@@ -150,6 +154,7 @@ export class RobotLink extends EventEmitter {
     socket.setNoDelay(true);
     const reader = new WireReader(), snapshots = new SnapshotAssembler();
     let lastHeard = Date.now(), quiet = false, hello: Hello | null = null;
+    let mapParts: Buffer[] = [], mapOriginCx = 0, mapOriginCy = 0;
     const current = () => this.socket === socket && this.status.state === "connected";
     const seconds = (ms: number) => (ms / 1000).toFixed(0);
     const refuse = (why: string, once?: string) => {
@@ -204,6 +209,15 @@ export class RobotLink extends EventEmitter {
         case "move_end": this.emit("moveEnd", withoutType(m)); break;
         case "tof": this.emit("tof", withoutType(m)); break;
         case "imu_batch": this.emit("imuBatch", withoutType(m)); break;
+        case "map_part":
+          if (m.part === 0) { mapParts = [m.cells]; mapOriginCx = m.originCx; mapOriginCy = m.originCy; }
+          else if (m.part === mapParts.length && m.originCx === mapOriginCx && m.originCy === mapOriginCy) mapParts.push(m.cells);
+          else mapParts = [];
+          if (mapParts.length === MAP_PARTS) {
+            this.emit("mapWindow", { originX: mapOriginCx, originY: mapOriginCy, cellsX: 60, cellsY: 60, cells: Buffer.concat(mapParts) });
+            mapParts = [];
+          }
+          break;
         case "snapshot_part":
           for (const snap of snapshots.push(m.bytes)) this.emit("snapshot", snap);
           if (snapshots.skipped) { this.emit("note", `snapshot parts: ${snapshots.skipped} bytes skipped (not a snapshot)`); snapshots.skipped = 0; }

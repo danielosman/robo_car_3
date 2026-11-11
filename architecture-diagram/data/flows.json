@@ -151,7 +151,7 @@
   {
     "id": "tof-map",
     "name": "ToF frame to the robot's map",
-    "description": "Each posed frame, packed and unpacked as the PC gets it, into the robot's 6 × 6 m map.",
+    "description": "Each posed frame, packed and unpacked as the PC gets it, into the robot's 6 × 6 m window. Ground-layer ray passes beyond 50 cm are ignored, so distant floor reflections do not mark holes.",
     "parent": "tof-frame",
     "steps": [
       { "at": "picoA.pose.pose_stamp" },
@@ -252,36 +252,79 @@
     ]
   },
   {
-    "id": "house-map",
-    "name": "Tiles to the whole-house map",
-    "description": "When the robot nears the edge of its 6 × 6 m map, the 2 m tiles leaving it go into the whole-house map; each tile changed since goes to the PC in the next snapshot.",
-    "parent": "tof-map",
-    "status": "leaving",
-    "plan": { "path": "doc/DATA_FLOW_PLAN.md", "code": "`house_map` leaves the robot" },
+    "id": "drive-check",
+    "name": "Drive startup checked against the map",
+    "description": "Before starting a drive, the robot checks its 6 × 6 m map for obstacles and drops across the requested distance, and on a forward drive for unidentified floor within 25 cm ahead, stopping 15 cm short. This flow shows startup refusal, not the repeated checks while moving.",
     "steps": [
-      { "at": "picoA.cell_map.cell_map_add", "path": "picoA/app/cell_map.c", "code": "cell_map_follow(f->x_m, f->y_m);" },
-      { "change": "turn", "name": "window scroll", "at": "picoA.cell_map.cell_map_follow",
-        "what": "not the frame itself: the map's cells of the tiles leaving the window, 4 bits a column (a tile: 20 × 20 columns)",
-        "bytes": 200,
-        "rate": { "text": "when the window moves", "path": "picoA/app/cell_map.c", "code": "while (x_m >= ((float)tile_x + 0.5f) * TILE_M + FOLLOW_M) scroll(1, 0);" },
-        "path": "picoA/app/cell_map.c", "code": "if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy));" },
-      { "at": "picoA.house_map.house_map_put" },
-      { "at": "picoA.house_map.house_map_tile", "path": "picoA/app/snapshot.c", "code": "house_map_tile(i, &tx, &ty, &columns);" },
-      { "change": "add", "name": "into the snapshot", "at": "picoA.snapshot.snapshot_update",
-        "what": "each tile changed since the last snapshot, with its place (tx, ty), into the snapshot's tiles", "bytes": 204,
-        "path": "picoA/app/snapshot.c", "code": "memcpy(t.columns, columns, HOUSE_TILE_BYTES);" }
+      { "at": "picoA.cell_map.cell_map_obstacle_along", "bytes": 4,
+        "path": "picoA/app/room.c", "code": "float along = cell_map_obstacle_along(" },
+      { "change": "turn", "name": "room", "at": "picoA.room.room_m",
+        "what": "less the robot's front or rear and the 15 cm stop margin", "bytes": 4,
+        "path": "picoA/app/room.c", "code": "return gap(x_m, y_m, yaw_rad, direction, look_m, &g) ? g - STOP_BEFORE_M : look_m;" },
+      { "change": "turn", "name": "drive limit", "at": "picoA.room.room_drive",
+        "what": "into how far the drive may go, and whether an obstacle stops it short", "dto": "picoA.room.room_drive_t",
+        "path": "picoA/app/room.c", "code": "return room < want ? (room_drive_t){room, true} : (room_drive_t){want, false};" },
+      { "at": "picoA.behaviour.behaviour_drive",
+        "path": "picoA/app/behaviour.c", "code": "if (room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m).moved_m <= 0) {" },
+      { "at": "picoA.move.move_refused",
+        "path": "picoA/app/behaviour.c", "code": "move_refused(MOVE_DRIVE, distance_m, number, MOVE_END_OBSTACLE);" }
     ]
   },
   {
-    "id": "house-map-back",
-    "name": "Tiles back from the whole-house map",
-    "description": "The tiles coming into the 6 × 6 m map as it moves start from what the whole-house map kept of them.",
-    "status": "leaving",
-    "plan": { "path": "doc/DATA_FLOW_PLAN.md", "code": "`house_map` leaves the robot" },
+    "id": "pc-cell-map",
+    "name": "PC cell map",
+    "description": "The PC builds a boot's whole-house cell map (6 × 6 m window and 2 × 2 m tiles) from the boot's stored ToF frames by running the robot's own C map code in a helper process.",
     "steps": [
-      { "at": "picoA.house_map.house_map_get", "bytes": 200,
-        "path": "picoA/app/cell_map.c", "code": "if (coming) restore(ix, iy, house_map_get(origin_x + ix, origin_y + iy));" },
-      { "at": "picoA.cell_map.cell_map_follow" }
+      { "at": "pc.store.Store.framesBetween", "dto": "pc.store.StoredFrame",
+        "path": "pc/robot/src/maps/cell_map.ts", "code": "const frames = await this.store.framesBetween(boot, b.fedUpTo, lastFrame);" },
+      { "change": "turn", "name": "pack for helper", "at": "pc.tof_format.packTof",
+        "what": "each stored frame into its 277 B compact bytes for the C helper", "bytes": 277,
+        "path": "pc/robot/src/maps/cell_map.ts", "code": "add(frame: PosedFrame): Promise<Buffer> { return this.ask(\"F\", packTof(\"compact\", frame)); }" },
+      { "change": "turn", "name": "build map", "at": "pc.cell_map.CellMaps.viewAtSnapshot",
+        "what": "the helper runs cell_map_add and house_map (2 × 2 m tiles), and returns the window, columns and tiles",
+        "dto": "pc.cell_map.CellMapView",
+        "path": "pc/robot/src/maps/cell_map.ts", "code": "const view = kept ?? await this.upTo(boot, s.lastFrame, m => m.view());" }
+    ]
+  },
+  {
+    "id": "robot-map",
+    "name": "Robot's map on demand",
+    "description": "When asked (robot map --robot), the robot sends its 6 × 6 m window in 9 bulk messages. Requests run one at a time. The PC waits for both the window and the command answer's live pose: the control answer may arrive before the bulk parts. The C helper classifies the columns; this does not use a snapshot or the PC's stored tiles.",
+    "steps": [
+      { "at": "picoA.cell_map.cell_map_window", "bytes": 10804,
+        "path": "picoA/app/commands.c", "code": "const uint8_t *cells = cell_map_window(&ox, &oy);" },
+      { "change": "turn", "name": "encode part", "at": "picoA.wire.wire_encode_map_part",
+        "what": "1,200 cell bytes (1/9 of the window) and the window's origin into one map part message", "bytes": 1205,
+        "path": "picoA/app/commands.c", "code": "uint32_t len = wire_encode_map_part(part, (int16_t)ox, (int16_t)oy, cells + part * WIRE_MAP_PART_CELLS, message);" },
+      { "at": "picoA.link_pc.link_pc_send_bulk",
+        "path": "picoA/app/commands.c", "code": "if (!link_pc_send_bulk(message, len)) return false;" },
+      { "at": "pc.wire.WireReader.push",
+        "path": "pc/robot/src/link.ts", "code": "for (const raw of reader.push(chunk))" },
+      { "change": "turn", "name": "decode part", "at": "pc.wire.decode",
+        "what": "the bytes into one of the 9 map parts", "dto": "pc.wire.MapPart",
+        "path": "pc/robot/src/wire.ts", "code": "case TYPE.MAP_PART:" },
+      { "change": "turn", "name": "join 9 parts", "at": "pc.link.RobotLink",
+        "what": "the 9 parts in order into the 10,800 B window and its origin", "dto": "pc.link.MapWindow",
+        "path": "pc/robot/src/link.ts", "code": "this.emit(\"mapWindow\", { originX: mapOriginCx, originY: mapOriginCy, cellsX: 60, cellsY: 60, cells: Buffer.concat(mapParts) });" },
+      { "change": "add", "name": "live pose", "at": "api.runner.CommandRunner.askMap",
+        "what": "the map command's control answer (flow map-answer) supplies the live pose; return only when both answer and window have arrived", "bytes": 10816,
+        "path": "pc/robot/src/api/runner.ts", "code": "else if (d && w) finish({ window: w, pose: d.pose });" },
+      { "at": "api.queue.CommandQueue.askMap",
+        "path": "pc/robot/src/api/queue.ts", "code": "return this.runner.askMap ? this.runner.askMap() : Promise.resolve({ error: \"robot not connected\" });" },
+      { "change": "turn", "name": "columns", "at": "pc.cell_map.CellMaps.columnsOf",
+        "what": "the C helper's cell_map_column_of turns the 3 layers into 60 × 60 columns and confidence (--png)", "bytes": 7200,
+        "path": "pc/robot/src/maps/cell_map.ts", "code": "const b = await this.ask(\"K\", cells), colBytes = GRID * GRID;" }
+    ]
+  },
+  {
+    "id": "map-answer",
+    "name": "Map command's answer",
+    "description": "The map command's answer uses the same control-message path as other answers. Its command number selects the waiting request; its result and live pose join the bulk window in robot-map.",
+    "parent": "answer",
+    "steps": [
+      { "at": "pc.link.doneRecord" },
+      { "at": "api.runner.CommandRunner.askMap",
+        "path": "pc/robot/src/api/runner.ts", "code": "this.waiting.set(n, done => { d = done; check(); });" }
     ]
   }
 ]

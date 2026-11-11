@@ -1,7 +1,8 @@
 #pragma once
 // The whole-house map (doc/ARCHITECTURE.md, the map): each 10 cm column's class
 // (column_t, 4 bits) of everything the map window (cell_map) has seen, in 2 x 2 m
-// tiles, only the tiles seen. The window writes into it what scrolls out of it and
+// tiles, only the tiles seen. Compiled into the PC's helper (pc/robot/native/
+// cell_map_helper.c), not the robot: the window writes into it what scrolls out and
 // starts from it what scrolls in. A known class overwrites what a column had; an
 // unknown one keeps it (the robot didn't look there this time).
 //
@@ -9,14 +10,11 @@
 // (cx + 1) * 10 cm in the map frame (pose.h). Tile (tx, ty) holds columns
 // cx = 20 tx - 10 … 20 tx + 9, so it covers 2 tx ± 1 m: the tile of the power-up
 // point is centred on it.
-//
-// Each tile changed since it was last handed to a snapshot is dirty
-// (house_map_next_dirty()); a new server marks them all dirty again.
 #include <stdbool.h>
 #include <stdint.h>
 #include "cell_map.h"
 
-#define HOUSE_TILE_COLS  20                                     // columns across a tile: 2 m
+#define HOUSE_TILE_COLS  CELL_MAP_TILE                               // columns across a tile: 2 m
 #define HOUSE_TILE_BYTES (HOUSE_TILE_COLS * HOUSE_TILE_COLS / 2) // 4 bits per column
 #define HOUSE_TILES      100                                    // a 20 x 20 m flat
 
@@ -32,8 +30,3 @@ int house_map_tile_of(int cx); // the tile a column is in (the same for x and y)
 // from the tile's low corner.
 int house_map_tiles(void);
 void house_map_tile(int i, int16_t *tx, int16_t *ty, const uint8_t **columns);
-// The first dirty tile from i on, or -1; handing it out clears its dirt.
-int house_map_next_dirty(int i);
-void house_map_sent(int i);
-void house_map_all_dirty(void);
-uint32_t house_map_clears(void); // counts house_map_clear() calls: the PC starts again when it changes

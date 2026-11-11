@@ -2,24 +2,26 @@
 #include <string.h>
 #include "tof_rays.h"
 #include "cell_map.h"
-#include "house_map.h"
 
 #define GRID_M        0.1f
 #define GRID          CELL_MAP_GRID // grid across: 6 m, three tiles of the whole-house map
-#define TILE          HOUSE_TILE_COLS
+#define TILE          CELL_MAP_TILE
 #define TILE_M        (TILE * GRID_M)
 #define FOLLOW_M      0.5f      // the robot this far out of the window's middle tile: it scrolls by a tile
-#define RESTORED_CONF 1         // cells started from the whole-house map: any measurement overrides them
+#define RESTORED_CONF 1         // cells started from the whole-house map (or the start seed): any measurement overrides them
 _Static_assert(GRID == 3 * TILE, "the window is 3 x 3 tiles");
 #define G_TOP_M       TOF_FLOOR_TOP_M       // 3 cm: a ray ending lower is on the floor (tof_rays)
 #define G_BOTTOM_M    (G_TOP_M - GRID_M)    // −7 cm: the ground layer's bottom; layers are GRID_M tall
 #define NOTHING_M     1.0f      // a zone with nothing in range: free this far
+#define NO_FLOOR_MAX_M 0.5f     // G passes count only this close: farther, shiny floor reflects
 #define NEAR_M        1.5f      // the ray_closeness sigmoid: 0.5 here...
 #define NEAR_SLOPE_M  0.25f     // ...falling over about this much
 #define ERASE_Q       0.3f      // a frame this confident may overwrite, given...
 #define DOUBT_FRAMES  3         // ...this many in a row
 #define FOOT_M        0.15f     // the robot stands and turns here: floor, L1 free
 #define L2_BLIND_M    0.25f     // no zone sees L2 this close to the robot
+#define SEED_M        0.35f     // floor seeded around (x, y) on clear: row 8 first sees floor ~25 cm ahead
+#define FLOOR_LOOK_M  0.25f     // unidentified floor closer than this from (x, y) stops a forward drive (farther is seen as the robot approaches)
 #define WEIGHT_ONE    64        // weight 1 in the per-frame hit_w, pass_w
 #define FULL_FLOOR_RAYS 9.0f    // the ground layer: rays' worth of agreement for full confidence
 #define Z_STEP_M      0.002f    // hit heights kept in 2 mm steps above G_BOTTOM_M
@@ -42,16 +44,11 @@ static uint16_t hit_w[CELL_LAYERS][GRID][GRID], pass_w[CELL_LAYERS][GRID][GRID];
 static uint8_t hit_z[CELL_LAYERS][GRID][GRID], frame_hit_z[CELL_LAYERS][GRID][GRID];
 // The window: GRID x GRID columns from world cell (origin_x, origin_y) on (cell (cx, cy)
 // covers cx * 10 cm … (cx + 1) * 10 cm), the middle tile (tile_x, tile_y) of 3 x 3
-// tiles of the whole-house map. At power-up it is centred on the map's origin.
+// tiles. At power-up it is centred on the map's origin.
 static int tile_x, tile_y, origin_x = -GRID / 2, origin_y = -GRID / 2;
+static const cell_map_tiles_t *tile_store;
 
-void cell_map_clear(void) {
-    memset(grid, 0, sizeof grid);
-    memset(hit_w, 0, sizeof hit_w);
-    memset(pass_w, 0, sizeof pass_w);
-    memset(hit_z, NO_HIT_Z, sizeof hit_z);
-    house_map_clear();
-}
+void cell_map_keep_tiles(const cell_map_tiles_t *t) { tile_store = t; }
 
 static uint8_t z_code(float z_m) {
     float q = (z_m - G_BOTTOM_M) / Z_STEP_M;
@@ -128,8 +125,8 @@ static void walk_ray(const float o[3], const float d[3], float length_m, ray_end
                 float low_m = fminf(o[2] + t * d[2], o[2] + t_out * d[2]); // the ray's lowest point in the cell
                 // As sure as a reading from where the ray leaves the cell: it is free that far.
                 if (low_m > pass_limit_m(layer, ix, iy)) {}
-                else if (layer == 0) add_weight(&pass_w[0][ix][iy], ray_closeness(t) * v);
-                else keep_max(&pass_w[layer][ix][iy], ray_closeness(t_out) * v);
+                else if (layer == 0 && t_out <= NO_FLOOR_MAX_M) add_weight(&pass_w[0][ix][iy], ray_closeness(t) * v);
+                else if (layer > 0) keep_max(&pass_w[layer][ix][iy], ray_closeness(t_out) * v);
             }
         }
         if (last) return;
@@ -281,6 +278,25 @@ static void restore(int ix, int iy, column_t c) {
     }
 }
 
+void cell_map_clear(float x_m, float y_m) {
+    memset(grid, 0, sizeof grid);
+    memset(hit_w, 0, sizeof hit_w);
+    memset(pass_w, 0, sizeof pass_w);
+    memset(hit_z, NO_HIT_Z, sizeof hit_z);
+    tile_x = tile_y = 0;
+    origin_x = origin_y = -GRID / 2;
+    if (tile_store) tile_store->clear();
+    cell_map_follow(x_m, y_m);
+    for (int cx = cell_of(x_m - SEED_M); cx <= cell_of(x_m + SEED_M); cx++)
+        for (int cy = cell_of(y_m - SEED_M); cy <= cell_of(y_m + SEED_M); cy++) {
+            if (!in_window(cx, cy)) continue;
+            float nx = fmaxf((float)cx * GRID_M, fminf(x_m, (float)(cx + 1) * GRID_M)) - x_m;
+            float ny = fmaxf((float)cy * GRID_M, fminf(y_m, (float)(cy + 1) * GRID_M)) - y_m;
+            if (hypotf(nx, ny) <= SEED_M) restore(cx - origin_x, cy - origin_y, COLUMN_DRIVABLE);
+        }
+    around_the_robot(x_m, y_m);
+}
+
 // Moves a [layer][x][y] array by one tile along x (dx = ±1) or y (dy = ±1): what was
 // at +d tiles comes to 0; what comes in is `empty`.
 static void shift(uint8_t a[CELL_LAYERS][GRID][GRID], int dx, int dy, uint8_t empty) {
@@ -295,27 +311,29 @@ static void shift(uint8_t a[CELL_LAYERS][GRID][GRID], int dx, int dy, uint8_t em
     }
 }
 
-// One tile along x or y: the tiles leaving go into the whole-house map, the ones
-// coming in start from it.
+// One tile along x or y: if tiles are kept, the ones leaving go into them and the
+// ones coming in start from them.
 static void scroll(int dx, int dy) {
-    for (int ix = 0; ix < GRID; ix++)
-        for (int iy = 0; iy < GRID; iy++) {
-            bool leaving = (dx > 0 && ix < TILE) || (dx < 0 && ix >= GRID - TILE) ||
-                           (dy > 0 && iy < TILE) || (dy < 0 && iy >= GRID - TILE);
-            if (leaving) house_map_put(origin_x + ix, origin_y + iy, column_of(ix, iy));
-        }
+    if (tile_store)
+        for (int ix = 0; ix < GRID; ix++)
+            for (int iy = 0; iy < GRID; iy++) {
+                bool leaving = (dx > 0 && ix < TILE) || (dx < 0 && ix >= GRID - TILE) ||
+                               (dy > 0 && iy < TILE) || (dy < 0 && iy >= GRID - TILE);
+                if (leaving) tile_store->put(origin_x + ix, origin_y + iy, column_of(ix, iy));
+            }
     shift(grid, dx, dy, 0);
     shift(hit_z, dx, dy, NO_HIT_Z);
     tile_x += dx;
     tile_y += dy;
     origin_x = tile_x * TILE - GRID / 2;
     origin_y = tile_y * TILE - GRID / 2;
-    for (int ix = 0; ix < GRID; ix++)
-        for (int iy = 0; iy < GRID; iy++) {
-            bool coming = (dx < 0 && ix < TILE) || (dx > 0 && ix >= GRID - TILE) ||
-                          (dy < 0 && iy < TILE) || (dy > 0 && iy >= GRID - TILE);
-            if (coming) restore(ix, iy, house_map_get(origin_x + ix, origin_y + iy));
-        }
+    if (tile_store)
+        for (int ix = 0; ix < GRID; ix++)
+            for (int iy = 0; iy < GRID; iy++) {
+                bool coming = (dx < 0 && ix < TILE) || (dx > 0 && ix >= GRID - TILE) ||
+                              (dy < 0 && iy < TILE) || (dy > 0 && iy >= GRID - TILE);
+                if (coming) restore(ix, iy, tile_store->get(origin_x + ix, origin_y + iy));
+            }
 }
 
 void cell_map_follow(float x_m, float y_m) {
@@ -339,32 +357,42 @@ cell_state3_t cell_map_cell(float x_m, float y_m, int layer, float *confidence) 
     return (cell_state3_t)C_STATE(c);
 }
 
+column_t cell_map_column_of(uint8_t g, uint8_t l1, uint8_t l2, uint8_t *confidence) {
+    int gs = C_STATE(g), l1s = C_STATE(l1), l2s = C_STATE(l2);
+    uint8_t gc = C_CONF(g), l1c = C_CONF(l1), l2c = C_CONF(l2);
+    uint8_t conf = 0;
+    column_t col = COLUMN_UNKNOWN;
+    if (l1s == CELL_STATE_OCCUPIED) { col = COLUMN_BLOCKED; conf = l1c; }
+    else if (l2s == CELL_STATE_OCCUPIED) { col = COLUMN_OVERHANG; conf = l2c; }
+    else if (gs == CELL_STATE_FREE) { col = COLUMN_NO_FLOOR; conf = gc; }
+    else if (l1s == CELL_STATE_FREE && l2s == CELL_STATE_FREE) {
+        uint8_t air = l1c < l2c ? l1c : l2c;
+        if (gs == CELL_STATE_OCCUPIED) { col = COLUMN_DRIVABLE; conf = gc < air ? gc : air; }
+        else { col = COLUMN_OPEN; conf = air; }
+    }
+    if (confidence) *confidence = conf;
+    return col;
+}
+
 // A column of the window (window indexes).
 static column_t column_of(int ix, int iy) {
     if (!in_grid(ix, iy, 0)) return COLUMN_UNKNOWN;
-    int g = C_STATE(grid[0][ix][iy]), l1 = C_STATE(grid[1][ix][iy]), l2 = C_STATE(grid[2][ix][iy]);
-    if (l1 == CELL_STATE_OCCUPIED) return COLUMN_BLOCKED;
-    if (l2 == CELL_STATE_OCCUPIED) return COLUMN_OVERHANG;
-    if (g == CELL_STATE_FREE) return COLUMN_NO_FLOOR;
-    if (l1 != CELL_STATE_FREE || l2 != CELL_STATE_FREE) return COLUMN_UNKNOWN;
-    return g == CELL_STATE_OCCUPIED ? COLUMN_DRIVABLE : COLUMN_OPEN;
+    return cell_map_column_of(grid[0][ix][iy], grid[1][ix][iy], grid[2][ix][iy], NULL);
 }
 
-// A world column: the window's inside it, the whole-house map's outside.
+// A world column: the window's inside it, the tiles' (if kept) outside.
 static column_t column_at(int cx, int cy) {
-    return in_window(cx, cy) ? column_of(cx - origin_x, cy - origin_y) : house_map_get(cx, cy);
+    return in_window(cx, cy) ? column_of(cx - origin_x, cy - origin_y) : tile_store ? tile_store->get(cx, cy) : COLUMN_UNKNOWN;
 }
 
 column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m)); }
 
-float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m) {
+float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward) {
     float nearest = max_m;
     float ends_x[2] = {x_m, x_m + max_m * dx}, ends_y[2] = {y_m, y_m + max_m * dy};
     float wx = fabsf(dy) * half_width_m, wy = fabsf(dx) * half_width_m; // the path's half width along x and y
     for (int ix = cell_of(fminf(ends_x[0], ends_x[1]) - wx); ix <= cell_of(fmaxf(ends_x[0], ends_x[1]) + wx); ix++)
         for (int iy = cell_of(fminf(ends_y[0], ends_y[1]) - wy); iy <= cell_of(fmaxf(ends_y[0], ends_y[1]) + wy); iy++) {
-            column_t c = column_at(ix, iy);
-            if (c != COLUMN_BLOCKED && c != COLUMN_OVERHANG) continue;
             float along_lo = 1e9f, along_hi = -1e9f, side_lo = 1e9f, side_hi = -1e9f;
             for (int k = 0; k < 4; k++) { // the cell's corners in the path's frame
                 float cx = (float)(ix + (k & 1)) * GRID_M - x_m;
@@ -374,6 +402,11 @@ float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float ha
                 side_lo = fminf(side_lo, side); side_hi = fmaxf(side_hi, side);
             }
             if (side_hi <= -half_width_m || side_lo >= half_width_m || along_hi <= 0) continue;
+            column_t c = column_at(ix, iy);
+            float mid_side = fabsf((side_lo + side_hi) / 2);
+            bool bad = c == COLUMN_BLOCKED || c == COLUMN_OVERHANG || c == COLUMN_NO_FLOOR ||
+                       (forward && along_lo < FLOOR_LOOK_M && mid_side < half_width_m && c != COLUMN_DRIVABLE);
+            if (!bad) continue;
             nearest = fminf(nearest, fmaxf(along_lo, 0));
         }
     return nearest;

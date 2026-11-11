@@ -3,7 +3,7 @@
 // together). Each is stored as it arrives, its bytes too (store.ts); its camera
 // picture is a PNG in recordings/camera/<boot's folder>/ (boot_folders.ts).
 //
-// A snapshot: "SNAP", version u8 (2), total length u32, sections [type u8][length u32]
+// A snapshot: "SNAP", version u8 (3), total length u32, sections [type u8][length u32]
 // [payload], CRC-32 of everything before it. Little-endian. The ToF section is a
 // compact frame (tof_format.ts), its pose in it.
 import zlib from "node:zlib";
@@ -14,14 +14,13 @@ import { END_WORDS } from "./wire.ts";
 import { unpackTof, type PosedFrame } from "./tof_format.ts";
 
 export const SNAPSHOT_MAGIC = "SNAP";
-export const SNAPSHOT_VERSION = 2;
-const SEC = { HEAD: 1, POSE: 2, TOF: 4, CAMERA: 5, COLOR: 6, WINDOW: 7, TILES: 8, FEATURES: 9 } as const; // 3 was the sensor geometry
+export const SNAPSHOT_VERSION = 3;
+const SEC = { HEAD: 1, POSE: 2, TOF: 4, CAMERA: 5, COLOR: 6, FEATURES: 9 } as const; // 3 was geometry, 7 window, 8 tiles
 // vision_feature_t.flags (picoA/app/vision.h)
 export const FEATURE = { NEW: 1, MISSED: 2, LOST: 4, LEFT_IMAGE: 8 } as const;
 export const WHY = ["action ended", "command", "server connected"]; // snapshot_why_t; 0 until 14 Oct, 1 was key S
 export const MODES = ["idle", "manual"];
-export const TILE_COLS = 20; // picoA/app/house_map.h
-export const TILE_BYTES = TILE_COLS * TILE_COLS / 2;
+export const TILE_COLS = 20; // picoA/app/cell_map.h
 // column_t (picoA/app/cell_map.h)
 export const COLUMN = { UNKNOWN: 0, BLOCKED: 1, OVERHANG: 2, NO_FLOOR: 3, DRIVABLE: 4, OPEN: 5 } as const;
 
@@ -30,16 +29,14 @@ export const COLUMN = { UNKNOWN: 0, BLOCKED: 1, OVERHANG: 2, NO_FLOOR: 3, DRIVAB
 export interface SnapshotPose { robotClockUs: number; x: number; y: number; yaw: number; pitch: number; roll: number; v: number; w: number; stationary: boolean; motorsOn: boolean; stopReason: number }
 export interface SnapshotCamera { number: number; lastRowUs: number; lineUs: number; exposureUs: number; gain: number; width: number; height: number; pixels: Buffer }
 export interface SnapshotColor { robotClockUs: number; sequence: number; overload: boolean; raw: Buffer; lux: number | null; cie: { x: number; y: number } | null; xyz: { X: number; Y: number; Z: number } | null; channels: number[] }
-export interface SnapshotWindow { originX: number; originY: number; cellsX: number; cellsY: number; layers: number; cells: Buffer }
-export interface SnapshotTile { tx: number; ty: number; columns: Buffer }
 export interface SnapshotFeature { id: number; age: number; flags: number; x: number; y: number; dx: number; dy: number; strength: number; match: number }
 export interface SnapshotFeatures { sequence: number; cameraNumber: number; features: SnapshotFeature[] }
 export interface Snapshot {
   version: number; length: number;
   bootId: string; sequence: number; robotClockUs: number; why: string; action: string; endReason: string | null; actionsEnded: number;
-  running: string; mode: string; mapClears: number; build: string;
+  running: string; mode: string; build: string;
   pose: SnapshotPose | null; tof: PosedFrame | null; camera: SnapshotCamera | null; color: SnapshotColor | null;
-  window: SnapshotWindow | null; tiles: SnapshotTile[]; features: SnapshotFeatures | null;
+  features: SnapshotFeatures | null;
 }
 
 const text = (b: Buffer) => { const z = b.indexOf(0); return b.subarray(0, z < 0 ? b.length : z).toString("latin1"); };
@@ -62,11 +59,10 @@ export function parseSnapshot(b: Buffer): Snapshot {
   const length = b.readUInt32LE(5);
   if (length !== b.length) throw new Error(`snapshot: ${b.length} bytes, it says ${length}`);
   if (zlib.crc32(b.subarray(0, length - 4)) !== b.readUInt32LE(length - 4)) throw new Error("snapshot: CRC error");
-  if (b[4] !== SNAPSHOT_VERSION) throw new Error(`snapshot version ${b[4]}, this server reads ${SNAPSHOT_VERSION}`);
+  if (b[4] !== SNAPSHOT_VERSION && b[4] !== 2) throw new Error(`snapshot version ${b[4]}, this server reads ${SNAPSHOT_VERSION}`);
   const s: Snapshot = {
     version: b[4], length, bootId: "", sequence: 0, robotClockUs: 0, why: "", action: "", endReason: null, actionsEnded: 0, running: "",
-    mode: "", mapClears: 0, build: "", pose: null, tof: null, camera: null, color: null, window: null, tiles: [],
-    features: null,
+    mode: "", build: "", pose: null, tof: null, camera: null, color: null, features: null,
   };
   for (let at = 9; at < length - 4;) {
     const type = b[at], n = b.readUInt32LE(at + 1), p = b.subarray(at + 5, at + 5 + n);
@@ -83,8 +79,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
         s.actionsEnded = p.readUInt32LE(26);
         s.running = text(p.subarray(30, 42));
         s.mode = MODES[p[42]] ?? `mode ${p[42]}`;
-        s.mapClears = p.readUInt32LE(43);
-        s.build = text(p.subarray(47, 71));
+        s.build = text(p.subarray(p.length - 24));
         break;
       case SEC.POSE: {
         const f = (i: number) => p.readFloatLE(4 + 4 * i);
@@ -107,19 +102,6 @@ export function parseSnapshot(b: Buffer): Snapshot {
         s.color = { robotClockUs: p.readUInt32LE(0), sequence: p.readUInt32LE(4), overload, raw, ...colorOf(raw, overload) };
         break;
       }
-      case SEC.WINDOW: {
-        const w = { originX: p.readInt16LE(0), originY: p.readInt16LE(2), cellsX: p[4], cellsY: p[5], layers: p[6] };
-        if (p.length !== 7 + w.cellsX * w.cellsY * w.layers) throw new Error("snapshot: window section size");
-        s.window = { ...w, cells: Buffer.from(p.subarray(7)) };
-        break;
-      }
-      case SEC.TILES: {
-        const n = p.readUInt16LE(0);
-        if (p.length !== 2 + n * (4 + TILE_BYTES)) throw new Error("snapshot: tiles section size");
-        for (let i = 0, q = 2; i < n; i++, q += 4 + TILE_BYTES)
-          s.tiles.push({ tx: p.readInt16LE(q), ty: p.readInt16LE(q + 2), columns: Buffer.from(p.subarray(q + 4, q + 4 + TILE_BYTES)) });
-        break;
-      }
       case SEC.FEATURES: {
         const n = p[8], size = 15;
         if (p.length !== 9 + n * size) throw new Error("snapshot: features section size");
@@ -131,7 +113,7 @@ export function parseSnapshot(b: Buffer): Snapshot {
         s.features = { sequence: p.readUInt32LE(0), cameraNumber: p.readUInt32LE(4), features };
         break;
       }
-      default: break; // a section from a newer robot
+      default: break; // a section from another version
     }
   }
   return s;
@@ -161,32 +143,8 @@ export class SnapshotAssembler {
   }
 }
 
-// A column's class from the window's three cells (cell_map.c column_of()): the
-// cells' state is in their low 2 bits (0 unknown, 1 free, 2 occupied).
-export function columnOf(g: number, l1: number, l2: number): number {
-  const st = (c: number) => c & 3, OCC = 2, FREE = 1;
-  if (st(l1) === OCC) return COLUMN.BLOCKED;
-  if (st(l2) === OCC) return COLUMN.OVERHANG;
-  if (st(g) === FREE) return COLUMN.NO_FLOOR;
-  if (st(l1) !== FREE || st(l2) !== FREE) return COLUMN.UNKNOWN;
-  return st(g) === OCC ? COLUMN.DRIVABLE : COLUMN.OPEN;
-}
-
-// The window's columns, [ix * cellsY + iy], and the confidence (0-15) of the cell
-// that decides each.
-export function windowColumns(w: SnapshotWindow): { columns: number[]; confidence: number[] } {
-  const n = w.cellsX * w.cellsY, columns: number[] = [], confidence: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const g = w.cells[i], l1 = w.cells[n + i], l2 = w.cells[2 * n + i], c = columnOf(g, l1, l2);
-    columns.push(c);
-    const deciding = c === COLUMN.BLOCKED ? l1 : c === COLUMN.OVERHANG ? l2 : c === COLUMN.NO_FLOOR ? g : Math.max(l1, l2);
-    confidence.push(c === COLUMN.UNKNOWN ? 0 : deciding >> 4);
-  }
-  return { columns, confidence };
-}
-
 // A tile's columns, [ix * 20 + iy] (picoA/app/house_map.h).
-export function tileColumns(t: SnapshotTile): number[] {
+export function tileColumns(t: { columns: Buffer }): number[] {
   const out: number[] = [];
   for (let k = 0; k < TILE_COLS * TILE_COLS; k++) out.push(k & 1 ? t.columns[k >> 1] >> 4 : t.columns[k >> 1] & 15);
   return out;

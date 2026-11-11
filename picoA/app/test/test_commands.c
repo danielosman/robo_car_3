@@ -24,12 +24,22 @@ static wire_command_t inbox[32];
 static int inbox_n, inbox_at;
 static uint8_t out[64][WIRE_MESSAGE_MAX]; // the control messages sent
 static int out_n;
+static uint8_t bulk[16][WIRE_MESSAGE_MAX];
+static int bulk_n, bulk_room = 100;
 bool link_pc_connected(void) { return connected; }
 void link_pc_print_status(void) {}
 bool link_pc_send_control(const uint8_t *message, uint32_t len) {
     wire_message_t m;
     assert(wire_take(message, len, &m) == (int32_t)len && out_n < 64);
     memcpy(out[out_n++], message, len);
+    return true;
+}
+bool link_pc_send_bulk(const uint8_t *message, uint32_t len) {
+    wire_message_t m;
+    assert(wire_take(message, len, &m) == (int32_t)len && bulk_n < 16);
+    if (!bulk_room) return false;
+    bulk_room--;
+    memcpy(bulk[bulk_n++], message, len);
     return true;
 }
 bool link_pc_received(wire_command_t *c) {
@@ -96,10 +106,13 @@ int move_post_ms(void) { return post; }
 // --- the rest ---
 char __end__, __HeapLimit; // the linker's, for "RAM free"
 static int clears;
+static float clear_x, clear_y;
+static uint8_t fake_window[CELL_LAYERS * CELL_MAP_GRID * CELL_MAP_GRID];
 static uint32_t snapshot_asked;
 static snapshot_sent_t snapshot_gone;
 static bool snapshot_has_gone;
-void cell_map_clear(void) { clears++; }
+void cell_map_clear(float x_m, float y_m) { clears++; clear_x = x_m; clear_y = y_m; }
+const uint8_t *cell_map_window(int *ox, int *oy) { *ox = -10; *oy = 20; return fake_window; }
 int tof_hz(void) { return 10; }
 float tof_frames_per_s(void) { return 10; }
 void loop_statistics_print(void) {}
@@ -118,11 +131,30 @@ int main(void) {
     loop(500);
     assert(clears == 0 && out_n == 0);
     loop(600);
-    assert(clears == 1 && out_n == 2);
+    assert(clears == 1 && clear_x == 0.43f && clear_y == -0.04f && out_n == 2);
     assert(sent(0).type == WIRE_MAP_CLEARED);
     wire_answer_t a = answer_sent(1);
     assert(a.n == 1 && a.end == WIRE_END_OK && a.has == 0 && a.x_m == 0.43f && a.yaw_rad == 0.5f);
-    printf("ok: commands wait for the greeting; clear_map: map cleared, then its answer\n");
+    // "map": sends the 9 parts of the window on the bulk lane, then answers ok (or refused if the lane is full).
+    out_n = 0;
+    fake_window[0] = 0x55;
+    fake_window[sizeof fake_window - 1] = 0xaa;
+    pc_sends(2, "map");
+    loop(1);
+    assert(bulk_n == WIRE_MAP_PARTS && out_n == 1 && answer_sent(0).n == 2 && answer_sent(0).end == WIRE_END_OK);
+    wire_message_t bm;
+    wire_map_part_t mp;
+    assert(wire_take(bulk[0], WIRE_MESSAGE_MAX, &bm) > 0 && wire_decode_map_part(&bm, &mp) && mp.part == 0 &&
+           mp.origin_cx == -10 && mp.origin_cy == 20 && mp.cells[0] == 0x55);
+    assert(wire_take(bulk[8], WIRE_MESSAGE_MAX, &bm) > 0 && wire_decode_map_part(&bm, &mp) && mp.part == 8 &&
+           mp.cells[WIRE_MAP_PART_CELLS - 1] == 0xaa);
+    bulk_n = 0;
+    bulk_room = 3;
+    out_n = 0;
+    pc_sends(29, "map");
+    loop(1);
+    assert(out_n == 1 && answer_sent(0).n == 29 && answer_sent(0).end == WIRE_END_REFUSED);
+    printf("ok: commands wait for the greeting; clear_map: map cleared with pose; map: 9 parts on bulk\n");
 
     // A move: started with its number, answered when it ends, with how far it went.
     out_n = 0;
