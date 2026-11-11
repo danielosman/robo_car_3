@@ -25,6 +25,15 @@ Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the design is in
     of the wedge's height formula; a test of the 5 cm margin. Left: the caller
     passes the zone angle; a "beyond" reading also loses the margin (simple first).
 
+- **Substep b, pieces** (`maps/line_map/pieces.ts`): one row's hits broken at
+  missing hits and distance jumps, split with Ramer-Douglas-Peucker, a lone hit as a
+  stub. Changed while building: the break rule is a jump in distance (20 % plus
+  3 cm), not a gap in zone widths, which broke up every wall seen at an angle.
+  - Review (fresh subagent): fine to commit. Taken: an end made by a split stops at
+    the shared hit (both pieces stuck out half a zone past a corner, behind the
+    other wall, where see-through can't reach); `fitWeight` named apart from
+    `weight`. Left: a shared split hit counts twice when both pieces join one line.
+
 ## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5), the robot's window-only map and floor first (step 6)
 
 Steps of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Both Picos flashed once (commit

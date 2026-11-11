@@ -15,8 +15,8 @@ map is built: from the frames stored before the step you pick. `robot map --png
 | Substep | What | State |
 |---|---|---|
 | a | Sights: a frame's zones as flat wedges (`sights.ts`); the helper gives the sensor's position | done |
-| b | Pieces: one row's hits joined into straight pieces (`pieces.ts`) | next |
-| c | Merge: pieces into a band's lines (`line_map.ts`) | |
+| b | Pieces: one row's hits joined into straight pieces (`pieces.ts`) | done |
+| c | Merge: pieces into a band's lines (`line_map.ts`) | next |
 | d | See-through: wedges remove what isn't there (`line_map.ts`) | |
 | e | The reader (a boot's line maps at a snapshot) and `robot map --png --lines [--no-cells]` | |
 
@@ -74,11 +74,12 @@ hit at its end or none.
    - **per band:** a hit goes to each band its heights reach, cut to that band.
      What a sight saw through is the same for all three maps.
 2. **Pieces** (`pieces.ts`). In one band, one row's hits left to right:
-   - break where a zone has no hit, or two neighbours are farther apart than about
-     two zone widths;
+   - break where a zone has no hit, or two neighbours' distances differ by more than
+     20 % plus 3 cm (a wall met at under 30° breaks into stubs);
    - split each run at its worst-fitting point until all fit (Ramer-Douglas-Peucker;
-     limit: the larger of 3 cm, 2 × sigma, a share of the zone width);
-   - a piece's ends go half a zone width past its outer points;
+     limit: the larger of 3 cm, 2 × sigma, 35 % of the zone's width);
+   - a piece's ends go half a zone width past its outer points; an end made by a
+     split stops at the shared point;
    - a lone point becomes a stub across its zone.
 3. **Merge** (`line_map.ts`). A piece joins the nearest line that both its ends lie
    near and whose seen part it touches. Otherwise it starts a new line.
