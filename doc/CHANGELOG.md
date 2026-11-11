@@ -34,6 +34,30 @@ Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the design is in
     other wall, where see-through can't reach); `fitWeight` named apart from
     `weight`. Left: a shared split hit counts twice when both pieces join one line.
 
+- **Substeps c + d, the map: the confirmed merge dropped, spots kept instead**
+  (`maps/line_map/line_map.ts`, `straight.ts`; `pieces.ts` removed).
+  - Built first as planned: each frame's pieces merged into lines (a fitted carrier,
+    a score per 5 cm step). Its hand-made tests passed. On boot `cc0e4e65` it gave a
+    tangle: 521 lines in "above" (210 m of line in a 5 × 5 m area), fans of lines
+    at every direction around each surface. Tried and not enough: matching by hits
+    instead of piece ends; a direction only for clearly long lines; hits only
+    within 1.3 m (still 218 lines).
+  - Why: 80 % of pieces have 1 or 2 points, so their direction is noise, and each
+    piece that fitted no line started a new one. Also 87 % of the frames are taken
+    while moving, and hits beyond about 1.2 m smear 20-30 cm along the ray.
+  - Now: hits are kept in 5 cm spots (weighted middle, score, frames, heights);
+    sights lower the spots they saw through; lines are made when read, through
+    groups of nearby spots. Fitting tried in order: Ramer-Douglas-Peucker on the
+    points ordered along their main direction (zigzags through thick groups); a
+    looser thickness limit (still zigzags); the straight stretch through the most
+    points, taken out again and again (kept: 58 straight lines in "above").
+  - Review (fresh subagent): fine to commit. Taken: number keys for the squares
+    (`add()` 5-7 times faster); `add(sights)` takes a flat list (rows were only for
+    pieces); `Hit.sigmaM` dropped; the refit repeated while the stretch grows (a
+    long noisy wall came out as two lines); tests for the score cap and for
+    counting a frame once. Written down as known limits: a still robot forgets
+    slowly (only a wedge's middle half sees through); heights are the wedge's.
+
 ## 10 Nov 2026: steps 4f, 4h, the measurement run (4i), the PC's cell map (step 5), the robot's window-only map and floor first (step 6)
 
 Steps of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Both Picos flashed once (commit

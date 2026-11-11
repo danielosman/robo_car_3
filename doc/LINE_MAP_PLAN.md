@@ -1,6 +1,7 @@
 # Line map on the PC — plan
 
-Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Confirmed by Daniel on 11 Nov 2026.
+Step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md). Confirmed by Daniel on 11 Nov 2026;
+the way lines are made changed while building (see "Changed while building").
 The earlier draft is [LINE_MAP_PLAN_OLD.md](LINE_MAP_PLAN_OLD.md) (not built).
 
 ## In short
@@ -15,10 +16,9 @@ map is built: from the frames stored before the step you pick. `robot map --png
 | Substep | What | State |
 |---|---|---|
 | a | Sights: a frame's zones as flat wedges (`sights.ts`); the helper gives the sensor's position | done |
-| b | Pieces: one row's hits joined into straight pieces (`pieces.ts`) | done |
-| c | Merge: pieces into a band's lines (`line_map.ts`) | next |
-| d | See-through: wedges remove what isn't there (`line_map.ts`) | |
-| e | The reader (a boot's line maps at a snapshot) and `robot map --png --lines [--no-cells]` | |
+| b | Pieces: one row's hits joined into straight pieces (`pieces.ts`) | done, then removed in c (not used any more) |
+| c + d | Spots and see-through (`line_map.ts`); lines through the spots (`straight.ts`) | done |
+| e | The reader (a boot's line maps at a snapshot) and `robot map --png --lines [--no-cells]` | built, in review |
 
 Each substep ends with tests green, a fresh reviewer, this table updated and a commit
 (no push). Step 7 changes no Pico: nothing to flash.
@@ -39,20 +39,36 @@ Each substep ends with tests green, a fresh reviewer, this table updated and a c
   same. No per-frame page view, no update while the robot drives.
 - **`robot map --png`** draws the cell map, as now. `--lines` adds the lines.
   `--lines --no-cells` draws only the lines. `--no-cells` alone is an error.
-- **No spatial index.** A band's lines are a plain list.
+- **No spatial index** beyond the map's own 5 cm squares.
 - `robot check` keeps using the cell map. No pose correction from lines.
+
+## Changed while building (for Daniel to confirm)
+
+The confirmed plan made lines from each frame (pieces) and merged them into the
+map's lines. On the stored drive that gave a tangle: about 500 crossing lines in the
+"above" band for a handful of real surfaces. One frame's pieces are too short (80 %
+have 1 or 2 points) to tell a direction, and each wrong direction started a new line.
+
+Now the map keeps the **hit points** (in 5 cm spots) and makes lines **when read**,
+through all the points together. The same drive gives 58 lines in "above", straight,
+where the surfaces are. So:
+
+- Proximity clustering: used, to group nearby spots before fitting.
+- Ramer-Douglas-Peucker: not used any more. It needs points in order along a
+  shape; a cloud of points from many frames has no order.
+- `pieces.ts` (substep b) is removed.
 
 ## The parts
 
 | File (`pc/robot/src/maps/line_map/`) | Knows | Interface |
 |---|---|---|
-| `sights.ts` | ToF frames, verdicts, "beyond", the band heights | `sightsOf(frame, rays, zoneRad)` → 8 rows of 8 sights; `inBand(rows, band)` → the rows for one band's map; `heightsAt(sight, d)` |
-| `pieces.ts` | how one row's hits become straight pieces | `piecesOf(row)` |
-| `line_map.ts` | one band's lines: merge, see-through | `add(rows)`, `lines()` |
-| `index.ts` | the store and the helper: a boot's three maps at a snapshot | `lineMapsAt(boot, n)` |
+| `sights.ts` | ToF frames, verdicts, "beyond", the band heights | `sightsOf(frame, rays, zoneRad)` → the 64 zones' sights; `inBand(sights, band)` → the sights for one band's map; `heightsAt(sight, d)` |
+| `line_map.ts` | one band's spots: hits, see-through, groups | `add(sights)` (one call a frame), `lines()` |
+| `straight.ts` | how a group of points becomes straight lines | `straightLines(points)` |
+| `index.ts` | the store and the helper: a boot's three maps at a snapshot | `lineMapsAt(store, cellMaps, boot, n)` → each band's lines |
 
-- Only `sights.ts` knows ToF data and the bands. The other two read sights alone
-  and are tested with hand-made sights.
+- Only `sights.ts` knows ToF data and the bands. `line_map.ts` reads sights alone;
+  `straight.ts` reads points alone. Both are tested with hand-made input.
 - The helper (`cell_map_helper.c`, request `R`) also returns the sensor's position.
   No C geometry is copied into TypeScript.
 
@@ -73,49 +89,58 @@ hit at its end or none.
    - a still, sure reading weighs 1; moving halves it, less sure halves it;
    - **per band:** a hit goes to each band its heights reach, cut to that band.
      What a sight saw through is the same for all three maps.
-2. **Pieces** (`pieces.ts`). In one band, one row's hits left to right:
-   - break where a zone has no hit, or two neighbours' distances differ by more than
-     20 % plus 3 cm (a wall met at under 30° breaks into stubs);
-   - split each run at its worst-fitting point until all fit (Ramer-Douglas-Peucker;
-     limit: the larger of 3 cm, 2 × sigma, 35 % of the zone's width);
-   - a piece's ends go half a zone width past its outer points; an end made by a
-     split stops at the shared point;
-   - a lone point becomes a stub across its zone.
-3. **Merge** (`line_map.ts`). A piece joins the nearest line that both its ends lie
-   near and whose seen part it touches. Otherwise it starts a new line.
-   - A line keeps weighted sums of its points and is refitted from them. Close and
-     still readings weigh more.
-   - A line keeps a score for each 5 cm step along it. A hit raises the scores of
-     the steps the piece covers.
-4. **See-through** (`line_map.ts`). A sight lowers the score of each step inside its
-   seen-through stretch, if the wedge is there at the heights the step was hit at.
-   A wedge passing over a low box says nothing about the box.
-   - Wedges meeting a line at under 30° are skipped (they slide along it).
-5. **Read.** A line is drawn where its steps have a score above zero and were hit
-   in at least two frames. Steps at zero are forgotten; a line with no steps goes.
+2. **Spots** (`line_map.ts`). A hit goes into the 5 cm square it lies in. The spot keeps:
+   - where its hits lie: their weighted middle (a close hit weighs more);
+   - a score: each hit raises it by the sight's weight, up to 5;
+   - in how many frames it was hit, and the heights it was hit at.
+3. **See-through** (`line_map.ts`). A sight lowers the score of each spot inside its
+   wedge and closer than it saw through, if the wedge is there at the heights the
+   spot was hit at. A wedge passing over a low box says nothing about the box.
+   - Only the wedge's middle half counts. A wedge sliding along a wall would
+     otherwise remove the wall under its edge.
+   - A spot at zero is forgotten.
+4. **Lines, when read** (`line_map.ts`, `straight.ts`). Spots hit in 3 frames or more
+   stand.
+   - Standing spots at most 3 squares apart form a group (proximity clustering).
+   - In a group: try every direction in 3° steps; find the 6 cm wide strip with the
+     most points; keep its longest run with no gap over 15 cm; fit a line through
+     that run (and again, while that gains points). Take those points out and
+     repeat, until fewer than 4 are in a row.
+   - Points on no such line (clutter, a lone leg) give no line.
 
 ## Numbers from the stored drive (boot `cc0e4e65`, 774 frames)
 
 | Fact | Number |
 |---|---|
 | Obstacle points per frame (median) | 20, all in rows 1-6 |
-| Neighbour pairs in a row with a depth jump | 23 % |
+| Frames taken while moving | 87 % |
 | Obstacle points whose zone spans more than one band | 31 % |
-| Pieces per frame (3 cm limit) | about 12, median 20 cm long |
-| Pieces with 1 or 2 points | about 80 % |
-| The helper's rays for the whole drive | about 0.2 s |
-
-One frame gives short, weak pieces. The map's quality comes from the merge.
+| Hits closer than 1.2 m | 35 %; they lie within about 5 cm of each other |
+| Hits farther than 1.2 m | 65 %; smeared 20-30 cm along the ray |
+| Lines per band (L1 / L2 / above) | 23 / 29 / 58, median 34 cm long |
+| Building the three maps for the whole drive | about 1 s |
 
 ## Tests
 
-- Hand-made: a flat wall, a corner, a leg in front of a wall, a wall at a shallow
-  angle, a thing that went away, beyond-range readings (no lines).
+- `straight.ts`: a wall, a corner, two walls side by side, a doorway, clutter.
+- `line_map.ts`: a wall seen three times; a close look against a far one; a thing
+  that went away; a sight passing over; a wedge's edge.
 - The stored drive replayed, drawn over the cell map (`robot map --png --lines`).
 
 ## Known limits
 
+- **Far things are thick.** Beyond about 1.2 m the hits smear, so a far wall shows
+  as two or three lines side by side until the robot comes closer.
+- **Thin things give no line**: a lone chair leg is 1 or 2 spots; a line needs 4.
+- **A robot standing still forgets slowly.** Only the middle half of each wedge
+  sees through, so from one pose half the view removes nothing. A thing that went
+  away goes from the map fully once the robot moves or turns.
+- **Heights are the wedge's, not the thing's.** A 5 cm box hit by a wedge covering
+  3-13 cm is kept as 3-13 cm, so "passing over says nothing" holds only roughly.
+- A wall met at a very shallow angle (calculated: under about 13°) can still remove
+  itself. Not measured.
 - Odometry drifts: a wall seen again after a long drive may become two lines.
-- Two lines that grow into each other are not joined into one.
-- The limits (fit, match, margin, score cap) are first guesses, tuned on the stored
-  drive.
+- The limits (strip width, gap, frames to stand, score cap) are first guesses,
+  tuned on one stored drive in which the robot mostly turned on the spot.
+- Building takes about 1 s for 774 frames and is done again on every read: fine
+  for `robot map`; step 8's slider should keep the last maps read.
