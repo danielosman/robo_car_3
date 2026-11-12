@@ -524,12 +524,26 @@ Terms (all poses x, y, yaw; `corrected(c, p)` and its inverse as in `mapper.ts`)
 - The robot's pose = `corrected(c_robot, raw)`. With `c_robot = c_pc`, the robot's
   pose is the PC's best pose.
 
-What is sent (proposed; Daniel agreed "the corrected pose", see "Open for Daniel"):
-the **total correction `c_pc`**, not a pose and not a change.
+What is sent (Daniel, 12 Nov): the **total correction `c_pc`**, not a pose and not a
+change since the last one.
 
-- Like a pose: absolute. A lost message is put right by the next one.
-- Unlike a pose: it does not depend on when it is applied. A pose is right only for
-  the moment it was computed; the robot may have moved since.
+- Not a pose: a pose is right only for the moment it was computed. A move queued
+  before it (by the page or the CLI) runs first, and the pose would then be wrong by
+  that move. The correction is right whenever it is applied.
+- Not a change: the robot sets `c_robot = c`; sending the same value twice does no harm.
+
+When the robot does not take it:
+
+- Commands go over one TCP connection, through the queue; each is answered. A command
+  is not lost silently: either the robot answers, or the PC sees no answer (WiFi
+  dropped, robot restarted).
+- The PC holds `c_robot` as the robot last answered it (`robot_corrections`), never
+  as sent. With no answer, `c_robot` stays the old value:
+  - the PC queues `correct c_pc` again before the next move it sends;
+  - goto targets are turned into the robot's frame with the `c_robot` the robot has
+    (see Goto below), so the robot still drives to the place meant, by its older pose.
+- The robot restarted: a new boot, `c_robot = 0` and a new mapper on the PC; nothing
+  to recover.
 
 Robot (PicoA; PicoB unchanged):
 
@@ -552,11 +566,15 @@ on each odometry report from PicoB (body.c):
 PC:
 
 ```
-after a snapshot is stored (main.ts, after OutlineMaps.added):
-    if c_pc != c_robot_sent: queue "correct c_pc"; c_robot_sent = c_pc
+after a snapshot is stored (main.ts, after OutlineMaps.added),
+and before sending any move:
+    if c_pc != c_robot: queue "correct c_pc"
 
-store: robot_corrections(boot, message_number, x, y, yaw)
-    one row per "correct" answer: c_robot from that message on
+on the answer "ok" to "correct c":
+    store robot_corrections(boot, message_number of the answer, c)
+    c_robot = c                          // from that message on
+
+c_robot at message m = the last row with message_number <= m (none: 0)
 
 rawOf(boot, message_number, pose) = uncorrected(c_robot at message_number, pose)
 ```
@@ -566,14 +584,15 @@ rawOf(boot, message_number, pose) = uncorrected(c_robot at message_number, pose)
   as built (they take `raw`). Readers to change: `store.framesBetween` (frames for
   the outline mapper and the cell map), `snapshotsUpTo`/`snapshotFrames`, `store.path`,
   the live pose (page), `robot check`'s start pose.
-- **Goto** (page click, `robot steer g`): `target_robot = corrected(c_robot_now,
-  uncorrected(c_pc, target_map))`. With `c_robot = c_pc` it is the place clicked.
+- **Goto** (page click, `robot steer g`): `target_robot = corrected(c_robot,
+  uncorrected(c_pc, target_map))`, with `c_robot` as last answered. With `c_robot =
+  c_pc` it is the place clicked.
 - **Log:** the existing line, plus `correction sent: a cm, b°` when one is queued.
 
 Needs: a new command (`picoA/app/commands.h`, `wire.ts`, the CLI's list), the
 `robot_corrections` table, `rawOf` and its readers, tests on both sides (the host
 test `test_behaviour` for PicoA; the drift test in `index.test.ts` for the PC), a
-flash of PicoA ("Open for Daniel" 2).
+flash of PicoA ("Open for Daniel" 1).
 
 To look at, on a real drive:
 
@@ -604,16 +623,14 @@ To look at, on a real drive:
 - The PC's cell map is placed by the corrected pose too (it is the PC's own, built
   from the stored frames).
 - `robot map --png --lines` draws what the page draws, for the agent to test and drive.
-- Step F, its own step after E: the PC sends the robot its best pose as an absolute
-  value, not as a change (a lost message is then put right by the next one); the
-  robot's own cell map and steering use it. Past frames, cells and dots are not moved.
+- Step F, its own step after E: the PC sends the robot its **total correction** (not
+  a pose: a move queued before it would make a pose wrong; not a change: sending it
+  twice does no harm); the robot's own cell map and steering use it. Past frames,
+  cells and dots are not moved.
 
 ## Open for Daniel
 
-1. **Step F sends the total correction, not the corrected pose?** Proposed in
-   "Step F: where to start": both are absolute (a lost message is put right by the
-   next one); only the correction does not depend on when the robot applies it.
-2. **A real drive**, later: one that goes round and comes back to its start. It
+1. **A real drive**, later: one that goes round and comes back to its start. It
    needs the robot flashed (the PC speaks wire 5; the robot has the 10 Nov
    firmware). Step C has passed in the simulator: it can come any time.
 
