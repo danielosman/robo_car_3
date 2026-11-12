@@ -49,7 +49,7 @@ export async function wallsAt(store: Store, cellMaps: CellMaps, boot: string, se
       for (const v of [s.wall, s.frame]) sightings.appendInteger(v);
       for (const v of [s.pose.x, s.pose.y, s.pose.yaw, s.doubt.xyM, s.doubt.yawRad]) sightings.appendDouble(v);
       sightings.appendVarchar(JSON.stringify(s.hits.map(([x, y]) => [mm(x), mm(y)])));
-      sightings.appendDouble(s.offM);
+      if (s.offM === null) sightings.appendNull(); else sightings.appendDouble(s.offM);
       if (s.turnRad === null) sightings.appendNull(); else sightings.appendDouble(s.turnRad);
       sightings.endRow();
     }

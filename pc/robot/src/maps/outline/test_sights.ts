@@ -9,7 +9,7 @@ export const DEG = Math.PI / 180, ZONE = 5.625 * DEG;
 // the wedge is there. It saw through to 10 cm before its hit.
 export function sight(bearing: number, rangeM: number | null, more: Partial<Sight> = {}): Sight {
   const s: Sight = { x: 0, y: 0, bearing, halfWidth: ZONE / 2, reachM: rangeM === null ? 2 : Math.max(0, rangeM - 0.1),
-                     z: 0.09, lowPerM: 0.1, highPerM: 0.2, weight: 1, hit: null, ...more };
+                     z: 0.09, lowPerM: 0.1, highPerM: 0.2, weight: 1, still: true, hit: null, ...more };
   if (rangeM !== null) {
     const [lowM, highM] = heightsAt(s, rangeM);
     s.hit = { x: s.x + rangeM * Math.cos(bearing), y: s.y + rangeM * Math.sin(bearing), rangeM, lowM, highM };

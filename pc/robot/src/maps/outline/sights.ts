@@ -7,6 +7,7 @@
 //   inBand(sights, band)            the same sights for one band's map: only the hits that
 //                                   reach the band, their heights cut to it
 //   heightsAt(sight, d)             the heights the wedge covers d from the sensor
+//   seesBand(band, sight, d)        does the wedge, d from the sensor, see the band's floor (cover its lower part)
 import { isBeyond, type PosedFrame } from "../../tof_format.ts";
 import type { ZoneRays } from "../cell_map.ts";
 
@@ -32,6 +33,7 @@ export interface Sight {
   z: number;                 // the sensor's height; with the two slopes, the wedge's heights along the way:
   lowPerM: number; highPerM: number; // read them with heightsAt()
   weight: number;            // 1: a sure reading while still; less when less sure or moving
+  still: boolean;            // taken while the robot stood still (moving, readings smear)
   hit: Hit | null;
 }
 
@@ -40,6 +42,14 @@ export interface Sight {
 // them), so a little inside the zone's true borders.
 export function heightsAt(s: Sight, d: number): [number, number] {
   return [s.z + s.lowPerM * d, s.z + s.highPerM * d];
+}
+
+// A wedge sees a band's floor free where it covers the band's lower part: things stand
+// on the floor, so a wedge passing over the band's top says nothing.
+const LOWER_PART = 0.6, LOWER_PART_MAX_M = 0.1, INTO_BAND_M = 0.02;
+export function seesBand(band: Band, s: Sight, d: number): boolean {
+  const [low, high] = heightsAt(s, d);
+  return low <= band.lowM + Math.min(LOWER_PART_MAX_M, LOWER_PART * (band.highM - band.lowM)) && high >= band.lowM + INTO_BAND_M;
 }
 
 const MARGIN_M = 0.05; // the seen-through stretch ends at least this far before the reading
@@ -62,7 +72,7 @@ function sightOf(frame: PosedFrame, zone: number, r: ZoneRays, zoneRad: number):
   return {
     x, y, bearing: Math.atan2(dy, dx), halfWidth: zoneRad / 2, reachM: Math.max(0, rangeM - margin),
     z: height, lowPerM: (r.lowM - height) / rangeM, highPerM: (r.highM - height) / rangeM,
-    weight: (frame.still ? 1 : 0.5) * (z.kind === "sure" ? 1 : 0.5),
+    weight: (frame.still ? 1 : 0.5) * (z.kind === "sure" ? 1 : 0.5), still: frame.still,
     hit: stands ? { x: r.point[0], y: r.point[1], rangeM, lowM: r.lowM, highM: r.highM } : null,
   };
 }

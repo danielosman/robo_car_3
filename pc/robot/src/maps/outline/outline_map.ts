@@ -14,7 +14,7 @@
 // each border point moved onto the standing spot just beyond it, if there is one.
 import { bordersOf, connected, keyOf, type Key } from "./border.ts";
 import { edgesOf, type BorderPoint, type Edge } from "./shape.ts";
-import { heightsAt, inBand, type Band, type Sight } from "./sights.ts";
+import { heightsAt, inBand, seesBand, type Band, type Sight } from "./sights.ts";
 import { sureOf, type Walls } from "./walls.ts";
 
 export type { Edge };
@@ -29,9 +29,6 @@ const HEIGHT_M = 0.01;    // a wedge this little into a spot's heights doesn't c
 // Only the wedge's middle half sees through a spot: a wedge sliding along a wall reads
 // what is behind the wall's end, and would remove the wall under its edge.
 const SEE_SHARE = 0.5;
-// A wedge sees a band's floor free where it covers the band's lower part: things stand
-// on the floor, so a wedge passing over the band's top says nothing.
-const LOWER_PART = 0.6, LOWER_PART_MAX_M = 0.1, INTO_BAND_M = 0.02;
 // A border point is moved onto the nearest standing spot this close beyond it. Sights
 // end a margin before what they hit (sights.ts), so the free floor ends before the hits.
 const SNAP_M = 0.3;
@@ -60,11 +57,9 @@ export class OutlineMap {
   private frame = 0;
   private readonly start: Key;
   private readonly band: Band;
-  private readonly lowerPartM: number;
 
   constructor(band: Band, start: { x: number; y: number } = { x: 0, y: 0 }) {
     this.band = band;
-    this.lowerPartM = band.lowM + Math.min(LOWER_PART_MAX_M, LOWER_PART * (band.highM - band.lowM));
     this.start = keyOf(square(start.x), square(start.y));
     const reach = Math.ceil(START_M / SPOT_M);
     for (let ix = square(start.x) - reach; ix <= square(start.x) + reach; ix++)
@@ -151,8 +146,7 @@ export class OutlineMap {
         const key = keyOf(ix, iy), x = (ix + 0.5) * SPOT_M, y = (iy + 0.5) * SPOT_M;
         const along = (x - s.x) * ux + (y - s.y) * uy, across = (x - s.x) * uy - (y - s.y) * ux;
         if (along > 0 && along <= s.reachM && Math.abs(across) <= along * spread) {
-          const [low, high] = heightsAt(s, along);
-          if (along <= NEAR_M || (low <= this.lowerPartM && high >= this.band.lowM + INTO_BAND_M)) this.free.add(key);
+          if (along <= NEAR_M || seesBand(this.band, s, along)) this.free.add(key);
         }
         const spot = this.spots.get(key);
         if (!spot) continue;

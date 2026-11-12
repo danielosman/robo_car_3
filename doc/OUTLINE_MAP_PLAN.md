@@ -1,7 +1,7 @@
 # Outline map and drift correction — plan (11 Nov 2026)
 
-Agreed in general by Daniel on 11 Nov; steps S (the simulator), A (the outline) and
-B (the walls) are built. It follows the line map
+Agreed in general by Daniel on 11 Nov; steps S (the simulator), A (the outline), B
+(the walls) and C (the pose check) are built. It follows the line map
 ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md), step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)),
 which Daniel looked at and found is not what he wants: loose lines, too few of them.
 
@@ -21,7 +21,7 @@ disagree, the less sure one gives way.
 ## For the fresh session
 
 - **Steps S, then A to E in order.** The table in "Steps" says which are done:
-  start at the first that is not. **Next: step C**; read "Step C: where to start"
+  start at the first that is not. **Next: step D**; read "Step D: where to start"
   first.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
   `pc/robot/src/maps/outline/` and `pc/robot/src/sim/` with their tests.
@@ -93,7 +93,10 @@ This is the stochastic part. In plain words:
   looked for that puts them back on.
 - **Who is blamed** follows from the two "how sure" numbers. An unsure pose against
   a sure wall: the pose moves. A sure pose against a new, unsure wall: the wall
-  moves. (This weighing is a Kalman filter; nothing fancier is planned.)
+  moves. (This weighing is a Kalman filter; nothing fancier is planned.) As built
+  it keeps one covariance over the pose and the walls together (EKF-SLAM): a wall
+  placed from an unsure pose shares the pose's error, and seen again from there it
+  says nothing about where the pose truly is.
 - **One wall is not enough to shift the robot.** One wall corrects the turn and the
   distance to that wall, not the position along it. A full correction needs two
   walls in different directions.
@@ -118,8 +121,8 @@ Limits to accept:
 | Table | Holds |
 |---|---|
 | `walls` | per boot and band: number, middle, direction, length, how sure (spread across, of the direction), sightings, first and last frame, the snapshot it was built at |
-| `wall_sightings` | band, wall, frame, the pose it was seen from and how sure, the hits (JSON), how far off they were (across, slope) |
-| `frame_poses` | frame, the odometry pose, the placed pose (the same until step C), how sure |
+| `wall_sightings` | band, wall, frame, the pose it was seen from and how sure, the hits (JSON), how far off they were (across, slope; NULL: only near its ends, it was only lengthened) |
+| `frame_poses` | frame, the odometry pose, the corrected pose, how sure after the check |
 
 - Written by `robot walls [n]`: the boot's rows are replaced each time.
 - Which walls a frame was checked against: `wall_sightings` by frame.
@@ -127,23 +130,25 @@ Limits to accept:
 
 ## How it fits the code
 
-Built (steps A and B), in `pc/robot/src/maps/outline/`:
+Built (steps A to C), in `pc/robot/src/maps/outline/`:
 
 | File | Knows | Interface |
 |---|---|---|
-| `sights.ts` | ToF frames, verdicts, "beyond", the band heights | `sightsOf()`, `inBand()`, `heightsAt()` |
-| `mapper.ts` | the object on top: per band a map and its walls; the pose and how sure | `new Mapper()`, `add(frame, sights)`, `outlines()`, `walls()`, `sightings()`, `poses()` |
+| `sights.ts` | ToF frames, verdicts, "beyond", the band heights; does a wedge see a band's floor | `sightsOf()`, `inBand()`, `heightsAt()`, `seesBand()` |
+| `mapper.ts` | the object on top: per band a map and its walls; places each frame by the corrected pose | `new Mapper({ correct })`, `add(frame, sights)`, `outlines()`, `walls()`, `sightings()`, `poses()` |
 | `outline_map.ts` | one band's 5 cm squares: seen free, hits (spots), see-through; which border point lies on which spot, or on which wall | `new OutlineMap(band)`, `add(sights)`, `outline(walls)` |
 | `border.ts` | the closed loops round a set of squares | `connected()`, `bordersOf()` |
 | `shape.ts` | a loop's points as wall, rough and guess edges; edges on a known wall carry its number; no knots | `edgesOf(points)` |
-| `walls.ts` | one band's walls: their line and how sure, moved by each frame's hits (a Kalman filter), new ones from wall edges, merges | `new Walls()`, `see()`, `found()`, `on()`, `doubtOf()`, `sureOf()` |
-| `pose.ts` | how sure the pose is: grows with turning and driving | `grown()`, `lineDoubt()` |
+| `walls.ts` | one band's walls: their line, ends and how sure; a frame's hits on them as measurements; new ones, merges, corners | `new Walls(band, check?)`, `measure()`, `apply()`, `see()`, `found()`, `on()`, `doubtOf()`, `sureOf()` |
+| `pose_check.ts` | the joint filter over the pose and the band "above"'s walls; each wall alone for the other bands | `new PoseCheck()`, `moved()`, `added()`, `removed()`, `recentred()`, `check()`, `doubt()`, `covOf()`; `wallsAlone()` |
+| `kalman.ts` | one Kalman step on small matrices | `kalmanStep()` |
+| `pose.ts` | how fast the pose's doubt grows with turning and driving | `growth()`, `grown()`, `lineDoubt()` |
 | `colours.ts` | a colour a band, a brightness an edge (walls by how sure) | `edgeRgb()`, `outlineStrokes()` |
 | `index.ts` | the store and the helper: a boot's outlines and walls at a snapshot; the tables | `outlinesAt()`, `wallsAt()` |
 
 - `robot map --png --lines [--no-cells]` draws the outlines; `robot walls [n]` lists
   the walls and writes the three tables.
-- **New in C and D:** the pose check, removal.
+- **New in D:** removal.
 - The cell map is untouched. `robot check` keeps using it.
 - PC only. The robot does not get the corrected pose in this plan.
 
@@ -236,10 +241,11 @@ knows the truth, so every step can be measured, not only looked at.
 - A picture has three panels: L1, L2, above. Each shows the room at that band's
   heights.
 - Scenarios: `square`, `things`, `door`, `loop`, `box-removed`, `box-stays`, `big`.
-  `--no-noise` and `--no-drift` switch those off. Pictures go to
+  `--no-noise` and `--no-drift` switch those off; `--no-correction` turns the pose
+  check off (the white robot is the corrected pose). Pictures go to
   `pc/robot/recordings/sim/<scenario>/`.
 - With the measured drift (3 % per turn) a full turn ends 11° off, and the `door`
-  drive ends 58 cm off. That is what step C has to take out.
+  drive ends 58 cm off. Step C takes most of it out (see "How the pose is checked").
 
 **Limits of the simulator**
 - It is only as true as its noise. Limits tuned on it are first guesses; the
@@ -257,7 +263,7 @@ tried in the simulator first, then on the stored drive.
 | S | done | The simulator: room, robot with drift, ToF with noise, pictures with a slider, the numbers | `npm run sim -- <scenario>`; the scenarios as tests |
 | A | done | The outline: seen-free floor per band, its border and islands, simplified; kinds wall / rough / guess by rule, nothing remembered yet | `robot map --png --lines`: a closed polygon from the 35 cm circle on, step by step with the slider's snapshots |
 | B | done | Walls remembered: numbers, how sure, sightings; colour by confidence; the three tables | the same picture, walls brighter the surer they are; `robot walls` listing them |
-| C | | The pose check: frames checked against walls, corrected poses stored, the map built with them | the same drive drawn with and without correction; the error on returning to the start |
+| C | done | The pose check: frames checked against walls, corrected poses stored, the map built with them | the same drive drawn with and without correction (`npm run sim -- loop [--no-correction]`); the error on returning to the start |
 | D | | Removal with the two-wall rule | a moved box goes; a wall stays when the robot drifts |
 | E | | The page: the outline per band, switchable (the old step 8) | the page |
 
@@ -292,9 +298,8 @@ What the outline does and does not show (measured in the simulator):
 - **L1's floor is known to about 1.65 m only.** Only row 5 looks along the floor.
   Farther walls are hit but stay outside L1's outline until the robot is closer.
 - **Far walls are rough, not walls.** Beyond 1.2 m the hits smear, so no stretch is
-  straight to 3 cm. In the `square` room (walls 1.5 m away) there is no wall edge
-  with noise on. Step B has to find walls there another way (a line through many
-  smeared hits), or step C has nothing to correct against.
+  straight to 3 cm. So step B added a second wall rule (1 m or more fitting a line
+  to 5 cm).
 - **A thing never looked at is a guess island** (the pouf in `loop`).
 - **A table top is seen from below:** its far edge shows as a thin shape, not as
   an island, until the robot has seen round it.
@@ -341,30 +346,107 @@ What the walls do (measured in the simulator, all noise on):
 | With drift | walls follow the drifted pose: up to 23 cm and 10° off; in `door` half the walls are on no true wall |
 | The stored drive (boot `cc0e4e65`), built and tables written | 2 s; 13 walls, most unsure (the drive turned a lot) |
 
-- **Walls seen later are less sure:** the pose's doubt only grows in B. In `square`
-  without drift the four walls read 0.94, 0.71, 0.54, 0.33.
+- **Without the pose check, walls seen later are less sure:** the pose's doubt only
+  grows. In `square` without drift the four walls read 0.94, 0.71, 0.54, 0.33.
 - **L1's walls are few and rough:** its floor is known to 1.65 m only.
+- Since step C's rules for hits near a wall's end and in corners, `things` (no
+  drift, correction off) finds 3 of its 4 walls in "above", not 4; a test holds 3.
 
-### Step C: where to start
+How the pose is checked (step C, as built):
 
-Not built. From the sessions that built B and reviewed it:
+- **One band checks the pose: "above".** A wall stands in every band; three bands
+  would count it three times. "above" finds the most walls; things on the floor are
+  mostly below it. L1 and L2 walls then see the frame from the corrected pose, each
+  wall alone, as in step B.
+- **One covariance over the pose and the band's walls** (`PoseCheck`). Odometry
+  moving the pose grows its doubt (and turns the heading's doubt into position
+  doubt along the way driven); a new wall placed from the pose shares its error.
+  Each frame: the hits on each wall give a measurement (offset of their middle,
+  slope if they span 20 cm); one Kalman step gives the pose's change and every
+  wall's, also walls not in view. The frame's sights are then placed by the
+  corrected pose (`mapper.ts` keeps the shift from odometry).
+- **Tried first, as the plan said: no covariance between pose and walls.** Failed:
+  each check made pose and wall look sure, new walls took up the drift, `square`
+  stayed 9-17° off.
+- **Rules found in the simulator** (each fixed a measured failure):
+  - a hit whose wedge covers a wall's end doesn't measure it (it may be the next
+    wall round the corner); it only lengthens it;
+  - a hit that fits two walls at an angle (a corner) is not used; of walls in line,
+    it goes to the one it lies least beyond;
+  - past a wall's end a hit must lie within 2 of its own spreads of the line;
+  - a frame's hits on a wall are never surer than 1 cm and 2° (still), 3 cm and 6°
+    (moving: readings smear);
+  - a measurement more than 3 spreads off (pose, wall and hits together) is left out;
+  - in "above" a new wall is the line through the current frame's hits along the
+    outline's wall edge (the outline holds hits placed by older poses); its own
+    doubt 5 cm, 10 cm if made while moving. New walls are looked for every 10
+    frames and on every still frame.
+- **Wall ends move both ways** (Daniel: seen face-on an end is vague; seen from the
+  side, the corner is placed better). Each end has a spread. A frame sees an end
+  between the last hit on the wall and the first wedge that saw at least 30 cm past
+  its line at the band's heights; a Kalman step moves the end. So the end is as
+  sure as the wedges are dense there: closer is surer. Two walls at more than 45°
+  whose ends are within 30 cm of where their lines cross end there (a corner,
+  placed by both lines).
+- `new Mapper({ correct: false })` and `npm run sim -- <name> --no-correction` give
+  step B's behaviour, to compare.
 
-- **Split the wall update first:** `update()` in `walls.ts` both makes the
-  measurement and moves the wall. C needs `measure(wall, hits)` (z, H, the hits'
-  own noise, the pose's part) and then one step that shares the change between wall
-  and pose by their doubts.
-- **One correction per frame from all its walls:** stack each wall's measurement;
-  one wall gives the turn and the distance across it, two at an angle give the
-  whole pose. The pose's doubt shrinks after it.
-- **Place the frame's sights by the corrected pose** before the maps and walls take
-  them (the mapper owns that). Store the corrected pose in `frame_poses`.
-- **"How sure" counts the pose twice:** the filter's doubt already holds the pose's
-  doubt from each measurement, and `doubtOf` adds the surest pose again (with no
-  heading-times-distance part). Fine for brightness; C uses it to decide who gives
-  way, so look at it first.
-- Move `outline_map.ts`'s use of `Walls` to a plain snap function if it gets in the way.
-- Test: the `loop` scenario's end error must come out clearly under the odometry's
-  (27 cm and 12° at its end).
+What the pose check does (simulator, all noise and the measured drift; mean of the
+end error over 5 seeds):
+
+| Scenario | Odometry | Corrected |
+|---|---|---|
+| `square` (a full turn on the spot) | 1 cm, 10.7° | 1 cm, 1.4° |
+| `things` | 1 cm, 10.7° | 1 cm, 0.8° |
+| `box-stays` (two turns) | 1 cm, 21.1° | 1 cm, 1.4° |
+| `loop` (round a room, back to the start) | 27 cm, 12.0° | 9 cm, 2.0° |
+| `door` (two rooms) | 55 cm, 21.2° | 23 cm, 4.4° |
+
+- Without noise or drift the pose stays exact (under 1 cm and 0.1° all the way).
+- **Weak spot:** with noise but no drift the check alone can push the pose off, up
+  to about 21 cm and 6° in `loop` and `door` (a test caps it at 25 cm and 7°).
+- With drift the walls are far closer to the truth than in B (`loop` 7-8 cm against
+  16-23 cm). In `square` the walls end within 1 cm of the corners without noise,
+  1-7 cm with noise.
+- The stored drive (boot `cc0e4e65`): built in 2.9 s; the correction stays within
+  6° and 6 cm of odometry (no truth to compare with).
+
+### Step D: where to start
+
+Not built. Removal with the two-wall rule (idea 3, "Removal"), and what the review of
+step C left open:
+
+- **The rule:** seeing through a wall counts only while the pose is well fixed (just
+  checked against at least two other walls at an angle). `PoseCheck.check()` knows
+  which walls a frame used (`used`); the pose's doubt after it says how well fixed.
+  "Seeing through" a wall: a wedge whose reach crosses the wall's line inside its
+  length, at the band's heights (`seesBand`, as `endsSeen()` in `walls.ts` does).
+- **Removing a wall** from the pose band must also remove it from `PoseCheck`
+  (`removed()`), as merging does. The scenarios: `box-removed` (the box must go)
+  and `box-stays` (nothing may go, with drift).
+- **The outline** already forgets hits seen through (step A); walls are what D adds.
+  Floor cut off from the start is not drawn (open points below).
+- **Left open by the review of step C** (none blocks D):
+  - Each wall's `cov` is a copy of its part of `PoseCheck`'s covariance, made fresh
+    by `sync()`; `Walls` branches on "has a pose check" in four places. Cleaner: one
+    "how sure are the walls" object with two kinds (alone, as in B; joint).
+  - Still frames count as new information each time (10 a second, same errors).
+    Likely the cause of the weak spot above. Better: one measurement per still
+    period, or the noise scaled by the frames since the last move.
+  - The odometry's doubt growth reads the pose's current doubt ("adds up"); a turn
+    scale error kept as part of the state would be the principled form.
+  - `corners()` overrides the end filter without asking its spread; an end's
+    spread never grows again (it could freeze).
+  - `found()` fits new walls to the frame only in "above"; with the pose corrected
+    the same reason holds for L1 and L2.
+  - The mapper sequences measure → check → apply itself; one
+    `walls.checkPose(...)` could hide that.
+  - No direct test of `PoseCheck.recentred()`, `removed()`.
+  - First guesses to check on the stored and a real drive: past an end 2 spreads,
+    end gap 50 cm, seeing past 30 cm, corner 30 cm and 45°, a new wall made moving
+    10 cm, the noise floors above.
+  - The joint state grows by 2 rows a wall and walls are never removed before D:
+    fine at today's sizes, watch on long drives.
 
 ## Decided (Daniel, 11 Nov)
 
@@ -375,13 +457,13 @@ Not built. From the sessions that built B and reviewed it:
 - Edges no longer seen are removed, with more than one piece of evidence.
 - A simulator first. It is for the agent, not for driving by hand: pictures with a
   slider, and the scenarios as tests.
-- One commit per step, after tests and review (no push).
+- One commit per step, after tests and review (pushed since step B, as Daniel asked).
 
 ## Open for Daniel
 
 1. **A real drive**, later: one that goes round and comes back to its start. It
    needs the robot flashed (the PC speaks wire 5; the robot has the 10 Nov
-   firmware). Not needed before step C has passed in the simulator.
+   firmware). Step C has passed in the simulator: it can come any time.
 
 ## Open technical points
 
@@ -396,10 +478,8 @@ Not built. From the sessions that built B and reviewed it:
   3 cm; 1 m, 5 cm): tuned on the real drive.
 - The snap to a known wall reaches 12 cm (far hits smear about 7 cm): a box standing
   10 cm in front of a wall is drawn on the wall. Tune on the stored drive.
-- Walls only grow: a hit up to 20 cm past an end lengthens it, so smeared hits near
-  a corner may push a wall round it. For step D.
-- With drift, walls are duplicated and off (step C's job). With the simulator's far noise (7 cm) rough
-  edges are jagged by about 10 cm.
+- With the simulator's far noise (7 cm) rough edges are jagged by about 10 cm.
+- L1 and L2 walls (drawing only) are rougher than "above": up to 18° off in `square`.
 - Building takes longer than the line map's 1 s once poses are corrected frame by
   frame; the tables double as a cache for the slider.
 
@@ -416,5 +496,5 @@ do more. They are kept for discussion once step C is measured, not built now:
 - **Particle filter:** many random guesses of the pose round the odometry's, each
   scored by how well the frame fits the map; the best ones are kept. Handles a
   robot that is badly lost, but costs much more, and 64 zones give a blurry score.
-- When to look at them: if the `loop` scenario (or a real drive round and back)
-  still ends clearly off after step C.
+- When to look at them: if a real drive round and back still ends clearly off. In
+  the simulator step C brings `loop` to 9 cm and 2° (odometry 27 cm and 12°).

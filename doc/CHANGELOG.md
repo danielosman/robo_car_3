@@ -5,6 +5,49 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 12 Nov 2026: the outline map, step C (the pose check)
+
+The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.
+
+- **Built:** `pose_check.ts` (the pose and the walls of band "above" in one Kalman
+  filter), `kalman.ts` (the one Kalman step), `walls.ts` split into `measure()` and
+  `apply()`, the mapper places each frame by the corrected pose; wall ends that move
+  both ways, and corners; `npm run sim -- <name> --no-correction`.
+- **Tried and changed on the simulator** (a 5-seed mean of the end error guided it):
+  - As the plan said, no covariance between pose and walls: each check made both
+    look sure, new walls took up the drift (`square` 9-17° off). Checking against
+    each wall's whole doubt instead: no better. Then one covariance over pose and
+    walls (EKF-SLAM): the turn-on-the-spot rooms to about 1-2°.
+  - Wrong corrections came mostly from a corner's other wall, not known yet: its
+    hits gave false slopes. Now hits whose wedge covers a wall's end don't measure
+    it, a hit fitting two walls at an angle is not used, and hits past an end must
+    lie on the line by their own spread. With these the exact rooms stay exact.
+  - New walls were placed from the outline, which holds hits placed by older poses:
+    in "above" a new wall is now fitted to the current frame's hits. A first version
+    took hits round the edge's start, not its middle, and could flip the line after
+    its ends were set (both fixed). Fitting the new wall's doubt from its hits, and
+    making walls only while still, were tried and made things worse.
+  - A new wall made while moving gets twice the doubt (one drive ended 28 cm off,
+    now 10 or under); a frame's slope is never surer than 2° still, 6° moving.
+  - Wall ends (Daniel asked mid-step: an end seen face-on is vague; from the side the
+    corner should be placed better, and ends should move, not only grow): each end
+    has a spread and is measured between the last hit and the first wedge seeing past
+    the wall; corners where two walls meet. Found while doing it: a smeared hit just
+    behind a wall counted as seeing past it and froze an end (now it must see 30 cm
+    past); a merge could loop forever (the rename was recorded after the number changed).
+- **Review (fresh subagent):** the joint filter's Jacobians and signs checked out.
+  Fixed: the outlier test never reached the outlier rule (it does now, and fails
+  without it); walls were lengthened by hits placed before the correction (they are
+  moved by it first); a wall's covariance copy could go stale (one `sync()` now);
+  `things` finding 3 of 4 walls without correction is now stated and held by a
+  test; a test caps the noise-without-drift weak spot. Written into the plan for
+  step D: two owners of the walls' doubt, still frames counted as new each time,
+  the doubt growth reading its own state, corners overriding the end filter, the
+  first-guess limits.
+- **Numbers** (5 seeds, end error): `square` 10.7° → 1.4°, `things` 10.7° → 0.8°,
+  `box-stays` 21.1° → 1.4°, `loop` 27 cm/12° → 9 cm/2°, `door` 55 cm/21° → 23 cm/4.4°.
+  The stored drive builds in 2.9 s.
+
 ## 12 Nov 2026: the outline map, step B (the walls)
 
 The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.

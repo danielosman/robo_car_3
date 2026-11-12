@@ -4,6 +4,7 @@
 // spread for the position and one for the heading. Step C makes it surer again at each
 // check against the walls.
 //   NO_DOUBT                      at the start: the map's frame is the start pose
+//   growth(from, to)              how much the doubt grows from one pose to the next
 //   grown(doubt, from, to)        the doubt after odometry moved from one pose to the next
 //   lineDoubt(doubt, ...)         what the pose's doubt does to a line seen from it
 export interface Pose { x: number; y: number; yaw: number }
@@ -17,12 +18,18 @@ export const NO_DOUBT: PoseDoubt = { xyM: 0, yawRad: 0 };
 // slides about 1.5 cm in a full turn (README, "Measured on the robot").
 const YAW_PER_RAD = 0.035, YAW_PER_M = 0.02, XY_PER_M = 0.01, XY_PER_RAD = 0.01;
 
-export function grown(doubt: PoseDoubt, from: Pose, to: Pose): PoseDoubt {
+// How much the doubt grows from one pose to the next, its own part: the turn's and the
+// distance's (pose_check.ts adds what an unsure heading does to the position itself).
+export function growth(from: Pose, to: Pose): PoseDoubt {
   const driven = Math.hypot(to.x - from.x, to.y - from.y);
   const turned = Math.abs(Math.atan2(Math.sin(to.yaw - from.yaw), Math.cos(to.yaw - from.yaw)));
-  const yawRad = doubt.yawRad + YAW_PER_RAD * turned + YAW_PER_M * driven;
+  return { xyM: XY_PER_M * driven + XY_PER_RAD * turned, yawRad: YAW_PER_RAD * turned + YAW_PER_M * driven };
+}
+
+export function grown(doubt: PoseDoubt, from: Pose, to: Pose): PoseDoubt {
+  const more = growth(from, to), driven = Math.hypot(to.x - from.x, to.y - from.y);
   // Driving with an unsure heading puts the position off sideways.
-  return { xyM: doubt.xyM + (XY_PER_M + doubt.yawRad) * driven + XY_PER_RAD * turned, yawRad };
+  return { xyM: doubt.xyM + more.xyM + doubt.yawRad * driven, yawRad: doubt.yawRad + more.yawRad };
 }
 
 // A line seen from a pose: a shift of the pose moves it across, a turn of the pose turns
