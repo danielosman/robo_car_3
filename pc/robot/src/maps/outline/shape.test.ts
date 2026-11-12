@@ -74,3 +74,23 @@ test("a loop that cuts through itself is cut at the crossing: closed, no crossin
   for (const a of edges) for (const b of edges)
     assert.ok(!(side(a, b.ax, b.ay) * side(a, b.bx, b.by) < -1e-9 && side(b, a.ax, a.ay) * side(b, a.bx, a.by) < -1e-9));
 });
+
+test("a long run of hits jagged by a few cm round a line (far hits smear) is a wall by its fit; a jagged short one is rough", () => {
+  const edges = edgesOf([...run(0, 0, 2, 0, true, 0.04), ...run(2, 0, 2, 0.6, true, 0.04), ...run(2, 0.6, 0, 0.6, false), ...run(0, 0.6, 0, 0, false)]);
+  assert.ok(isClosed(edges));
+  const walls = edges.filter(e => e.kind === "wall");
+  assert.equal(walls.length, 1);
+  assert.ok(lengthOf(walls[0]) > 1.8 && Math.abs(walls[0].ay) <= 0.05 + 1e-9 && Math.abs(walls[0].by) <= 0.05 + 1e-9, JSON.stringify(walls[0]));
+  assert.ok(edges.some(e => e.kind === "rough" && e.ax > 1.9));
+});
+
+test("points on a known wall are one wall edge with its number and how sure it is, however short", () => {
+  const known = { number: 7, sure: 0.4 };
+  const on = (points: BorderPoint[]) => points.map(p => ({ ...p, wall: known }));
+  const edges = edgesOf([...run(0, 0, 0.5, 0, true, 0.08), ...on(run(0.5, 0, 0.8, 0, true)), ...run(0.8, 0, 0.8, 1, false), ...run(0.8, 1, 0, 1, false), ...run(0, 1, 0, 0, false)]);
+  assert.ok(isClosed(edges));
+  const walls = edges.filter(e => e.kind === "wall");
+  assert.deepEqual(walls.map(e => e.wall), [known]);
+  assert.ok(Math.abs(walls[0].ax - 0.5) < 1e-9 && Math.abs(walls[0].bx - 0.75) < 1e-9);
+  assert.ok(edges.some(e => e.kind === "rough" && !e.wall));
+});

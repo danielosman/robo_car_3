@@ -16,7 +16,8 @@ import { CAMERA } from "./firmware.ts";
 import { poseOut } from "./answers.ts";
 import { displayRgb } from "./colour.ts";
 import { mapPng } from "./map.ts";
-import { outlinesAt } from "../maps/outline/index.ts";
+import { outlinesAt, wallsAt } from "../maps/outline/index.ts";
+import { doubtOf } from "../maps/outline/walls.ts";
 import type { CellMaps } from "../maps/cell_map.ts";
 import type { CommandQueue } from "./queue.ts";
 import type { StoredSnapshots } from "./runner.ts";
@@ -164,6 +165,28 @@ export const READS: Record<string, Read> = {
                   G: layer(0), L1: layer(1), L2: layer(2) },
         tiles: map.tiles.map(t => ({ tx: t.tx, ty: t.ty, columns: t.columns })),
         format: MAP_FORMAT,
+      };
+    },
+  },
+  walls: {
+    usage: "walls [n]",
+    help: "The PC's walls at snapshot n (default: the newest): the long straight edges of the outline maps (map --png\n" +
+          "--lines), per height band, each with its number, its two ends (cm), how sure its place is (the spread across\n" +
+          "it, cm, and of its direction, degrees) and how often it was seen (frames). Built from the frames before the\n" +
+          "snapshot; it also writes the database's tables walls, wall_sightings and frame_poses for the boot.",
+    async run(ctx, args) {
+      atMostOne(args, this.usage);
+      const id = await findSnapshot(ctx.store, args[0]), bands = await wallsAt(ctx.store, ctx.maps, id.boot, id.sequence);
+      if (!bands) throw new ReadError(`snapshot ${id.sequence}: no frames to build walls from`);
+      const cm = (m: number) => round(m * 100, 1);
+      return {
+        snapshot: id.sequence,
+        walls: bands.flatMap(({ band, walls }) => walls.map(w => {
+          const dx = Math.cos(w.angle) * w.halfM, dy = Math.sin(w.angle) * w.halfM;
+          return { band, wall: w.number, from: [cm(w.x - dx), cm(w.y - dy)], to: [cm(w.x + dx), cm(w.y + dy)], length: cm(2 * w.halfM),
+                   across_sd: cm(doubtOf(w).acrossM), angle_sd: round(doubtOf(w).angleRad * 180 / Math.PI, 1),
+                   seen: w.sightings, first_frame: w.firstFrame, last_frame: w.lastFrame };
+        })),
       };
     },
   },

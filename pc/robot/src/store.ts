@@ -15,6 +15,8 @@
 //              colour reading; snapshot_zones (its ToF frame), snapshot_features; the
 //              picture a PNG beside the database
 //   detect_runs, detections, map_objects, object_detections: objects (objects/db.ts)
+//   walls, wall_sightings, frame_poses: the outline maps' walls, written by robot walls
+//              (maps/outline/index.ts); built again from the frames each time
 // Times: t_us and t_s are since power-up (µs as sent, s); robot_clock_us is PicoA's
 // 32-bit clock (it wraps every 71.6 min), kept only where the robot's own bytes hold
 // it (a packed frame, a snapshot); arrived_at the PC's local time. message_number numbers a
@@ -113,6 +115,22 @@ CREATE TABLE IF NOT EXISTS map_objects (  -- the shapes on the map, m and rad in
   distance DOUBLE,    -- camera to the front edge's middle, along the floor
   cx DOUBLE, cy DOUBLE, width DOUBLE, depth DOUBLE, angle DOUBLE);
 CREATE TABLE IF NOT EXISTS object_detections (object_id VARCHAR, snapshot_id VARCHAR, n INTEGER);  -- which boxes made an object
+CREATE TABLE IF NOT EXISTS walls (  -- the outline maps' walls (maps/outline/walls.ts), as robot walls last built them; m and rad, map frame
+  boot_id VARCHAR, band VARCHAR, wall INTEGER,
+  x DOUBLE, y DOUBLE, angle DOUBLE, length DOUBLE,   -- its middle, its direction, its length
+  across_sd DOUBLE, angle_sd DOUBLE,                 -- how sure: the spread across (at the middle) and of its direction
+  sightings INTEGER, first_frame INTEGER, last_frame INTEGER,  -- frames: their number (frames.number)
+  snapshot INTEGER);                                 -- built from the frames before this snapshot
+CREATE TABLE IF NOT EXISTS wall_sightings (  -- each frame's sighting of a wall
+  boot_id VARCHAR, band VARCHAR, wall INTEGER, frame INTEGER,
+  x DOUBLE, y DOUBLE, yaw DOUBLE, xy_sd DOUBLE, yaw_sd DOUBLE,  -- the pose it was seen from, and how sure that was
+  hits VARCHAR,                                      -- the hits on it, JSON [[x, y], ...]
+  off_m DOUBLE, turn_rad DOUBLE);                    -- how far off the wall they were: their middle across it, their slope (NULL: too short)
+CREATE TABLE IF NOT EXISTS frame_poses (  -- each frame's pose as the outline maps placed it
+  boot_id VARCHAR, frame INTEGER,
+  odometry_x DOUBLE, odometry_y DOUBLE, odometry_yaw DOUBLE,  -- as the frame carries it
+  x DOUBLE, y DOUBLE, yaw DOUBLE,                    -- as placed (the same until the pose is checked against the walls)
+  xy_sd DOUBLE, yaw_sd DOUBLE);                      -- how sure
 `;
 
 // A timestamp in the PC's local time (as the database keeps them), in µs.

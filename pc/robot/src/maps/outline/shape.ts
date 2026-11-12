@@ -1,14 +1,21 @@
 // A border loop's points as edges of three kinds (doc/OUTLINE_MAP_PLAN.md, idea 1): wall
-// (backed by hits, long and straight), rough (backed by hits, short or jagged), guess
-// (nothing seen there yet). Pure geometry: no map, no sights.
+// (backed by hits, long and straight, or on a known wall), rough (backed by hits, short
+// or jagged), guess (nothing seen there yet). Pure geometry: no map, no sights.
 //   edgesOf(points)   the closed loop's edges, in order: each ends where the next starts
 export type EdgeKind = "wall" | "rough" | "guess";
-export interface Edge { ax: number; ay: number; bx: number; by: number; kind: EdgeKind }
-// A point of the border: on a hit, or where the seen-free floor just ends.
-export interface BorderPoint { x: number; y: number; hit: boolean }
+// A known wall (walls.ts): its number and how sure its place is (0 to 1).
+export interface WallTag { number: number; sure: number }
+// wall: the known wall the edge lies on; none for a wall edge found by the rule alone.
+export interface Edge { ax: number; ay: number; bx: number; by: number; kind: EdgeKind; wall?: WallTag }
+// A point of the border: on a hit, or where the seen-free floor just ends; on a known
+// wall if it was put on one.
+export interface BorderPoint { x: number; y: number; hit: boolean; wall?: WallTag }
 
 const WALL_MIN_M = 0.4;   // a wall is a straight stretch at least this long ...
 const WALL_OFF_M = 0.03;  // ... whose hits lie this close to it
+// Far hits smear (sights.ts): there a wall is a longer stretch whose hits fit a line to
+// this spread across it (their root mean square distance from it).
+const FIT_MIN_M = 1, FIT_SD_M = 0.05;
 const ROUGH_OFF_M = 0.06; // rough and guess stretches are simplified this coarsely
 const GUESS_OFF_M = 0.04;
 const GAP_M = 0.3;        // two hits farther apart are not joined by a hit edge: an opening may be between them (a zone is 25 cm wide at the sensor's reach)
@@ -36,18 +43,87 @@ function simplified(run: BorderPoint[], off: number): BorderPoint[] {
 const edges = (run: BorderPoint[], kind: EdgeKind): Edge[] =>
   run.slice(1).map((b, i) => ({ ax: run[i].x, ay: run[i].y, bx: b.x, by: b.y, kind }));
 
-// An open run of hits: its long straight stretches are walls; what lies between them is rough.
+// An open run of hits: points on the same known wall, one after another, are one wall
+// edge; between them the rule below.
 function hitEdges(run: BorderPoint[]): Edge[] {
+  const out: Edge[] = [];
+  let from = 0; // where the stretch not on a known wall starts
+  for (let i = 0; i < run.length;) {
+    const wall = run[i].wall;
+    let j = i;
+    while (wall && j + 1 < run.length && run[j + 1].wall?.number === wall.number) j++;
+    if (j === i) { i++; continue; }
+    if (i > from) out.push(...ruleEdges(run.slice(from, i + 1)));
+    out.push({ ax: run[i].x, ay: run[i].y, bx: run[j].x, by: run[j].y, kind: "wall", wall });
+    from = j;
+    i = j + 1;
+  }
+  if (run.length - 1 > from) out.push(...ruleEdges(run.slice(from)));
+  return out;
+}
+
+// An open run of hits on no known wall: its long straight stretches are walls; what lies
+// between them is left to fittedEdges().
+function ruleEdges(run: BorderPoint[]): Edge[] {
   const corners = simplified(run, WALL_OFF_M), out: Edge[] = [];
-  let roughFrom = 0; // the run's index where the rough stretch being gathered starts
+  let roughFrom = 0; // the run's index where the stretch left over starts
   let at = 0;
   for (let c = 1; c < corners.length; c++) {
     const from = at;
     at = run.indexOf(corners[c], from + 1);
     if (far(corners[c - 1], corners[c]) < WALL_MIN_M) continue;
-    if (from > roughFrom) out.push(...edges(simplified(run.slice(roughFrom, from + 1), ROUGH_OFF_M), "rough"));
+    if (from > roughFrom) out.push(...fittedEdges(run.slice(roughFrom, from + 1)));
     out.push(...edges([corners[c - 1], corners[c]], "wall"));
     roughFrom = at;
+  }
+  if (run.length - 1 > roughFrom) out.push(...fittedEdges(run.slice(roughFrom)));
+  return out;
+}
+
+// The line that fits a run of points best, from running sums: how far its points
+// spread across it (the smaller axis of their scatter), and how far a point is off it.
+class Fit {
+  n = 0; x = 0; y = 0; xx = 0; xy = 0; yy = 0;
+  add(p: BorderPoint): void { this.n++; this.x += p.x; this.y += p.y; this.xx += p.x * p.x; this.xy += p.x * p.y; this.yy += p.y * p.y; }
+  private moments() {
+    const mx = this.x / this.n, my = this.y / this.n;
+    return { mx, my, a: this.xx / this.n - mx * mx, b: this.xy / this.n - mx * my, c: this.yy / this.n - my * my };
+  }
+  spread(): number {
+    const { a, b, c } = this.moments();
+    return Math.sqrt(Math.max(0, (a + c) / 2 - Math.hypot((a - c) / 2, b)));
+  }
+  off(p: BorderPoint): number {
+    const { mx, my, a, b, c } = this.moments(), angle = Math.atan2(2 * b, a - c) / 2;
+    return Math.abs((p.y - my) * Math.cos(angle) - (p.x - mx) * Math.sin(angle));
+  }
+}
+
+// An open run of hits: stretches of at least FIT_MIN_M whose points fit a line to
+// FIT_SD_M are walls (from the stretch's first point to its last, both close to the
+// line: the stretch may have reached round a corner); the rest is rough.
+function fittedEdges(run: BorderPoint[]): Edge[] {
+  const out: Edge[] = [];
+  let roughFrom = 0;
+  for (let i = 0; i < run.length - 1; i++) {
+    const fit = new Fit();
+    fit.add(run[i]);
+    let end = i;
+    for (let j = i + 1; j < run.length; j++) {
+      fit.add(run[j]);
+      if (fit.spread() > FIT_SD_M) break;
+      end = j;
+    }
+    const line = new Fit();
+    for (let k = i; k <= end; k++) line.add(run[k]);
+    let from = i;
+    while (end > from && line.off(run[end]) > FIT_SD_M) end--;
+    while (from < end && line.off(run[from]) > FIT_SD_M) from++;
+    if (far(run[from], run[end]) < FIT_MIN_M) continue;
+    if (from > roughFrom) out.push(...edges(simplified(run.slice(roughFrom, from + 1), ROUGH_OFF_M), "rough"));
+    out.push(...edges([run[from], run[end]], "wall"));
+    roughFrom = end;
+    i = end - 1;
   }
   if (run.length - 1 > roughFrom) out.push(...edges(simplified(run.slice(roughFrom), ROUGH_OFF_M), "rough"));
   return out;

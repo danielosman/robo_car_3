@@ -8,13 +8,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
-import { edgeRgb, outlinesAt } from "./index.ts";
+import { edgeRgb, outlinesAt, wallsAt } from "./index.ts";
 import { CellMaps } from "../cell_map.ts";
 import { cellMapAt } from "../../snapshots_api.ts";
 import { mapPng } from "../../api/map.ts";
 import { loadMounting } from "../../mounting.ts";
 import { noFirmware, snapshotAgain, storeWithSnapshots } from "../../test_store.ts";
-import type { PosedFrame, Zone } from "../../tof_format.ts";
+import { rowCol, type PosedFrame, type Zone } from "../../tof_format.ts";
 
 // A frame at the origin, still: rows 1-4 read mm (sure), rows 5-8 unsure.
 const frame = (number: number, mm: number): PosedFrame => ({
@@ -61,7 +61,7 @@ test("a boot's outlines at a snapshot: a wall 50 cm ahead, on each band's outlin
     // The picture: 6 pixels a 10 cm column, x up, y to the left; the window covers ±3 m.
     const view = (await cellMapAt(store, maps, boot.id, 3))!;
     const at = (x: number, y: number) => [Math.round((3 - y) * 60), Math.round((3 - x) * 60)] as const;
-    const first = hitEdges(bands[0])[0], WHITE = [...edgeRgb("L1", first.kind)], UNKNOWN = [0x15, 0x15, 0x15];
+    const first = hitEdges(bands[0])[0], WHITE = [...edgeRgb("L1", first)], UNKNOWN = [0x15, 0x15, 0x15];
     const cells = pixelsOf(mapPng(view)), both = pixelsOf(mapPng(view, { outlines: bands })), alone = pixelsOf(mapPng(view, { cells: false, outlines: bands }));
     assert.equal(both.width, cells.width);
     assert.equal(alone.width, cells.width);
@@ -75,5 +75,45 @@ test("a boot's outlines at a snapshot: a wall 50 cm ahead, on each band's outlin
     assert.notDeepEqual(both.rgb(...floor), UNKNOWN);
     assert.deepEqual(both.rgb(...floor), cells.rgb(...floor));
     assert.deepEqual(alone.rgb(...floor), UNKNOWN);
+  } finally { maps.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+// A frame at the origin, still, facing a flat wall `flatM` ahead of the sensor: rows 1-4
+// read it (sure), rows 5-8 unsure. A zone reads along its own ray, up and to the side.
+const facingWall = (number: number, flatM: number): PosedFrame => {
+  const deg = loadMounting().tof.zone_deg * Math.PI / 180;
+  return { ...frame(number, 0), zones: Array.from({ length: 64 }, (_, k): Zone => {
+    const [row, col] = rowCol(k), up = (4.5 - row) * deg, left = (4.5 - col) * deg;
+    return { distanceMm: Math.round(flatM * 1000 / (Math.cos(up) * Math.cos(left))), signal: 50, sigmaMm: 5, kind: k < 32 ? "sure" : "unsure", targets: 1 };
+  }) };
+};
+
+test("a boot's walls at a snapshot: a flat wall ahead, in L2 and above; the tables written, then replaced", { skip: noFirmware }, async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-walls-"));
+  const { store, boot } = await storeWithSnapshots(directory);
+  const maps = new CellMaps(store);
+  try {
+    // 30 frames facing a wall 1 m ahead of the sensor (new walls are looked for every 10 frames).
+    for (let n = 1; n <= 30; n++) void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: n * 100000, frame: facingWall(n, 1.0) }));
+    await snapshotAgain(store, boot, directory, 3);
+    const bands = (await wallsAt(store, maps, boot.id, 3))!;
+    assert.deepEqual(bands.map(b => b.band), ["L1", "L2", "above"]);
+    const wallX = loadMounting().tof.x_m + 1.0;
+    // Rows 1-4 at 1 m reach from about 10 cm up to 44 cm: the wall is in every band. But
+    // L1's floor is seen only by the lower rows (unsure here), so its outline never reaches the wall.
+    assert.equal(bands[0].walls.length, 0);
+    for (const { band, walls } of bands.slice(1)) {
+      assert.equal(walls.length, 1, band);
+      const w = walls[0];
+      assert.ok(Math.abs(w.x - wallX) < 0.02 && Math.abs(Math.cos(w.angle)) < 0.05 && w.sightings >= 10, `${band} ${JSON.stringify(w)}`);
+    }
+    const count = async () => (await store.query(`SELECT (SELECT count(*) FROM walls) AS walls, (SELECT count(*) FROM wall_sightings) AS sightings,
+      (SELECT count(*) FROM frame_poses) AS poses, (SELECT count(*) FROM wall_sightings s JOIN walls w USING (boot_id, band, wall)) AS joined`))[0];
+    const first = await count();
+    assert.deepEqual([Number(first.walls), Number(first.poses)], [2, 30]);
+    assert.ok(Number(first.sightings) >= 20 && Number(first.joined) === Number(first.sightings), JSON.stringify(first));
+    await wallsAt(store, maps, boot.id, 3);
+    assert.deepEqual(await count(), first);
+    assert.equal(await wallsAt(store, maps, boot.id, 99), null);
   } finally { maps.close(); rmSync(directory, { recursive: true, force: true }); }
 });

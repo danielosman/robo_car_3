@@ -3,7 +3,8 @@
 // closed outline, and a closed island round each thing standing in it.
 //   new OutlineMap(band)  the floor starts as a 35 cm circle round the start
 //   map.add(sights)       one frame's sights (one call a frame: a spot counts the frames it was hit in)
-//   map.outline()         the outline and the islands, as edges of three kinds (shape.ts)
+//   map.outline(walls)    the outline and the islands, as edges of three kinds (shape.ts);
+//                         border points close to a known wall (walls.ts) are put on it
 // The map keeps 5 cm squares. A square is seen free when a sight's wedge passed through
 // it at the band's heights. A square that was hit keeps where its hits lie (their
 // weighted middle), a score and the heights it was hit at: a spot. A hit raises the
@@ -14,6 +15,7 @@
 import { bordersOf, connected, keyOf, type Key } from "./border.ts";
 import { edgesOf, type BorderPoint, type Edge } from "./shape.ts";
 import { heightsAt, inBand, type Band, type Sight } from "./sights.ts";
+import { sureOf, type Walls } from "./walls.ts";
 
 export type { Edge };
 // A closed run of edges: the outline of the seen-free floor, or an island in it.
@@ -77,7 +79,7 @@ export class OutlineMap {
     for (const s of own) this.seeThrough(s);
   }
 
-  outline(): Loop[] {
+  outline(walls?: Walls): Loop[] {
     // The start square never stands: the outline is the floor joined to it.
     const standing = new Map([...this.spots].filter(([key, s]) => s.frames >= FRAMES_TO_STAND && key !== this.start));
     const floor = connected(new Set([...this.free].filter(key => !standing.has(key))), this.start);
@@ -94,7 +96,9 @@ export class OutlineMap {
           const again = points.findLastIndex((p, k) => k >= points.length - SAME_AGAIN && p.spot === spot);
           if (again >= 0) { points.length = again + 1; return; }
         }
-        points.push(spot ? { ...middle(spot), hit: true, spot } : { x, y, hit: false, spot: null });
+        if (!spot) { points.push({ x, y, hit: false, spot: null }); return; }
+        const p = middle(spot), on = walls?.on(p.x, p.y);
+        points.push(on ? { x: on.x, y: on.y, hit: true, spot, wall: { number: on.wall.number, sure: sureOf(on.wall) } } : { ...p, hit: true, spot });
       });
       const island = area > 0;
       if (island && border.length <= SMALL_HOLE && !points.some(p => p.hit)) continue;

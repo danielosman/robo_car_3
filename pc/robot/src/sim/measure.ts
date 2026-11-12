@@ -4,8 +4,10 @@
 //   offFaces(faces, x, y)    how far a point is from the nearest true face
 //   closed(loops)            are the loops closed, and do their edges cross anywhere
 //   floorError(...)          the outline's floor against the floor the robot could truly see
+//   wallErrors(walls, faces, band)  each remembered wall against the true face it lies on; walls per face
 import type { Band } from "../maps/outline/sights.ts";
 import type { Loop } from "../maps/outline/index.ts";
+import type { Wall } from "../maps/outline/walls.ts";
 import { cast, type Face } from "./room.ts";
 import type { Pose } from "./drive.ts";
 
@@ -79,4 +81,28 @@ export function floorError(loops: Loop[], faces: Face[], band: Band, poses: Pose
       if (inView) { could++; if (drawn) did++; }
     }
   return { areaM2: area * GRID_M ** 2, wrongM2: wrong * GRID_M ** 2, seen: could ? did / could : 1 };
+}
+
+// Each wall against the true face of the band it lies on (the face nearest to its ends and
+// running its way): how far its ends are off that face's line (the larger), and the angle
+// between them. face: null if no face runs its way within 30 cm. perFace: how many walls
+// each face that has one got (1 is right; more are duplicates).
+export interface WallError { wall: Wall; face: Face | null; offM: number; rad: number }
+export function wallErrors(walls: readonly Wall[], faces: Face[], band: Band): { errors: WallError[]; perFace: number[] } {
+  const own = faces.filter(f => f.lowM < band.highM && f.highM > band.lowM);
+  const errors = walls.map(w => {
+    const dx = Math.cos(w.angle) * w.halfM, dy = Math.sin(w.angle) * w.halfM, ends = [[w.x - dx, w.y - dy], [w.x + dx, w.y + dy]];
+    let best: WallError = { wall: w, face: null, offM: Infinity, rad: Infinity };
+    for (const f of own) {
+      const fx = f.bx - f.ax, fy = f.by - f.ay, length = Math.hypot(fx, fy);
+      const turn = Math.abs(Math.atan2(Math.sin(2 * (w.angle - Math.atan2(fy, fx))), Math.cos(2 * (w.angle - Math.atan2(fy, fx))))) / 2;
+      const off = Math.max(...ends.map(([x, y]) => offFaces([f], x, y)));
+      const across = Math.max(...ends.map(([x, y]) => Math.abs(fx * (y - f.ay) - fy * (x - f.ax)) / length));
+      if (turn < 20 * Math.PI / 180 && off < 0.3 && off < best.offM) best = { wall: w, face: f, offM: across, rad: turn };
+    }
+    return best;
+  });
+  const counts = new Map<Face, number>();
+  for (const e of errors) if (e.face) counts.set(e.face, (counts.get(e.face) ?? 0) + 1);
+  return { errors, perFace: [...counts.values()] };
 }

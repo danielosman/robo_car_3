@@ -5,6 +5,42 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 12 Nov 2026: the outline map, step B (the walls)
+
+The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.
+
+- **Asked first:** is this SLAM? Answer given to Daniel: yes, a stripped-down
+  EKF-SLAM with walls as landmarks, no particle filter, past poses not corrected.
+  Daniel kept the plan and asked to mark graph SLAM and the particle filter as
+  alternatives for later (the plan's last section).
+- **Built:** `walls.ts` (each band's walls, moved by each frame's hits with a Kalman
+  step, new ones from the outline's wall edges every 10 frames, merges), `pose.ts`
+  (the pose's doubt), `mapper.ts` (the object on top; the simulator and the store
+  reader use it), `colours.ts` (out of `index.ts`; walls brighter the surer). The
+  tables `walls`, `wall_sightings`, `frame_poses`, written by the new `robot walls`.
+- **Tried and changed on the simulator:**
+  - With noise the planned rule found almost no walls (far hits smear, as step A
+    found). Max-distance simplifying at 5 cm did not help either: the border points
+    zig-zag about ±5 cm. Now a second rule: 1 m or more whose points fit a line to
+    5 cm (root mean square). It first reached round corners: its ends are trimmed
+    to points on the line.
+  - Snapping border points to a known wall within 6 cm left spikes (points 6-13 cm
+    off): 12 cm now.
+  - With drift, walls placed from a drifted pose read as sure (the filter takes
+    each frame's pose error as new). Raising the wall's doubt to the pose's inside
+    the filter made walls swing, up to 26 cm off. Now the pose's part is added only
+    when saying how sure a wall is (`doubtOf`).
+- **Review (fresh subagent; a first one stopped at a usage limit):** one fix, taken:
+  merging walls in a chain could bring back a wall already merged away (the tables
+  then disagreed); the merge now starts again after each pair, with a test. Written
+  into the plan for step C: split the wall update into measure and apply; "how
+  sure" counts the pose twice; the 12 cm snap swallows a box near a wall; walls
+  only grow. Checked and fine: the Kalman step, the re-centring, the signs, the
+  gate, the fit rule, the tables in one transaction.
+- **Numbers:** without noise each wall found once within 1 cm; with noise, band
+  "above", within 5 cm and 2°; L1 and L2 rougher. With drift the walls are off by up
+  to 23 cm. The stored drive builds in 2 s (1.1 s before) with 13 walls.
+
 ## 11 Nov 2026: the outline map, step by step
 
 The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.

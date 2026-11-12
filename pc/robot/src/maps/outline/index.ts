@@ -1,45 +1,68 @@
-// The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines at a snapshot, one
-// map per height band, built from the boot's frames that came before the snapshot, as
-// the PC's cell map is (maps/cell_map.ts). Each frame's zones are placed by the cell
-// map's helper (the robot's own geometry, with the boot's mounting), turned into sights
-// and added to each band's map. Built again on every read.
+// The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines and walls at a
+// snapshot, built from the boot's frames that came before the snapshot, as the PC's cell
+// map is (maps/cell_map.ts). Each frame's zones are placed by the cell map's helper (the
+// robot's own geometry, with the boot's mounting), turned into sights and given to the
+// mapper (mapper.ts). Built again on every read.
 //   outlinesAt(store, cellMaps, boot, n)   each band's outline and islands
-//   outlineStrokes(outline)                one band's edges as coloured lines to draw
+//   wallsAt(store, cellMaps, boot, n)      each band's walls; writes the tables walls,
+//                                          wall_sightings and frame_poses (the boot's rows, replaced)
 import type { Store } from "../../store.ts";
 import type { CellMaps } from "../cell_map.ts";
-import { OutlineMap, type Edge, type Loop } from "./outline_map.ts";
-import { BANDS, sightsOf, type BandName } from "./sights.ts";
+import { Mapper, type BandOutline, type BandWalls } from "./mapper.ts";
+import { sightsOf } from "./sights.ts";
+import { doubtOf } from "./walls.ts";
 
-export type { BandName, Edge, Loop };
-// One band's outline; the bands come in sights.ts's order (BANDS): L1, L2, above.
-export interface BandOutline { band: BandName; loops: Loop[] }
+export type { BandName } from "./sights.ts";
+export type { Edge, Loop } from "./outline_map.ts";
+export type { BandOutline, BandWalls };
+export { edgeRgb, outlineStrokes, BAND_RGB, type Rgb, type Stroke } from "./colours.ts";
 
-// The boot's outlines at snapshot `sequence`; null if there is no such snapshot.
-export async function outlinesAt(store: Store, cellMaps: CellMaps, boot: string, sequence: number): Promise<BandOutline[] | null> {
+// The boot's mapper after its frames up to snapshot `sequence`; null if there is no such snapshot.
+async function mapperAt(store: Store, cellMaps: CellMaps, boot: string, sequence: number): Promise<Mapper | null> {
   const snapshot = await store.snapshotFrames(boot, sequence), mounting = await store.mountingOf(boot);
   if (!snapshot || !mounting) return null;
-  const zoneRad = mounting.tof.zone_deg * Math.PI / 180, maps = BANDS.map(band => new OutlineMap(band));
-  for (const { frame } of await store.framesBetween(boot, 0, snapshot.lastFrame)) {
-    const sights = sightsOf(frame, await cellMaps.rays(boot, frame), zoneRad).filter(s => s !== null);
-    for (const map of maps) map.add(sights);
-  }
-  return BANDS.map((band, i) => ({ band: band.name, loops: maps[i].outline() }));
+  const zoneRad = mounting.tof.zone_deg * Math.PI / 180, mapper = new Mapper();
+  for (const { frame } of await store.framesBetween(boot, 0, snapshot.lastFrame))
+    mapper.add(frame, sightsOf(frame, await cellMaps.rays(boot, frame), zoneRad).filter(s => s !== null));
+  return mapper;
 }
 
-export type Rgb = readonly [number, number, number];
-// A line to draw, in metres.
-export interface Stroke { ax: number; ay: number; bx: number; by: number; rgb: Rgb }
+export async function outlinesAt(store: Store, cellMaps: CellMaps, boot: string, sequence: number): Promise<BandOutline[] | null> {
+  return (await mapperAt(store, cellMaps, boot, sequence))?.outlines() ?? null;
+}
 
-// The bands' colours (white: L1, yellow: L2, cyan: above) and how bright each kind of
-// edge is drawn: a wall strong, a rough edge medium, a guess faint.
-export const BAND_RGB: Record<BandName, Rgb> = { L1: [0xff, 0xff, 0xff], L2: [0xf2, 0xe2, 0x4a], above: [0x30, 0xd0, 0xd0] };
-const SHADE = { wall: 1, rough: 0.6, guess: 0.3 } as const;
-export const edgeRgb = (band: BandName, kind: Edge["kind"]): Rgb =>
-  [Math.round(BAND_RGB[band][0] * SHADE[kind]), Math.round(BAND_RGB[band][1] * SHADE[kind]), Math.round(BAND_RGB[band][2] * SHADE[kind])];
-
-// One band's edges as lines, the faint ones first so the strong ones are drawn over them.
-export function outlineStrokes(outline: BandOutline): Stroke[] {
-  const order = ["guess", "rough", "wall"] as const;
-  return outline.loops.flatMap(loop => loop.edges).sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind))
-    .map(e => ({ ax: e.ax, ay: e.ay, bx: e.bx, by: e.by, rgb: edgeRgb(outline.band, e.kind) }));
+export async function wallsAt(store: Store, cellMaps: CellMaps, boot: string, sequence: number): Promise<BandWalls[] | null> {
+  const mapper = await mapperAt(store, cellMaps, boot, sequence);
+  if (!mapper) return null;
+  const walls = mapper.walls(), mm = (m: number) => Math.round(m * 1000) / 1000;
+  await store.write(async c => {
+    await c.run("BEGIN TRANSACTION");
+    for (const table of ["walls", "wall_sightings", "frame_poses"]) await c.run(`DELETE FROM ${table} WHERE boot_id = $1`, [boot]);
+    for (const { band, walls: list } of walls)
+      for (const w of list)
+        await c.run("INSERT INTO walls VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+          [boot, band, w.number, w.x, w.y, w.angle, 2 * w.halfM, doubtOf(w).acrossM, doubtOf(w).angleRad,
+           w.sightings, w.firstFrame, w.lastFrame, sequence]);
+    const sightings = await c.createAppender("wall_sightings");
+    for (const s of mapper.sightings()) {
+      for (const v of [boot, s.band]) sightings.appendVarchar(v);
+      for (const v of [s.wall, s.frame]) sightings.appendInteger(v);
+      for (const v of [s.pose.x, s.pose.y, s.pose.yaw, s.doubt.xyM, s.doubt.yawRad]) sightings.appendDouble(v);
+      sightings.appendVarchar(JSON.stringify(s.hits.map(([x, y]) => [mm(x), mm(y)])));
+      sightings.appendDouble(s.offM);
+      if (s.turnRad === null) sightings.appendNull(); else sightings.appendDouble(s.turnRad);
+      sightings.endRow();
+    }
+    sightings.closeSync();
+    const poses = await c.createAppender("frame_poses");
+    for (const p of mapper.poses()) {
+      poses.appendVarchar(boot);
+      poses.appendInteger(p.frame);
+      for (const v of [p.odometry.x, p.odometry.y, p.odometry.yaw, p.pose.x, p.pose.y, p.pose.yaw, p.doubt.xyM, p.doubt.yawRad]) poses.appendDouble(v);
+      poses.endRow();
+    }
+    poses.closeSync();
+    await c.run("COMMIT");
+  });
+  return walls;
 }

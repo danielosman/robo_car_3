@@ -30,12 +30,13 @@ mkdirSync(directory, { recursive: true });
 
 const DEG = Math.PI / 180, cm = (m: number) => (m * 100).toFixed(1), deg = (rad: number) => (rad / DEG).toFixed(1);
 const everyFace = allFaces(scenario.room), captions: string[] = [];
-play(scenario).forEach(({ step, bands: drawn }, n) => {
+play(scenario).forEach(({ step, bands: drawn, walls }, n) => {
   const bands = Object.fromEntries(BANDS.map(band => [band.name, outlineStrokes({ band: band.name, loops: drawn[band.name] })])) as Record<BandName, Stroke[]>;
   writeFileSync(path.join(directory, stepFile(n)), stepPicture(everyFace, { faces: step.faces, truth: step.truth, odometry: step.odometry, bands }));
   const off = poseError(step.odometry, step.truth);
   captions.push(`Step ${n} of ${scenario.moves.trim().split(/\s+/).length - 1} (${scenario.moves.trim().split(/\s+/)[n]}): odometry is ${cm(off.m)} cm and ${deg(off.rad)}° off the truth; ` +
-                `edges: ${BANDS.map(band => `${band.name} ${bands[band.name].length}`).join(", ")}`);
+                `edges: ${BANDS.map(band => `${band.name} ${bands[band.name].length}`).join(", ")}; ` +
+                `walls: ${BANDS.map(band => `${band.name} ${walls[band.name].length}`).join(", ")}`);
 });
 writeFileSync(path.join(directory, "index.html"), sliderPage(`Simulator: ${scenario.name}`, scenario.about, captions));
 console.log(captions[captions.length - 1]);

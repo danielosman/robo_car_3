@@ -673,17 +673,23 @@
     "name": "outline",
     "origin": "pc",
     "path": "pc/robot/src/maps/outline/index.ts",
-    "summary": "The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read: the closed border of the floor seen free, and an island round each thing in it. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), outline_map.ts (one band's 5 cm squares: seen free, hits, see-through), border.ts (the loops round the free squares), shape.ts (the loops as wall, rough and guess edges).",
+    "summary": "The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines and walls at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read: the closed border of the floor seen free, an island round each thing in it, and the walls remembered with how sure they are; robot walls also writes the tables walls, wall_sightings and frame_poses. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), mapper.ts (the object on top: per band a map and its walls, the pose with how sure it is), outline_map.ts (one band's 5 cm squares: seen free, hits, see-through), border.ts (the loops round the free squares), shape.ts (the loops as wall, rough and guess edges), walls.ts (the walls, moved by each frame's hits on them: a Kalman filter), pose.ts (the pose's doubt), colours.ts (how the edges are drawn).",
     "members": [
       {
         "name": "BandOutline",
         "kind": "type",
+        "path": "pc/robot/src/maps/outline/mapper.ts",
         "code": "export interface BandOutline"
       },
       {
         "name": "outlinesAt",
         "kind": "function",
         "code": "export async function outlinesAt("
+      },
+      {
+        "name": "wallsAt",
+        "kind": "function",
+        "code": "export async function wallsAt("
       }
     ]
   }

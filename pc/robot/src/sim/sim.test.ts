@@ -18,7 +18,8 @@ import { drive, MEASURED_DRIFT, movesOf, NO_DRIFT, randomOf, type Moment, type P
 import { ALL_NOISE, NO_NOISE, tofFrame, ZONE_RAD, type Noise } from "./tof.ts";
 import { run, SCENARIOS, type Scenario } from "./scenarios.ts";
 import { play } from "./play.ts";
-import { closed, floorError, offFaces, poseError } from "./measure.ts";
+import { closed, floorError, offFaces, poseError, wallErrors } from "./measure.ts";
+import { sureOf } from "../maps/outline/walls.ts";
 
 const DEG = Math.PI / 180, tof = loadMounting().tof;
 const close = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
@@ -209,6 +210,36 @@ test("through the door the outline grows; in the big room it ends in a guess at 
   const big = measured(scenario("big")).bands[2];
   assert.ok(big.loops[0].edges.every(e => e.kind === "guess"));
   for (const e of big.loops[0].edges) assert.ok(Math.hypot(e.ax, e.ay) > 1.9 && Math.hypot(e.ax, e.ay) < 2.6, `${Math.hypot(e.ax, e.ay)}`);
+});
+
+// Each band's walls after the scenario's last step: every face of the room found once, every wall on a face within offM and rad.
+function wallsFound(s: Scenario, bands: typeof BANDS, offM: number, rad: number) {
+  const last = play(s).at(-1)!;
+  for (const band of bands) {
+    const { errors, perFace } = wallErrors(last.walls[band.name], last.step.faces, band), what = `${s.name} ${band.name}`;
+    assert.deepEqual(perFace, [1, 1, 1, 1], what);
+    for (const e of errors) {
+      assert.ok(e.face, `${what}: wall ${e.wall.number} is on no face`);
+      assert.ok(e.offM < offM && e.rad < rad, `${what}: wall ${e.wall.number} ${e.offM} m, ${e.rad / DEG}°`);
+    }
+  }
+}
+
+test("the walls without noise or drift: each of the room's four walls found once, within 1 cm and 1°", () => {
+  for (const name of ["square", "loop", "box-stays"]) wallsFound(scenario(name, EXACT), BANDS, 0.01, 1 * DEG);
+});
+
+test("the walls with noise, no drift: in the band above each wall found once, within 5 cm and 2°", () => {
+  for (const name of ["square", "things", "loop", "box-stays"]) wallsFound(scenario(name, { drift: NO_DRIFT }), [BANDS[2]], 0.05, 2 * DEG);
+});
+
+test("turning, the pose gets less sure: the walls seen later are less sure; the edges carry their wall's number", () => {
+  const last = play(scenario("square", EXACT)).at(-1)!, sure = last.walls.above.map(sureOf);
+  assert.equal(sure.length, 4);
+  for (let i = 1; i < sure.length; i++) assert.ok(sure[i] < sure[i - 1], JSON.stringify(sure));
+  assert.ok(sure[0] > 0.9 && sure[3] < 0.5, JSON.stringify(sure));
+  const edges = last.bands.above.flatMap(l => l.edges).filter(e => e.wall);
+  assert.deepEqual([...new Set(edges.map(e => e.wall!.number))].sort(), last.walls.above.map(w => w.number).sort());
 });
 
 test("with the measured drift a full turn ends about 11° off; odometry doesn't see it", () => {
