@@ -7,6 +7,10 @@
 // the answers come back in the log, which shows everyone's.
 // The objects robot detect found (doc/OBJECTS_PLAN.md): the boxes on the camera picture,
 // the shapes on the map (the boot's, up to the snapshot shown; this snapshot's brighter).
+// The PC's outline map (doc/OUTLINE_MAP_PLAN.md) over the cell map or alone, a colour a
+// band. The robot, its path, the snapshots, the ToF readings and the objects are drawn where the PC's
+// walls corrected them to (the correction of the snapshot shown); a click to steer is
+// turned back into the robot's own (odometry) frame.
 // Map frame: x forward at power-up, y left; drawn with x up and y to the left, as
 // the robot's `m` prints it.
 
@@ -31,7 +35,7 @@ const LABEL_COLORS = { chair: "#ff9f43", table: "#feca57", sofa: "#54a0ff", door
 
 // --- state ---
 let ws = null, robotStatus = { state: "waiting" }, livePose = null, poseFresh = 0, goal = null;
-let boots = [], boot = null, snapshots = [], index = -1, detail = null, mapView = null, objects = null;
+let boots = [], boot = null, snapshots = [], index = -1, detail = null, mapView = null, objects = null, outline = null;
 let image = null;
 const view = { cx: 0, cy: 0, scale: 80 }; // the map's centre (m) and pixels per metre
 let follow = true;
@@ -78,6 +82,38 @@ function drawRobot(x, y, yaw, color, alpha = 1) {
   ctx.globalAlpha = 1;
 }
 
+// Odometry's pose to the corrected one, by the correction of the snapshot shown (none until it has
+// loaded). As maps/outline/mapper.ts corrected(): keep the two the same.
+function corrected(p) {
+  const c = outline?.correction ?? { x: 0, y: 0, yaw: 0 }, cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), x = Number(p.x), y = Number(p.y);
+  return { x: cos * x - sin * y + c.x, y: sin * x + cos * y + c.y, yaw: Number(p.yaw ?? 0) + c.yaw };
+}
+// Where the snapshots up to the one shown were taken: corrected; odometry's without an outline map.
+const snapshotPlaces = () => outline?.snapshots ?? snapshots.slice(0, index + 1).filter(s => s.x !== null);
+// A place on the map back in the robot's own frame (for goto).
+function uncorrected(x, y) {
+  const c = outline?.correction ?? { x: 0, y: 0, yaw: 0 }, cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), dx = x - c.x, dy = y - c.y;
+  return [cos * dx + sin * dy, -sin * dx + cos * dy];
+}
+// The outline map's bands, L1 (what blocks the robot) drawn last, on top.
+const BAND_ORDER = ["above", "L2", "L1"];
+const bandShown = band => document.querySelector(`#bands input[data-band="${band}"]`).checked;
+
+function drawOutline() {
+  if (!$("showoutline").checked || !outline) return;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.lineWidth = 2 * dpr;
+  ctx.lineCap = "round";
+  for (const band of BAND_ORDER) {
+    if (!bandShown(band)) continue;
+    for (const [ax, ay, bx, by, color] of outline.bands.find(b => b.band === band)?.strokes ?? []) {
+      ctx.strokeStyle = color;
+      ctx.beginPath(); ctx.moveTo(...toScreen(ax, ay)); ctx.lineTo(...toScreen(bx, by)); ctx.stroke();
+    }
+  }
+  ctx.lineCap = "butt";
+}
+
 function draw() {
   const W = canvas.width, H = canvas.height, dpr = window.devicePixelRatio || 1;
   ctx.fillStyle = css("--unknown");
@@ -89,7 +125,7 @@ function draw() {
   for (let x = Math.floor(Math.min(x0, x1)); x <= Math.max(x0, x1); x++) { const [, py] = toScreen(x, 0); ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(W, py); ctx.stroke(); }
   for (let y = Math.floor(Math.min(y0, y1)); y <= Math.max(y0, y1); y++) { const [px] = toScreen(0, y); ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke(); }
 
-  if (mapView) {
+  if (mapView && $("showcells").checked) {
     const w = mapView.window;
     const inWindow = (cx, cy) => w && cx >= w.originX && cx < w.originX + w.cellsX && cy >= w.originY && cy < w.originY + w.cellsY;
     const hide = $("hideweak").checked;
@@ -128,6 +164,7 @@ function draw() {
       ctx.setLineDash([]);
     }
   }
+  drawOutline();
   const [ox, oy] = toScreen(0, 0);
   ctx.strokeStyle = "#666";
   ctx.beginPath(); ctx.arc(ox, oy, 4 * dpr, 0, 2 * Math.PI); ctx.stroke();
@@ -137,9 +174,9 @@ function draw() {
   ctx.strokeStyle = "#7aa7d988";
   ctx.lineWidth = 1.5 * dpr;
   ctx.beginPath();
-  for (const p of mapView?.path ?? []) { const [px, py] = toScreen(p.x, p.y); ctx.lineTo(px, py); }
+  for (const p of outline?.path ?? mapView?.path ?? []) { const [px, py] = toScreen(p.x, p.y); ctx.lineTo(px, py); }
   ctx.stroke();
-  for (const s of snapshots.slice(0, index + 1).filter(s => s.x !== null)) {
+  for (const s of snapshotPlaces()) {
     const [px, py] = toScreen(s.x, s.y);
     ctx.fillStyle = "#7aa7d9";
     ctx.beginPath(); ctx.arc(px, py, 2.5 * dpr, 0, 2 * Math.PI); ctx.fill();
@@ -149,17 +186,17 @@ function draw() {
   if (detail) {
     for (const t of detail.zones) {
       if (t.x === null || !["sure", "less_sure"].includes(t.kind)) continue;
-      const z = Number(t.z), [px, py] = toScreen(Number(t.x), Number(t.y));
+      const z = Number(t.z), at = corrected(t), [px, py] = toScreen(at.x, at.y);
       ctx.fillStyle = z < 0.03 ? "#6c6" : z < 0.13 ? "#f55" : z < 0.23 ? "#fa4" : "#aaf";
       ctx.fillRect(px - 1.5 * dpr, py - 1.5 * dpr, 3 * dpr, 3 * dpr);
     }
     const s = detail.snapshot;
-    if (s.x !== null) drawRobot(Number(s.x), Number(s.y), Number(s.yaw), "#7aa7d9", showingLive() ? 0.5 : 1);
+    if (s.x !== null) { const p = corrected(s); drawRobot(p.x, p.y, p.yaw, "#7aa7d9", showingLive() ? 0.5 : 1); }
   }
   drawObjects();
-  if (livePose && showingLive()) drawRobot(livePose.x, livePose.y, livePose.yaw, "#5fe08a");
+  if (livePose && showingLive()) { const p = corrected(livePose); drawRobot(p.x, p.y, p.yaw, "#5fe08a"); }
   if (goal) {
-    const [gx, gy] = toScreen(goal.x, goal.y);
+    const g = corrected(goal), [gx, gy] = toScreen(g.x, g.y);
     ctx.strokeStyle = "#ffd75e";
     ctx.lineWidth = 2 * dpr;
     ctx.beginPath(); ctx.arc(gx, gy, 9 * dpr, 0, 2 * Math.PI); ctx.moveTo(gx - 14 * dpr, gy); ctx.lineTo(gx + 14 * dpr, gy);
@@ -182,9 +219,9 @@ function drawObjects() {
   if (!$("showobjects").checked) return;
   const dpr = window.devicePixelRatio || 1, s = detail?.snapshot;
   if (s && s.x !== null && s.image && CAM) {
-    const c = Math.cos(Number(s.yaw)), sn = Math.sin(Number(s.yaw));
-    const cam = [Number(s.x) + c * CAM.x - sn * CAM.y, Number(s.y) + sn * CAM.x + c * CAM.y];
-    const ray = a => [cam[0] + CAM.viewM * Math.cos(Number(s.yaw) + a), cam[1] + CAM.viewM * Math.sin(Number(s.yaw) + a)];
+    const p = corrected(s), c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
+    const cam = [p.x + c * CAM.x - sn * CAM.y, p.y + sn * CAM.x + c * CAM.y];
+    const ray = a => [cam[0] + CAM.viewM * Math.cos(p.yaw + a), cam[1] + CAM.viewM * Math.sin(p.yaw + a)];
     ctx.setLineDash([3 * dpr, 4 * dpr]);
     ctx.strokeStyle = "#ffffff55";
     ctx.lineWidth = dpr;
@@ -194,7 +231,7 @@ function drawObjects() {
     ctx.setLineDash([]);
   }
   for (const o of objects?.map ?? []) {
-    const pts = objectCorners(o);
+    const pts = objectCorners(o).map(([x, y]) => { const p = corrected({ x, y }); return [p.x, p.y]; });
     if (!pts.length) continue;
     const here = o.sequence === Number(s?.sequence), color = LABEL_COLORS[o.label] ?? "#fff";
     ctx.globalAlpha = here ? 1 : 0.45;
@@ -207,7 +244,7 @@ function drawObjects() {
     ctx.stroke();
     ctx.setLineDash([]);
     if (here) {
-      const [px, py] = toScreen(o.cx, o.cy);
+      const c = corrected({ x: o.cx, y: o.cy }), [px, py] = toScreen(c.x, c.y);
       ctx.fillStyle = color;
       ctx.font = `${11 * dpr}px system-ui, sans-serif`;
       ctx.textAlign = "center";
@@ -246,12 +283,14 @@ canvas.addEventListener("wheel", e => {
   draw();
 }, { passive: false });
 $("hideweak").onchange = () => draw();
+for (const id of ["showcells", "showoutline"]) $(id).onchange = () => draw();
+for (const box of document.querySelectorAll("#bands input")) box.onchange = () => draw();
 $("zoomin").onclick = () => { view.scale = Math.min(800, view.scale * 1.4); draw(); };
 $("zoomout").onclick = () => { view.scale = Math.max(15, view.scale / 1.4); draw(); };
 $("center").onclick = () => { follow = true; centre(); draw(); };
 function centre() {
   const p = showingLive() && livePose ? livePose : detail?.snapshot;
-  if (p && p.x !== null && p.x !== undefined) { view.cx = Number(p.x); view.cy = Number(p.y); }
+  if (p && p.x !== null && p.x !== undefined) { const at = corrected(p); view.cx = at.x; view.cy = at.y; }
 }
 
 // Live: the newest snapshot of the newest boot (boots come newest first).
@@ -268,16 +307,20 @@ function toast(text) {
 
 function clicked(x, y) {
   if (canSteer()) {
-    const cx = Math.round(x * 100), cy = Math.round(y * 100);
+    // The robot steers by its own pose: the place clicked, in its frame.
+    const [ux, uy] = uncorrected(x, y), cx = Math.round(ux * 100), cy = Math.round(uy * 100);
     if (Math.abs(cx) > GOTO_MAX_CM || Math.abs(cy) > GOTO_MAX_CM) { toast(`A goal is at most ${GOTO_MAX_CM} cm from the start on each axis`); return; }
-    goal = { x, y, command: `steer g${cx},${cy}` };
+    goal = { x: ux, y: uy, command: `steer g${cx},${cy}` };  // in the robot's frame, drawn corrected
     send("steer", `g${cx},${cy}`);
     draw();
     return;
   }
   // Not steering: pick the nearest snapshot within 15 px.
   let best = -1, bestD = 15 / view.scale;
-  snapshots.forEach((s, i) => { if (s.x === null) return; const d = Math.hypot(s.x - x, s.y - y); if (d < bestD) { bestD = d; best = i; } });
+  for (const s of snapshotPlaces()) {
+    const d = Math.hypot(s.x - x, s.y - y), i = snapshots.findIndex(t => t.sequence === s.sequence);
+    if (d < bestD && i >= 0) { bestD = d; best = i; }
+  }
   if (best >= 0) { select(best); return; }
   if (robotStatus.state !== "connected") toast("The robot isn't connected");
   else toast("Showing an old snapshot: go to the newest (▶) to steer");
@@ -417,7 +460,7 @@ async function loadBoots(prefer) {
 $("boot").onchange = () => loadSnapshots($("boot").value);
 
 async function loadSnapshots(b) {
-  if (b !== boot) loadMounting(b);
+  if (b !== boot) { loadMounting(b); outline = null; ++loading; }  // another boot's correction (or one on its way) is not this one's
   boot = b;
   snapshots = (await getJson(`/api/snapshots?boot=${b}`)).map(s => ({ ...s, x: s.x === null ? null : Number(s.x), y: Number(s.y), sequence: Number(s.sequence) }));
   $("timeline").max = Math.max(0, snapshots.length - 1);
@@ -433,12 +476,16 @@ async function select(i) {
   index = Math.max(0, Math.min(snapshots.length - 1, i));
   $("timeline").value = index;
   const s = snapshots[index], mine = ++loading;
-  const [d, m, o] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.sequence}`), getJson(`/api/snapshots/${boot}/${s.sequence}/map`),
-                                       getJson(`/api/snapshots/${boot}/${s.sequence}/objects`)]);
+  // The cell map and the outline map come together: the cells are placed by the same
+  // correction (the first read after a server start builds it: a few seconds).
+  const [d, m, o, l] = await Promise.all([getJson(`/api/snapshots/${boot}/${s.sequence}`), getJson(`/api/snapshots/${boot}/${s.sequence}/map`),
+                                          getJson(`/api/snapshots/${boot}/${s.sequence}/objects`),
+                                          getJson(`/api/snapshots/${boot}/${s.sequence}/outline`).catch(err => { toast(`no outline map: ${err.message}`); return null; })]);
   if (mine !== loading) return;
   detail = d;
   mapView = m;
   objects = o;
+  outline = l;  // none (an error): everything by odometry
   if (follow) centre();
   showSnapshot();
   draw();

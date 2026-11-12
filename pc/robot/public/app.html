@@ -27,6 +27,7 @@ main { display:grid; grid-template-columns:1fr 360px; min-height:0; }
 #map { width:100%; height:100%; display:block; cursor:crosshair; }
 #maphud { position:absolute; left:10px; top:8px; font:12px ui-monospace,monospace; color:var(--dim); pointer-events:none; text-shadow:0 0 3px #000; }
 #mapbtns { position:absolute; right:10px; top:8px; display:flex; gap:4px; }
+#bands { display:flex; gap:4px; }
 #legend { position:absolute; left:10px; bottom:8px; display:flex; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--dim); pointer-events:none; }
 #legend i { display:inline-block; width:10px; height:10px; margin-right:4px; vertical-align:-1px; border-radius:2px; }
 #toast { position:absolute; left:50%; top:12px; transform:translateX(-50%); background:#3a2f12; border:1px solid #806a2a; color:#ffe6a8;
@@ -71,11 +72,12 @@ footer.hidden #log { display:none; }
   <div id="mapwrap">
     <canvas id="map"></canvas>
     <div id="maphud"></div>
-    <div id="mapbtns"><label class="pill" title="columns set by a measurement under 10 % confident count as unknown"><input type="checkbox" id="hideweak" checked> hide weak</label><button id="center">Centre on robot</button><button id="zoomin">+</button><button id="zoomout">−</button></div>
+    <div id="mapbtns"><label class="pill" title="the cell map: the robot's own map code, run on the PC"><input type="checkbox" id="showcells" checked> cells</label><label class="pill" title="the outline map: per height band the border of the floor seen free (doc/OUTLINE_MAP_PLAN.md)"><input type="checkbox" id="showoutline" checked> outline</label><span id="bands"><label class="pill" style="color:#ffffff" title="3-13 cm: blocks the robot"><input type="checkbox" data-band="L1" checked> L1</label><label class="pill" style="color:#f2e24a" title="13-23 cm: an overhang"><input type="checkbox" data-band="L2" checked> L2</label><label class="pill" style="color:#30d0d0" title="above 23 cm"><input type="checkbox" data-band="above" checked> above</label></span><label class="pill" title="columns set by a measurement under 10 % confident count as unknown"><input type="checkbox" id="hideweak" checked> hide weak</label><button id="center">Centre on robot</button><button id="zoomin">+</button><button id="zoomout">−</button></div>
     <div id="legend">
       <span><i style="background:var(--blocked)"></i>blocked</span><span><i style="background:var(--overhang)"></i>overhang</span>
       <span><i style="background:var(--nofloor)"></i>no floor</span><span><i style="background:var(--drivable)"></i>drivable</span>
       <span><i style="background:var(--open)"></i>free, floor not seen</span><span>dimmed: old (the window doesn't know it now)</span>
+      <span>outline: bright a wall (brighter the surer), medium rough, faint a guess</span>
     </div>
     <div id="toast"></div>
   </div>

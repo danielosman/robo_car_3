@@ -400,12 +400,22 @@ export class Store {
   // before it (0: none), and the robot's pose in it (null: PicoB not connected); null if
   // there is no such snapshot.
   async snapshotFrames(boot: string, sequence: number): Promise<{ lastFrame: number; pose: Pose | null } | null> {
+    const [s] = await this.snapshotsWhere(boot, "sequence = $2", sequence);
+    return s ? { lastFrame: s.lastFrame, pose: s.pose } : null;
+  }
+
+  // The boot's snapshots up to `sequence`, oldest first, each as snapshotFrames gives it.
+  snapshotsUpTo(boot: string, sequence: number): Promise<{ sequence: number; lastFrame: number; pose: Pose | null }[]> {
+    return this.snapshotsWhere(boot, "sequence <= $2", sequence);
+  }
+
+  private snapshotsWhere(boot: string, where: string, sequence: number): Promise<{ sequence: number; lastFrame: number; pose: Pose | null }[]> {
     return this.use(async c => {
-      const [r] = (await c.runAndReadAll(`SELECT x, y, yaw, (SELECT coalesce(max(f.message_number), 0) FROM frames f
+      const rows = (await c.runAndReadAll(`SELECT sequence, x, y, yaw, (SELECT coalesce(max(f.message_number), 0) FROM frames f
         WHERE f.boot_id = s.boot_id AND f.message_number < s.message_number) AS last_frame
-        FROM snapshots s WHERE boot_id = $1 AND sequence = $2`, [boot, sequence])).getRowObjects();
-      if (!r) return null;
-      return { lastFrame: Number(r.last_frame), pose: r.x === null ? null : { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) } };
+        FROM snapshots s WHERE boot_id = $1 AND ${where} ORDER BY sequence`, [boot, sequence])).getRowObjects();
+      return rows.map(r => ({ sequence: Number(r.sequence), lastFrame: Number(r.last_frame),
+                              pose: r.x === null ? null : { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) } }));
     });
   }
 

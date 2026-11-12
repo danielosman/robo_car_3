@@ -5,6 +5,42 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 12 Nov 2026: the outline map, step E (the page)
+
+The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.
+
+- **Decided with Daniel first** (plan, "Decided (Daniel, 12 Nov)"): the map updated
+  after each move; only the corrected pose shown; the corrections in the log, not on
+  the map; removed walls not shown; cells and outline as two toggles that can both be
+  on; `robot map --png --lines` draws what the page draws; a new step F sends the
+  corrected pose to the robot. Then, asked mid-step: the PC's cell map placed by the
+  corrected pose too.
+- **Built:** `OutlineMaps` (`maps/outline/index.ts`) in place of `outlinesAt()` and
+  `wallsAt()`, which built the map from the first frame on every read (2.8 s at 774
+  frames, growing): one forward-only mapper per boot, fed snapshot by snapshot, the
+  outlines and correction kept at each. A log line per stored snapshot. The page's
+  `/outline` read and its toggles; everything drawn corrected. `CellMaps.placeBy()`.
+  `robot check` asks in the robot's own frame.
+- **Measured** on the stored drive (`cc0e4e65`): 3.5 s for the first read after a
+  server start, 0.1-0.3 s a new snapshot, 11 ms a past one. A replay with the fake
+  robot logged the corrections live (at most 1.9 cm and 1.6° there).
+- **Tests:** the kept mapper is fed only new frames; a past snapshot as a fresh
+  mapper draws it; the simulator's drifting `square` drive, stored, gives a
+  correction over 3° that the robot, path, log and cell map all use (its blocked
+  cells nearer the true walls than odometry's).
+- **First review (fresh subagent):** `robot walls` wrote the tables from the kept
+  mapper after letting go of it, so the next move's frames could slip in: it now
+  builds its own. Objects drawn corrected; a boot switch could show the old boot's
+  outline; no path or dots while the outline loaded; the goal kept in the robot's
+  frame. Tests added for the restart and a non-zero correction.
+- **Second review:** `robot check` mixed the corrected map with goto targets in the
+  robot's frame: now it asks in the robot's frame. A feed failing part way left the
+  kept mapper with frames given twice: it is built again. The page fetches map and
+  outline together. Left open: the two maps' link both ways (plan, "Left open").
+- On the way, a test server opened the real database once and `robot walls 28`
+  rewrote its derived tables (`walls`, `wall_sightings`, `frame_poses`, same
+  content); test servers now use their own `RECORDINGS`, as the README says.
+
 ## 12 Nov 2026: the outline map, step D (removal)
 
 The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.

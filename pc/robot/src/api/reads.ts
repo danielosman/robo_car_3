@@ -16,7 +16,7 @@ import { CAMERA } from "./firmware.ts";
 import { poseOut } from "./answers.ts";
 import { displayRgb } from "./colour.ts";
 import { mapPng } from "./map.ts";
-import { outlinesAt, wallsAt } from "../maps/outline/index.ts";
+import type { OutlineMaps } from "../maps/outline/index.ts";
 import { doubtOf } from "../maps/outline/walls.ts";
 import type { CellMaps } from "../maps/cell_map.ts";
 import type { CommandQueue } from "./queue.ts";
@@ -27,7 +27,7 @@ import { framesJson, framesText, imuJson, imuText } from "./frames.ts";
 
 export interface Config { autoSnap: boolean }
 export interface ApiContext {
-  store: Store; maps: CellMaps; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDirectory: string;
+  store: Store; maps: CellMaps; outlines: OutlineMaps; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDirectory: string;
   bootFolders: BootFolders;  // the robot's boot ids to our folder names (map --png)
   chat?: Chat; modelName?: string;  // the vision model for robot detect (objects/)
 }
@@ -118,10 +118,12 @@ export const READS: Record<string, Read> = {
           "the robot's own map code. The window (6 × 6 m around the robot, 10 cm cells) as three layers of cell bytes,\n" +
           "G (the floor), L1 (3-13 cm), L2 (13-23 cm), and the whole-house tiles outside it. format says how to read\n" +
           "them. --robot asks the connected robot for its own 6 × 6 m window right now. --png draws the whole map\n" +
-          "(or, with --robot, the robot's window) as a picture and gives its file. --png --lines draws the PC's outline\n" +
-          "maps over it: per height band (white: L1, 3-13 cm; yellow: L2, 13-23 cm; cyan: above) the closed border of the\n" +
-          "floor seen free, and an island round each thing in it; bright: a wall, medium: a rough edge, faint: a guess\n" +
-          "(nothing seen there yet). With --no-cells, the outlines alone.",
+          "(or, with --robot, the robot's window) as a picture and gives its file; without --robot the robot and its\n" +
+          "path are drawn where the PC's walls corrected them to, as the page does. --png --lines draws the PC's outline maps over it:\n" +
+          "per height band (white: L1, 3-13 cm; yellow: L2, 13-23 cm; cyan: above) the closed border of the floor seen\n" +
+          "free, and an island round each thing in it; bright: a wall, medium: a rough edge, faint: a guess (nothing\n" +
+          "seen there yet). With --no-cells, the outlines alone. The PC's map and its pose are placed by the corrected\n" +
+          "pose; robot status, the moves' answers and goto use the robot's own (odometry).",
     async run(ctx, args, flags) {
       atMostOne(args, this.usage);
       const withLines = flags.has("lines"), withCells = !flags.has("nocells");
@@ -152,9 +154,10 @@ export const READS: Record<string, Read> = {
       if (flags.has("png")) {
         const name = `${id.sequence}${withLines ? (withCells ? "-lines" : "-lines-only") : ""}.png`;
         const file = path.join(ctx.recordingsDirectory, "map", ctx.bootFolders.folderForBoot(id.boot), name);
-        const outlines = withLines ? await outlinesAt(ctx.store, ctx.maps, id.boot, id.sequence) ?? [] : [];
+        const outline = await ctx.outlines.at(id.boot, id.sequence);
+        if (!outline) throw new ReadError(`snapshot ${id.sequence} has no outline map`);
         await mkdir(path.dirname(file), { recursive: true });
-        await writeFile(file, mapPng(map, { cells: withCells, outlines }));
+        await writeFile(file, mapPng({ ...map, robot: outline.robot, path: outline.path }, { cells: withCells, outlines: withLines ? outline.bands : [] }));
         return { snapshot: id.sequence, map: "pc", file };
       }
       const w = map.window, r = map.robot, n = w.cellsX * w.cellsY;
@@ -176,7 +179,7 @@ export const READS: Record<string, Read> = {
           "snapshot; it also writes the database's tables walls, wall_sightings and frame_poses for the boot.",
     async run(ctx, args) {
       atMostOne(args, this.usage);
-      const id = await findSnapshot(ctx.store, args[0]), bands = await wallsAt(ctx.store, ctx.maps, id.boot, id.sequence);
+      const id = await findSnapshot(ctx.store, args[0]), bands = await ctx.outlines.walls(id.boot, id.sequence);
       if (!bands) throw new ReadError(`snapshot ${id.sequence}: no frames to build walls from`);
       const cm = (m: number) => round(m * 100, 1);
       return {

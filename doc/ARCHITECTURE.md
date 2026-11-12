@@ -620,7 +620,11 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   and a tile knows the column, dimmed; "hide weak" hides columns under 10 %
   confident), the path driven up to the snapshot (from the pose
   lines) and where each snapshot was taken, the snapshot's ToF
-  zones (sure and less sure, by height), the robot then and now; a timeline of the boot's snapshots ("live"
+  zones (sure and less sure, by height), the robot then and now; over or instead of the
+  cells (toggles "cells", "outline", and per band) the PC's outline maps
+  ([OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)); the cells, the robot, the path and all
+  else are placed by the PC's corrected pose, and a click to go there is turned back
+  into the robot's own frame; a timeline of the boot's snapshots ("live"
   follows the newest; a new boot's first snapshot, sent when the robot connects,
   always takes over the page and ticks "live"); the camera picture with its features
   (the camera's view from the boot's own mounting), the 8 × 8 ToF grid (~ less sure, ?

@@ -10,6 +10,8 @@
 //   mapper.sightings()          every sighting of a wall, by band (wall numbers as they are now)
 //   mapper.poses()              every frame's pose: odometry's, corrected, how sure
 //   mapper.removed()            the walls taken as gone (seen through while the pose was well fixed), as they were
+//   mapper.correction()         the correction now: odometry's pose to the corrected one (corrected(c, pose))
+//   corrected(c, pose)          an odometry pose moved by a correction
 //   fixedWithout(fix, known, w) is the pose well fixed without wall w (the rule for removal)
 // The pose is checked against the walls of one band, "above": a wall stands in every band,
 // and counting it three times would make the pose far too sure. "above" finds the most
@@ -49,11 +51,17 @@ export function fixedWithout(fix: Fix | null, known: readonly Wall[], w: Wall): 
   return by.some(a => by.some(b => between(a.angle, b.angle) >= FIXED_RAD));
 }
 
+// A correction: the odometry's pose turned by `yaw` about the origin, then moved by (x, y).
+export function corrected(c: Pose, p: Pose): Pose {
+  const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw);
+  return { x: cos * p.x - sin * p.y + c.x, y: sin * p.x + cos * p.y + c.y, yaw: p.yaw + c.yaw };
+}
+
 export class Mapper {
   private readonly check: PoseCheck | null;
   private readonly bands: { band: (typeof BANDS)[number]; map: OutlineMap; walls: Walls }[];
   private doubt = NO_DOUBT;  // without the pose check
-  // The corrected pose is the odometry's turned by `yaw` about the origin, then moved by (x, y).
+  // Odometry's pose to the corrected one (corrected()).
   private shift: Pose = { x: 0, y: 0, yaw: 0 };
   private readonly placed: FramePose[] = [];
   private readonly seen: BandSighting[] = [];
@@ -120,7 +128,7 @@ export class Mapper {
     const c = Math.cos(this.shift.yaw), s = Math.sin(this.shift.yaw);
     return [c * p.x - s * p.y, s * p.x + c * p.y];
   }
-  private place(p: Pose): Pose { const [x, y] = this.turned(p); return { x: x + this.shift.x, y: y + this.shift.y, yaw: p.yaw + this.shift.yaw }; }
+  private place(p: Pose): Pose { return corrected(this.shift, p); }
   private placeSight(s: Sight): Sight {
     const [x, y] = this.turned(s), at = { ...s, x: x + this.shift.x, y: y + this.shift.y, bearing: s.bearing + this.shift.yaw };
     if (s.hit) { const [hx, hy] = this.turned(s.hit); at.hit = { ...s.hit, x: hx + this.shift.x, y: hy + this.shift.y }; }
@@ -131,6 +139,7 @@ export class Mapper {
   walls(): BandWalls[] { return this.bands.map(({ band, walls }) => ({ band: band.name, walls: walls.all() })); }
   poses(): readonly FramePose[] { return this.placed; }
   removed(): readonly RemovedWall[] { return this.gone; }
+  correction(): Pose { return { ...this.shift }; }
 
   sightings(): BandSighting[] {
     const walls = new Map(this.bands.map(b => [b.band.name, b.walls]));

@@ -19,6 +19,7 @@ import { CommandQueue } from "./queue.ts";
 import { createApi } from "./routes.ts";
 import type { Chat } from "../objects/model.ts";
 import { BootFolders } from "../boot_folders.ts";
+import { OutlineMaps } from "../maps/outline/index.ts";
 import { CellMaps } from "../maps/cell_map.ts";
 
 const skip = noFirmware;
@@ -55,8 +56,8 @@ async function setUp(chat?: Chat) {
   live.setBoot(boot.id);
   live.setPose(livePose({ type: "status", x: 0.43, y: -0.04, yaw: 30 * Math.PI / 180, mode: "manual", action: "", rssi: -58 }));
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
-  const maps = new CellMaps(store);
-  const app = createApi({ store, maps, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
+  const maps = new CellMaps(store), outlines = new OutlineMaps(store, maps);
+  const app = createApi({ store, maps, outlines, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
                           chat, modelName: "gemma-fake" });
   const post = async (command: string, body = "", query = "") => {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });

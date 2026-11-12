@@ -25,6 +25,7 @@ import { ROBOT_PORT, RobotLink, broadcastAddresses, type LivePose } from "./link
 import { DB_PATH, RECORDINGS_DIRECTORY, Store } from "./store.ts";
 import { handleSnapshotApi } from "./snapshots_api.ts";
 import { CellMaps } from "./maps/cell_map.ts";
+import { OutlineMaps } from "./maps/outline/index.ts";
 import { ingest } from "./ingest.ts";
 import { BootFolders } from "./boot_folders.ts";
 import { Log } from "./log.ts";
@@ -56,6 +57,8 @@ async function main(): Promise<void> {
   const store = new Store(DB_PATH);
   store.onError = err => note(`the robot's data NOT stored: ${err.message}`);
   const maps = new CellMaps(store, note);  // the PC's cell map, built from the store when read
+  const outlines = new OutlineMaps(store, maps, note);  // the PC's outline maps, brought up to each snapshot as it comes
+  maps.placeBy(outlines);  // the PC's cell map placed by the corrected pose too
   const live = new LiveRobot();
   const stored = new StoredSnapshots();
   const announceTo = process.env.ANNOUNCE_TO ? process.env.ANNOUNCE_TO.split(",") : [];
@@ -64,6 +67,7 @@ async function main(): Promise<void> {
   // What the robot sends, stored in the order it came (ingest.ts); the page and the API told.
   ingest(robot, store, { recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, note, stored: s => {
     stored.add(s.bootId, s.sequence);
+    void outlines.added(s.bootId, s.sequence);  // queued before the page's read of it
     broadcast({ type: "snapshot", boot: s.bootId, sequence: s.sequence });
   } });
   robot.on("hello", (h: Hello) => live.setBoot(h.bootId));
@@ -75,7 +79,7 @@ async function main(): Promise<void> {
   robot.on("mapCleared", () => note("the robot's map was cleared (its own 6 x 6 m map; the PC's are kept)"));
   const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
   const chat = openAiChat(MODEL_API, MODEL, note);
-  const api = getRequestListener(createApi({ store, maps, live, queue, log, snapshots: stored, config: { autoSnap: true },
+  const api = getRequestListener(createApi({ store, maps, outlines, live, queue, log, snapshots: stored, config: { autoSnap: true },
                                               recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, chat, modelName: MODEL }).fetch);
   await robot.start();
   if (!wireCheck()) note("wire: the message table is wrong (two types share a number, or a ToF format is too big; wire.ts, tof_format.ts): the robot's messages can't be read");
@@ -88,7 +92,7 @@ async function main(): Promise<void> {
   };
   const server = http.createServer(async (req, res) => {
     if (/^\/api\/robot(\/|$|\?)/.test(req.url ?? "")) { await api(req, res); return; }
-    if (await handleSnapshotApi(req, res, store, RECORDINGS_DIRECTORY, bootFolders, maps)) return;
+    if (await handleSnapshotApi(req, res, store, RECORDINGS_DIRECTORY, bootFolders, maps, outlines)) return;
     const file = files[new URL(req.url ?? "/", "http://localhost").pathname];
     if (!file) { res.writeHead(404); res.end("not found"); return; }
     try {

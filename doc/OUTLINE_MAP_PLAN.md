@@ -1,12 +1,12 @@
 # Outline map and drift correction — plan (11 Nov 2026)
 
 Agreed in general by Daniel on 11 Nov; steps S (the simulator), A (the outline), B
-(the walls), C (the pose check) and D (removal) are built. It follows the line map
+(the walls), C (the pose check), D (removal) and E (the page) are built; F is left. It follows the line map
 ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md), step 7 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)),
 which Daniel looked at and found is not what he wants: loose lines, too few of them.
 
 Contents: In short · For the fresh session · What Daniel asked for · The three ideas ·
-What is stored · How it fits the code · The simulator · Steps · Decided · Open ·
+What is stored · How it fits the code · The simulator · Steps · Decided (11 and 12 Nov) · Open ·
 Alternatives for later.
 
 ## In short
@@ -20,9 +20,9 @@ disagree, the less sure one gives way.
 
 ## For the fresh session
 
-- **Steps S, then A to E in order.** The table in "Steps" says which are done:
-  start at the first that is not. **Next: step E** (the page); read "Step E: where
-  to start" first.
+- **Steps S, then A to F in order.** The table in "Steps" says which are done:
+  start at the first that is not. **Next: step F** (the corrected pose sent to the
+  robot); read "Step F: where to start" and "Decided (Daniel, 12 Nov)" first.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
   `pc/robot/src/maps/outline/` and `pc/robot/src/sim/` with their tests.
 - **Rules as in DATA_FLOW_PLAN.md section 2:** tests first where they make sense, a
@@ -267,7 +267,8 @@ tried in the simulator first, then on the stored drive.
 | B | done | Walls remembered: numbers, how sure, sightings; colour by confidence; the three tables | the same picture, walls brighter the surer they are; `robot walls` listing them |
 | C | done | The pose check: frames checked against walls, corrected poses stored, the map built with them | the same drive drawn with and without correction (`npm run sim -- loop [--no-correction]`); the error on returning to the start |
 | D | done | Removal with the two-wall rule | `npm run sim -- board-removed`: the board goes; `board-stays`: it stays with drift |
-| E | | The page: the outline per band, switchable (the old step 8) | the page |
+| E | done | The page: the outline per band, toggled with the cell map, both can be on (the old step 8); everything placed by the corrected pose | the page; `robot map --png --lines`; the log's "outline map, snapshot n" lines |
+| F | | The corrected pose sent to the robot, so its own cell map and steering use it (firmware and wire change) | a drive where the robot's map and the PC's agree |
 
 How the outline is made (step A, as built):
 
@@ -449,7 +450,7 @@ What removal does (simulator, all noise and the measured drift):
 
 ### Left open
 
-From the reviews of steps C and D; none blocks step E.
+From the reviews of steps C, D and E; none blocks step F.
 
 - Each wall's `cov` is a copy of its part of `PoseCheck`'s covariance, made fresh by
   `sync()`; `Walls` branches on "has a pose check" in several places. Cleaner: one
@@ -469,26 +470,65 @@ From the reviews of steps C and D; none blocks step E.
   the noise floors above; for removal 10 cm past, 2 wedges, 2 frames, 2 cm and 3°.
 - Only whole walls go: part of a wall gone (a door opened in it) is not handled.
 - The joint state grows by 2 rows a wall: fine at today's sizes, watch on long drives.
+- Step E: `CellMaps` and `OutlineMaps` know each other (rays one way, the placement
+  the other, joined by `placeBy` in `main.ts`). Cleaner: the rays as their own small
+  object given to both. A bug in the outline map now also stops the cell map,
+  `robot check` and `robot map`.
+- Step E: the page draws objects and the snapshot's ToF dots by the shown snapshot's
+  correction, not each by its own snapshot's.
+- Step E: `/map`'s `path` is still odometry's (the page uses it only without an
+  outline map; `robot map --png` takes the corrected one).
 
-### Step E: where to start
+### How the page and the PC's maps work (step E, as built)
 
-Not built. The page shows the outline maps, switchable with the cell map
-(DATA_FLOW_PLAN.md, "8. The map switch"): each band in its own colour, each band
-can be hidden.
+- **One outline mapper per boot, kept** (`OutlineMaps`, `maps/outline/index.ts`). It
+  only goes forward: fed the frames up to each snapshot in turn, it keeps at each the
+  outlines, the correction and how many frame poses it had. A past snapshot is read at
+  once; a snapshot stored again with other frames, or a feed that fails part way,
+  builds it again from the first frame. Two boots are kept.
+- **When a snapshot is stored** (`main.ts`) the mapper is brought up to it and one
+  line goes in the log: `outline map, snapshot n: pose corrected by a cm, b° in all;
+  this move c cm, d°` (corrected against odometry at the snapshot's last frame).
+- **The PC's cell map is placed by the corrected pose** (`CellMaps.placeBy`): each
+  frame by its corrected pose, the snapshot's pose corrected. `robot check` still
+  asks in the robot's own frame (odometry pose, goto targets): the map turns its
+  places into the corrected frame first.
+- **The page** (`app.js`): toggles cells and outline (both on: the outline over the
+  cells), and L1, L2, above. The robot, the live pose, the path, the snapshot dots, the
+  ToF dots, the objects and the camera cone are drawn corrected (the page's
+  `corrected()` is a copy of `mapper.ts`'s). A goal click is turned back into the
+  robot's frame before `goto`, kept there, and drawn corrected.
+- **CLI:** `robot map --png [--lines [--no-cells]]` draws what the page draws (robot
+  and path corrected); `robot map`'s JSON pose is corrected; `robot walls` builds its
+  own mapper for the snapshot.
+- **Numbers** (stored drive `cc0e4e65`, 774 frames, 28 snapshots):
 
-- **The page** is `pc/robot/public/app.html` and `app.js`: it draws the cell map on
-  a canvas, with a slider over the boot's snapshots.
-- **What exists to draw from:** `outlinesAt()` and `wallsAt()` (`maps/outline/index.ts`)
-  build a snapshot's outlines and walls; `outlineStrokes()` and `BAND_RGB`
-  (`colours.ts`) turn an outline into coloured strokes (wall edges brighter the surer,
-  rough fainter, guess faintest). `robot map --png --lines` already draws them
-  (`api/map.ts`, `api/reads.ts`). No API read gives the outlines to the page yet.
-- **Speed:** the maps are built again on every read, from the boot's first frame:
-  2.8 s for the stored drive (boot `cc0e4e65`, 774 frames). The slider may need the
-  last maps kept, as `CellMaps.viewAtSnapshot()` does, or the mapper kept and fed
-  only the new frames.
-- To show from step D, if wanted: the removed walls (`mapper.removed()`), the
-  corrected pose against odometry's (`mapper.poses()`).
+| What | Time |
+|---|---|
+| First read after a server start | 3.5 s |
+| Each new snapshot (one move) | 0.1-0.3 s |
+| A past snapshot | 11 ms |
+
+### Step F: where to start
+
+Not built. The PC sends the robot its **corrected pose** after each move (not the
+change: a lost message is put right by the next one). The robot's own cell map and
+steering then use it.
+
+- **What the PC has:** after each stored snapshot, `OutlineMaps.added()` has the
+  correction then (`stage.correction`; the corrected pose is `corrected(correction,
+  odometry)`, `mapper.ts`). The page, `robot check` and goto clicks already turn
+  between the two frames.
+- **What changes when the robot takes it:** the robot's odometry jumps to the
+  corrected pose. The mapper reads odometry from the frames and keeps its own
+  correction on top, so after a jump the two would add up. F must decide how the
+  mapper sees it: e.g. the robot says in each frame the pose it was set to, and the
+  mapper's correction drops by that amount.
+- **Needs:** a wire message PC → robot (wire.ts and PicoA's side), firmware on both
+  ends, then a flash ("Open for Daniel" 1). The robot's own map (`cell_map.c`) is
+  placed by its pose: after a jump, its window must move with it, or be cleared.
+- **To look at:** a drive where the robot's map (`robot map --robot --png`) and the
+  PC's (`robot map --png`) agree.
 
 ## Decided (Daniel, 11 Nov)
 
@@ -500,6 +540,20 @@ can be hidden.
 - A simulator first. It is for the agent, not for driving by hand: pictures with a
   slider, and the scenarios as tests.
 - One commit per step, after tests and review (pushed since step B, as Daniel asked).
+
+## Decided (Daniel, 12 Nov)
+
+- The map is updated after each move; a few seconds per move are fine.
+- The page shows the corrected pose only: no odometry pose, no old estimates.
+- The corrections go in the log (cm and degrees), not on the map.
+- Removed walls are not shown; they vanish from the map.
+- Cell map and outline map are two toggles; both on, they are drawn over each other.
+- The PC's cell map is placed by the corrected pose too (it is the PC's own, built
+  from the stored frames).
+- `robot map --png --lines` draws what the page draws, for the agent to test and drive.
+- Step F, its own step after E: the PC sends the robot the **corrected pose** (not
+  the change: a lost message is then put right by the next one); the robot's own
+  cell map and steering use it.
 
 ## Open for Daniel
 
@@ -522,8 +576,6 @@ can be hidden.
   10 cm in front of a wall is drawn on the wall. Tune on the stored drive.
 - With the simulator's far noise (7 cm) rough edges are jagged by about 10 cm.
 - L1 and L2 walls (drawing only) are rougher than "above": up to 18° off in `square`.
-- Building takes longer than the line map's 1 s once poses are corrected frame by
-  frame; the tables double as a cache for the slider.
 
 ## Alternatives for later (Daniel, 12 Nov)
 

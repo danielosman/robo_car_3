@@ -27,8 +27,8 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   time and used against pose drift.
 - **Next: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)**, agreed in general by Daniel
   (11 Nov), being built (its table of steps says how far): a simulator first (its
-  step S), then the outline, the walls and the pose correction (A-D), then the page
-  (E, the old step 8). The line map's code is replaced by `maps/outline/`. A fresh
+  step S), then the outline, the walls and the pose correction (A-D), the page
+  (E, the old step 8, done), then the corrected pose sent to the robot (F). The line map's code is replaced by `maps/outline/`. A fresh
   session starts at its "For the fresh session". Then 9 docs, the final flash,
   the robot test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
@@ -370,7 +370,7 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.5 K
 
 **7. The line map** (PC) — built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). Daniel wants
 a closed outline and drift correction instead: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)
-(agreed in general; its steps S, A-E come next, and E is step 8).
+(agreed in general; its steps S, A-F; E, done, was step 8).
 
 Real-data limits to keep in mind:
 - Floor rows 8 / 7 / 6 meet the floor at about 27 / 37 / 60 cm with the 9 cm mount.
@@ -380,10 +380,8 @@ Real-data limits to keep in mind:
   often have unsure readings around 31-37 cm; do not assume every close point is
   a real obstacle. Odometry drifts; a commanded 30° turn is about 31°.
 
-**8. The map switch** (PC): cell map / line map on the page; the bands in their own
-colours, each can be hidden. `lineMapsAt()` builds the maps again on every read
-(LINE_MAP_PLAN.md, the numbers); if the slider feels slow, keep the last maps
-read, as `CellMaps.viewAtSnapshot()` does.
+**8. The map switch** (PC) — done as OUTLINE_MAP_PLAN.md step E: cell map and outline
+map on the page, two toggles that can both be on.
 
 **9. The flash and the robot test** (both Picos): docs final; the README list of robot
 tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2`,

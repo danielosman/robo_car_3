@@ -9,6 +9,7 @@ import type http from "node:http";
 import { MOUNTING_FILE, loadMounting, parseMounting } from "./mounting.ts";
 import { handleSnapshotApi } from "./snapshots_api.ts";
 import type { Store } from "./store.ts";
+import type { OutlineMaps } from "./maps/outline/index.ts";
 import type { CellMaps } from "./maps/cell_map.ts";
 import type { BootFolders } from "./boot_folders.ts";
 
@@ -54,7 +55,7 @@ test("the page gets it: GET /api/mounting", async () => {
   let code = 0, body = "";
   const req = { method: "GET", url: "/api/mounting" } as http.IncomingMessage;
   const res = { writeHead: (c: number) => { code = c; }, end: (b: string) => { body = b; } } as unknown as http.ServerResponse;
-  assert.ok(await handleSnapshotApi(req, res, {} as Store, "", {} as BootFolders, {} as CellMaps));
+  assert.ok(await handleSnapshotApi(req, res, {} as Store, "", {} as BootFolders, {} as CellMaps, {} as OutlineMaps));
   assert.equal(code, 200);
   assert.deepEqual(JSON.parse(body), loadMounting());
 });
