@@ -19,7 +19,7 @@ import { ALL_NOISE, NO_NOISE, tofFrame, ZONE_RAD, type Noise } from "./tof.ts";
 import { run, SCENARIOS, type Scenario } from "./scenarios.ts";
 import { play } from "./play.ts";
 import { closed, floorError, offFaces, poseError, wallErrors } from "./measure.ts";
-import { sureOf } from "../maps/outline/walls.ts";
+import { sureOf, type Wall } from "../maps/outline/walls.ts";
 
 const DEG = Math.PI / 180, tof = loadMounting().tof;
 const close = (a: number, b: number, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
@@ -284,6 +284,32 @@ test("the pose check, without noise or drift: the square room's walls end at its
       const x = w.x + k * w.halfM * Math.cos(w.angle), y = w.y + k * w.halfM * Math.sin(w.angle);
       assert.ok(Math.min(...corners.map(([cx, cy]) => Math.hypot(x - cx, y - cy))) < 0.01, `wall ${w.number}: ${x}, ${y}`);
     }
+});
+
+// The board of "board-removed" and "board-stays": a wall at x = 1.1 (sim/scenarios.ts).
+const onBoard = (w: Wall) => Math.abs(w.x - 1.1) < 0.08 && Math.abs(Math.cos(w.angle)) < 0.3;
+
+test("removal, without noise or drift: the board's walls go the first time the robot looks there with the pose fixed; staying, they stay", () => {
+  const removed = play(scenario("board-removed", EXACT)), stays = play(scenario("board-stays", EXACT)).at(-1)!;
+  assert.deepEqual(BANDS.map(b => removed[11].walls[b.name].filter(onBoard).length), [1, 1, 1]);
+  // It goes at step 12, while the robot turns past the empty place (steps 12 and 13).
+  assert.deepEqual(BANDS.map(b => removed[13].walls[b.name].filter(onBoard).length), [0, 0, 0]);
+  assert.deepEqual(removed.at(-1)!.removed.map(r => r.band), ["L1", "L2", "above"]);
+  assert.ok(removed.at(-1)!.removed.every(r => onBoard(r.wall)));
+  assert.deepEqual(BANDS.map(b => stays.walls[b.name].filter(onBoard).length), [1, 1, 1]);
+  assert.equal(stays.removed.length, 0);
+});
+
+test("removal, with all noise and the measured drift: no wall that still stands is removed, in any scenario; the board goes", () => {
+  for (const sc of SCENARIOS) {
+    const played = play(scenario(sc.name));
+    for (const r of played.at(-1)!.removed) {
+      const step = played.findIndex(p => p.removed.includes(r));
+      const band = BANDS.find(b => b.name === r.band)!;
+      assert.equal(wallErrors([r.wall], played[step].step.faces, band).errors[0].face, null, `${sc.name}: ${r.band} wall ${r.wall.number} removed at step ${step}, but it stands`);
+    }
+    if (sc.name === "board-removed") assert.deepEqual(BANDS.map(b => played.at(-1)!.walls[b.name].filter(onBoard).length), [0, 0, 0]);
+  }
 });
 
 test("with the measured drift a full turn ends about 11° off; odometry doesn't see it", () => {

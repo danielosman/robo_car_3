@@ -1,11 +1,13 @@
 // Tests for walls.ts and pose.ts, on hand-made sights: a wall is made from an outline's
 // wall edge, moved by the hits seen on it (much while unsure, little once sure), turned by
 // their slope, lengthened to them; hits far off it are a new thing; two walls that grow
-// into each other are one; a border point close to a wall is put on it; the pose's doubt
-// grows with turning and driving. Run with `npm test`.
+// into each other are one; a border point close to a wall is put on it; a wall seen
+// through while the pose is well fixed goes; the pose's doubt grows with turning and
+// driving. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { sureOf, Walls, type Wall } from "./walls.ts";
+import { PoseCheck } from "./pose_check.ts";
 import { grown, NO_DOUBT, type Pose } from "./pose.ts";
 import type { Edge } from "./shape.ts";
 import { BANDS, type Sight } from "./sights.ts";
@@ -143,4 +145,33 @@ test("two walls that meet at more than 45° end where their lines cross: a corne
   close(a.y + a.halfM, 0.5, 1e-6);      // x = 1 runs along +y: its far end
   close(b.x + b.halfM, 1, 1e-6);        // y = 0.5 runs along +x
   assert.ok(a.endSd[1] < 0.06 && b.endSd[1] < 0.06); // about the other wall's spread across (5 cm)
+});
+
+test("a wall seen through in two frames while the pose is well fixed goes; not if the pose isn't, or the wall is hit between", () => {
+  // A wall x = 1 from y = -0.6 to 0.6. A row facing it sees through to 2 m (the wall is gone).
+  // Whether the pose is well fixed is the mapper's rule (mapper.test.ts): here yes or no.
+  const wall = [edge(1, -0.6, 0.6)], gone = () => row(() => null), fixedBy = () => true;
+  const made = () => { const check = new PoseCheck(), walls = new Walls(ABOVE, check); walls.found(wall, 0, AT, NO_DOUBT, along(wall)); return { check, walls }; };
+
+  // Not well fixed: nothing.
+  let { walls } = made();
+  for (let i = 1; i <= 5; i++) assert.deepEqual(walls.seenThrough(i, gone(), () => false), []);
+  assert.equal(walls.all().length, 1);
+
+  // Well fixed: the second frame removes it, from the pose check too.
+  const { check, walls: w2 } = made(), w = w2.all()[0];
+  assert.deepEqual(w2.seenThrough(1, gone(), fixedBy), []);
+  assert.deepEqual(w2.seenThrough(2, gone(), fixedBy), [w]);
+  assert.equal(w2.all().length, 0);
+  assert.throws(() => check.covOf(w));
+
+  // A frame that hits it between starts the count again.
+  ({ walls } = made());
+  walls.seenThrough(1, gone(), fixedBy);
+  walls.see(2, AT, NO_DOUBT, facing(1));
+  assert.deepEqual(walls.seenThrough(3, gone(), fixedBy), []);
+  assert.equal(walls.all().length, 1);
+  // Wedges that cross its line within 30 cm of its end (ends are vague) or past it, or that don't see past it, say nothing.
+  const nearEnd = row(() => null, Math.atan2(0.9, 1)), short = row(b => 1.05 / Math.cos(b));
+  for (let i = 4; i <= 8; i++) assert.deepEqual(walls.seenThrough(i, i % 2 ? nearEnd : short, fixedBy), []);
 });

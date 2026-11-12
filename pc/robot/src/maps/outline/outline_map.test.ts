@@ -1,13 +1,16 @@
 // Tests for outline_map.ts, on hand-made sights: the outline starts as a 35 cm circle,
 // grows where sights saw through, lies on a wall seen in three frames, and moves out
-// again when the thing went away. Run with `npm test`.
+// again when the thing went away; a removed wall's spots go. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { OutlineMap, type Edge, type Loop } from "./outline_map.ts";
 import { BANDS, type Sight } from "./sights.ts";
 import { row, sight } from "./test_sights.ts";
+import { NO_DOUBT } from "./pose.ts";
+import type { Wall } from "./walls.ts";
 
 const L2 = BANDS[1];
+const close = (a: number, b: number, eps: number) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
 const lengthOf = (e: Edge) => Math.hypot(e.bx - e.ax, e.by - e.ay);
 const isClosed = (l: Loop) => l.edges.every((e, i) => { const n = l.edges[(i + 1) % l.edges.length]; return Math.hypot(n.ax - e.bx, n.ay - e.by) < 1e-9; });
 // The area inside a loop (its edges run clockwise round the floor).
@@ -54,6 +57,24 @@ test("a thing that went away: the outline moves out to the wall behind it", () =
   const walls = map.outline()[0].edges.filter(e => e.kind === "wall");
   assert.equal(walls.length, 1);
   assert.ok(Math.abs(walls[0].ax - 1.0) < 1e-3);
+});
+
+test("a wall removed: its spots go with it, those 15 cm off it or past its ends stay", () => {
+  // The wall x = 0.9 runs along +y; its hits span y = ±0.32.
+  const wall = (x: number, halfM: number): Wall => ({ number: 1, x, y: 0, angle: Math.PI / 2, halfM, endSd: [0.1, 0.1], cov: [0, 0, 0], surest: NO_DOUBT,
+                                                      sightings: 3, firstFrame: 0, lastFrame: 0, through: 0 });
+  // The outline's edges between hits (wall or rough), and how long they are together.
+  const onHits = (map: OutlineMap) => map.outline()[0].edges.filter(e => e.kind !== "guess");
+  const length = (map: OutlineMap) => onHits(map).reduce((m, e) => m + lengthOf(e), 0);
+  const map = new OutlineMap(L2);
+  times(3, map, () => wallFrame(0.9));
+  map.forget(wall(0.75, 1));           // 15 cm off: nothing goes
+  close(length(map), 0.64, 0.02);
+  map.forget(wall(0.9, 0.15));         // its middle 30 cm: only the hits past y = ±0.15 are left
+  assert.ok(length(map) > 0.1 && length(map) < 0.25, `${length(map)}`);
+  assert.ok(onHits(map).every(e => Math.min(Math.abs(e.ay), Math.abs(e.by)) > 0.15));
+  map.forget(wall(0.9, 1));            // all of it
+  assert.equal(onHits(map).length, 0);
 });
 
 test("a thing hit in the start square: there is still an outline; a hole is an island", () => {

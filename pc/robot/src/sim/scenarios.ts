@@ -26,6 +26,9 @@ const TABLE: Room = [
   ...[[-1.05, -0.35], [-1.05, 0.35], [-0.55, -0.35], [-0.55, 0.35]].map(([x, y]) => round(x, y, 0.02, 8, { highM: 0.3 })),
 ];
 
+// A board between the robot and the room's right wall, 30 cm in front of it.
+const BOARD = (untilStep: number) => box(1.1, -0.6, 1.2, 0.6, { highM: 0.4, untilStep });
+
 export const SCENARIOS: Scenario[] = [
   scenario("square", "An empty 3 x 3 m room; the robot turns 360° in 30° steps in the middle.", [SQUARE], LOOK_ROUND),
   scenario("things", "The same room with a 10 cm box and a table: islands, bands.",
@@ -39,6 +42,9 @@ export const SCENARIOS: Scenario[] = [
            [SQUARE, box(0.7, 0.3, 1.0, 0.6, { ...BOX, untilStep: 12 })], LOOK_ROUND + LOOK_ROUND),
   scenario("box-stays", "The same drive, the box stays: only the drift moves things.",
            [SQUARE, box(0.7, 0.3, 1.0, 0.6, BOX)], LOOK_ROUND + LOOK_ROUND),
+  scenario("board-removed", "A board 1.2 m long and 40 cm high (a wall in every band) is taken away half way through two looks round.",
+           [SQUARE, BOARD(12)], LOOK_ROUND + LOOK_ROUND),
+  scenario("board-stays", "The same drive, the board stays: only the drift moves things.", [SQUARE, BOARD(Infinity)], LOOK_ROUND + LOOK_ROUND),
   scenario("big", "A big room (walls 4 m away, beyond the sensor's reach): guess edges.", [walls(-4, -4, 4, 4)], LOOK_ROUND),
 ];
 

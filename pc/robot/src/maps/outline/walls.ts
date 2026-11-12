@@ -6,6 +6,10 @@
 //   walls.measure(...), walls.apply(...)    the same in two halves, so the pose can take its share between (pose_check.ts)
 //   walls.found(edges, frame, pose, doubt, sights)  new walls where the outline has a wall edge on no known wall:
 //                                           the line through this frame's hits along it
+//   walls.seenThrough(frame, sights, fixed)  walls the frame saw through while the pose was well
+//                                           fixed without them (fixed(wall), mapper.ts); one seen through
+//                                           in REMOVE_FRAMES frames, not hit between, is gone (a thing moved): removed
+//   coords(wall, x, y), between(a, b)       (x, y) along the wall from its middle and across it; the angle between two directions
 //   walls.on(x, y)                          the wall a border point lies on, and the point put on its line
 //   walls.all(), walls.numberNow(n)         the walls; the number a wall has now (two can become one)
 //   priorOf(wall), doubtOf(wall), sureOf(wall)  a wall's whole doubt; its spreads; 0 to 1 (the brightness it is drawn with)
@@ -33,6 +37,7 @@ export interface Wall {
   cov: [number, number, number];
   surest: PoseDoubt;
   sightings: number; firstFrame: number; lastFrame: number;
+  through: number;       // frames that saw through it since it was last hit (seenThrough)
 }
 
 // A frame's hits on one wall as a measurement: z = hw·(the wall's change: offset, turn)
@@ -74,16 +79,21 @@ const PAST_M = 0.3;        // if it saw this far beyond the wall's line
 const CORNER_RAD = 45 * Math.PI / 180, CORNER_M = 0.3; // two walls at this angle, ends this close to where they cross: a corner
 const SNAP_M = 0.12;       // a border point this close to a wall is put on it (drawing): far hits smear by about 7 cm
 const SURE_SD_M = 0.01, UNSURE_SD_M = 0.1;         // drawn brightest at this spread across, faintest at this
+// Seeing through a wall (seenThrough): a wedge crossing its line this far inside its ends
+// and seeing this far beyond it (a sight's reach already ends a margin before what it hit);
+// at least this many wedges in a frame (one alone: far readings smear past real walls);
+// this many such frames, the wall not hit between (by 3 hits or more: a sighting), and it is gone.
+const THROUGH_INSIDE_M = 0.1, THROUGH_PAST_M = 0.1, THROUGH_SIGHTS = 2, REMOVE_FRAMES = 2;
 
 const dir = (w: Wall) => [Math.cos(w.angle), Math.sin(w.angle)] as const;
 // (x, y) in a wall's frame: along it from its middle, and across it (left of its direction).
-function coords(w: Wall, x: number, y: number): { u: number; v: number } {
+export function coords(w: Wall, x: number, y: number): { u: number; v: number } {
   const [dx, dy] = dir(w), px = x - w.x, py = y - w.y;
   return { u: px * dx + py * dy, v: py * dx - px * dy };
 }
 const halfTurn = (a: number) => ((a % Math.PI) + Math.PI) % Math.PI;
 // The angle between two directions, ignoring which way they run (0 to π/2).
-const between = (a: number, b: number) => { const d = halfTurn(a - b); return Math.min(d, Math.PI - d); };
+export const between = (a: number, b: number) => { const d = halfTurn(a - b); return Math.min(d, Math.PI - d); };
 // The across spread² a wall's own doubt gives at `u` along it.
 const wallVar = (w: Wall, u: number) => w.cov[0] + 2 * u * w.cov[1] + u * u * w.cov[2];
 
@@ -191,7 +201,7 @@ export class Walls {
         w.endSd[k] = Math.sqrt(1 - gain) * w.endSd[k];
       }
       this.setEnds(w, ends[0], ends[1]);
-      w.sightings++; w.lastFrame = frame;
+      w.sightings++; w.lastFrame = frame; w.through = 0;
       return { wall: w.number, frame, pose, doubt, hits: m.hits, offM: m.z[0] ?? null, turnRad: m.z[1] ?? null };
     });
     this.merge();
@@ -249,7 +259,7 @@ export class Walls {
       const line = this.check ? fitted(e, sights) : { x: (e.ax + e.bx) / 2, y: (e.ay + e.by) / 2, angle: Math.atan2(e.by - e.ay, e.bx - e.ax),
                                                       halfM: Math.hypot(e.bx - e.ax, e.by - e.ay) / 2, moving: false };
       if (!line) continue;
-      const w: Wall = { number: this.next++, x: line.x, y: line.y, angle: line.angle, halfM: line.halfM, endSd: [NEW_END_SD_M, NEW_END_SD_M], cov: [0, 0, 0], surest: this.check ? NO_DOUBT : doubt, sightings: 0, firstFrame: frame, lastFrame: frame };
+      const w: Wall = { number: this.next++, x: line.x, y: line.y, angle: line.angle, halfM: line.halfM, endSd: [NEW_END_SD_M, NEW_END_SD_M], cov: [0, 0, 0], surest: this.check ? NO_DOUBT : doubt, sightings: 0, firstFrame: frame, lastFrame: frame, through: 0 };
       // Its own doubt (its hits lie within a few cm of it; more while moving: they smear), and the pose's it was seen from.
       const sd = line.moving ? NEW_MOVING_SD_M : NEW_SD_M, own: Wall["cov"] = [sd ** 2, 0, (sd / w.halfM) ** 2];
       if (this.check) { this.check.added(w, pose, own); w.cov = this.check.covOf(w); } else {
@@ -263,6 +273,24 @@ export class Walls {
     this.corners();
     this.sync();
     return made;
+  }
+
+  // The frame (its sights placed by the corrected pose) against each wall the pose is well
+  // fixed without (fixed(wall): the mapper's rule). Otherwise seeing through a wall may be
+  // the pose's error, and the frame says nothing about it (doc/OUTLINE_MAP_PLAN.md, idea 3).
+  // A wall hit this frame is not seen through. Gives the walls removed.
+  seenThrough(frame: number, sights: Sight[], fixed: (w: Wall) => boolean): Wall[] {
+    const gone: Wall[] = [];
+    for (const w of this.walls) {
+      if (w.lastFrame === frame || !fixed(w)) continue;
+      if (sights.filter(s => crosses(w, s, this.band)).length < THROUGH_SIGHTS) continue;
+      if (++w.through >= REMOVE_FRAMES) gone.push(w);
+    }
+    if (!gone.length) return gone;
+    for (const w of gone) this.check?.removed(w);
+    this.walls = this.walls.filter(w => !gone.includes(w));
+    this.sync();
+    return gone;
   }
 
   on(x: number, y: number): { wall: Wall; x: number; y: number } | null {
@@ -298,7 +326,7 @@ export class Walls {
       keep.endSd = [first.sd, last.sd];
       this.check?.removed(other);
       this.recentre(keep, (from + to) / 2);
-      Object.assign(keep, { number: a.number, halfM: (to - from) / 2, sightings: a.sightings + b.sightings,
+      Object.assign(keep, { number: a.number, halfM: (to - from) / 2, sightings: a.sightings + b.sightings, through: Math.min(a.through, b.through),
                             surest: { xyM: Math.min(a.surest.xyM, b.surest.xyM), yawRad: Math.min(a.surest.yawRad, b.surest.yawRad) },
                             firstFrame: Math.min(a.firstFrame, b.firstFrame), lastFrame: Math.max(a.lastFrame, b.lastFrame) });
       this.walls = this.walls.filter(w => w !== other);
@@ -367,8 +395,27 @@ function fitted(e: Edge, sights: Sight[]): (Pick<Wall, "x" | "y" | "angle" | "ha
   return { x: l.x + dx * s, y: l.y + dy * s, angle: l.angle, halfM: (to - from) / 2, moving };
 }
 
+// Where the sight's middle ray crosses the wall's line, if it saw `pastM` beyond it at the
+// band's heights: u along the wall, t along the ray (on the floor plan). null: it runs
+// nearly along the wall (it says little), the line is behind it, it didn't see that far
+// past it (a hit smeared behind the wall is no opening), or it passed over the band.
+function seenPast(w: Wall, s: Sight, band: Band, pastM: number): { u: number; t: number } | null {
+  const p = coords(w, s.x, s.y), du = Math.cos(s.bearing - w.angle), dv = Math.sin(s.bearing - w.angle);
+  if (Math.abs(dv) < MIN_INCIDENCE * 0.5) return null;
+  const t = -p.v / dv;
+  if (t <= 0 || s.reachM < t + pastM || !seesBand(band, s, t)) return null;
+  return { u: p.u + t * du, t };
+}
+
+// Does the sight's wedge pass through the wall: seen THROUGH_PAST_M past it, inside its ends
+// by its wedge's width and two of the end's spreads (ends are vague).
+function crosses(w: Wall, s: Sight, band: Band): boolean {
+  const c = seenPast(w, s, band, THROUGH_PAST_M);
+  return c !== null && Math.abs(c.u) <= w.halfM - Math.max(THROUGH_INSIDE_M, c.t * Math.tan(s.halfWidth), 2 * w.endSd[c.u < 0 ? 0 : 1]);
+}
+
 const lineOf = (x: number, y: number, angle: number, halfM: number): Wall =>
-  ({ number: 0, x, y, angle, halfM, endSd: [0, 0], cov: [0, 0, 0], surest: NO_DOUBT, sightings: 0, firstFrame: 0, lastFrame: 0 });
+  ({ number: 0, x, y, angle, halfM, endSd: [0, 0], cov: [0, 0, 0], surest: NO_DOUBT, sightings: 0, firstFrame: 0, lastFrame: 0, through: 0 });
 
 // Where the frame saw the wall end, each side: between the last hit on it and the first
 // wedge whose middle ray crossed its line past that hit (closer than END_GAP_M) and saw
@@ -381,14 +428,10 @@ function endsSeen(w: Wall, hits: Taken[], sights: Sight[], band: Band): EndSeen[
     const on = Math.max(...hits.map(h => side * h.u));
     let past: { u: number; wedge: number } | null = null;
     for (const s of sights) {
-      const p = coords(w, s.x, s.y), du = Math.cos(s.bearing - w.angle), dv = Math.sin(s.bearing - w.angle);
-      if (Math.abs(dv) < MIN_INCIDENCE * 0.5) continue; // along the wall: it says little about where it ends
-      const t = -p.v / dv;                              // how far along the ray it crosses the line
-      // The line is behind it, it didn't see well past it (a hit smeared behind the wall is
-      // no opening), or it passed over the band.
-      if (t <= 0 || s.reachM < t + PAST_M || !seesBand(band, s, t)) continue;
-      const u = side * (p.u + t * du);
-      if (u > on && u - on <= END_GAP_M && (!past || u < past.u)) past = { u, wedge: t * Math.tan(s.halfWidth) };
+      const c = seenPast(w, s, band, PAST_M);
+      if (!c) continue;
+      const u = side * c.u;
+      if (u > on && u - on <= END_GAP_M && (!past || u < past.u)) past = { u, wedge: c.t * Math.tan(s.halfWidth) };
     }
     if (!past) continue;
     const u = side * (on + past.u) / 2;

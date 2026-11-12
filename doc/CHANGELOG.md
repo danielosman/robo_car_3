@@ -5,6 +5,54 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 12 Nov 2026: the outline map, step D (removal)
+
+The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.
+
+- **First, the pose check's weak spot** (with noise but no drift the pose was pushed
+  up to 30 cm off). The plan's guess, still frames counting as new each time, was
+  tried: the n-th still frame in a row counted 1/n. Mixed (`door` better, `loop`
+  worse, most runs a little worse with drift): dropped. Traced instead: it happens
+  while driving through the door, moving frames shifting the pose 3-8 cm each; in
+  `loop` the error stays within the pose's own doubt. Left open.
+- **Built:** `walls.seenThrough()` and `fixedApart()` (`walls.ts`): a wall seen
+  through while the pose is well fixed goes, from the pose check too; the mapper
+  keeps the last check against two walls and lists the walls removed
+  (`mapper.removed()`); scenarios `board-removed` and `board-stays`.
+- **Found on the simulator:**
+  - The box of `box-removed` never was a wall (its sides are 30 cm, a wall needs
+    40): hence the board, 1.2 m long and in every band.
+  - Both walls fixing the pose in the same frame almost never happens (the view is
+    45°): now the last such check counts while odometry added at most 2 cm and 3°.
+  - Seeing 30 cm past the line (as for wall ends) never happened behind the board: a
+    sight ends 15 cm before what it hits. Now 10 cm. Without noise the board then
+    goes at the first look with the pose fixed.
+  - One wedge a frame removed real room walls (far readings smear past them); two
+    are needed. A wedge crossing near a wall's end did too: the margin includes two
+    of the end's spreads.
+  - A removed L1 or L2 wall came back in the same frame, made from the outline's old
+    hits of the board (short, with vague ends: then never seen through again).
+    Fitting new L1 and L2 walls to the frame's hits, as "above" does, lost most of
+    them (`square`: none): dropped. Instead the outline forgets the spots on a
+    removed wall's line.
+- **Review (fresh subagent):** nothing blocking. Fixed:
+  - the "just checked" window compared the fix's pose with the pose now, so a full
+    turn on the spot counted as no turn: now the doubt odometry adds is summed frame
+    by frame;
+  - the test of "a wall doesn't fix the pose for its own removal" passed without that
+    rule (its other wall was parallel);
+  - the rule was split between `mapper.ts` and `walls.ts`: now `fixedWithout()` in
+    the mapper owns it (and is tested on its own), `seenThrough` gets a yes or no;
+  - walls of the last fix that were merged away or removed since still counted;
+  - `forget()` had no test and its own geometry (now `coords`); `crosses()` and
+    `endsSeen()` repeated the seeing-past test (now one `seenPast()`); a merge kept
+    one wall's count of frames seen through (now the smaller); a resync every frame;
+  - the plan held history and gave the board's gap as both 30 and 40 cm.
+- **Measured:** no standing wall removed (9 scenarios, 10 seeds); the board gone in
+  7 of 10 seeds (else one L2 wall stays), without noise at steps 12-13; L1 and L2
+  walls and the pose errors as before step D; the stored drive unchanged (nothing
+  removed, 2.8 s).
+
 ## 12 Nov 2026: the outline map, step C (the pose check)
 
 The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.

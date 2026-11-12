@@ -3,6 +3,7 @@
 // closed outline, and a closed island round each thing standing in it.
 //   new OutlineMap(band)  the floor starts as a 35 cm circle round the start
 //   map.add(sights)       one frame's sights (one call a frame: a spot counts the frames it was hit in)
+//   map.forget(wall)      a wall taken as gone (walls.ts, seenThrough): the spots on its line go too
 //   map.outline(walls)    the outline and the islands, as edges of three kinds (shape.ts);
 //                         border points close to a known wall (walls.ts) are put on it
 // The map keeps 5 cm squares. A square is seen free when a sight's wedge passed through
@@ -15,7 +16,7 @@
 import { bordersOf, connected, keyOf, type Key } from "./border.ts";
 import { edgesOf, type BorderPoint, type Edge } from "./shape.ts";
 import { heightsAt, inBand, seesBand, type Band, type Sight } from "./sights.ts";
-import { sureOf, type Walls } from "./walls.ts";
+import { coords, sureOf, type Wall, type Walls } from "./walls.ts";
 
 export type { Edge };
 // A closed run of edges: the outline of the seen-free floor, or an island in it.
@@ -40,6 +41,7 @@ const SAME_AGAIN = 8;
 // Closer to the sensor than this a wedge is too thin to cover a band's lower part (the
 // robot stands there): what it saw through counts as free for every band.
 const NEAR_M = 0.45;
+const FORGET_M = 0.1;      // a removed wall's spots: this close to its line, inside its ends
 const SMALL_HOLE = 12;    // a hole with this few border points and no hit is a gap between wedges, not an island
 
 interface Spot {
@@ -72,6 +74,14 @@ export class OutlineMap {
     const own = inBand(sights, this.band);
     for (const s of own) this.hit(s);
     for (const s of own) this.seeThrough(s);
+  }
+
+  // Its spots would stand on and make the wall again before the sights wear them down.
+  forget(w: Wall): void {
+    for (const [key, spot] of this.spots) {
+      const p = middle(spot), { u, v } = coords(w, p.x, p.y);
+      if (Math.abs(u) <= w.halfM && Math.abs(v) <= FORGET_M) this.spots.delete(key);
+    }
   }
 
   outline(walls?: Walls): Loop[] {
