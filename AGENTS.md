@@ -15,6 +15,13 @@ conventions"). These rules are about how to answer Daniel.
 - End with what is open or what you need from Daniel, if anything.
 - Docs follow the same rules.
 
+## Physical tests
+
+- During a physical test with the robot, Daniel starts and stops the server. Don't start,
+  stop or restart it, also when he reports a problem: say what is wrong and what to do.
+- A test server of your own (its own database and ports, as in the README) is fine for
+  tests without the robot.
+
 ## Docs
 
 - A plan holds only how things are now and what is left. History (what was done,
