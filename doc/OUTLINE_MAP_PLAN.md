@@ -480,9 +480,11 @@ From the reviews of steps C, D and E; none blocks step F.
 - Step E: `/map`'s `path` is still odometry's (the page uses it only without an
   outline map; `robot map --png` takes the corrected one).
 - Step F: c_robot is held twice on the PC (`Corrections` for the live pose and goto,
-  the store's `robot_corrections` for its readers), both from the same "corrected".
+  the store's `robot_corrections` for its readers), both from the same "corrected"
+  (sent again on each connection).
 - Step F: a snapshot within about 100 ms of a `correct` carries a ToF frame stamped
-  before it (the snapshot keeps the last frame). The PC never asks for one then.
+  before it (the snapshot keeps the last frame): a `robot snap` typed right after a
+  steer can. Only that snapshot's ToF dots are off, by the jump.
 - Step F: a goto sent before the server's first snapshot of a run (a server restarted
   mid-boot, about 1 s) goes unturned.
 - Step F: the C and TS transforms are twins, held together only by one shared sample
@@ -542,7 +544,13 @@ Robot (PicoA):
   every message after "corrected" is corrected by it.
 - Refused while a move runs, while a snapshot is asked for or going out, or while the
   bulk lane holds anything: "corrected" goes on the control lane, which goes first,
-  and would overtake older frames.
+  and would overtake older frames. Sent again on every new connection (if not 0).
+- No limit on the size of a correction (Daniel, 15 Nov).
+- **The robot's own map:** old cells stay where they were placed; new frames are placed
+  by the corrected pose. Cells drawn from a drifted pose (the frames since the last
+  correction) are off from the robot by the jump until new frames redraw them; the
+  move's still time before it (200 ms, 2 frames) and the stop margin (15 cm) cover
+  most of that. Cells seen before the drift agree with the corrected pose.
 
 PC:
 
@@ -575,7 +583,9 @@ as without), `fakerobot.test.ts` (replayed and live corrections stored).
 To look at, on a real drive:
 
 - `robot map --robot --png` (the robot's own map) and `robot map --png` (the PC's)
-  agree from the first correction on.
+  agree to about the logged corrections: the robot places each move's frames by the
+  correction it had then (one move behind), the PC each frame by its own corrected
+  pose, and the robot's old cells are never moved.
 - After each "correction sent", `robot status`'s pose equals the page's robot to 1 cm
   and 0.5°. The log's "pose corrected by" line compares the best pose with `raw`, as
   before.
@@ -605,6 +615,11 @@ To look at, on a real drive:
   a pose: a move queued before it would make a pose wrong; not a change: sending it
   twice does no harm); the robot's own cell map and steering use it. Past frames,
   cells and dots are not moved.
+
+## Decided (Daniel, 15 Nov)
+
+- No limit on how far one correction moves the robot's pose: the correction is what
+  the walls say; a limit would be a magic number.
 
 ## Open for Daniel
 

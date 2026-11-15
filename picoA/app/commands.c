@@ -70,6 +70,15 @@ static void print_correction(void) {
            (double)(yaw * DEG_PER_RAD));
 }
 
+// "corrected": the correction applied now, so the PC files what follows by it (wire.h).
+static void send_corrected(void) {
+    wire_corrected_t k;
+    body_correction(&k.x_m, &k.y_m, &k.yaw_rad);
+    uint8_t message[WIRE_HEADER + WIRE_CORRECTED_SIZE];
+    uint32_t len = wire_encode_corrected(&k, message);
+    link_pc_send_control(message, len);
+}
+
 static void print_status(void) {
     print_body();
     print_correction();
@@ -168,12 +177,9 @@ static void run(const char *line, uint32_t n) {
                !link_pc_bulk_waiting() && !snapshot_busy()) {
         // Nothing older waits in the bulk lane, so "corrected" (control, sent first) can't
         // overtake a frame or snapshot made with the old correction.
-        wire_corrected_t k = {.x_m = (float)a / 1000, .y_m = (float)b / 1000, .yaw_rad = (float)c / 100 * RAD_PER_DEG};
-        pose_correct(k.x_m, k.y_m, k.yaw_rad);
+        pose_correct((float)a / 1000, (float)b / 1000, (float)c / 100 * RAD_PER_DEG);
         print_correction();
-        uint8_t message[WIRE_HEADER + WIRE_CORRECTED_SIZE];
-        uint32_t len = wire_encode_corrected(&k, message);
-        link_pc_send_control(message, len);
+        send_corrected();
         answer(n, WIRE_END_OK);
     } else if (IS("mode %7s", 1, word) && (!strcmp(word, "idle") || !strcmp(word, "manual"))) {
         if (!strcmp(word, "idle")) stop();
@@ -242,6 +248,13 @@ void commands_status(wire_status_t *s) {
 void commands_update(void) {
     answer_ended();
     bool usb = stdio_usb_connected(), wifi = link_pc_connected();
+    // A new connection: the correction again, if there is one (a "corrected" lost with
+    // the old connection would leave the PC filing what follows by the one before).
+    if (wifi && !wifi_was_connected) {
+        float x, y, yaw;
+        body_correction(&x, &y, &yaw);
+        if (x != 0 || y != 0 || yaw != 0) send_corrected();
+    }
     if ((usb && !usb_was_connected) || (wifi && !wifi_was_connected)) {
         greeted = false;
         greeting_time = make_timeout_time_us(GREETING_DELAY_US);

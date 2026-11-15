@@ -25,19 +25,20 @@ function setup(o: { stored?: Planar[]; answers?: boolean } = {}) {
     store: { corrections: async () => (o.stored ?? []).map(c => ({ c })) },
     note: (t: string) => notes.push(t),
   };
-  let answers = o.answers ?? true;
+  let answers: boolean | "refuse" = o.answers ?? true;
   const inner = {
     async run(c: Command): Promise<Outcome> { ran.push(c); return c.name === "snap" ? { result: "ok", snapshot: 3 } : { result: "ok" }; },
     async send(text: string): Promise<DoneRecord | string> {
       sent.push(text);
       if (!answers) return "no answer";
+      if (answers === "refuse") return done("refused");
       const [x, y, cdeg] = text.split(" ").slice(1).map(Number);
       corrections.heard("b1", { x: x / 1000, y: y / 1000, yaw: cdeg / 100 * Math.PI / 180 });
       return done("ok");
     },
   };
   const corrections = new Corrections(inner, deps);
-  return { corrections, sent, ran, notes, pc, deps, answer: (on: boolean) => { answers = on; } };
+  return { corrections, sent, ran, notes, pc, deps, answer: (on: boolean | "refuse") => { answers = on; } };
 }
 
 test("sent before a move when it differs, once; a goto's point as given once the robot has it; the log", async () => {
@@ -83,4 +84,15 @@ test("c_robot from the store (a server restarted mid-boot); the live pose back t
   deps.live.boot = "b2";
   await corrections.run({ name: "drive", values: [20] });
   assert.deepEqual(sent, []);
+});
+
+test("refused by the robot (something still on its bulk lane): logged, c_robot kept, sent again", async () => {
+  const { corrections, sent, notes, answer } = setup();
+  answer("refuse");
+  await corrections.run({ name: "drive", values: [20] });
+  assert.match(notes[0], /not taken by the robot \(refused\)/);
+  assert.deepEqual(await corrections.robotHas("b1"), { x: 0, y: 0, yaw: 0 });
+  answer(true);
+  await corrections.run({ name: "drive", values: [20] });
+  assert.equal(sent.length, 2);
 });

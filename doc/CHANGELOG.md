@@ -30,6 +30,19 @@ and the PC; wire 5 → 6.
   still said goto takes odometry. The logged turn wasn't wrapped; the PC's copy of the
   robot's range limit dropped (the robot refuses). Left open: see the plan, "Left open".
 - Also: four stale references in the architecture diagram fixed (three from step E).
+- **Full review before the robot test (fresh subagent):** no bug in the design. It
+  proposed a limit of 5 cm and 3° on one correction (the robot's newest cells are off
+  by a jump until new frames redraw them); Daniel declined it: no magic numbers, the
+  correction is what the walls say. Fixed: "corrected" is sent again on every new
+  connection (one lost with a WiFi drop left the PC filing by the old correction); the
+  fake robot numbers its snapshots on from the last one and corrects their poses
+  (re-sent old numbers made the PC rebuild its map and send corrections back and
+  forth in a dry run); a goal click before the outline map has loaded is refused;
+  tests for body and pose together and for a refused correct; the plan's "maps agree"
+  check made "agree to about the logged corrections".
+- **Dry run** with the fake robot replaying `cc0e4e65` into a test server: the PC's
+  correction (1.9 cm, -1.3°) sent once before the first move, not again for three more
+  moves; the row stored (0, -5 mm, -1.32°).
 
 ## 12 Nov 2026: the outline map, step E (the page)
 

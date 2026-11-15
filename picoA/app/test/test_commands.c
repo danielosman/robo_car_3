@@ -5,7 +5,8 @@
 // greeting after a server connects, a line typed on USB still taken, config pre_ms
 // and post_ms (the moves' still times; out of range refused), and the status the PC
 // gets (pose, mode, the running move; no peaks since step 4c); correct: the pose
-// corrected, "corrected" sent before the answer, refused during a move or out of range. The test plays link_pc.h,
+// corrected, "corrected" sent before the answer, refused during a move or out of range;
+// "corrected" again on a new connection. The test plays link_pc.h,
 // body, behaviour, move, the map and snapshot. Run from the
 // repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -Ibuild/host -o build/test_commands picoA/app/test/test_commands.c -lm && build/test_commands
@@ -72,9 +73,9 @@ const odometry_report_t *body_odometry(void) { return &odometry; }
 const status_report_t *body_status(void) { return &body_st; }
 void body_motors(bool on) { motors = on; }
 uint32_t body_imu_received(void) { return 0; }
-void body_correction(float *x, float *y, float *yaw) { *x = *y = *yaw = 0; }
 static float corrected_to[3];
 static int corrections;
+void body_correction(float *x, float *y, float *yaw) { *x = corrected_to[0]; *y = corrected_to[1]; *yaw = corrected_to[2]; }
 void pose_correct(float x, float y, float yaw) { corrected_to[0] = x; corrected_to[1] = y; corrected_to[2] = yaw; corrections++; }
 uint32_t body_imu_lost(void) { return 0; }
 
@@ -260,6 +261,17 @@ int main(void) {
     for (int i = 2; i < 8; i++) assert(answer_sent(i).end == WIRE_END_REFUSED);
     printf("ok: correct: the pose corrected, \"corrected\" before the answer; refused out of range, during a move, "
            "while bulk waits or a snapshot is on its way\n");
+    // A new connection: "corrected" again, the correction the robot has.
+    out_n = 0;
+    connected = false;
+    loop(1);
+    connected = true;
+    loop(1);
+    assert(out_n == 1);
+    wire_message_t again = sent(0);
+    assert(wire_decode_corrected(&again, &k) && k.x_m == 0.12f && k.y_m == -0.045f);
+    out_n = 0;
+    printf("ok: \"corrected\" sent again on a new connection\n");
 
     // A line typed on USB still works, its number after '#'.
     out_n = 0;

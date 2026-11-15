@@ -14,7 +14,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { RobotLink, type DoneRecord, type LivePose } from "./link.ts";
-import { FakeRobot, type FakeSnapshot } from "./fakerobot.ts";
+import { FakeRobot, restamped, type FakeSnapshot } from "./fakerobot.ts";
 import { SnapshotAssembler, parseSnapshot } from "./snapshot.ts";
 import { CommandRunner, StoredSnapshots } from "./api/runner.ts";
 import { parseAction, parseSteer, type Command } from "./api/commands.ts";
@@ -177,4 +177,15 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     rmSync(from, { recursive: true, force: true });
     rmSync(to, { recursive: true, force: true });
   }
+});
+
+test("a stored snapshot sent again: numbered on, its pose and ToF frame corrected as the robot's, still whole", { skip }, () => {
+  const bytes = new SnapshotAssembler().push(readFileSync(FIRMWARE)).find(b => parseSnapshot(b).pose && parseSnapshot(b).tof)!;
+  const was = parseSnapshot(bytes), c = { x: 0.1, y: -0.2, yaw: 0.3 }, now = parseSnapshot(restamped(bytes, 77, c));
+  assert.equal(now.sequence, 77);
+  const near = (a: number, b: number, d: number) => Math.abs(a - b) < d;
+  const p = { x: Math.cos(0.3) * was.pose!.x - Math.sin(0.3) * was.pose!.y + 0.1, y: Math.sin(0.3) * was.pose!.x + Math.cos(0.3) * was.pose!.y - 0.2 };
+  assert.ok(near(now.pose!.x, p.x, 1e-5) && near(now.pose!.y, p.y, 1e-5) && near(now.pose!.yaw, was.pose!.yaw + 0.3, 1e-5));
+  assert.ok(near(Math.sin(now.tof!.yaw - was.tof!.yaw - 0.3), 0, 1e-3), "the ToF frame turned too (packed to 0.01°)");
+  assert.deepEqual(now.camera, was.camera);
 });

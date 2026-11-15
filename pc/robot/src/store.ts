@@ -576,7 +576,6 @@ function moveRow(m: Record<string, unknown>): MoveRow {
   };
 }
 
-// Frame rows and their zone rows (both by number, the zones by row and column) as frames.
 // A boot's corrections, oldest first.
 async function correctionsIn(c: DuckDBConnection, boot: string, withTime?: false): Promise<CorrectionRow[]>;
 async function correctionsIn(c: DuckDBConnection, boot: string, withTime: true): Promise<(CorrectionRow & { atMs: number })[]>;
@@ -585,6 +584,7 @@ async function correctionsIn(c: DuckDBConnection, boot: string): Promise<(Correc
   return rows.map(r => ({ messageNumber: Number(r.message_number), atMs: msOf(r.arrived_at), c: { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) } }));
 }
 
+// Frame rows and their zone rows (both by number, the zones by row and column) as frames.
 function framesOf(frames: Record<string, unknown>[], zones: Record<string, unknown>[]): StoredFrame[] {
   const byNumber = new Map<number, Record<string, unknown>[]>();
   for (const z of zones) {

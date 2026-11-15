@@ -16,6 +16,7 @@
 //                          sends "corrected" (wire.h), then the answer; refused while a move runs,
 //                          a snapshot is asked for or going out, or the bulk lane holds anything
 //                          (control goes first: "corrected" would overtake it; the PC sends it again)
+//                          "corrected" goes again on every new connection to the PC (if not 0)
 //   mode idle|manual       idle also stops, as stop does
 //   stop                   motors off, mode idle
 //   status                 PicoA's and PicoB's state, printed (for a serial monitor)

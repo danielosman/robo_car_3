@@ -3,7 +3,8 @@
 // respecting PicoB's safety stops, PicoB restarting, the connection timeout,
 // keeping every report (several can arrive in one loop iteration), and PicoB's imu
 // records on PicoA's clock (dropped until the clock is known, both clocks wrapping,
-// the newest kept, the lost counted), the PC's correction on every report,
+// the newest kept, the lost counted), the PC's correction on every report (with pose.c:
+// applied once, the history moved once),
 // against a fake link with the test playing PicoB. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon/test/fakes -Icommon -o build/test_body picoA/app/test/test_body.c && build/test_body
 #include <assert.h>
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include "units.h"
 #include "../body.c"
+#include "../pose.c" // the two together: pose takes body's reports
 
 // The fake PicoB.
 static bool b_alive;             // sends ODOMETRY and STATUS
@@ -238,6 +240,19 @@ int main(void) {
     assert(body_odometry_get(at, &r, &t_us) && fabsf(r.x_m - 2.1f) < 1e-5f && fabsf(r.y_m - 0.5f) < 1e-5f);
     body_correct(0, 0, 0);
     assert(fabsf(body_odometry()->x_m - 3.0f) < 1e-5f);
+    // With pose.c: a report taken before a correction is moved once in the history, one
+    // arriving after it comes corrected once (not twice).
+    pose_update();
+    pose_correct(0.1f, 0, 0);
+    pose_t now;
+    assert(pose_now(&now) && fabsf(now.x_m - 3.1f) < 1e-5f);
+    b_odometry.x_m = 3.5f;
+    fake_link_deliver(MESSAGE_ODOMETRY, &b_odometry, sizeof b_odometry);
+    body_update();
+    pose_update();
+    assert(pose_now(&now) && fabsf(now.x_m - 3.6f) < 1e-5f);
+    pose_correct(0, 0, 0);
+    assert(pose_now(&now) && fabsf(now.x_m - 3.5f) < 1e-5f);
     printf("ok: the PC's correction: on every report, the kept ones moved, a new one replaces the old\n");
 
     // imu records. PicoB restarts: its clock isn't known until its first report, so a

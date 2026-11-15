@@ -303,7 +303,9 @@ function toast(text) {
 
 function clicked(x, y) {
   if (canSteer()) {
-    // The place clicked, on the map (the server turns it into the robot's frame).
+    // The place clicked, on the map (the server turns it into the robot's frame). Without the
+    // outline map (still loading) the map is drawn by odometry: the place would be off.
+    if (!outline && snapshots.length) { toast("The outline map isn't loaded yet: no goal by click"); return; }
     const cx = Math.round(x * 100), cy = Math.round(y * 100);
     if (Math.abs(cx) > GOTO_MAX_CM || Math.abs(cy) > GOTO_MAX_CM) { toast(`A goal is at most ${GOTO_MAX_CM} cm from the start on each axis`); return; }
     goal = { x, y, command: `steer g${cx},${cy}` };

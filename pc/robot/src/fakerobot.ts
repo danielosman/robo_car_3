@@ -8,13 +8,16 @@
 //    start and end (no frames, no imu batches), sends its status 4 times a second and
 //    its console lines, takes the PC's correction as the robot does (its pose moved,
 //    "corrected" before the answer), and for `snap` the boot's next stored
-//    snapshot, one after another, in parts as the robot does. It drives its pose at
+//    snapshot's content, one after another, numbered on from the last one sent and its
+//    poses corrected as the robot's would be (restamped), in parts as the robot does. It drives its pose at
 //    the robot's speeds (10 cm/s, 29°/s); it knows no map, so it never meets an obstacle.
 //   npm run fakerobot -- <boot id> [--speed=<n>] [--no-replay]   (the database: ROBOT_DB, or recordings/robot2.duckdb)
 // Point it at a test server with a database of its own (README, "The page without the robot").
 import net from "node:net";
+import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { parseSnapshot } from "./snapshot.ts";
+import { packTof, unpackTof } from "./tof_format.ts";
 import { ROBOT_PORT } from "./link.ts";
 import { corrected, NO_CORRECTION, uncorrected, type Planar } from "./correction.ts";
 import { DB_PATH, Store, type Replayed } from "./store.ts";
@@ -26,6 +29,27 @@ import {
 const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, GOTO_MAX_M = 3, STILL_MS = 200;
 
 export interface FakeSnapshot { bytes: Buffer; sequence: number; pose: { x: number; y: number; yaw: number } | null }
+
+// A stored snapshot as the fake robot sends it again: numbered `sequence`, its pose and its
+// ToF frame's corrected by c (as the robot applies its correction); the CRC made again.
+export function restamped(bytes: Buffer, sequence: number, c: Planar): Buffer {
+  const b = Buffer.from(bytes), length = b.readUInt32LE(5);
+  for (let at = 9; at < length - 4;) {
+    const type = b[at], n = b.readUInt32LE(at + 1), p = b.subarray(at + 5, at + 5 + n);
+    if (type === 1) p.writeUInt32LE(sequence >>> 0, 4);
+    if (type === 2) {
+      const q = corrected(c, { x: p.readFloatLE(4), y: p.readFloatLE(8), yaw: p.readFloatLE(12) });
+      p.writeFloatLE(q.x, 4); p.writeFloatLE(q.y, 8); p.writeFloatLE(q.yaw, 12);
+    }
+    if (type === 4) {
+      const f = corrected(c, unpackTof("compact", Buffer.from(p)));
+      packTof("compact", { ...f, yaw: Math.atan2(Math.sin(f.yaw), Math.cos(f.yaw)) }).copy(p);
+    }
+    at += 5 + n;
+  }
+  b.writeUInt32LE(zlib.crc32(b.subarray(0, length - 4)) >>> 0, length - 4);
+  return b;
+}
 
 // The snapshots among a boot's stored messages, as the robot sends them.
 export function snapshotsOf(messages: Replayed[]): FakeSnapshot[] {
@@ -53,6 +77,7 @@ export class FakeRobot {
   private correction: Planar = NO_CORRECTION; // the PC's, as the robot keeps it (commands.h, correct)
   private mode = "manual";
   private next = 0;
+  private sequence = 0;    // the last snapshot number sent (the replay's too): each new one is the next
   private moves = 0;       // numbered so far (the replay's too)
   private replaying = false;
   private timers: NodeJS.Timeout[] = [];
@@ -125,7 +150,7 @@ export class FakeRobot {
         this.pose = { x: p.x, y: p.y, yaw: p.yaw };
         this.socket.write(encodeStatus({ x: p.x, y: p.y, yaw: p.yaw, mode: p.mode, action: p.action, rssi: p.rssi ?? 0 }));
       } else if (m.type === "corrected") this.socket.write(encodeCorrected(m.c));
-      else this.sendParts(m.bytes);
+      else { this.sequence = Math.max(this.sequence, parseSnapshot(m.bytes).sequence); this.sendParts(m.bytes); }
     }
     this.replaying = false;
     this.say(`Replay of boot ${this.opts.bootId} done; taking commands\n`);
@@ -190,9 +215,9 @@ export class FakeRobot {
   private sendSnapshot(n: number | null): void {
     const snapshots = this.opts.snapshots;
     if (!snapshots.length) { if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT }); return; }
-    const s = snapshots[this.next++ % snapshots.length];
-    this.sendParts(s.bytes);
-    if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT, snapshot: s.sequence }, s.pose ?? this.pose);
+    const s = snapshots[this.next++ % snapshots.length], sequence = ++this.sequence;
+    this.sendParts(restamped(s.bytes, sequence, this.correction));
+    if (n !== null) this.answer(n, "ok", { has: HAS.SNAPSHOT, snapshot: sequence }, s.pose ? corrected(this.correction, s.pose) : this.pose);
   }
 
   private command(n: number, text: string): void {
