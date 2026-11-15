@@ -621,6 +621,15 @@ To look at, on a real drive:
 - No limit on how far one correction moves the robot's pose: the correction is what
   the walls say; a limit would be a magic number.
 
+## Next (after the drive of 15 Nov, boot `0a203718`)
+
+The correction was worse than odometry on the real drive (CHANGELOG, 15 Nov). It is
+switched off (`robot config correct`) until a replay of that drive ends at least as
+close to the measured end (15.5 cm forward, 0.5 cm right, 0°; 18° after the look round)
+as odometry does (13 cm, -3°). The cause: a wall made too early from a few far hits of
+two surfaces, and trusted too much. Also: the floor-first rule blocks a drive's start
+for one unseen floor cell beside the path (PicoA, `cell_map.c`/`room.c`).
+
 ## Open for Daniel
 
 1. **A real drive**: one that goes round and comes back to its start. It needs PicoA

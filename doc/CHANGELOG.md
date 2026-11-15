@@ -5,6 +5,33 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 15 Nov 2026: the first drive with step F (boot `0a203718`)
+
+PicoA flashed with step F (wire 6); PicoB unchanged.
+
+- **Drive:** `rotate 0`, a look round (12 × 30°), then a 1 m square turning left in 30°
+  steps, the last side a goto to (0, 0). Every move ended ok; every correction was
+  taken; the robot's correction always equalled the PC's. Side 3 was refused at first
+  ("obstacle 15 cm ahead (map)"): the floor-first rule (`cell_map.c`, 25 cm) counts
+  floor not yet seen with the 15 cm stop margin, so one such cell beside the path
+  blocks the start; a 30° turn left and back let it see the cell.
+- **Measured by Daniel:** after the look round the robot faced 18° (odometry 13°, PC
+  23°). At the end: 15.5 cm forward, 0.5 cm right, 0° (odometry 13 cm, -3°; PC 0 cm,
+  +4°). The ToF agrees: the wall ahead reads 12-16 cm closer than at the start.
+- **So the correction made the pose worse.** Odometry is far better than the simulator
+  assumed (2.5 cm and 3° after about 4 m and two full turns; "30° comes out as 31°" is
+  the turn, not odometry's error).
+- **Why (offline replay):** the only wall of band "above" was made at the robot's first
+  frames from 5 far hits (184-201 cm, 38 cm span) of two surfaces at different depths:
+  a line at -65°, where the wall is square to the robot. Its doubt was set from fixed
+  numbers (5 cm, and its edge's length), not from those hits, and the filter then
+  trusted it (0.8 cm, 2.2°). Without the pose check (walls looked for every 10 frames
+  only) the band's walls come out at -85° and -95°. Two quick tries (each half of the
+  hits must run the line's way; the outline's edge as the new wall) did not help;
+  reverted.
+- `robot config correct on|off`, off by default, until the correction is better than
+  odometry on this drive's replay.
+
 ## 15 Nov 2026: the outline map, step F (the correction sent to the robot)
 
 The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). Changes PicoA (not flashed)
