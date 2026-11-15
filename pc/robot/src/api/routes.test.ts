@@ -57,7 +57,7 @@ async function setUp(chat?: Chat) {
   live.setPose(livePose({ type: "status", x: 0.43, y: -0.04, yaw: 30 * Math.PI / 180, mode: "manual", action: "", rssi: -58 }));
   const queue = new CommandQueue(new CommandRunner(robot, snapshots), (a, s) => log.answer(a, s));
   const maps = new CellMaps(store), outlines = new OutlineMaps(store, maps);
-  const app = createApi({ store, maps, outlines, live, queue, log, snapshots, config: { autoSnap: true }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
+  const app = createApi({ store, maps, outlines, live, queue, log, snapshots, config: { autoSnap: true, correct: false }, recordingsDirectory: directory, bootFolders: new BootFolders(directory),
                           chat, modelName: "gemma-fake" });
   const post = async (command: string, body = "", query = "") => {
     const r = await app.request(`/api/robot/${command}${query}`, { method: "POST", body });
@@ -98,10 +98,10 @@ test("steer and the actions: one JSON line per command as it ends; refused; stop
     assert.equal((await post("config", "pre_ms 300")).text, '{"command":"config pre_ms 300","result":"ok"}\n');
     assert.equal(robot.lines.at(-1), "config pre_ms 300 #8");
     assert.equal((await post("config", "post_ms 2001")).status, 400);
-    assert.equal((await post("config", "")).text, '{\n  "auto_snap": true,\n  "pre_ms": 300,\n  "post_ms": 200\n}\n');
+    assert.equal((await post("config", "")).text, '{\n  "auto_snap": true,\n  "correct": false,\n  "pre_ms": 300,\n  "post_ms": 200\n}\n');
     assert.equal((await post("stop")).text, `{"command":"stop","result":"ok",${AT}}\n`);
     assert.equal((await post("clear_map", "", "?nowait")).text, '{"queued":["clear_map"]}\n');
-    assert.equal((await post("config", "auto_snap off")).text, '{\n  "auto_snap": false,\n  "pre_ms": 300,\n  "post_ms": 200\n}\n');
+    assert.equal((await post("config", "auto_snap off")).text, '{\n  "auto_snap": false,\n  "correct": false,\n  "pre_ms": 300,\n  "post_ms": 200\n}\n');
     robot.end = "ok";
     assert.equal((await post("steer", "d10", "?nowait")).text, '{"queued":["steer d10"]}\n');
   } finally { await done(); }

@@ -25,7 +25,7 @@ import type { Chat } from "../objects/model.ts";
 import type { BootFolders } from "../boot_folders.ts";
 import { framesJson, framesText, imuJson, imuText } from "./frames.ts";
 
-export interface Config { autoSnap: boolean }
+export interface Config { autoSnap: boolean; correct: boolean }
 export interface ApiContext {
   store: Store; maps: CellMaps; outlines: OutlineMaps; live: LiveRobot; queue: CommandQueue; log: Log; snapshots: StoredSnapshots; config: Config; recordingsDirectory: string;
   bootFolders: BootFolders;  // the robot's boot ids to our folder names (map --png)
@@ -293,17 +293,20 @@ export const READS: Record<string, Read> = {
     },
   },
   config: {
-    usage: "config [auto_snap on|off | pre_ms <ms> | post_ms <ms>]",
+    usage: "config [auto_snap on|off | correct on|off | pre_ms <ms> | post_ms <ms>]",
     help: "Shows the settings, or changes one. auto_snap on (the default): a snap runs after every move.\n" +
+          "correct on: the PC's correction of the pose goes to the robot between moves (off, the default: the robot\n" +
+          "keeps the one it has, 0 after a power-up; goto places are turned into its frame either way).\n" +
           "pre_ms, post_ms: how long the robot stands still before and after each move (0-2000 ms, 200 at power-up);\n" +
           "they go to the robot in the queue, after what waits, and are answered like the other commands. null: not\n" +
           "known yet (the robot says them with each move).",
     async run({ config, live }, args) {
       if (args.length) {
-        if (args.length !== 2 || args[0] !== "auto_snap" || !/^(on|off)$/.test(args[1])) throw new ReadError(`usage: robot ${this.usage}`, 400);
-        config.autoSnap = args[1] === "on";
+        if (args.length !== 2 || !/^(auto_snap|correct)$/.test(args[0]) || !/^(on|off)$/.test(args[1])) throw new ReadError(`usage: robot ${this.usage}`, 400);
+        if (args[0] === "auto_snap") config.autoSnap = args[1] === "on";
+        else config.correct = args[1] === "on";
       }
-      return { auto_snap: config.autoSnap, pre_ms: live.still?.preMs ?? null, post_ms: live.still?.postMs ?? null };
+      return { auto_snap: config.autoSnap, correct: config.correct, pre_ms: live.still?.preMs ?? null, post_ms: live.still?.postMs ?? null };
     },
   },
 };

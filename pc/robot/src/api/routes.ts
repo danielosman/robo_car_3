@@ -34,7 +34,7 @@ export function createApi(ctx: ApiContext): Hono {
     const sender: Sender = c.req.query("from") === "page" ? "page" : "cli";
     const refuse = (why: string) => json(line({ command: `${name} ${arg}`.trim(), result: "failed", why }), 400);
 
-    // config's auto_snap and config alone are read here; pre_ms and post_ms go to the robot.
+    // config's auto_snap, correct and config alone are read here; pre_ms and post_ms go to the robot.
     const queuedAction = parseAction(name, "") !== null && (name !== "config" || /^(pre|post)_ms\b/.test(arg));
     if (name === "steer" || name === "check" || name === "stop" || queuedAction) {
       const parsed: Parsed = name === "steer" || name === "check" ? parseSteer(arg)

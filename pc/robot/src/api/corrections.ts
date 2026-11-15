@@ -12,7 +12,8 @@
 // c_robot is as the robot last said it ("corrected", wire.ts; robot_corrections in the
 // store), never as sent: a correct without an answer is sent again before the next move.
 // A new boot starts at 0. A correction that can't be had (no outline map, an error) is
-// skipped with a note: the move runs as it would without step F. c_robot is also in the
+// skipped with a note: the move runs as it would without step F. With config correct off
+// nothing is sent; goto places are still turned by the correction the robot has. c_robot is also in the
 // store (robot_corrections, for its readers); both come from the same "corrected" message.
 // A goto before the server's first snapshot of a run (a server restarted mid-boot) goes as given.
 //   new Corrections(runner, { live, snapshots, outlines, store, note })
@@ -33,6 +34,7 @@ export interface CorrectionDeps {
   outlines: { correction(boot: string, sequence: number): Promise<Planar | null> };
   store: { corrections(boot: string): Promise<{ c: Planar }[]> };
   note: (text: string) => void;
+  config: { correct: boolean };  // false: nothing sent (robot config correct)
 }
 interface Inner extends Runner { send(text: string, ms: number): Promise<DoneRecord | string> }
 
@@ -100,7 +102,7 @@ export class Corrections implements Runner {
       return null;
     }
     if (!pc) return null;
-    if (same(pc, robot)) return { pc, robot };
+    if (same(pc, robot) || !this.deps.config.correct) return { pc, robot };
     const [x, y, yaw] = words(pc);
     const d = await this.inner.send(`correct ${x} ${y} ${yaw}`, CORRECT_MS);
     const now = await this.robotHas(boot);

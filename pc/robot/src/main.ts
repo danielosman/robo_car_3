@@ -73,7 +73,9 @@ async function main(): Promise<void> {
   } });
   // The PC's correction sent to the robot between moves (step F); every pose the robot
   // sends is corrected by the one it applies: the store and the page get them raw.
-  const corrections = new Corrections(new CommandRunner(robot, stored), { live, snapshots: stored, outlines, store, note });
+  // Off until the correction is better than odometry (the 15 Nov drive): robot config correct on.
+  const config = { autoSnap: true, correct: false };
+  const corrections = new Corrections(new CommandRunner(robot, stored), { live, snapshots: stored, outlines, store, note, config });
   const rawPose = (p: LivePose) => corrections.raw(live.boot, p);
   robot.on("hello", (h: Hello) => { live.setBoot(h.bootId); corrections.robotHas(h.bootId).catch(err => note(`the robot's correction NOT read: ${(err as Error).message}`)); });
   robot.on("corrected", (c: Corrected) => corrections.heard(live.boot, c));
@@ -85,7 +87,7 @@ async function main(): Promise<void> {
   robot.on("mapCleared", () => note("the robot's map was cleared (its own 6 x 6 m map; the PC's are kept)"));
   const queue = new CommandQueue(corrections, (a, sender) => log.answer(a, sender));
   const chat = openAiChat(MODEL_API, MODEL, note);
-  const api = getRequestListener(createApi({ store, maps, outlines, live, queue, log, snapshots: stored, config: { autoSnap: true },
+  const api = getRequestListener(createApi({ store, maps, outlines, live, queue, log, snapshots: stored, config,
                                               recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, chat, modelName: MODEL }).fetch);
   await robot.start();
   if (!wireCheck()) note("wire: the message table is wrong (two types share a number, or a ToF format is too big; wire.ts, tof_format.ts): the robot's messages can't be read");

@@ -24,6 +24,7 @@ function setup(o: { stored?: Planar[]; answers?: boolean } = {}) {
     outlines: { correction: async () => pc },
     store: { corrections: async () => (o.stored ?? []).map(c => ({ c })) },
     note: (t: string) => notes.push(t),
+    config: { correct: true },
   };
   let answers: boolean | "refuse" = o.answers ?? true;
   const inner = {
@@ -95,4 +96,13 @@ test("refused by the robot (something still on its bulk lane): logged, c_robot k
   answer(true);
   await corrections.run({ name: "drive", values: [20] });
   assert.equal(sent.length, 2);
+});
+
+test("config correct off: nothing sent; a goto still turned by the correction the robot has", async () => {
+  const { corrections, sent, ran, pc, deps } = setup();
+  deps.config.correct = false;
+  await corrections.run({ name: "goto", values: [100, 50] });
+  assert.deepEqual(sent, []);
+  const robotFrame = uncorrected(pc, { x: 1, y: 0.5, yaw: 0 });
+  assert.deepEqual(ran.at(-1), { name: "goto", values: [Math.round(robotFrame.x * 100), Math.round(robotFrame.y * 100)] });
 });
