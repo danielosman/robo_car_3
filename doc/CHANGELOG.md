@@ -5,6 +5,19 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 15 Nov 2026: the second drive (boot `da005bff`), correction off
+
+- PicoA flashed with the floor fix and message (wire 7). `rotate 0`, then a 1 m square
+  turning left with corners of 4 × 30° and 30° back (Daniel's rule): all moves ok, no
+  floor stop. No look round and no goto home (not the first drive's pattern; the
+  agent's choice).
+- Truth (Daniel): 11 cm forward, 14 cm right, about 20° left. Odometry 2.6 cm and 5°
+  off; the PC's corrected pose 10 cm and 1° off.
+- Daniel: two drives in one room are too few to change the algorithm; proposed instead
+  a dozen data drives in several rooms with measured truth, and a scoring replay (plan,
+  "Next: data drives, then the algorithm"). Also: during physical tests Daniel runs
+  the server (AGENTS.md), after the agent restarted it unasked.
+
 ## 15 Nov 2026: the first drive with step F (boot `0a203718`)
 
 PicoA flashed with step F (wire 6); PicoB unchanged.

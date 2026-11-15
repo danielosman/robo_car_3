@@ -21,9 +21,9 @@ disagree, the less sure one gives way.
 
 ## For the fresh session
 
-- **Steps S, then A to F in order:** all built. **Next: the real drive** ("Open for
-  Daniel" 1): PicoA flashed with wire 6, then a drive round and back, looked at as
-  in "How the correction reaches the robot (step F)".
+- **Steps S, then A to F in order:** all built and driven on the robot (15 Nov). The
+  correction is off: it was worse than odometry. **Next: "Next: data drives, then the
+  algorithm"** near the end of this file.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
   `pc/robot/src/maps/outline/` and `pc/robot/src/sim/` with their tests.
 - **Rules as in DATA_FLOW_PLAN.md section 2:** tests first where they make sense, a
@@ -668,37 +668,80 @@ correction sent (step F). Daniel measured the truth.
   neither the robot's line nor the answer said "floor". From now on the robot's
   line, the move's answer and `robot check` say "floor not seen yet" for this stop.
 
-## Next
+## The second robot drive (15 Nov, boot `da005bff`)
 
-1. Done, not flashed: a stop for floor not seen yet is named as such. The robot's line
-   says "floor not seen yet (floor first: ...)"; the move ends "unseen_floor" (wire 7);
-   the answer and `robot check` give result `obstacle` with why "floor not seen yet:
-   ... nothing is in the way. Turning to look (r30, then back) shows it the floor".
-2. The correction: the replay of `0a203718` must end at least as close to the truth as
-   odometry; the simulator's scenarios, run at several drifts, must not get worse.
-   Tried on the replay (none kept; end position against the truth, odometry 2 cm, 3°):
+Flashed first: the floor fix and the floor message (wire 7). The correction was off
+(`robot config correct off`): the robot drove by odometry alone; the PC still built its
+corrected pose, logged and drawn, so both can be held against the truth.
 
-   | Change | Heading after the look round (truth 18°) | End |
-   |---|---|---|
-   | none (as built) | 23.4° | 15 cm, 3.8° off |
-   | a new wall's doubt from its hits, and one measurement a stand | 22.3° | 16 cm, 25° off |
-   | the same, and the pose's turn doubt 1 % (not 3.5 %) | 15.6° | 10 cm, 1.7° off |
-   | only the turn doubt 1 % | 15.8° | 9 cm, 2.9° off |
+The drive: `rotate 0`, then a 1 m square turning left: 4 × (`d100`, then 4 × `r30` and
+`r-30`). No look round at the start and no goto back to the start, unlike the first drive
+(the agent's choice, not asked for). Every move ended ok; no stop for floor not seen.
 
-   The turn doubt (`pose.ts`, 3.5 % a turn, from the simulator's drift) makes odometry
-   look far worse than it was; but no change brings the position near odometry's,
-   because the one wall in "above" is slanted (two surfaces). A correct wall comes first.
-3. Done, not flashed: the floor-first rule checks floor not seen yet only under the
-   robot's own width, not in the 5 cm margin beside it (`cell_map_stop_along`,
-   `room.c`); on the stored map side 3 would have driven.
-4. **The second drive:** a corner of 90° is 4 × `r30`, then `r-30` (Daniel), so the robot
-   has seen the floor around it before driving on.
+| At the end | Forward | Right | Heading (left) | Off from the truth |
+|---|---|---|---|---|
+| Truth (Daniel) | 11 cm | 14 cm | about 20° | — |
+| Odometry | 12.5 cm | 11.9 cm | 15° | 2.6 cm, 5° |
+| Corrected (PC) | 20.9 cm | 15.2 cm | 21° | 10 cm, 1° |
+
+## What the two drives say, and what they don't
+
+- Odometry was good in both: 2-3 cm and 3-5° after about 4 m and two full turns.
+- The PC's corrected position was worse than odometry in both (10-15 cm off). Its
+  heading was worse in the first drive (4-5° off the wrong way) and better in the second
+  (1° against 5°).
+- One cause is known (first drive, replayed): a wall made from a few far hits of two
+  surfaces, and trusted too much. The PC also assumes odometry's heading 3.5 % unsure a
+  turn (the simulator's default drift), which looks too pessimistic for this robot.
+- **Two drives in one room are too few to change the algorithm.** No conclusion such as
+  "correct only the heading" (then the position would never be corrected, and on long
+  drives a heading error becomes a position error), and no new drift number from them.
+- The drives don't need to be the same to be compared: each drive with measured truth
+  is one test case for a replay.
+
+## Next: data drives, then the algorithm
+
+1. **Data drives with the correction off**, each with the truth measured. Odometry
+   drives the robot, the PC's correction is computed and kept, both are scored against
+   the truth afterwards.
+   - **Rooms:** this room again; a room with long clear walls; a cluttered room (things
+     at different heights in front of walls, as here); two rooms through a door; a
+     hallway. Five rooms, two or three drives each: about a dozen drives.
+   - **Patterns:** a look round on the spot (12 × `r30`); a square each way; a longer
+     loop of 3-5 m; a drive out and straight back. Corners as 4 × `r30`, then `r-30`
+     (Daniel), so the floor around is seen.
+   - **Truth:** a tape mark at the start; Daniel measures forward, sideways and
+     heading at the end, and where it helps after a look round or a side. Written into
+     a file next to the drive (`recordings/truth.json`: boot, snapshot, x, y, yaw).
+2. **A scoring replay** (`npm run score`, PC only): every drive in `truth.json` replayed
+   through the mapper; for each measured point, odometry's error and the corrected
+   pose's, and the sum over all drives. Any change to the algorithm (wall rules, how
+   sure walls and odometry are) is kept only if it lowers the corrected error over all
+   drives, and stays at least as good as odometry on each. The simulator's scenarios,
+   at several drifts, must not get worse either.
+3. **Then the algorithm.** First what the replays point at (the two-surface wall, how
+   sure a new wall and odometry are). If no change gets the corrected pose to
+   odometry's on these drives, the approach itself is in question (for example, correct
+   only when two walls at an angle agree, or graph SLAM: "Alternatives for later").
+4. Done, not flashed before the second drive: the floor-first rule checks floor not seen
+   yet only under the robot's own width, not in the 5 cm margin; a stop for it says
+   "floor not seen yet" in the robot's line, the answer (end `unseen_floor`, wire 7)
+   and `robot check`. Both flashed on 15 Nov, before the second drive.
+
+Tried on the first drive's replay, none kept (end position against the truth; odometry
+2 cm, 3°):
+
+| Change | Heading after the look round (truth 18°) | End |
+|---|---|---|
+| none (as built) | 23.4° | 15 cm, 3.8° off |
+| a new wall's doubt from its hits, and one measurement a stand | 22.3° | 16 cm, 25° off |
+| the same, and the pose's turn doubt 1 % (not 3.5 %) | 15.6° | 10 cm, 1.7° off |
+| only the turn doubt 1 % | 15.8° | 9 cm, 2.9° off |
 
 ## Open for Daniel
 
-1. **A real drive**: one that goes round and comes back to its start. It needs PicoA
-   flashed (the PC speaks wire 6; the robot has the 10 Nov firmware, wire 3), so it
-   tests steps 5, 6 and F on the robot at once. Step F needs PicoA only.
+1. **The data drives** ("Next: data drives, then the algorithm"): which rooms are at
+   hand, and how many drives; Daniel measures the truth at each.
 
 ## Open technical points
 
