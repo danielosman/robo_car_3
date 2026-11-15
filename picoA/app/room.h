@@ -20,6 +20,9 @@ float room_m(float x_m, float y_m, float yaw_rad, float direction, float look_m)
 // The same as a gap: from the edge to that obstacle (room_m + STOP_BEFORE_M); exactly
 // STOP_BEFORE_M + look_m when nothing is closer. For the robot's console lines.
 float room_gap_m(float x_m, float y_m, float yaw_rad, float direction, float look_m);
+// That nearest stop is floor not seen yet within 25 cm (floor first, cell_map.h), not a thing
+// in the way: the robot's line, the move's end ("unseen_floor") and robot check say so.
+bool room_unseen_floor(float x_m, float y_m, float yaw_rad, float direction, float look_m);
 
 // A drive of distance_m (+ forward, - back) on the map as it is now: how far it goes and
 // whether an obstacle stops it short; moved 0 with obstacle: it doesn't start. (On the
@@ -27,5 +30,6 @@ float room_gap_m(float x_m, float y_m, float yaw_rad, float direction, float loo
 typedef struct {
     float moved_m;
     bool obstacle;
+    bool unseen_floor;  // ...and that stop is floor not seen yet, not a thing (room_unseen_floor)
 } room_drive_t;
 room_drive_t room_drive(float x_m, float y_m, float yaw_rad, float distance_m);

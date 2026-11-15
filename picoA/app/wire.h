@@ -41,7 +41,7 @@
 #include "link_messages.h"
 #include "tof_format.h"
 
-#define WIRE_VERSION 6 // up when any payload or the table changes; the PC refuses another
+#define WIRE_VERSION 7 // up when any payload or the table changes; the PC refuses another
 
 #define WIRE_HEADER      3
 #define WIRE_PAYLOAD_MAX 1400 // the longest payload of any message (a snapshot part)
@@ -133,6 +133,7 @@ bool wire_decode_console(const wire_message_t *m, char *text);
 typedef enum {
     WIRE_END_OK, WIRE_END_OBSTACLE, WIRE_END_STOPPED, WIRE_END_REPLACED, WIRE_END_TILT, WIRE_END_WHEELS,
     WIRE_END_NO_DRIVE, WIRE_END_PICOB_LOST, WIRE_END_NO_START, WIRE_END_REFUSED, WIRE_END_SAFETY, WIRE_END_ENDED,
+    WIRE_END_UNSEEN_FLOOR, // a drive or go to stopped (or didn't start) for floor not seen yet, not for a thing (room.h)
     WIRE_ENDS
 } wire_end_t;
 #define WIRE_HAS_MOVE     1 // moved and rotated: a move

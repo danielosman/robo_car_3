@@ -17,7 +17,7 @@ typedef struct {
     move_kind_t kind;
     float parameter;
     bool acted;                 // the act phase began (start is set)
-    bool obstacle;              // the act phase ended before an obstacle
+    move_end_t act_end;         // how the act phase ended: done, before an obstacle, before floor not seen yet
     odometry_report_t start;        // the robot when the act phase began
     uint32_t sent, dropped;     // its frames
     uint32_t imu_sent, imu_dropped;      // its imu batches
@@ -67,6 +67,7 @@ static wire_end_t wire_end_of(move_end_t how, uint8_t stop_reason) {
     switch (how) {
     case MOVE_END_DONE: return WIRE_END_OK;
     case MOVE_END_OBSTACLE: return WIRE_END_OBSTACLE;
+    case MOVE_END_UNSEEN_FLOOR: return WIRE_END_UNSEEN_FLOOR;
     case MOVE_END_STOPPED: return WIRE_END_STOPPED;
     case MOVE_END_REPLACED: return WIRE_END_REPLACED;
     case MOVE_END_PICOB_LOST: return WIRE_END_PICOB_LOST;
@@ -219,7 +220,7 @@ void move_update(void) {
         move_act_t r = running_actor->step(o);
         if (r == MOVE_ACTING) break;
         body_drive(0, 0);
-        cur.obstacle = r == MOVE_ACT_OBSTACLE;
+        cur.act_end = r == MOVE_ACT_OBSTACLE ? MOVE_END_OBSTACLE : r == MOVE_ACT_UNSEEN_FLOOR ? MOVE_END_UNSEEN_FLOOR : MOVE_END_DONE;
         phase = POST;
         still_until = make_timeout_time_us((uint64_t)post_ms * 1000);
         deadline = make_timeout_time_us(POST_MAX_US);
@@ -228,7 +229,7 @@ void move_update(void) {
     case POST:
         if ((time_reached(still_until) && o->stationary) || time_reached(deadline)) {
             body_motors(false);
-            finish(cur.obstacle ? MOVE_END_OBSTACLE : MOVE_END_DONE);
+            finish(cur.act_end);
         }
         break;
     case IDLE:

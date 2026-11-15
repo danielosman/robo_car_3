@@ -84,8 +84,8 @@ test("a boot's map at a snapshot: a wall ahead, a drive stopped; tiles; back in 
     // its front edge (9.5 cm from the centre); one backwards doesn't.
     const ahead = (await drive(3, 1))!;
     assert.ok(ahead.obstacle && ahead.movedM > 0.15 && ahead.movedM < 0.3, JSON.stringify(ahead));
-    assert.deepEqual(await drive(3, -1), { movedM: 1, obstacle: false });
-    assert.deepEqual(await drive(3, 0.1), { movedM: 0.1, obstacle: false });
+    assert.deepEqual(await drive(3, -1), { movedM: 1, obstacle: false, unseenFloor: false });
+    assert.deepEqual(await drive(3, 0.1), { movedM: 0.1, obstacle: false, unseenFloor: false });
     assert.equal(await maps.atSnapshot(boot.id, 3, m => m.obstacleWithin(0, 0, 0.3)), false);
     assert.equal(await maps.atSnapshot(boot.id, 3, m => m.obstacleWithin(0.4, 0, 0.3)), true);
     const at3 = (await maps.viewAtSnapshot(boot.id, 3))!;
@@ -102,7 +102,7 @@ test("a boot's map at a snapshot: a wall ahead, a drive stopped; tiles; back in 
     const png2 = mapPng((await cellMapAt(store, maps, boot.id, 2))!);
     assert.deepEqual([png2.readUInt32BE(16), png2.readUInt32BE(20)], [60 * 6, 80 * 6]);
     // Back in time: before any frame nothing ahead; then forward again, the same.
-    assert.deepEqual(await drive(1, 1), { movedM: 1, obstacle: false });
+    assert.deepEqual(await drive(1, 1), { movedM: 1, obstacle: false, unseenFloor: false });
     assert.deepEqual(await drive(3, 1), ahead);
     assert.equal(await maps.atSnapshot(boot.id, 99, async () => 1), null);
     // A new server: the same map from the store.

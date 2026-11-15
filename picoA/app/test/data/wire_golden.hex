@@ -1,9 +1,9 @@
 # The wire's golden bytes (picoA/app/wire.h, pc/robot/src/wire.ts): both sides encode
 # the same samples and must give these bytes, and decode these bytes to them.
 # Written by build/test_wire --write; read by test_wire.c and wire.test.ts.
-version 6
+version 7
 table 01:0:1:1400 02:0:0:240 03:0:34:34 04:0:33:33 05:0:0:0 06:0:26:26 07:0:37:37 08:0:12:12 10:1:1:1400 11:1:27:135 12:1:1205:1205 20:2:5:50 21:2:0:0 40:1:289:289
-hello 011d00062672587a4e6f7620203720323032362031383a30303a303000000000
+hello 011d00072672587a4e6f7620203720323032362031383a30303a303000000000
 console 0214005475726e3a20646f6e652c2039302e3020646567
 console_empty 020000
 answer_move 032200110000000103f628dc3e0ad723bda60a063f52b89e3e000000be6666864000000000

@@ -44,10 +44,11 @@ typedef enum {
     MOVE_END_SAFETY_STOP,  // PicoB switched the motors off (stop_reason says why)
     MOVE_END_PICOB_LOST,
     MOVE_END_NO_START,     // the motors didn't switch on, or the robot didn't stand still
+    MOVE_END_UNSEEN_FLOOR, // as MOVE_END_OBSTACLE, but the stop was floor not seen yet (floor first, room.h), not a thing
 } move_end_t;
 
 // What the act phase does: the action's own code (behaviour.c gives it).
-typedef enum { MOVE_ACTING, MOVE_ACT_DONE, MOVE_ACT_OBSTACLE } move_act_t;
+typedef enum { MOVE_ACTING, MOVE_ACT_DONE, MOVE_ACT_OBSTACLE, MOVE_ACT_UNSEEN_FLOOR } move_act_t;
 typedef struct {
     void (*begin)(const odometry_report_t *start); // the act phase starts (the robot stands still, motors on)
     move_act_t (*step)(const odometry_report_t *o); // every loop while acting; it drives (body_drive)

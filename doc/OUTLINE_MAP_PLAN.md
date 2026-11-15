@@ -621,14 +621,64 @@ To look at, on a real drive:
 - No limit on how far one correction moves the robot's pose: the correction is what
   the walls say; a limit would be a magic number.
 
-## Next (after the drive of 15 Nov, boot `0a203718`)
+## What the first robot drive showed (15 Nov, boot `0a203718`)
 
-The correction was worse than odometry on the real drive (CHANGELOG, 15 Nov). It is
-switched off (`robot config correct`) until a replay of that drive ends at least as
-close to the measured end (15.5 cm forward, 0.5 cm right, 0°; 18° after the look round)
-as odometry does (13 cm, -3°). The cause: a wall made too early from a few far hits of
-two surfaces, and trusted too much. Also: the floor-first rule blocks a drive's start
-for one unseen floor cell beside the path (PicoA, `cell_map.c`/`room.c`).
+The drive: `rotate 0`, a look round (12 × `r30`), then a 1 m square turning left in
+30° steps (`d100`, 3 × `r30`; the last side `g0,0`), a snapshot after every move, the
+correction sent (step F). Daniel measured the truth.
+
+| When | Truth (Daniel) | Odometry | Corrected (PC) |
+|---|---|---|---|
+| After the look round: heading | 18° | 13° | 23° |
+| At the end: from the start | 15.5 cm forward, 0.5 cm right | 13 cm forward, 0 cm | 0 cm, 1 cm left |
+| At the end: heading | 0° | -3° | +4° |
+
+- **Step F worked as built:** every correction sent was taken, the robot's correction
+  equalled the PC's, the goto drove by the corrected pose, nothing refused or dropped
+  on the link.
+- **The correction made the pose worse.** Odometry ended within 2.5 cm and 3° after
+  about 4 m and two full turns. The ToF agrees with the truth: at the end the wall
+  ahead reads 12-16 cm closer than at the start (rows 1 and 4, same heading).
+- **Odometry is far better than the simulator's default drift (3 % a turn).** One drive
+  is not enough to set a number: the simulator's drift stays a setting, and the
+  scenarios are run at several drifts, also small ones. The correction must help when
+  drift is large and must not hurt when it is small.
+- **Why the correction went wrong** (an offline replay of the stored drive): the only
+  wall of band "above" (the band that checks the pose) was made at the robot's first
+  frames, from 5 far hits (184-201 cm, spanning 38 cm) that belong to two surfaces at
+  different depths (the wall, and something in front of it at mid height). The line
+  through them runs at -65°; the wall is square to the robot. A new wall's doubt is
+  set from fixed numbers (5 cm, and its edge's length), not from its hits, so the
+  filter took its direction as good to about 6°, later 2.2°, and turned and moved the
+  robot to fit it. Without the pose check the same band's walls, made later from more
+  hits, come out at -85° and -95°. Tried and dropped: each half of the hits must run
+  the line's way (too few hits per half); the outline's edge as the new wall (the edge
+  is slanted too at that moment).
+- **The correction is off** (`robot config correct on|off`, off by default) until a
+  replay of this drive ends at least as close to the truth as odometry.
+- **A drive refused for floor not yet seen, reported as an obstacle.** Side 3 was
+  refused: "obstacle 15 cm ahead (map), closer than 15 cm", `robot check` the same,
+  though nothing was there. The cause was the floor-first rule (`cell_map.c`, step 6):
+  floor not seen as floor within 25 cm of the robot's centre, in its path, stops a
+  forward drive with the 15 cm stop margin. 25 cm is about the front edge (9.5 cm)
+  plus the margin, so one such cell leaves no room and the drive cannot start. Here
+  it was one cell 24-31 cm ahead and 15 cm to the side, which the lowest ToF row (27 cm
+  ahead, about ±11 cm wide there) cannot see from where the robot stood; a `rotate 0`
+  did not help, a 30° turn left and back did. Finding it took a probe of the map:
+  neither the robot's line nor the answer said "floor". From now on the robot's
+  line, the move's answer and `robot check` say "floor not seen yet" for this stop.
+
+## Next
+
+1. Done, not flashed: a stop for floor not seen yet is named as such. The robot's line
+   says "floor not seen yet (floor first: ...)"; the move ends "unseen_floor" (wire 7);
+   the answer and `robot check` give result `obstacle` with why "floor not seen yet:
+   ... nothing is in the way. Turning to look (r30, then back) shows it the floor".
+2. The correction: a new wall's doubt from its own hits; the replay of `0a203718` must
+   end at least as close to the truth as odometry; the simulator's scenarios, run at
+   several drifts, must not get worse.
+3. The floor-first rule must not block a drive's start for floor the robot cannot see
+   from where it stands (to be decided with Daniel).
 
 ## Open for Daniel
 

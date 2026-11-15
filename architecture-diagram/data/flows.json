@@ -257,17 +257,17 @@
     "description": "Before starting a drive, the robot checks its 6 × 6 m map for obstacles and drops across the requested distance, and on a forward drive for unidentified floor within 25 cm ahead, stopping 15 cm short. This flow shows startup refusal, not the repeated checks while moving.",
     "steps": [
       { "at": "picoA.cell_map.cell_map_obstacle_along", "bytes": 4,
-        "path": "picoA/app/room.c", "code": "float along = cell_map_obstacle_along(" },
+        "path": "picoA/app/room.c", "code": "float along = cell_map_stop_along(" },
       { "change": "turn", "name": "room", "at": "picoA.room.room_m",
         "what": "less the robot's front or rear and the 15 cm stop margin", "bytes": 4,
-        "path": "picoA/app/room.c", "code": "return gap(x_m, y_m, yaw_rad, direction, look_m, &g) ? g - STOP_BEFORE_M : look_m;" },
+        "path": "picoA/app/room.c", "code": "return gap(x_m, y_m, yaw_rad, direction, look_m, &g, NULL) ? g - STOP_BEFORE_M : look_m;" },
       { "change": "turn", "name": "drive limit", "at": "picoA.room.room_drive",
         "what": "into how far the drive may go, and whether an obstacle stops it short", "dto": "picoA.room.room_drive_t",
-        "path": "picoA/app/room.c", "code": "return room < want ? (room_drive_t){room, true} : (room_drive_t){want, false};" },
+        "path": "picoA/app/room.c", "code": "return room < want ? (room_drive_t){room, true, unseen} : (room_drive_t){want, false, false};" },
       { "at": "picoA.behaviour.behaviour_drive",
-        "path": "picoA/app/behaviour.c", "code": "if (room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m).moved_m <= 0) {" },
+        "path": "picoA/app/behaviour.c", "code": "room_drive_t r = room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m);" },
       { "at": "picoA.move.move_refused",
-        "path": "picoA/app/behaviour.c", "code": "move_refused(MOVE_DRIVE, distance_m, number, MOVE_END_OBSTACLE);" }
+        "path": "picoA/app/behaviour.c", "code": "move_refused(MOVE_DRIVE, distance_m, number, r.unseen_floor ? MOVE_END_UNSEEN_FLOOR : MOVE_END_OBSTACLE);" }
     ]
   },
   {

@@ -36,6 +36,7 @@ static odometry_report_t start;     // the robot when the act phase began
 static absolute_time_t run_start;
 static bool following;          // watching: turning towards a movement
 static bool obstacle_stop;      // moving: stopped short, before an obstacle on the map
+static bool unseen_stop;        // ...and that stop is floor not seen yet, not a thing (room.h)
 static float goal_x, goal_y;    // GOTO: the point (map frame) and how far before it to stop
 static float goal_stop_m;
 static bool goal_driving;       // GOTO: turned towards it, now driving
@@ -67,14 +68,25 @@ static float gap_from(const odometry_report_t *o, float direction, float look_m)
     return room_gap_m(o->x_m, o->y_m, o->yaw_rad, direction, look_m);
 }
 
+// What a stop on the map is, for the console.
+static const char *stop_name(bool unseen_floor) {
+    return unseen_floor ? "floor not seen yet (floor first: it drives only onto floor it has seen within 25 cm)" : "obstacle";
+}
+
+// A drive or go to stopped short (obstacle_stop): is it for floor not seen yet?
+static void stop_why(const odometry_report_t *o, float direction, float look_m) {
+    unseen_stop = obstacle_stop && room_unseen_floor(o->x_m, o->y_m, o->yaw_rad, direction, look_m);
+}
+
 void behaviour_drive(float distance_m, uint32_t number) {
     const char *side = distance_m > 0 ? "ahead" : "behind";
     const odometry_report_t *o = body_odometry();
-    if (room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m).moved_m <= 0) {
+    room_drive_t r = room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m);
+    if (r.moved_m <= 0) {
         float gap_m = gap_from(o, distance_m > 0 ? 1.0f : -1.0f, fabsf(distance_m));
-        printf("Drive: not moving: obstacle %.0f cm %s (map), closer than %.0f cm\n", (double)(gap_m * 100), side,
-               (double)(STOP_BEFORE_M * 100));
-        move_refused(MOVE_DRIVE, distance_m, number, MOVE_END_OBSTACLE);
+        printf("Drive: not moving: %s %.0f cm %s (map), closer than %.0f cm\n", stop_name(r.unseen_floor), (double)(gap_m * 100),
+               side, (double)(STOP_BEFORE_M * 100));
+        move_refused(MOVE_DRIVE, distance_m, number, r.unseen_floor ? MOVE_END_UNSEEN_FLOOR : MOVE_END_OBSTACLE);
         return;
     }
     begin(DRIVE, distance_m, distance_m, number);
@@ -188,14 +200,14 @@ static void say_done(const odometry_report_t *o) {
     float dx = o->x_m - start.x_m, dy = o->y_m - start.y_m;
     if (action == DRIVE && obstacle_stop) {
         float direction = goal < 0 ? -1.0f : 1.0f;
-        printf("Drive stopped: obstacle %.0f cm %s (map), moved %.0f cm\n", (double)(gap_from(o, direction, 0.1f) * 100),
+        printf("Drive stopped: %s %.0f cm %s (map), moved %.0f cm\n", stop_name(unseen_stop), (double)(gap_from(o, direction, 0.1f) * 100),
                direction > 0 ? "ahead" : "behind", (double)(hypotf(dx, dy) * 100));
         return;
     }
     if (action == GOTO) {
         float off = hypotf(goal_x - o->x_m, goal_y - o->y_m);
         if (obstacle_stop)
-            printf("Go to stopped: obstacle %.0f cm ahead (map), %.0f cm from the goal\n",
+            printf("Go to stopped: %s %.0f cm ahead (map), %.0f cm from the goal\n", stop_name(unseen_stop),
                    (double)(gap_from(o, 1.0f, 0.1f) * 100), (double)(off * 100));
         else printf("Go to done: %.1f s; at (%+.0f, %+.0f) cm, %.0f cm from the goal\n",
                     (double)(absolute_time_diff_us(run_start, get_absolute_time()) * 1e-6f), (double)(o->x_m * 100),
@@ -222,6 +234,7 @@ static bool go_to(const odometry_report_t *o) {
     float remaining_m = c * dx + s * dy - goal_stop_m; // along the way: never circles around it
     float room = room_from(o, 1.0f, fmaxf(remaining_m, 0));
     obstacle_stop = room < remaining_m;
+    stop_why(o, 1.0f, fmaxf(remaining_m, 0));
     if (obstacle_stop) remaining_m = room;
     if (remaining_m <= 0) return true;
     float w = fmaxf(-GOTO_STEER_RADPS, fminf(GOTO_STEER_RADPS, GOTO_STEER * error_rad));
@@ -234,7 +247,7 @@ static void act_begin(const odometry_report_t *o) {
     start = *o;
     run_start = get_absolute_time();
     following = false;
-    obstacle_stop = false;
+    obstacle_stop = unseen_stop = false;
     seen_n = 0;
     watch_log(action == WATCH); // movement lines only while watching
 }
@@ -255,6 +268,7 @@ static bool step(const odometry_report_t *o) {
         float remaining_m = fabsf(goal) - hypotf(o->x_m - start.x_m, o->y_m - start.y_m);
         float room = room_from(o, direction, fmaxf(remaining_m, 0));
         obstacle_stop = room < remaining_m;
+        stop_why(o, direction, fmaxf(remaining_m, 0));
         if (obstacle_stop) remaining_m = room;
         if (remaining_m <= 0) return true;
         body_drive(motion_speed(direction * remaining_m), 0);
@@ -272,12 +286,13 @@ static bool step(const odometry_report_t *o) {
 
 static move_act_t act_step(const odometry_report_t *o) {
     if (!step(o)) return MOVE_ACTING;
-    return (action == DRIVE || action == GOTO) && obstacle_stop ? MOVE_ACT_OBSTACLE : MOVE_ACT_DONE;
+    if ((action == DRIVE || action == GOTO) && obstacle_stop) return unseen_stop ? MOVE_ACT_UNSEEN_FLOOR : MOVE_ACT_OBSTACLE;
+    return MOVE_ACT_DONE;
 }
 
 // The move has ended: done or before an obstacle, what odometry measured; the
 // movement lines stop.
 static void act_end(const odometry_report_t *o, move_end_t how) {
     watch_log(false);
-    if (how == MOVE_END_DONE || how == MOVE_END_OBSTACLE) say_done(o);
+    if (how == MOVE_END_DONE || how == MOVE_END_OBSTACLE || how == MOVE_END_UNSEEN_FLOOR) say_done(o);
 }

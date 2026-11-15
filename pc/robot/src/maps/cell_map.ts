@@ -57,7 +57,8 @@ export interface Placement {
 export interface CellMap {
   // A drive of distanceM (+ forward) from (x, y) facing yaw, as the robot's rule would end
   // it on this map (picoA/app/room.h): how far it goes, whether an obstacle stops it short.
-  drive(x: number, y: number, yaw: number, distanceM: number): Promise<{ movedM: number; obstacle: boolean }>;
+  // unseenFloor: the stop is floor not seen yet (floor first, picoA/app/room.h), not a thing.
+  drive(x: number, y: number, yaw: number, distanceM: number): Promise<{ movedM: number; obstacle: boolean; unseenFloor: boolean }>;
   obstacleWithin(x: number, y: number, r: number): Promise<boolean>; // a blocked or overhang column closer than r
   view(): Promise<CellMapView>;
 }
@@ -121,10 +122,10 @@ class Helper implements CellMap {
   add(frame: PosedFrame): Promise<Buffer> { return this.ask("F", packTof("compact", frame)); }
   clear(x = 0, y = 0): Promise<Buffer> { return this.ask("C", f32(x, y)); }
 
-  async drive(x: number, y: number, yaw: number, distanceM: number): Promise<{ movedM: number; obstacle: boolean }> {
+  async drive(x: number, y: number, yaw: number, distanceM: number): Promise<{ movedM: number; obstacle: boolean; unseenFloor: boolean }> {
     const b = await this.ask("D", f32(x, y, yaw, distanceM)), moved = b.readFloatLE(0), obstacle = b[4] === 1;
     // Not stopped short: the whole distance itself, not its 32-bit copy.
-    return { movedM: obstacle ? moved : Math.abs(distanceM), obstacle };
+    return { movedM: obstacle ? moved : Math.abs(distanceM), obstacle, unseenFloor: b[5] === 1 };
   }
 
   async obstacleWithin(x: number, y: number, r: number): Promise<boolean> {

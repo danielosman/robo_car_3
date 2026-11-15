@@ -4,7 +4,8 @@
 //   result   ok, obstacle (a move stopped early before an obstacle on the map),
 //            limited (a goto further than 3 m went 3 m), stopped (by stop),
 //            safety_stop, failed, dropped (never ran: one before it didn't end ok)
-//   why      only when result isn't ok, obstacle or limited
+//   why      only when result isn't ok, obstacle or limited; for obstacle only when the stop was
+//            floor not seen yet (UNSEEN_FLOOR), not a thing
 //   pose     where the robot is after it (moves, snap, stop): x, y cm, yaw degrees
 //   moved, rotated   for a move: cm straight from where it started, degrees turned
 //   snapshot for a snap: its number
@@ -25,6 +26,11 @@ export type Outcome = Omit<Answer, "command">;
 
 export const failed = (why: string): Outcome => ({ result: "failed", why });
 
+// A drive or goto stopped (or refused) for floor not seen yet, not a thing in the way
+// (the robot's end "unseen_floor"; picoA/app/room.h; robot check says it too).
+export const UNSEEN_FLOOR = "floor not seen yet: the robot drives only onto floor it has seen within 25 cm of its centre " +
+  "(floor first); nothing is in the way. Turning to look (r30, then back) shows it the floor";
+
 // Yaw in degrees, (-180, 180].
 export function yawDeg(rad: number): number {
   let d = Math.round(rad * 180 / Math.PI) % 360;
@@ -42,6 +48,7 @@ const FAILED: Record<string, string> = { picob_lost: "PicoB lost", no_start: "di
 export function outcome(c: Command, d: DoneRecord): Outcome {
   const out: Outcome = d.end === "ok" ? { result: c.name === "goto" && (d.goalM ?? 0) > MOVE.gotoMaxM ? "limited" : "ok" }
     : d.end === "obstacle" || d.end === "stopped" ? { result: d.end }
+    : d.end === "unseen_floor" ? { result: "obstacle", why: UNSEEN_FLOOR }
     : d.end in SAFETY ? { result: "safety_stop", why: SAFETY[d.end] }
     : failed(FAILED[d.end] ?? d.end);
   if (d.end === "refused") return out;

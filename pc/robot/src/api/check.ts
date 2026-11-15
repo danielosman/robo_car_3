@@ -9,24 +9,25 @@
 import type { Pose } from "../link.ts";
 import { MOVE } from "./firmware.ts";
 import { commandText, type Command } from "./commands.ts";
-import { poseOut, type Answer } from "./answers.ts";
+import { poseOut, UNSEEN_FLOOR, type Answer } from "./answers.ts";
 import type { CellMap } from "../maps/cell_map.ts";
 
 export type CheckAnswer = Answer & { warning?: string };
-interface Moved { end: Pose; result: "ok" | "obstacle"; moved: number }
+interface Moved { end: Pose; result: "ok" | "obstacle"; moved: number; unseenFloor: boolean }
 
 // Driving distanceM (+ forward, - back) from p.
 async function drive(map: CellMap, p: Pose, distanceM: number): Promise<Moved> {
   const direction = distanceM < 0 ? -1 : 1, d = await map.drive(p.x, p.y, p.yaw, distanceM);
   const end = { x: p.x + direction * d.movedM * Math.cos(p.yaw), y: p.y + direction * d.movedM * Math.sin(p.yaw), yaw: p.yaw };
-  return { end, result: d.obstacle ? "obstacle" : "ok", moved: d.movedM };
+  return { end, result: d.obstacle ? "obstacle" : "ok", moved: d.movedM, unseenFloor: d.obstacle && d.unseenFloor };
 }
 
 async function checkOne(c: Command, map: CellMap, p: Pose): Promise<{ answer: CheckAnswer; end: Pose }> {
   const command = commandText(c), [a, b] = c.values;
-  const answer = (result: Answer["result"], end: Pose, moved: number, rotatedRad: number, warning?: string) =>
-    ({ answer: { command, result, pose: poseOut(end), moved: Math.round(moved * 100), rotated: Math.round(rotatedRad * 180 / Math.PI), ...(warning ? { warning } : {}) }, end });
-  if (c.name === "drive") { const d = await drive(map, p, a / 100); return answer(d.result, d.end, d.moved, 0); }
+  const answer = (result: Answer["result"], end: Pose, moved: number, rotatedRad: number, warning?: string, unseenFloor = false) =>
+    ({ answer: { command, result, ...(unseenFloor ? { why: UNSEEN_FLOOR } : {}), pose: poseOut(end), moved: Math.round(moved * 100),
+                 rotated: Math.round(rotatedRad * 180 / Math.PI), ...(warning ? { warning } : {}) }, end });
+  if (c.name === "drive") { const d = await drive(map, p, a / 100); return answer(d.result, d.end, d.moved, 0, undefined, d.unseenFloor); }
   if (c.name === "rotate") {
     const end = { ...p, yaw: p.yaw + a * Math.PI / 180 }, r = Math.hypot(MOVE.edgeM, MOVE.halfWidthM);
     const warning = await map.obstacleWithin(p.x, p.y, r) ? `an obstacle within ${Math.round(r * 100)} cm: the robot doesn't check turns` : undefined;
@@ -37,7 +38,7 @@ async function checkOne(c: Command, map: CellMap, p: Pose): Promise<{ answer: Ch
   if (dist < MOVE.gotoThereM) return answer("ok", p, 0, 0);
   const bearing = Math.atan2(y - p.y, x - p.x), turn = Math.atan2(Math.sin(bearing - p.yaw), Math.cos(bearing - p.yaw));
   const d = await drive(map, { ...p, yaw: p.yaw + turn }, Math.min(dist, MOVE.gotoMaxM));
-  return answer(d.result === "ok" && dist > MOVE.gotoMaxM ? "limited" : d.result, d.end, d.moved, turn);
+  return answer(d.result === "ok" && dist > MOVE.gotoMaxM ? "limited" : d.result, d.end, d.moved, turn, undefined, d.unseenFloor);
 }
 
 // One answer per move; only drive, rotate and goto.

@@ -11,7 +11,7 @@
 // answer on stdout: a u32 length, then that many bytes. Little-endian, floats f32.
 //   'F' frame (277 B, compact)  add it to the map (cell_map_add)        -> nothing
 //   'C' x y                     clear the map (window and tiles)         -> nothing
-//   'D' x y yaw distance        a drive on the map now (room_drive)      -> f32 moved, u8 obstacle
+//   'D' x y yaw distance        a drive on the map now (room_drive)      -> f32 moved, u8 obstacle, u8 unseen floor
 //   'W' x y r                   a blocked or overhang column within r?   -> u8 (0, 1)
 //   'V'                         the map: the window's origin cell (i32 x, y), its
 //                               cells (3 x 60 x 60 B, cell_map_window), its columns
@@ -159,9 +159,10 @@ int main(int argc, char **argv) {
         case 'D': {
             read_floats(a, 4);
             room_drive_t d = room_drive(a[0], a[1], a[2], a[3]);
-            uint8_t obstacle = d.obstacle;
+            uint8_t obstacle = d.obstacle, unseen = d.unseen_floor;
             put(&d.moved_m, 4);
             put(&obstacle, 1);
+            put(&unseen, 1);
             break;
         }
         case 'W': {

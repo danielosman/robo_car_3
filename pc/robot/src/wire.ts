@@ -8,7 +8,7 @@
 // Times (tUs) are µs since PicoA's power-up (u64 on the wire): they never wrap.
 import { TOF_FORMATS, packTof, tofFormatOfType, unpackTof, type PosedFrame } from "./tof_format.ts";
 
-export const WIRE_VERSION = 6; // as picoA/app/wire.h; the server refuses a robot with another
+export const WIRE_VERSION = 7; // as picoA/app/wire.h; the server refuses a robot with another
 export const HEADER = 3;
 export const PAYLOAD_MAX = 1400;
 
@@ -63,7 +63,7 @@ export function wireCheck(): boolean {
 
 // How a command ended (wire_end_t): the robot's end words, as api/answers.ts names them.
 export const END_WORDS = ["ok", "obstacle", "stopped", "replaced", "tilt", "wheels", "no_drive", "picob_lost", "no_start",
-                          "refused", "safety", "ended"] as const;
+                          "refused", "safety", "ended", "unseen_floor"] as const;
 export const HAS = { MOVE: 1, GOAL: 2, SNAPSHOT: 4 } as const;
 // A move's kind (wire_move_kind_t; picoA/app/move.h).
 export const MOVE_KINDS = ["drive", "rotate", "goto", "watch"] as const;

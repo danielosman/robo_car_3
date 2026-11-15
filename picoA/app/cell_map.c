@@ -388,7 +388,13 @@ static column_t column_at(int cx, int cy) {
 column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m)); }
 
 float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward) {
+    return cell_map_stop_along(x_m, y_m, dx, dy, half_width_m, max_m, forward, NULL);
+}
+
+float cell_map_stop_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward,
+                          bool *unseen_floor) {
     float nearest = max_m;
+    bool unseen = false;
     float ends_x[2] = {x_m, x_m + max_m * dx}, ends_y[2] = {y_m, y_m + max_m * dy};
     float wx = fabsf(dy) * half_width_m, wy = fabsf(dx) * half_width_m; // the path's half width along x and y
     for (int ix = cell_of(fminf(ends_x[0], ends_x[1]) - wx); ix <= cell_of(fmaxf(ends_x[0], ends_x[1]) + wx); ix++)
@@ -404,10 +410,12 @@ float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float ha
             if (side_hi <= -half_width_m || side_lo >= half_width_m || along_hi <= 0) continue;
             column_t c = column_at(ix, iy);
             float mid_side = fabsf((side_lo + side_hi) / 2);
-            bool bad = c == COLUMN_BLOCKED || c == COLUMN_OVERHANG || c == COLUMN_NO_FLOOR ||
-                       (forward && along_lo < FLOOR_LOOK_M && mid_side < half_width_m && c != COLUMN_DRIVABLE);
-            if (!bad) continue;
-            nearest = fminf(nearest, fmaxf(along_lo, 0));
+            bool thing = c == COLUMN_BLOCKED || c == COLUMN_OVERHANG || c == COLUMN_NO_FLOOR;
+            bool floor = !thing && forward && along_lo < FLOOR_LOOK_M && mid_side < half_width_m && c != COLUMN_DRIVABLE;
+            if (!thing && !floor) continue;
+            float at = fmaxf(along_lo, 0);
+            if (at < nearest || (at == nearest && thing)) { nearest = at; unseen = floor; } // a thing wins a tie
         }
+    if (unseen_floor) *unseen_floor = unseen && nearest < max_m;
     return nearest;
 }

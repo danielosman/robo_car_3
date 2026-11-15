@@ -531,6 +531,14 @@ int main(void) {
     // The map is cleared by C (cell_map_clear), not by a scan.
     cell_map_clear(sim.x_m, sim.y_m);
     assert(cell_map_column(WALL_FRONT - 0.05f, 0) == COLUMN_UNKNOWN);
+    // Floor not seen yet ahead (the floor seeded round a point 30 cm behind the robot):
+    // a drive forward doesn't start, and its end says floor, not obstacle.
+    cell_map_clear(sim.x_m - 0.3f * cosf(sim.yaw_rad), sim.y_m - 0.3f * sinf(sim.yaw_rad));
+    behaviour_drive(0.5f, 13);
+    assert(move_endings(&ended) && ended.command == 13 && ended.how == MOVE_END_UNSEEN_FLOOR && last_end.end == WIRE_END_UNSEEN_FLOOR);
+    run(1);
+    cell_map_clear(sim.x_m, sim.y_m);
+    printf("ok: a drive refused for floor not seen yet says so\n");
 
     // Watching, with the person's sighting jitter of several seeds, each trial from
     // where the one before left the robot (the overshoot hangs on the seed and the
