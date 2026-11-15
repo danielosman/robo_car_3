@@ -21,9 +21,14 @@ disagree, the less sure one gives way.
 
 ## For the fresh session
 
+- **First, remind Daniel of two open things** (he asked for this, 15 Nov):
+  1. **Step 9 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md) (the cleanup):** the docs
+     (ARCHITECTURE, README, TODO) brought up to date with steps 4d-F, the README's robot
+     tests checked; still to do.
+  2. **The open options to collect more data** for the correction ("Options: more data,
+     then the algorithm" near the end of this file). Nothing is decided: ask him which.
 - **Steps S, then A to F in order:** all built and driven on the robot (15 Nov). The
-  correction is off: it was worse than odometry. **Next: "Next: data drives, then the
-  algorithm"** near the end of this file.
+  correction is off: it was worse than odometry.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
   `pc/robot/src/maps/outline/` and `pc/robot/src/sim/` with their tests.
 - **Rules as in DATA_FLOW_PLAN.md section 2:** tests first where they make sense, a
@@ -684,6 +689,20 @@ The drive: `rotate 0`, then a 1 m square turning left: 4 × (`d100`, then 4 × `
 | Odometry | 12.5 cm | 11.9 cm | 15° | 2.6 cm, 5° |
 | Corrected (PC) | 20.9 cm | 15.2 cm | 21° | 10 cm, 1° |
 
+## Driving by hand after the second drive (15 Nov, boot `da005bff`)
+
+- Daniel drove the robot across the room by clicks on the page. Then every goto was
+  refused: the PC turns a click from its map into the robot's frame by its correction,
+  and that had run away to 164 cm and -27° (snapshot 47 on); the points came out past
+  the robot's 300 cm goto range (`goto 320 -171`). The robot doesn't use the
+  correction (off), but the goto turning still does.
+- The refusal said only "not a command, a number out of range, or ...": not which.
+- The agent drove it back by turns and straight drives from odometry (339 cm in four
+  drives); odometry put it at (0, 3) cm, -3°.
+- Open: with the correction off, should goto still be turned by it? Should the PC
+  refuse a goto past the robot's range itself, and say so? Why the correction ran away
+  on this drive (replay `da005bff` up to snapshot 47).
+
 ## What the two drives say, and what they don't
 
 - Odometry was good in both: 2-3 cm and 3-5° after about 4 m and two full turns.
@@ -699,7 +718,9 @@ The drive: `rotate 0`, then a 1 m square turning left: 4 × (`d100`, then 4 × `
 - The drives don't need to be the same to be compared: each drive with measured truth
   is one test case for a replay.
 
-## Next: data drives, then the algorithm
+## Options: more data, then the algorithm
+
+Open: Daniel decides which, and when. One way to go:
 
 1. **Data drives with the correction off**, each with the truth measured. Odometry
    drives the robot, the PC's correction is computed and kept, both are scored against
