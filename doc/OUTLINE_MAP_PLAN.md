@@ -629,6 +629,8 @@ To look at, on a real drive:
   the walls say; a limit would be a magic number.
 - Whatever can't happen, the robot and the PC say why (which rule, which value, which
   limit), in the answer and the log, not only "refused".
+- A goto's range counts from the robot's current position, not from where it was
+  switched on.
 - Robot drives: a 90° corner is 4 × `r30`, then `r-30`, so the floor around is seen.
 - During a physical test Daniel runs the server (AGENTS.md).
 - Two drives in one room are too few to change the algorithm; options for more data stay
@@ -706,6 +708,12 @@ agent then drove it back by turns and straight drives from odometry (339 cm in f
 drives, every move ok); odometry put it at (0, 3) cm, -3°. Daniel switched it off for
 the day.
 
+**In short, the chain:** the PC's idea of where the robot is had gone wrong (by 164 cm
+and 27°). A click on the page is a place on the PC's map; the PC turns it into the
+robot's own coordinates using that wrong idea, so the robot got a point far off; that
+point was outside the range a goto accepts, so the robot refused it, without saying so
+clearly. The robot itself (its odometry) knew well where it was.
+
 **What refused the clicks.** Each refusal was the robot's ("Command refused: \"goto 320
 -171\" (not a command, a number out of range, or ...)"). A goto takes x and y within
 ±300 cm of where the robot was powered up (`COMMAND_GOTO_MAX_CM`, commands.h). The
@@ -725,7 +733,14 @@ answer said "refused by the robot (robot log says why)"; the page checked a diff
 number (the click on its map) than the robot got. It took the agent the log and the
 command text to see it.
 
-**Why the correction ran away** (replay of `da005bff`, the PC's mapper as built):
+**Why the PC's idea of the pose went wrong** (replay of `da005bff`, the PC's mapper as
+built). In plain words: the PC weighs two sources, odometry and the walls it has seen.
+How much it trusts odometry is a number it keeps for itself, the "pose doubt"; it grows
+with every turn (3.5 % of the turn, from the simulator) and only shrinks when walls
+confirm the pose. The gotos by hand turned a lot, so the PC came to distrust odometry
+almost completely (it thought it could be 35° and 1 m off). From then on it followed
+any wall it saw, even walls it was itself unsure of, and those walls were wrong. Nothing
+on the robot was wrong:
 
 | Snapshot | What happened | Pose doubt (how unsure the PC thinks odometry is) | Correction, heading |
 |---|---|---|---|
@@ -755,13 +770,18 @@ command text to see it.
    goto past the robot's range: the point the robot would get, the range, and that the
    correction turned it); the answer carries the robot's own reason, not "robot log
    says why".
-2. Decide: with the correction off, should goto points be turned by it at all? (The page
-   draws the corrected map, so a click is in its frame; but a runaway correction then
-   sends the robot elsewhere.)
-3. Decide: the goto range from the power-up point (±300 cm on each axis), or from the
-   robot (as far as a goto goes, 3 m)?
-4. The correction's runaway: part of the open options (more data, then the algorithm);
-   the pose doubt's growth is the first lead.
+2. **The goto range counts from the robot's current position** (Daniel, 15 Nov): a
+   point at most 3 m from where the robot is, not ±300 cm from where it was switched
+   on (PicoA `commands.c`/`commands.h`, the PC's `LIMITS` and the page's check).
+3. Open: with the correction off, should goto points be turned by it at all? The page
+   draws the corrected map, so a click is a place on it; a wrong correction then sends
+   the robot elsewhere. A simple option: with the correction off, the page draws and
+   clicks in odometry's frame.
+4. How to keep the PC from distrusting odometry this far (open; part of "Options: more
+   data, then the algorithm"). Leads, none decided: the pose doubt's growth measured on
+   the robot instead of the simulator's 3.5 %; an unsure wall never moves a pose more
+   than the wall itself is sure of; a correction that moves the pose by more than its
+   own doubt is taken as a sign that something is wrong, logged, and not applied.
 
 ## What the two drives say, and what they don't
 
