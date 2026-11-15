@@ -13,6 +13,12 @@ older entries point to the plans of their day, now in [archive/](archive/).
   agent's choice).
 - Truth (Daniel): 11 cm forward, 14 cm right, about 20° left. Odometry 2.6 cm and 5°
   off; the PC's corrected pose 10 cm and 1° off.
+- Then Daniel drove it by page clicks; four clicks were refused by the robot (goto past
+  its ±300 cm range: the PC turned each click by a correction that had run away to
+  164 cm and -27°, though the correction was off). The refusal named no reason. Replay:
+  the PC's heading doubt had grown to 35° (3.5 % of every turn), so unsure walls could
+  turn the pose. The agent drove the robot back by odometry; Daniel switched it off.
+  Plan: "Driving by hand after the second drive".
 - Daniel: two drives in one room are too few to change the algorithm; proposed instead
   a dozen data drives in several rooms with measured truth, and a scoring replay (plan,
   "Next: data drives, then the algorithm"). Also: during physical tests Daniel runs

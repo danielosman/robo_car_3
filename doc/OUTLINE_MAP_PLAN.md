@@ -27,6 +27,8 @@ disagree, the less sure one gives way.
      tests checked; still to do.
   2. **The open options to collect more data** for the correction ("Options: more data,
      then the algorithm" near the end of this file). Nothing is decided: ask him which.
+  Also open from 15 Nov: "everything that can't happen says why", and why the robot
+  wouldn't move ("Driving by hand after the second drive").
 - **Steps S, then A to F in order:** all built and driven on the robot (15 Nov). The
   correction is off: it was worse than odometry.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
@@ -625,6 +627,12 @@ To look at, on a real drive:
 
 - No limit on how far one correction moves the robot's pose: the correction is what
   the walls say; a limit would be a magic number.
+- Whatever can't happen, the robot and the PC say why (which rule, which value, which
+  limit), in the answer and the log, not only "refused".
+- Robot drives: a 90° corner is 4 × `r30`, then `r-30`, so the floor around is seen.
+- During a physical test Daniel runs the server (AGENTS.md).
+- Two drives in one room are too few to change the algorithm; options for more data stay
+  open.
 
 ## What the first robot drive showed (15 Nov, boot `0a203718`)
 
@@ -689,19 +697,71 @@ The drive: `rotate 0`, then a 1 m square turning left: 4 × (`d100`, then 4 × `
 | Odometry | 12.5 cm | 11.9 cm | 15° | 2.6 cm, 5° |
 | Corrected (PC) | 20.9 cm | 15.2 cm | 21° | 10 cm, 1° |
 
-## Driving by hand after the second drive (15 Nov, boot `da005bff`)
+## Driving by hand after the second drive: why the robot wouldn't move (15 Nov, boot `da005bff`)
 
-- Daniel drove the robot across the room by clicks on the page. Then every goto was
-  refused: the PC turns a click from its map into the robot's frame by its correction,
-  and that had run away to 164 cm and -27° (snapshot 47 on); the points came out past
-  the robot's 300 cm goto range (`goto 320 -171`). The robot doesn't use the
-  correction (off), but the goto turning still does.
-- The refusal said only "not a command, a number out of range, or ...": not which.
-- The agent drove it back by turns and straight drives from odometry (339 cm in four
-  drives); odometry put it at (0, 3) cm, -3°.
-- Open: with the correction off, should goto still be turned by it? Should the PC
-  refuse a goto past the robot's range itself, and say so? Why the correction ran away
-  on this drive (replay `da005bff` up to snapshot 47).
+After the square Daniel drove the robot across the room by clicks on the page (moves
+24-46: 21 gotos, two 30° turns; three gotos ended `obstacle`, the rest ok). Then at
+(277, -195) cm by odometry it would not move: four clicks in a row were refused. The
+agent then drove it back by turns and straight drives from odometry (339 cm in four
+drives, every move ok); odometry put it at (0, 3) cm, -3°. Daniel switched it off for
+the day.
+
+**What refused the clicks.** Each refusal was the robot's ("Command refused: \"goto 320
+-171\" (not a command, a number out of range, or ...)"). A goto takes x and y within
+±300 cm of where the robot was powered up (`COMMAND_GOTO_MAX_CM`, commands.h). The
+page checks the click against ±300 cm on its own map, then the PC turns it into the
+robot's frame (`api/corrections.ts`): `corrected(c_robot, uncorrected(c_pc, click))`.
+The correction was off, so c_robot was 0, but c_pc had run away to 164 cm and -27°: the
+click (164, -169) became (320, -171), past the range. So two things together:
+
+- **The PC's correction had run away** (below), and goto points are turned by it even
+  with the correction off.
+- **The goto range is measured from the power-up point, not from the robot.** At
+  x = 277 cm any point farther along x is out of reach, correction or not. In a room
+  larger than 3 m from the start, part of the room can't be clicked at all.
+
+**Nobody said why.** The robot's line lists three possible reasons and names none; the
+answer said "refused by the robot (robot log says why)"; the page checked a different
+number (the click on its map) than the robot got. It took the agent the log and the
+command text to see it.
+
+**Why the correction ran away** (replay of `da005bff`, the PC's mapper as built):
+
+| Snapshot | What happened | Pose doubt (how unsure the PC thinks odometry is) | Correction, heading |
+|---|---|---|---|
+| 2 | start | 0 cm, 0° | 0° |
+| 20 | the square, 3 sides | 25 cm, 14° | +5.5° |
+| 29 | the gotos by hand (big turns) | 102 cm, 35° | +5.5° |
+| 30 | a new wall, itself unsure (68 cm, 20°) | 72 cm, 23° | -10.1° |
+| 45 | more walls | 29 cm, 6° | -27.5° |
+
+- The PC lets the heading's doubt grow by 3.5 % of every turn, adding up (`pose.ts`,
+  the simulator's default drift), and it only shrinks again when the pose is checked
+  against walls. After many turns without good walls it believed odometry could be
+  35° and 1 m off. Then any wall, even a very unsure one, could turn the pose: one
+  turned it by 16° at once (snapshot 30), more followed.
+- Odometry itself was good: driven back by odometry alone, the robot arrived at its
+  start (Daniel to confirm on the next day).
+- So on both drives the PC's model of odometry was far more pessimistic than the
+  robot; on this one that, not the walls, did most of the harm. Still two drives in one
+  room: a lead for the data drives, not a decided number.
+
+**To do, so this can't happen silently again:**
+
+1. **Everything that can't happen says why** (Daniel, 15 Nov), on the robot and on the
+   PC: which rule, which number, which limit. The robot's refusals each name their
+   reason (out of range: which value and the range; a move runs; bulk waits; not a
+   command). The PC checks what it can before sending and says it in the answer (a
+   goto past the robot's range: the point the robot would get, the range, and that the
+   correction turned it); the answer carries the robot's own reason, not "robot log
+   says why".
+2. Decide: with the correction off, should goto points be turned by it at all? (The page
+   draws the corrected map, so a click is in its frame; but a runaway correction then
+   sends the robot elsewhere.)
+3. Decide: the goto range from the power-up point (±300 cm on each axis), or from the
+   robot (as far as a goto goes, 3 m)?
+4. The correction's runaway: part of the open options (more data, then the algorithm);
+   the pose doubt's growth is the first lead.
 
 ## What the two drives say, and what they don't
 
