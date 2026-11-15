@@ -73,6 +73,8 @@ column_t cell_map_column(float x_m, float y_m);
 // corner of such a cell that overlaps the path; max_m if none is closer.
 float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward);
 // The same, and whether that nearest stop is floor not seen yet (floor first), not a thing
-// in the way: then *unseen_floor is true (the robot says so: room.h).
-float cell_map_stop_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward,
-                          bool *unseen_floor);
+// in the way: then *unseen_floor is true (the robot says so: room.h). Floor is checked only
+// within floor_half_m of the path's middle (the robot's own width: the margin beside it is
+// floor it doesn't drive on, and the sensor often can't see it from close).
+float cell_map_stop_along(float x_m, float y_m, float dx, float dy, float half_width_m, float floor_half_m, float max_m,
+                          bool forward, bool *unseen_floor);

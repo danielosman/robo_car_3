@@ -388,11 +388,11 @@ static column_t column_at(int cx, int cy) {
 column_t cell_map_column(float x_m, float y_m) { return column_at(cell_of(x_m), cell_of(y_m)); }
 
 float cell_map_obstacle_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward) {
-    return cell_map_stop_along(x_m, y_m, dx, dy, half_width_m, max_m, forward, NULL);
+    return cell_map_stop_along(x_m, y_m, dx, dy, half_width_m, half_width_m, max_m, forward, NULL);
 }
 
-float cell_map_stop_along(float x_m, float y_m, float dx, float dy, float half_width_m, float max_m, bool forward,
-                          bool *unseen_floor) {
+float cell_map_stop_along(float x_m, float y_m, float dx, float dy, float half_width_m, float floor_half_m, float max_m,
+                          bool forward, bool *unseen_floor) {
     float nearest = max_m;
     bool unseen = false;
     float ends_x[2] = {x_m, x_m + max_m * dx}, ends_y[2] = {y_m, y_m + max_m * dy};
@@ -411,7 +411,7 @@ float cell_map_stop_along(float x_m, float y_m, float dx, float dy, float half_w
             column_t c = column_at(ix, iy);
             float mid_side = fabsf((side_lo + side_hi) / 2);
             bool thing = c == COLUMN_BLOCKED || c == COLUMN_OVERHANG || c == COLUMN_NO_FLOOR;
-            bool floor = !thing && forward && along_lo < FLOOR_LOOK_M && mid_side < half_width_m && c != COLUMN_DRIVABLE;
+            bool floor = !thing && forward && along_lo < FLOOR_LOOK_M && mid_side < floor_half_m && c != COLUMN_DRIVABLE;
             if (!thing && !floor) continue;
             float at = fmaxf(along_lo, 0);
             if (at < nearest || (at == nearest && thing)) { nearest = at; unseen = floor; } // a thing wins a tie

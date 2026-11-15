@@ -7,8 +7,8 @@
 // unseen_floor (may be NULL): that stop is floor not seen yet, not a thing.
 static bool gap(float x_m, float y_m, float yaw_rad, float direction, float look_m, float *gap_m, bool *unseen_floor) {
     float look = EDGE_M + STOP_BEFORE_M + look_m;
-    float along = cell_map_stop_along(x_m, y_m, direction * cosf(yaw_rad), direction * sinf(yaw_rad), PATH_HALF_M, look,
-                                      direction > 0, unseen_floor);
+    float along = cell_map_stop_along(x_m, y_m, direction * cosf(yaw_rad), direction * sinf(yaw_rad), PATH_HALF_M, HALF_WIDTH_M,
+                                      look, direction > 0, unseen_floor);
     *gap_m = along - EDGE_M;
     return along < look;
 }

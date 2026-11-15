@@ -674,11 +674,25 @@ correction sent (step F). Daniel measured the truth.
    says "floor not seen yet (floor first: ...)"; the move ends "unseen_floor" (wire 7);
    the answer and `robot check` give result `obstacle` with why "floor not seen yet:
    ... nothing is in the way. Turning to look (r30, then back) shows it the floor".
-2. The correction: a new wall's doubt from its own hits; the replay of `0a203718` must
-   end at least as close to the truth as odometry; the simulator's scenarios, run at
-   several drifts, must not get worse.
-3. The floor-first rule must not block a drive's start for floor the robot cannot see
-   from where it stands (to be decided with Daniel).
+2. The correction: the replay of `0a203718` must end at least as close to the truth as
+   odometry; the simulator's scenarios, run at several drifts, must not get worse.
+   Tried on the replay (none kept; end position against the truth, odometry 2 cm, 3°):
+
+   | Change | Heading after the look round (truth 18°) | End |
+   |---|---|---|
+   | none (as built) | 23.4° | 15 cm, 3.8° off |
+   | a new wall's doubt from its hits, and one measurement a stand | 22.3° | 16 cm, 25° off |
+   | the same, and the pose's turn doubt 1 % (not 3.5 %) | 15.6° | 10 cm, 1.7° off |
+   | only the turn doubt 1 % | 15.8° | 9 cm, 2.9° off |
+
+   The turn doubt (`pose.ts`, 3.5 % a turn, from the simulator's drift) makes odometry
+   look far worse than it was; but no change brings the position near odometry's,
+   because the one wall in "above" is slanted (two surfaces). A correct wall comes first.
+3. Done, not flashed: the floor-first rule checks floor not seen yet only under the
+   robot's own width, not in the 5 cm margin beside it (`cell_map_stop_along`,
+   `room.c`); on the stored map side 3 would have driven.
+4. **The second drive:** a corner of 90° is 4 × `r30`, then `r-30` (Daniel), so the robot
+   has seen the floor around it before driving on.
 
 ## Open for Daniel
 

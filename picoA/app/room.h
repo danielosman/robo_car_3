@@ -15,6 +15,10 @@
 // From (x, y) facing yaw, driving in direction (+1 forward, -1 back): how far it may go
 // before it is STOP_BEFORE_M from the nearest obstacle (blocked, overhang, no floor) or
 // close unidentified floor on the map in its path, measured from its edge on that side.
+// Unidentified floor counts only under the robot's own width (HALF_WIDTH_M), not in the
+// 5 cm margin of PATH_HALF_M: the ToF sees the floor from about 27 cm ahead of the centre
+// on, so floor closer than that it can't see any more, and the margin beside it it often
+// can't see at all from close (15 Nov: a drive refused for one such cell).
 // Looks at most look_m far: exactly look_m when nothing is closer.
 float room_m(float x_m, float y_m, float yaw_rad, float direction, float look_m);
 // The same as a gap: from the edge to that obstacle (room_m + STOP_BEFORE_M); exactly

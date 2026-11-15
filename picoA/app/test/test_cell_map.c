@@ -464,13 +464,19 @@ int main(void) {
     assert(fabsf(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, true) - 0.2f) < 1e-5f);
     assert(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, false) == 1.0f);
     bool unseen = false; // ...and it says the stop is floor not seen yet, not a thing
-    assert(fabsf(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 1.0f, true, &unseen) - 0.2f) < 1e-5f && unseen);
+    assert(fabsf(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 0.1175f, 1.0f, true, &unseen) - 0.2f) < 1e-5f && unseen);
+    // Beside the robot's width (in the path's margin), floor not seen yet doesn't stop it.
+    restore(32, 31, COLUMN_OPEN); // cell (2, 1): 20..30 cm ahead, 10..20 cm left (its middle 15 cm)
+    grid[0][32][31] = 0;
+    restore(32, 30, COLUMN_DRIVABLE);
+    assert(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 0.1175f, 1.0f, true, &unseen) == 1.0f);
+    assert(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, true) < 1.0f); // with the margin, as before
     cell_map_clear(0, 0);
     // No floor (a hole/drop) 80 cm ahead: stops at 80 cm even though > 25 cm.
     grid[0][38][30] = C_PACK(CELL_STATE_FREE, 0, 10);
     assert(fabsf(cell_map_obstacle_along(0, 0, 1, 0, 0.1675f, 1.0f, true) - 0.8f) < 1e-5f);
-    assert(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 1.0f, true, &unseen) < 1.0f && !unseen); // a hole is a thing
-    assert(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 0.5f, true, &unseen) == 0.5f && !unseen); // nothing within reach
+    assert(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 0.1175f, 1.0f, true, &unseen) < 1.0f && !unseen); // a hole is a thing
+    assert(cell_map_stop_along(0, 0, 1, 0, 0.1675f, 0.1175f, 0.5f, true, &unseen) == 0.5f && !unseen); // nothing within reach
     // Ground pass limit: row 8 ("nothing in range", crosses G ~30-45 cm ahead) marks G
     // free; row 6 ("nothing in range", crosses G ~60-90 cm ahead, > 50 cm) never marks G
     // free.
