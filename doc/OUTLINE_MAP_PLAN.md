@@ -761,7 +761,7 @@ Tried on the first drive's replay, none kept (end position against the truth; od
 
 ## Open for Daniel
 
-1. **The data drives** ("Next: data drives, then the algorithm"): which rooms are at
+1. **The data drives** ("Options: more data, then the algorithm"): which rooms are at
    hand, and how many drives; Daniel measures the truth at each.
 
 ## Open technical points
