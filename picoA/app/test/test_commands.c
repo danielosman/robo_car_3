@@ -4,7 +4,8 @@
 // runs, a command refused, the safety stops named, the commands waiting for the
 // greeting after a server connects, a line typed on USB still taken, config pre_ms
 // and post_ms (the moves' still times; out of range refused), and the status the PC
-// gets (pose, mode, the running move; no peaks since step 4c). The test plays link_pc.h,
+// gets (pose, mode, the running move; no peaks since step 4c); correct: the pose
+// corrected, "corrected" sent before the answer, refused during a move or out of range. The test plays link_pc.h,
 // body, behaviour, move, the map and snapshot. Run from the
 // repo root:
 //   cc -std=c11 -Wall -Wextra -IpicoA/app/test/stubs -Icommon/test/fakes -Icommon -Ibuild/host -o build/test_commands picoA/app/test/test_commands.c -lm && build/test_commands
@@ -27,6 +28,8 @@ static int out_n;
 static uint8_t bulk[16][WIRE_MESSAGE_MAX];
 static int bulk_n, bulk_room = 100;
 bool link_pc_connected(void) { return connected; }
+static uint32_t bulk_waiting;
+uint32_t link_pc_bulk_waiting(void) { return bulk_waiting; }
 void link_pc_print_status(void) {}
 bool link_pc_send_control(const uint8_t *message, uint32_t len) {
     wire_message_t m;
@@ -69,6 +72,10 @@ const odometry_report_t *body_odometry(void) { return &odometry; }
 const status_report_t *body_status(void) { return &body_st; }
 void body_motors(bool on) { motors = on; }
 uint32_t body_imu_received(void) { return 0; }
+void body_correction(float *x, float *y, float *yaw) { *x = *y = *yaw = 0; }
+static float corrected_to[3];
+static int corrections;
+void pose_correct(float x, float y, float yaw) { corrected_to[0] = x; corrected_to[1] = y; corrected_to[2] = yaw; corrections++; }
 uint32_t body_imu_lost(void) { return 0; }
 
 // --- behaviour, move ---
@@ -119,6 +126,8 @@ void loop_statistics_print(void) {}
 void snapshot_request(snapshot_why_t why, uint32_t command) { assert(why == SNAPSHOT_COMMAND); snapshot_asked = command; }
 bool snapshot_sent(snapshot_sent_t *s) { if (!snapshot_has_gone) return false; snapshot_has_gone = false; *s = snapshot_gone; return true; }
 void snapshot_print_status(void) {}
+static bool snapshot_is_busy;
+bool snapshot_busy(void) { return snapshot_is_busy; }
 
 static void loop(int ms) {
     for (int i = 0; i < ms; i++) { fake_now_us += 1000; commands_update(); }
@@ -221,6 +230,36 @@ int main(void) {
     assert(answer_sent(6).n == 11 && answer_sent(6).end == WIRE_END_OK);
     for (int i = 7; i < 10; i++) assert(answer_sent(i).end == WIRE_END_REFUSED);
     printf("ok: a snapshot answered once it has gone; refused; config pre_ms / post_ms; the others at once\n");
+
+    // correct: mm and 0.01°; "corrected" first, then the answer; refused out of range or during a move.
+    out_n = 0;
+    pc_sends(20, "correct 120 -45 -1050");
+    loop(1);
+    assert(corrections == 1 && corrected_to[0] == 0.12f && corrected_to[1] == -0.045f &&
+           fabsf(corrected_to[2] + 10.5f * RAD_PER_DEG) < 1e-6f && out_n == 2);
+    wire_message_t cm = sent(0);
+    wire_corrected_t k;
+    assert(wire_decode_corrected(&cm, &k) && k.x_m == 0.12f && k.y_m == -0.045f && k.yaw_rad == corrected_to[2]);
+    assert(answer_sent(1).n == 20 && answer_sent(1).end == WIRE_END_OK);
+    pc_sends(21, "correct 20001 0 0");
+    pc_sends(22, "correct 0 0 18001");
+    pc_sends(23, "correct 1 2");
+    running = "drive";
+    pc_sends(24, "correct 0 0 0");
+    loop(1);
+    running = "";
+    bulk_waiting = 289;      // a frame still waiting in the bulk lane
+    pc_sends(25, "correct 0 0 0");
+    loop(1);
+    bulk_waiting = 0;
+    snapshot_is_busy = true; // a snapshot asked for or going out
+    pc_sends(26, "correct 0 0 0");
+    loop(1);
+    snapshot_is_busy = false;
+    assert(corrections == 1 && out_n == 8);
+    for (int i = 2; i < 8; i++) assert(answer_sent(i).end == WIRE_END_REFUSED);
+    printf("ok: correct: the pose corrected, \"corrected\" before the answer; refused out of range, during a move, "
+           "while bulk waits or a snapshot is on its way\n");
 
     // A line typed on USB still works, its number after '#'.
     out_n = 0;

@@ -682,14 +682,9 @@
         "code": "export interface BandOutline"
       },
       {
-        "name": "outlinesAt",
-        "kind": "function",
-        "code": "export async function outlinesAt("
-      },
-      {
-        "name": "wallsAt",
-        "kind": "function",
-        "code": "export async function wallsAt("
+        "name": "OutlineMaps",
+        "kind": "type",
+        "code": "export class OutlineMaps implements Placement"
       }
     ]
   }

@@ -25,6 +25,8 @@ static odometry_report_t odometry = {.stationary = false};
 bool body_connected(void) { return true; }
 const odometry_report_t *body_odometry(void) { return &odometry; }
 uint32_t body_odometry_count(void) { return reports; }
+void body_correct(float x, float y, float yaw) { (void)x; (void)y; (void)yaw; }  // pose.c's; not used here
+void body_correction(float *x, float *y, float *yaw) { *x = *y = *yaw = 0; }
 bool body_odometry_get(uint32_t n, odometry_report_t *r, uint32_t *t_us) {
     if (n != reports) return false; // the fake keeps only the latest
     *r = odometry;

@@ -251,6 +251,8 @@ void snapshot_update(void) {
     }
 }
 
+bool snapshot_busy(void) { return pending || sending; }
+
 void snapshot_print_status(void) {
     printf("Snapshots: %lu sent (the last %lu KB), %lu KB in all%s\n",
            (unsigned long)sequence, (unsigned long)(last_len / 1024), (unsigned long)(sent_bytes / 1024),

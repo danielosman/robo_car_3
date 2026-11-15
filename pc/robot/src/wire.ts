@@ -8,12 +8,12 @@
 // Times (tUs) are µs since PicoA's power-up (u64 on the wire): they never wrap.
 import { TOF_FORMATS, packTof, tofFormatOfType, unpackTof, type PosedFrame } from "./tof_format.ts";
 
-export const WIRE_VERSION = 5; // as picoA/app/wire.h; the server refuses a robot with another
+export const WIRE_VERSION = 6; // as picoA/app/wire.h; the server refuses a robot with another
 export const HEADER = 3;
 export const PAYLOAD_MAX = 1400;
 
 export const TYPE = {
-  HELLO: 0x01, CONSOLE: 0x02, ANSWER: 0x03, STATUS: 0x04, MAP_CLEARED: 0x05, MOVE_START: 0x06, MOVE_END: 0x07,
+  HELLO: 0x01, CONSOLE: 0x02, ANSWER: 0x03, STATUS: 0x04, MAP_CLEARED: 0x05, MOVE_START: 0x06, MOVE_END: 0x07, CORRECTED: 0x08,
   SNAPSHOT_PART: 0x10, IMU_BATCH: 0x11, MAP_PART: 0x12,
   COMMAND: 0x20, HEARTBEAT: 0x21,
 } as const;
@@ -23,7 +23,7 @@ export type Lane = (typeof LANE)[keyof typeof LANE];
 export interface TypeInfo { lane: Lane; min: number; max: number }
 
 const HELLO_SIZE = 29, BUILD_LEN = 24, CONSOLE_MAX = 240, ANSWER_SIZE = 34, STATUS_SIZE = 33, MODE_LEN = 8, ACTION_LEN = 12;
-const MOVE_START_SIZE = 26, MOVE_END_SIZE = 37, IMU_BATCH_HEADER = 15, IMU_RECORD = 12, TOF_HEADER = 12;
+const MOVE_START_SIZE = 26, MOVE_END_SIZE = 37, CORRECTED_SIZE = 12, IMU_BATCH_HEADER = 15, IMU_RECORD = 12, TOF_HEADER = 12;
 export const PART_MAX = 1400, COMMAND_TEXT_MAX = 46;
 export const MAP_PARTS = 9, MAP_PART_CELLS = 1200, MAP_PART_SIZE = 5 + MAP_PART_CELLS;
 export const IMU_BATCH_MAX = 10;          // records in an imu batch
@@ -39,6 +39,7 @@ const TABLE = new Map<number, TypeInfo>([
   [TYPE.MAP_CLEARED, { lane: LANE.CONTROL, min: 0, max: 0 }],
   [TYPE.MOVE_START, { lane: LANE.CONTROL, min: MOVE_START_SIZE, max: MOVE_START_SIZE }],
   [TYPE.MOVE_END, { lane: LANE.CONTROL, min: MOVE_END_SIZE, max: MOVE_END_SIZE }],
+  [TYPE.CORRECTED, { lane: LANE.CONTROL, min: CORRECTED_SIZE, max: CORRECTED_SIZE }],
   [TYPE.SNAPSHOT_PART, { lane: LANE.BULK, min: 1, max: PART_MAX }],
   [TYPE.IMU_BATCH, { lane: LANE.BULK, min: IMU_BATCH_HEADER + IMU_RECORD, max: IMU_BATCH_HEADER + IMU_BATCH_MAX * IMU_RECORD }],
   [TYPE.MAP_PART, { lane: LANE.BULK, min: MAP_PART_SIZE, max: MAP_PART_SIZE }],
@@ -72,6 +73,9 @@ export interface RobotAnswer {
   n: number; end: string; has: number; x: number; y: number; yaw: number; moved: number; rotated: number; goal: number; snapshot: number;
 }
 export interface Status { x: number; y: number; yaw: number; mode: string; action: string; rssi: number }
+// The correction the robot applies from now on (m, rad; correction.ts), sent before the
+// answer to its correct command.
+export interface Corrected { x: number; y: number; yaw: number }
 // A move's start (picoA/app/move.h): its number, its command's, kind, parameter
 // (drive m, rotate rad, goto m to the goal, watch s), its time, the still times;
 // refused: it can't start, its end follows at once and a running move goes on.
@@ -99,6 +103,7 @@ export type Message =
   | ({ type: "answer" } & RobotAnswer)
   | ({ type: "status" } & Status)
   | { type: "map_cleared" }
+  | ({ type: "corrected" } & Corrected)
   | ({ type: "move_start" } & MoveStart)
   | ({ type: "move_end" } & MoveEnd)
   | { type: "snapshot_part"; bytes: Buffer }
@@ -180,6 +185,7 @@ export function decode(m: RawMessage): Message {
       return { type: "status", x: p.readFloatLE(0), y: p.readFloatLE(4), yaw: p.readFloatLE(8), mode: readText(p.subarray(12, 12 + MODE_LEN)),
                action: readText(p.subarray(20, 20 + ACTION_LEN)), rssi: p.readInt8(32) };
     case TYPE.MAP_CLEARED: need(0); return { type: "map_cleared" };
+    case TYPE.CORRECTED: need(CORRECTED_SIZE); return { type: "corrected", x: p.readFloatLE(0), y: p.readFloatLE(4), yaw: p.readFloatLE(8) };
     case TYPE.MOVE_START:
       need(MOVE_START_SIZE);
       return { type: "move_start", move: p.readUInt32LE(0), command: p.readUInt32LE(4), kind: MOVE_KINDS[p[8]] ?? `kind ${p[8]}`,
@@ -252,6 +258,12 @@ export function encodeStatus(s: Status): Buffer {
 }
 
 export const encodeMapCleared = (): Buffer => header(TYPE.MAP_CLEARED, Buffer.alloc(0));
+
+export function encodeCorrected(c: Corrected): Buffer {
+  const p = Buffer.alloc(CORRECTED_SIZE);
+  p.writeFloatLE(c.x, 0); p.writeFloatLE(c.y, 4); p.writeFloatLE(c.yaw, 8);
+  return header(TYPE.CORRECTED, p);
+}
 
 export function encodeMoveStart(s: MoveStart): Buffer {
   const p = Buffer.alloc(MOVE_START_SIZE), kind = MOVE_KINDS.indexOf(s.kind as (typeof MOVE_KINDS)[number]);

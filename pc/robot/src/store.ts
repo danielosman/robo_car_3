@@ -11,6 +11,11 @@
 //   imu        one per imu record (104 a second during moves): its move (its batch names
 //              it), time, and the IMU's raw counts in the sensor's axes (training data)
 //   status     the robot's status messages (4 a second): the path driven
+//   robot_corrections  the PC's correction the robot applies from a message on (its
+//              "corrected", correction.ts): every pose in the rows above and in a
+//              snapshot after it is corrected by it, as the robot sent it. The readers
+//              for the maps (framesBetween, snapshotsUpTo, snapshotFrames, path, rawPose)
+//              give them back as raw odometry; moveFrames and replay as sent
 //   snapshots  one per snapshot, its bytes as they came, its pose, action, camera and
 //              colour reading; snapshot_zones (its ToF frame), snapshot_features; the
 //              picture a PNG beside the database
@@ -29,7 +34,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { snapshotId, type Snapshot } from "./snapshot.ts";
 import type { Pose } from "./link.ts";
-import { Boot, type TofRow, type ImuBatchRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
+import { Boot, type CorrectedRow, type TofRow, type ImuBatchRow, type MoveEndRow, type MoveStartRow, type StatusRow } from "./boot.ts";
+import { rawOf, type CorrectionRow, type Planar } from "./correction.ts";
 import type { Mounting } from "./mounting.ts";
 import { KINDS, rowCol, type Kind, type PosedFrame } from "./tof_format.ts";
 import { IMU_RECORD_PERIOD_US, type Hello, type ImuBatch, type ImuRecord, type TofMessage, type Vec3 } from "./wire.ts";
@@ -71,6 +77,8 @@ CREATE TABLE IF NOT EXISTS imu (                      -- one per imu record (com
 CREATE TABLE IF NOT EXISTS status (
   boot_id VARCHAR, message_number INTEGER, arrived_at TIMESTAMP,
   x DOUBLE, y DOUBLE, yaw DOUBLE, mode VARCHAR, action VARCHAR, rssi INTEGER);
+CREATE TABLE IF NOT EXISTS robot_corrections (        -- from this message on the robot applies this correction (m, rad; correction.ts)
+  boot_id VARCHAR, message_number INTEGER, arrived_at TIMESTAMP, x DOUBLE, y DOUBLE, yaw DOUBLE);
 CREATE TABLE IF NOT EXISTS snapshots (                -- picoA/app/snapshot.c
   snapshot_id VARCHAR PRIMARY KEY, boot_id VARCHAR, sequence INTEGER, message_number INTEGER, robot_clock_us UBIGINT, arrived_at TIMESTAMP,
   why VARCHAR, action VARCHAR, end_reason VARCHAR, actions_ended INTEGER, running VARCHAR, mode VARCHAR,
@@ -156,7 +164,8 @@ export type Replayed =
   | { messageNumber: number; atMs: number; type: "tof"; tof: TofMessage }
   | { messageNumber: number; atMs: number; type: "imu_batch"; batch: ImuBatch }
   | { messageNumber: number; atMs: number; type: "status"; pose: StatusRow["pose"] }
-  | { messageNumber: number; atMs: number; type: "snapshot"; bytes: Buffer };
+  | { messageNumber: number; atMs: number; type: "snapshot"; bytes: Buffer }
+  | { messageNumber: number; atMs: number; type: "corrected"; c: Planar };
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 const msOf = (v: unknown) => { // a TIMESTAMP read back (local time, as written) to ms since 1970
@@ -170,8 +179,9 @@ const msOf = (v: unknown) => { // a TIMESTAMP read back (local time, as written)
 export class Store {
   private queue: Promise<unknown> = Promise.resolve();
   readonly dbPath: string;
-  private pending: { starts: MoveStartRow[]; ends: MoveEndRow[]; frames: TofRow[]; imu: ImuBatchRow[]; status: StatusRow[]; boots: Map<string, Boot> } =
-    { starts: [], ends: [], frames: [], imu: [], status: [], boots: new Map() };
+  private pending: { starts: MoveStartRow[]; ends: MoveEndRow[]; frames: TofRow[]; imu: ImuBatchRow[]; status: StatusRow[];
+                     corrections: CorrectedRow[]; boots: Map<string, Boot> } =
+    { starts: [], ends: [], frames: [], imu: [], status: [], corrections: [], boots: new Map() };
   private flushing: Promise<void> | null = null;
   onError: (err: Error) => void = () => {};
 
@@ -238,11 +248,12 @@ export class Store {
   tof(boot: Boot, row: TofRow): Promise<void> { this.pending.frames.push(row); return this.queued(boot); }
   imuBatch(boot: Boot, row: ImuBatchRow): Promise<void> { this.pending.imu.push(row); return this.queued(boot); }
   status(boot: Boot, row: StatusRow): Promise<void> { this.pending.status.push(row); return this.queued(boot); }
+  corrected(boot: Boot, row: CorrectedRow): Promise<void> { this.pending.corrections.push(row); return this.queued(boot); }
 
   // Resolves once everything given so far is written.
   flush(): Promise<void> {
     const p = this.pending;
-    if (!p.starts.length && !p.ends.length && !p.frames.length && !p.imu.length && !p.status.length && !p.boots.size) {
+    if (!p.starts.length && !p.ends.length && !p.frames.length && !p.imu.length && !p.status.length && !p.corrections.length && !p.boots.size) {
       return this.flushing ?? Promise.resolve();
     }
     return this.queued(null);
@@ -255,7 +266,7 @@ export class Store {
     this.flushing = (async () => {
       await Promise.resolve(); // what arrives in the same tick goes along
       const p = this.pending;
-      this.pending = { starts: [], ends: [], frames: [], imu: [], status: [], boots: new Map() };
+      this.pending = { starts: [], ends: [], frames: [], imu: [], status: [], corrections: [], boots: new Map() };
       try { await this.writeRows(p); } catch (err) { this.onError(err as Error); }
       finally { this.flushing = null; }
     })();
@@ -298,6 +309,8 @@ export class Store {
         for (const r of p.status) appendStatus(a, r);
         a.closeSync();
       }
+      for (const r of p.corrections)
+        await c.run("INSERT INTO robot_corrections VALUES ($1, $2, $3, $4, $5, $6)", [r.boot, r.messageNumber, at(r.atMs), r.c.x, r.c.y, r.c.yaw]);
       for (const b of p.boots.values()) await saveBootState(c, b);
       await c.run("COMMIT");
     });
@@ -352,16 +365,27 @@ export class Store {
 
   // --- reads ---
 
-  // The path driven up to snapshot sequence of a boot: the statuses' x, y (m), oldest
-  // first, since power-up.
+  // The path driven up to snapshot sequence of a boot: the statuses' x, y (m; raw
+  // odometry), oldest first, since power-up.
   async path(boot: string, sequence: number): Promise<{ x: number; y: number }[]> {
     return this.use(async c => {
       const rows = (await c.runAndReadAll(`
-        SELECT x, y FROM status WHERE boot_id = $1
+        SELECT message_number, x, y, yaw FROM status WHERE boot_id = $1
           AND message_number <= (SELECT message_number FROM snapshots WHERE boot_id = $1 AND sequence = $2)
-        ORDER BY message_number`, [boot, sequence])).getRowObjects();
-      return rows.map(r => ({ x: Number(r.x), y: Number(r.y) }));
+        ORDER BY message_number`, [boot, sequence])).getRowObjects(), cs = await correctionsIn(c, boot);
+      return rows.map(r => {
+        const p = rawOf(cs, Number(r.message_number), { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) });
+        return { x: p.x, y: p.y };
+      });
     });
+  }
+
+  // The corrections the robot applied, oldest first (correction.ts).
+  async corrections(boot: string): Promise<CorrectionRow[]> { return this.use(c => correctionsIn(c, boot)); }
+
+  // A pose the robot sent in message messageNumber of a boot, back to raw odometry.
+  async rawPose<P extends Planar>(boot: string, messageNumber: number, p: P): Promise<P> {
+    return rawOf(await this.corrections(boot), messageNumber, p);
   }
 
   // A boot named by its id (8 hex digits); null if the store doesn't have it.
@@ -384,7 +408,7 @@ export class Store {
   }
 
   // A boot's frames with message numbers after `after`, up to `upTo`, in the order they
-  // came (the PC's cell map: maps/cell_map.ts).
+  // came (the PC's cell map: maps/cell_map.ts), their poses raw odometry (yaw wrapped).
   async framesBetween(boot: string, after: number, upTo: number): Promise<StoredFrame[]> {
     return this.use(async c => {
       const range = [boot, after, upTo];
@@ -392,13 +416,18 @@ export class Store {
         ORDER BY message_number`, range)).getRowObjects();
       const zones = (await c.runAndReadAll(`SELECT z.* FROM zones z JOIN frames f ON f.boot_id = z.boot_id AND f.number = z.number
         WHERE f.boot_id = $1 AND f.message_number > $2 AND f.message_number <= $3 ORDER BY z.number, z.row, z.col`, range)).getRowObjects();
-      return framesOf(frames, zones);
+      const cs = await correctionsIn(c, boot);
+      return framesOf(frames, zones).map((f, k) => {
+        if (!cs.length) return f;
+        const p = rawOf(cs, Number(frames[k].message_number), f.frame);
+        return { ...f, frame: { ...p, yaw: Math.atan2(Math.sin(p.yaw), Math.cos(p.yaw)) } };
+      });
     });
   }
 
   // A snapshot as the PC's cell map needs it: the message number of the boot's last frame
-  // before it (0: none), and the robot's pose in it (null: PicoB not connected); null if
-  // there is no such snapshot.
+  // before it (0: none), and the robot's pose in it (raw odometry; null: PicoB not
+  // connected); null if there is no such snapshot.
   async snapshotFrames(boot: string, sequence: number): Promise<{ lastFrame: number; pose: Pose | null } | null> {
     const [s] = await this.snapshotsWhere(boot, "sequence = $2", sequence);
     return s ? { lastFrame: s.lastFrame, pose: s.pose } : null;
@@ -411,11 +440,12 @@ export class Store {
 
   private snapshotsWhere(boot: string, where: string, sequence: number): Promise<{ sequence: number; lastFrame: number; pose: Pose | null }[]> {
     return this.use(async c => {
-      const rows = (await c.runAndReadAll(`SELECT sequence, x, y, yaw, (SELECT coalesce(max(f.message_number), 0) FROM frames f
+      const rows = (await c.runAndReadAll(`SELECT sequence, message_number, x, y, yaw, (SELECT coalesce(max(f.message_number), 0) FROM frames f
         WHERE f.boot_id = s.boot_id AND f.message_number < s.message_number) AS last_frame
         FROM snapshots s WHERE boot_id = $1 AND ${where} ORDER BY sequence`, [boot, sequence])).getRowObjects();
+      const cs = await correctionsIn(c, boot);
       return rows.map(r => ({ sequence: Number(r.sequence), lastFrame: Number(r.last_frame),
-                              pose: r.x === null ? null : { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) } }));
+                              pose: r.x === null ? null : rawOf(cs, Number(r.message_number), { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) }) }));
     });
   }
 
@@ -468,6 +498,7 @@ export class Store {
         out.push({ messageNumber: Number(s.message_number), atMs: msOf(s.arrived_at), type: "status", pose: {
           x: Number(s.x), y: Number(s.y), yaw: Number(s.yaw), mode: String(s.mode), action: String(s.action), rssi: num(s.rssi), at: msOf(s.arrived_at) } });
       }
+      for (const r of await correctionsIn(c, boot, true)) out.push({ messageNumber: r.messageNumber, atMs: r.atMs, type: "corrected", c: r.c });
       for (const s of await rows("SELECT message_number, arrived_at, bytes FROM snapshots WHERE boot_id = $1")) {
         out.push({ messageNumber: Number(s.message_number), atMs: msOf(s.arrived_at), type: "snapshot", bytes: Buffer.from((s.bytes as { bytes: Uint8Array }).bytes) });
       }
@@ -546,6 +577,14 @@ function moveRow(m: Record<string, unknown>): MoveRow {
 }
 
 // Frame rows and their zone rows (both by number, the zones by row and column) as frames.
+// A boot's corrections, oldest first.
+async function correctionsIn(c: DuckDBConnection, boot: string, withTime?: false): Promise<CorrectionRow[]>;
+async function correctionsIn(c: DuckDBConnection, boot: string, withTime: true): Promise<(CorrectionRow & { atMs: number })[]>;
+async function correctionsIn(c: DuckDBConnection, boot: string): Promise<(CorrectionRow & { atMs: number })[]> {
+  const rows = (await c.runAndReadAll("SELECT * FROM robot_corrections WHERE boot_id = $1 ORDER BY message_number", [boot])).getRowObjects();
+  return rows.map(r => ({ messageNumber: Number(r.message_number), atMs: msOf(r.arrived_at), c: { x: Number(r.x), y: Number(r.y), yaw: Number(r.yaw) } }));
+}
+
 function framesOf(frames: Record<string, unknown>[], zones: Record<string, unknown>[]): StoredFrame[] {
   const byNumber = new Map<number, Record<string, unknown>[]>();
   for (const z of zones) {

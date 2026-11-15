@@ -16,7 +16,7 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 - **Built:** steps 1-7, including the PC's whole-house cell map, PicoA's
   window-only, floor-first map, and the PC's line maps (step 7, PC only). Step 6 is
   not flashed. History is in [CHANGELOG.md](CHANGELOG.md), the 10 and 11 Nov entries.
-- **Current versions:** PicoA–PicoB link 7, robot–PC wire 5, snapshot 3. PicoB reads
+- **Current versions:** PicoA–PicoB link 7, robot–PC wire 6 (step F's "corrected"), snapshot 3. PicoB reads
   the IMU at 416 Hz; the PC receives and stores averaged records at 104 Hz.
   Odometry, `drive` and PicoA's layout stay as they are; the deferred 4e/4g redesigns
   are not part of the remaining work. Their design ideas have a separate home in
@@ -28,7 +28,8 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 - **Next: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)**, agreed in general by Daniel
   (11 Nov), being built (its table of steps says how far): a simulator first (its
   step S), then the outline, the walls and the pose correction (A-D), the page
-  (E, the old step 8, done), then the corrected pose sent to the robot (F). The line map's code is replaced by `maps/outline/`. A fresh
+  (E, the old step 8, done), then the correction sent to the robot (F, done, not
+  flashed). The line map's code is replaced by `maps/outline/`. A fresh
   session starts at its "For the fresh session". Then 9 docs, the final flash,
   the robot test.
 - **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).

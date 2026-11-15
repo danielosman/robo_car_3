@@ -198,7 +198,7 @@
       { "at": "api.runner.CommandRunner.run" },
       { "change": "turn", "name": "robot text", "at": "api.commands.robotText",
         "what": "into the robot's words (\"drive 50\") with the next command number", "dto": "pc.wire.RobotCommand",
-        "path": "pc/robot/src/api/runner.ts", "code": "if (!this.robot.sendCommand(n, robotText(c))) {" },
+        "path": "pc/robot/src/api/runner.ts", "code": "this.send(robotText(c), deadline - Date.now())" },
       { "at": "pc.link.RobotLink.sendCommand" },
       { "change": "turn", "name": "encode", "at": "pc.wire.encodeCommand",
         "what": "into the command message: number and text (up to 46 characters)", "bytes": 50,
@@ -283,7 +283,7 @@
       { "change": "turn", "name": "build map", "at": "pc.cell_map.CellMaps.viewAtSnapshot",
         "what": "the helper runs cell_map_add and house_map (2 × 2 m tiles), and returns the window, columns and tiles",
         "dto": "pc.cell_map.CellMapView",
-        "path": "pc/robot/src/maps/cell_map.ts", "code": "const view = kept ?? await this.upTo(boot, s.lastFrame, m => m.view());" }
+        "path": "pc/robot/src/maps/cell_map.ts", "code": "const view = kept ?? await this.upTo(boot, s.lastFrame, s.poseOf, m => m.view());" }
     ]
   },
   {

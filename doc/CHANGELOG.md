@@ -5,6 +5,32 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 15 Nov 2026: the outline map, step F (the correction sent to the robot)
+
+The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). Changes PicoA (not flashed)
+and the PC; wire 5 → 6.
+
+- **Built:** PicoA's `correct` command; the correction applied in `body.c` to each
+  odometry report and moved for the kept ones and `pose.c`'s history; the "corrected"
+  message before the answer. On the PC: `robot_corrections`, the store's readers giving
+  raw odometry back (`correction.ts` `rawOf`), `api/corrections.ts` sending the
+  correction after each snap and before each move and turning goto places into the
+  robot's frame. The page sends goto in the map's frame; `robot check` asks in it too
+  (step E's "robot's own frame" is gone). `inRobotFrame` removed. The fake robot takes
+  `correct` and replays corrections.
+- **Chosen while building:** the robot says which correction it applies by its own
+  message ("corrected"), not the PC by the answer: answers aren't stored, and the
+  message puts it in order with the frames, also in a replay.
+- **Review (fresh subagent), fixed:** the page drew the snapshot's robot and camera
+  corrected twice (its pose came as sent): now raw too. "corrected" could overtake
+  frames or a snapshot still in the bulk lane (a resend after WiFi dropped, or with
+  auto snap off): the robot refuses `correct` then. The drift test stored snapshot 3
+  uncorrected, so it proved little: now the drive runs twice, with and without the
+  robot taking the correction, and outline, path and cells must agree. The CLI help
+  still said goto takes odometry. The logged turn wasn't wrapped; the PC's copy of the
+  robot's range limit dropped (the robot refuses). Left open: see the plan, "Left open".
+- Also: four stale references in the architecture diagram fixed (three from step E).
+
 ## 12 Nov 2026: the outline map, step E (the page)
 
 The plan is [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md). PC only: nothing to flash.

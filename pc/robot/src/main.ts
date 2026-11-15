@@ -30,8 +30,9 @@ import { ingest } from "./ingest.ts";
 import { BootFolders } from "./boot_folders.ts";
 import { Log } from "./log.ts";
 import { LiveRobot } from "./live.ts";
-import { wireCheck, type Hello, type MoveStart } from "./wire.ts";
+import { wireCheck, type Corrected, type Hello, type MoveStart } from "./wire.ts";
 import { CommandRunner, StoredSnapshots } from "./api/runner.ts";
+import { Corrections } from "./api/corrections.ts";
 import { CommandQueue } from "./api/queue.ts";
 import { createApi } from "./api/routes.ts";
 import { MODEL, MODEL_API, openAiChat } from "./objects/model.ts";
@@ -70,14 +71,19 @@ async function main(): Promise<void> {
     void outlines.added(s.bootId, s.sequence);  // queued before the page's read of it
     broadcast({ type: "snapshot", boot: s.bootId, sequence: s.sequence });
   } });
-  robot.on("hello", (h: Hello) => live.setBoot(h.bootId));
+  // The PC's correction sent to the robot between moves (step F); every pose the robot
+  // sends is corrected by the one it applies: the store and the page get them raw.
+  const corrections = new Corrections(new CommandRunner(robot, stored), { live, snapshots: stored, outlines, store, note });
+  const rawPose = (p: LivePose) => corrections.raw(live.boot, p);
+  robot.on("hello", (h: Hello) => { live.setBoot(h.bootId); corrections.robotHas(h.bootId).catch(err => note(`the robot's correction NOT read: ${(err as Error).message}`)); });
+  robot.on("corrected", (c: Corrected) => corrections.heard(live.boot, c));
   robot.on("moveStart", (m: MoveStart) => live.setStill(m.preMs, m.postMs));
-  robot.on("pose", (p: LivePose) => { live.setPose(p); broadcast({ type: "pose", pose: p }); });
+  robot.on("pose", (p: LivePose) => { live.setPose(p); broadcast({ type: "pose", pose: rawPose(p) }); });
   robot.on("text", (text: string) => log.text(text));
   robot.on("note", note);
   robot.on("status", status => { live.setStatus(status); broadcast({ type: "status", status }); });
   robot.on("mapCleared", () => note("the robot's map was cleared (its own 6 x 6 m map; the PC's are kept)"));
-  const queue = new CommandQueue(new CommandRunner(robot, stored), (a, sender) => log.answer(a, sender));
+  const queue = new CommandQueue(corrections, (a, sender) => log.answer(a, sender));
   const chat = openAiChat(MODEL_API, MODEL, note);
   const api = getRequestListener(createApi({ store, maps, outlines, live, queue, log, snapshots: stored, config: { autoSnap: true },
                                               recordingsDirectory: RECORDINGS_DIRECTORY, bootFolders, chat, modelName: MODEL }).fetch);
@@ -108,7 +114,7 @@ async function main(): Promise<void> {
     clients.add(ws);
     send(ws, { type: "backlog", items: log.backlog() });
     send(ws, { type: "status", status: robot.status });
-    if (live.pose) send(ws, { type: "pose", pose: live.pose });
+    if (live.pose) send(ws, { type: "pose", pose: rawPose(live.pose) });
     ws.on("close", () => clients.delete(ws));
     ws.on("error", () => clients.delete(ws));
   });

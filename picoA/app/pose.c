@@ -4,6 +4,7 @@
 #include "geometry.h"
 #include "body.h"
 #include "pose.h"
+#include "correction.h"
 
 #define POSE_HISTORY        64      // reports: 1.28 s at 50 Hz
 #define MAX_AHEAD_US   50000   // how far past the latest report pose_at() extrapolates
@@ -35,6 +36,19 @@ void pose_update(void) {
             .pose = {o.x_m, o.y_m, o.yaw_rad, o.pitch_rad},
             .v_mps = o.v_mps, .w_radps = o.w_radps, .still = o.stationary,
         };
+    }
+}
+
+void pose_correct(float x_m, float y_m, float yaw_rad) {
+    planar_t from, to = {x_m, y_m, yaw_rad};
+    body_correction(&from.x_m, &from.y_m, &from.yaw_rad);
+    body_correct(x_m, y_m, yaw_rad);
+    for (int k = 0; k < count; k++) {
+        pose_t *p = &history[(newest - k + POSE_HISTORY) % POSE_HISTORY].pose;
+        planar_t q = correction_move(from, to, (planar_t){p->x_m, p->y_m, p->yaw_rad});
+        p->x_m = q.x_m;
+        p->y_m = q.y_m;
+        p->yaw_rad = q.yaw_rad;
     }
 }
 

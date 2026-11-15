@@ -5,8 +5,8 @@
 // a refused command, the console lines and status; a fake robot of another wire
 // version refused; a robot that connects again; and a stored boot replayed into a
 // second server's own database (ingest.ts, as main.ts stores): the same moves,
-// frames, zones, imu records, statuses and snapshots come out, the old database untouched, and
-// the fake's own moves get a start and an end. The snapshots are the firmware's
+// frames, zones, imu records, statuses, corrections and snapshots come out, the old database
+// untouched, and the fake's own moves get a start and an end, its correction stored. The snapshots are the firmware's
 // (build/test_snapshot.snap, from ./run_tests.sh). Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -125,6 +125,7 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     await old.imuBatch(boot, boot.imuBatch(imu(0, 10)));
     await old.imuBatch(boot, boot.imuBatch(imu(10, 3)));
     await old.moveEnd(boot, boot.moveEnd({ move: 1, end: "ok", tUs: 0x5000, framesSent: 2, framesDropped: 0, moved: 0.25, rotated: 0, imuSent: 2, imuDropped: 0 })); // f32-exact, as the wire carries them
+    await old.corrected(boot, boot.corrected({ x: 0.125, y: -0.5, yaw: 0.25 }));  // the PC's correction taken (step F)
     await old.status(boot, boot.status(pose(1.55)));
     await old.flush();
     const messages = await old.replay(boot.id);
@@ -152,11 +153,21 @@ test("a stored boot replayed to a test server: the same moves, frames, zones, im
     assert.deepEqual(b.frames.map(f => f.frame), a.frames.map(f => f.frame));
     assert.deepEqual({ ...b.move, startTS: 0, endTS: 0 }, { ...a.move, startTS: 0, endTS: 0 });
     assert.deepEqual(await store.mountingOf(boot.id), boot.mounting);
-    // Then it takes commands: a move of its own, with its start and end (number 2).
+    const corrections = async (s: InstanceType<typeof Store>) => (await s.corrections(boot.id)).map(r => r.c);
+    assert.deepEqual(await corrections(store), await corrections(old));
+    // Then it takes commands: a move of its own, with its start and end (number 2); a
+    // correction ("corrected" before its answer, stored after what came before it).
     const runner = new CommandRunner(link, new StoredSnapshots());
     assert.equal((await runner.run(steer("r10"))).result, "ok");
+    const heard: unknown[] = [];
+    link.on("corrected", c => heard.push(c));
+    const answer = await runner.send("correct 100 -50 1000", 1000);
+    assert.equal(typeof answer !== "string" && answer.end, "ok");
+    assert.equal(heard.length, 1, "corrected came before the answer");
     await new Promise(r => setTimeout(r, 100));
     await stored.idle();
+    const last = (await store.corrections(boot.id)).at(-1)!;
+    assert.ok(Math.abs(last.c.x - 0.1) < 1e-6 && Math.abs(last.c.y + 0.05) < 1e-6 && Math.abs(last.c.yaw - 10 * Math.PI / 180) < 1e-6);
     const own = (await store.moveFrames(boot.id, 2))!;
     assert.deepEqual([own.move.kind, own.move.end, own.move.preMs], ["rotate", "ok", 200]);
     assert.equal(statSync(oldFile).mtimeMs, oldTime); // the old one only read

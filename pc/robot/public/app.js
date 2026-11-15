@@ -9,8 +9,9 @@
 // the shapes on the map (the boot's, up to the snapshot shown; this snapshot's brighter).
 // The PC's outline map (doc/OUTLINE_MAP_PLAN.md) over the cell map or alone, a colour a
 // band. The robot, its path, the snapshots, the ToF readings and the objects are drawn where the PC's
-// walls corrected them to (the correction of the snapshot shown); a click to steer is
-// turned back into the robot's own (odometry) frame.
+// walls corrected them to (the correction of the snapshot shown; the server sends the live
+// pose as raw odometry); a click to steer goes as the map's place: the server turns it
+// into the robot's frame (api/corrections.ts).
 // Map frame: x forward at power-up, y left; drawn with x up and y to the left, as
 // the robot's `m` prints it.
 
@@ -83,18 +84,13 @@ function drawRobot(x, y, yaw, color, alpha = 1) {
 }
 
 // Odometry's pose to the corrected one, by the correction of the snapshot shown (none until it has
-// loaded). As maps/outline/mapper.ts corrected(): keep the two the same.
+// loaded). As correction.ts corrected(): keep the two the same.
 function corrected(p) {
   const c = outline?.correction ?? { x: 0, y: 0, yaw: 0 }, cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), x = Number(p.x), y = Number(p.y);
   return { x: cos * x - sin * y + c.x, y: sin * x + cos * y + c.y, yaw: Number(p.yaw ?? 0) + c.yaw };
 }
 // Where the snapshots up to the one shown were taken: corrected; odometry's without an outline map.
 const snapshotPlaces = () => outline?.snapshots ?? snapshots.slice(0, index + 1).filter(s => s.x !== null);
-// A place on the map back in the robot's own frame (for goto).
-function uncorrected(x, y) {
-  const c = outline?.correction ?? { x: 0, y: 0, yaw: 0 }, cos = Math.cos(c.yaw), sin = Math.sin(c.yaw), dx = x - c.x, dy = y - c.y;
-  return [cos * dx + sin * dy, -sin * dx + cos * dy];
-}
 // The outline map's bands, L1 (what blocks the robot) drawn last, on top.
 const BAND_ORDER = ["above", "L2", "L1"];
 const bandShown = band => document.querySelector(`#bands input[data-band="${band}"]`).checked;
@@ -196,7 +192,7 @@ function draw() {
   drawObjects();
   if (livePose && showingLive()) { const p = corrected(livePose); drawRobot(p.x, p.y, p.yaw, "#5fe08a"); }
   if (goal) {
-    const g = corrected(goal), [gx, gy] = toScreen(g.x, g.y);
+    const [gx, gy] = toScreen(goal.x, goal.y);
     ctx.strokeStyle = "#ffd75e";
     ctx.lineWidth = 2 * dpr;
     ctx.beginPath(); ctx.arc(gx, gy, 9 * dpr, 0, 2 * Math.PI); ctx.moveTo(gx - 14 * dpr, gy); ctx.lineTo(gx + 14 * dpr, gy);
@@ -307,10 +303,10 @@ function toast(text) {
 
 function clicked(x, y) {
   if (canSteer()) {
-    // The robot steers by its own pose: the place clicked, in its frame.
-    const [ux, uy] = uncorrected(x, y), cx = Math.round(ux * 100), cy = Math.round(uy * 100);
+    // The place clicked, on the map (the server turns it into the robot's frame).
+    const cx = Math.round(x * 100), cy = Math.round(y * 100);
     if (Math.abs(cx) > GOTO_MAX_CM || Math.abs(cy) > GOTO_MAX_CM) { toast(`A goal is at most ${GOTO_MAX_CM} cm from the start on each axis`); return; }
-    goal = { x: ux, y: uy, command: `steer g${cx},${cy}` };  // in the robot's frame, drawn corrected
+    goal = { x, y, command: `steer g${cx},${cy}` };
     send("steer", `g${cx},${cy}`);
     draw();
     return;

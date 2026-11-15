@@ -5,9 +5,9 @@
 // came before snapshot n. The PC's map is never cleared by the robot's clear_map
 // (doc/DATA_FLOW_PLAN.md, decisions).
 //   maps.atSnapshot(boot, n, (m, pose) => ...)  the map then and the robot's pose in the
-//                                    snapshot, both in the robot's own frame (its odometry, what
-//                                    its moves and goto use; robot check): drive (the robot's stop
-//                                    rule, room.h), obstacleWithin, view (its cells, as placed)
+//                                    snapshot, both in the map's frame (corrected, as the page
+//                                    draws them and goto points are given; robot check): drive
+//                                    (the robot's stop rule, room.h), obstacleWithin, view (its cells)
 //   maps.viewAtSnapshot(boot, n)     its cells, kept for the last few maps read (the page's timeline)
 //   maps.rays(boot, frame)           each zone's reading placed in the world (tof_rays), by the frame's own pose
 //   maps.placeBy(placement)          the frames and the snapshot's pose placed by the PC's corrected
@@ -60,15 +60,6 @@ export interface CellMap {
   drive(x: number, y: number, yaw: number, distanceM: number): Promise<{ movedM: number; obstacle: boolean }>;
   obstacleWithin(x: number, y: number, r: number): Promise<boolean>; // a blocked or overhang column closer than r
   view(): Promise<CellMapView>;
-}
-
-// The map asked in the robot's own frame: each pose placed as the map's frames are first.
-function inRobotFrame(m: CellMap, c: Pose): CellMap {
-  return {
-    drive: (x, y, yaw, distanceM) => { const p = corrected(c, { x, y, yaw }); return m.drive(p.x, p.y, p.yaw, distanceM); },
-    obstacleWithin: (x, y, r) => { const p = corrected(c, { x, y, yaw: 0 }); return m.obstacleWithin(p.x, p.y, r); },
-    view: () => m.view(),
-  };
 }
 
 let built = false;
@@ -195,7 +186,7 @@ export class CellMaps {
   // if there is no such snapshot.
   async atSnapshot<T>(boot: string, sequence: number, fn: (m: CellMap, pose: Pose | null) => Promise<T>): Promise<T | null> {
     const s = await this.placed(boot, sequence);
-    return s && this.upTo(boot, s.lastFrame, s.poseOf, m => fn(inRobotFrame(m, s.correction), s.odometry));
+    return s && this.upTo(boot, s.lastFrame, s.poseOf, m => fn(m, s.pose));
   }
 
   // The map's cells at snapshot `sequence` and the pose in it (as atSnapshot); a map read
@@ -217,8 +208,7 @@ export class CellMaps {
     if (!s) return null;
     const p = this.placement && await this.placement.placement(boot, sequence);
     const correction = p?.correction ?? { x: 0, y: 0, yaw: 0 };
-    return { lastFrame: s.lastFrame, odometry: s.pose, pose: s.pose && corrected(correction, s.pose), correction,
-             poseOf: p?.poseOf ?? (() => undefined) };
+    return { lastFrame: s.lastFrame, pose: s.pose && corrected(correction, s.pose), poseOf: p?.poseOf ?? (() => undefined) };
   }
 
   // Each zone of a frame of the boot, placed in the world with the boot's mounting.

@@ -52,10 +52,8 @@ export function fixedWithout(fix: Fix | null, known: readonly Wall[], w: Wall): 
 }
 
 // A correction: the odometry's pose turned by `yaw` about the origin, then moved by (x, y).
-export function corrected(c: Pose, p: Pose): Pose {
-  const cos = Math.cos(c.yaw), sin = Math.sin(c.yaw);
-  return { x: cos * p.x - sin * p.y + c.x, y: sin * p.x + cos * p.y + c.y, yaw: p.yaw + c.yaw };
-}
+export { corrected } from "../../correction.ts";
+import { corrected } from "../../correction.ts";
 
 export class Mapper {
   private readonly check: PoseCheck | null;

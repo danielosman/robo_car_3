@@ -10,6 +10,7 @@ static const struct { uint8_t type; wire_type_info_t info; } table[] = {
     {WIRE_MAP_CLEARED, {WIRE_LANE_CONTROL, 0, 0}},
     {WIRE_MOVE_START, {WIRE_LANE_CONTROL, WIRE_MOVE_START_SIZE, WIRE_MOVE_START_SIZE}},
     {WIRE_MOVE_END, {WIRE_LANE_CONTROL, WIRE_MOVE_END_SIZE, WIRE_MOVE_END_SIZE}},
+    {WIRE_CORRECTED, {WIRE_LANE_CONTROL, WIRE_CORRECTED_SIZE, WIRE_CORRECTED_SIZE}},
     {WIRE_SNAPSHOT_PART, {WIRE_LANE_BULK, 1, WIRE_PART_MAX}},
     {WIRE_IMU_BATCH, {WIRE_LANE_BULK, WIRE_IMU_BATCH_HEADER + WIRE_IMU_RECORD,
                       WIRE_IMU_BATCH_HEADER + WIRE_IMU_BATCH_MAX * WIRE_IMU_RECORD}},
@@ -182,6 +183,22 @@ bool wire_decode_status(const wire_message_t *m, wire_status_t *s) {
 }
 
 uint32_t wire_encode_map_cleared(uint8_t *out) { return wire_header(out, WIRE_MAP_CLEARED, 0); }
+
+uint32_t wire_encode_corrected(const wire_corrected_t *c, uint8_t *out) {
+    uint8_t *p = out + wire_header(out, WIRE_CORRECTED, WIRE_CORRECTED_SIZE);
+    setf(p, c->x_m);
+    setf(p + 4, c->y_m);
+    setf(p + 8, c->yaw_rad);
+    return WIRE_HEADER + WIRE_CORRECTED_SIZE;
+}
+
+bool wire_decode_corrected(const wire_message_t *m, wire_corrected_t *c) {
+    if (!is(m, WIRE_CORRECTED, WIRE_CORRECTED_SIZE)) return false;
+    c->x_m = readf(m->payload);
+    c->y_m = readf(m->payload + 4);
+    c->yaw_rad = readf(m->payload + 8);
+    return true;
+}
 
 uint32_t wire_encode_move_start(const wire_move_start_t *s, uint8_t *out) {
     uint8_t *p = out + wire_header(out, WIRE_MOVE_START, WIRE_MOVE_START_SIZE);

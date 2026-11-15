@@ -37,6 +37,8 @@ export class StoredSnapshots {
 
   // The newest snapshot stored, of the newest boot; null before the first.
   newest(): number | null { return this.last; }
+  // ... of this boot; null if it isn't the newest boot or has none.
+  newestOf(boot: string): number | null { return boot === this.boot ? this.last : null; }
 
   // True once snapshot sequence is stored; false if it isn't within ms.
   stored(sequence: number, ms: number): Promise<boolean> {
@@ -68,21 +70,27 @@ export class CommandRunner implements Runner {
   }
 
   async run(c: Command): Promise<Outcome> {
-    const n = this.next++, deadline = Date.now() + this.limitMs(c);
-    let timer: NodeJS.Timeout | undefined;
-    const done = new Promise<DoneRecord | null>(resolve => {
-      timer = setTimeout(() => { this.waiting.delete(n); resolve(null); }, deadline - Date.now());
-      this.waiting.set(n, d => { clearTimeout(timer); this.waiting.delete(n); resolve(d); });
-    });
-    if (!this.robot.sendCommand(n, robotText(c))) {
-      clearTimeout(timer);
-      this.waiting.delete(n);
-      return failed("robot not connected");
-    }
-    const d = await done;
-    if (!d) return failed("no answer");
+    const deadline = Date.now() + this.limitMs(c), d = await this.send(robotText(c), deadline - Date.now());
+    if (typeof d === "string") return failed(d);
     if (d.snapshot !== null && !(await this.snapshots.stored(d.snapshot, deadline - Date.now()))) return failed("no answer (the snapshot wasn't stored)");
     return outcome(c, d);
+  }
+
+  // A command's text to the robot, numbered; its answer, or why there is none
+  // ("robot not connected", "no answer" within ms).
+  async send(text: string, ms: number): Promise<DoneRecord | string> {
+    const n = this.next++;
+    let timer: NodeJS.Timeout | undefined;
+    const done = new Promise<DoneRecord | null>(resolve => {
+      timer = setTimeout(() => { this.waiting.delete(n); resolve(null); }, ms);
+      this.waiting.set(n, d => { clearTimeout(timer); this.waiting.delete(n); resolve(d); });
+    });
+    if (!this.robot.sendCommand(n, text)) {
+      clearTimeout(timer);
+      this.waiting.delete(n);
+      return "robot not connected";
+    }
+    return (await done) ?? "no answer";
   }
 
   // Asks the robot for its 6 x 6 m sliding window ("map" command) and waits for the 9

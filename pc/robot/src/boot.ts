@@ -7,7 +7,7 @@
 // power-up, which never wrap: wire.ts). Frames and imu batches name their move
 // themselves.
 import type { Mounting } from "./mounting.ts";
-import type { ImuBatch, ImuRecord, MoveEnd, TofMessage, MoveStart } from "./wire.ts";
+import type { Corrected, ImuBatch, ImuRecord, MoveEnd, TofMessage, MoveStart } from "./wire.ts";
 import type { PosedFrame } from "./tof_format.ts";
 import type { LivePose } from "./link.ts";
 
@@ -17,6 +17,8 @@ export type MoveStartRow = Stamp & MoveStart & { tS: number };
 export type MoveEndRow = Stamp & MoveEnd & { tS: number };
 export type TofRow = Stamp & { format: string; frame: PosedFrame; move: number; tS: number };
 export type StatusRow = Stamp & { pose: LivePose };
+// The robot's "corrected": the correction it applies from this message on (correction.ts).
+export type CorrectedRow = Stamp & { c: Corrected };
 // An imu batch: its move and its records, each with its time since power-up.
 export type ImuBatchRow = Stamp & { move: number; records: (ImuRecord & { tS: number })[] };
 
@@ -47,6 +49,7 @@ export class Boot {
   }
 
   status(pose: LivePose, atMs = Date.now()): StatusRow { return { ...this.stamp(atMs), pose }; }
+  corrected(c: Corrected, atMs = Date.now()): CorrectedRow { return { ...this.stamp(atMs), c }; }
 
   imuBatch(batch: ImuBatch, atMs = Date.now()): ImuBatchRow {
     return { ...this.stamp(atMs), move: batch.move, records: batch.records.map(r => ({ ...r, tS: seconds(r.tUs) })) };

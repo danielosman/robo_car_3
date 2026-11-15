@@ -4,6 +4,7 @@
 #include "pico/stdlib.h"
 #include "link.h"
 #include "body.h"
+#include "correction.h"
 
 #define DRIVE_PERIOD_US   (LINK_DRIVE_TIMEOUT_US / 5) // a lost DRIVE or two doesn't stop the robot
 #define MOTORS_RETRY_US   200000
@@ -25,6 +26,7 @@ static drive_message_t drive;
 static odometry_report_t odometry;
 static struct { odometry_report_t report; uint32_t t_us; } kept[BODY_ODOMETRY_KEPT]; // report n at n % BODY_ODOMETRY_KEPT
 static uint32_t odometry_count;
+static planar_t correction; // the PC's, applied to every report as it arrives (body_correct)
 static status_report_t status;
 static imu_record_t imu[BODY_IMU_KEPT]; // record n at n % BODY_IMU_KEPT
 static uint32_t imu_kept, imu_taken, imu_lost;
@@ -64,6 +66,15 @@ static void track_clock(uint32_t d, uint32_t now_us) {
         if ((int32_t)(block_min[i] - offset_us) < 0) offset_us = block_min[i];
 }
 
+// A report's pose, corrected by `from`, corrected by `to` instead (from 0: as PicoB sent it).
+// Speeds, pitch and roll are the robot's own: they don't change.
+static void corrected_by(odometry_report_t *r, planar_t from, planar_t to) {
+    planar_t p = correction_move(from, to, (planar_t){r->x_m, r->y_m, r->yaw_rad});
+    r->x_m = p.x_m;
+    r->y_m = p.y_m;
+    r->yaw_rad = p.yaw_rad;
+}
+
 static void send_hello(bool is_reply) {
     hello_message_t h = {.version = LINK_PROTOCOL_VERSION, .is_reply = is_reply};
     link_send(MESSAGE_HELLO, &h, sizeof h);
@@ -95,6 +106,7 @@ static void on_message(const link_message_t *m) {
     case MESSAGE_ODOMETRY:
         if (m->len == sizeof odometry) {
             memcpy(&odometry, m->body, sizeof odometry);
+            corrected_by(&odometry, (planar_t){0, 0, 0}, correction);
             last_report = get_absolute_time();
             track_clock(time_us_32() - odometry.t_us, time_us_32());
             odometry_count++;
@@ -176,6 +188,19 @@ bool body_odometry_get(uint32_t n, odometry_report_t *report, uint32_t *t_us) {
     *report = kept[n % BODY_ODOMETRY_KEPT].report;
     *t_us = kept[n % BODY_ODOMETRY_KEPT].t_us;
     return true;
+}
+
+void body_correct(float x_m, float y_m, float yaw_rad) {
+    planar_t to = {x_m, y_m, yaw_rad};
+    corrected_by(&odometry, correction, to);
+    for (int i = 0; i < BODY_ODOMETRY_KEPT; i++) corrected_by(&kept[i].report, correction, to);
+    correction = to;
+}
+
+void body_correction(float *x_m, float *y_m, float *yaw_rad) {
+    *x_m = correction.x_m;
+    *y_m = correction.y_m;
+    *yaw_rad = correction.yaw_rad;
 }
 
 const status_report_t *body_status(void) { return &status; }

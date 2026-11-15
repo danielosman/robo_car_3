@@ -1,6 +1,6 @@
 // What the robot sends (link.ts events), stored in the order it came (doc/ARCHITECTURE.md,
 // the PC): hello opens its boot in the store (boot.ts: its own mounting and message
-// count), then each move start and end, tof frame, imu batch, status and snapshot is
+// count), then each move start and end, tof frame, imu batch, status, correction and snapshot is
 // stamped by the boot and written (store.ts); a snapshot's picture goes to recordings/camera/.
 // Everything waits for its boot, which the store opens in a moment. main.ts and the
 // fake robot's replay test use it.
@@ -8,7 +8,7 @@ import type { RobotLink, LivePose } from "./link.ts";
 import type { Store } from "./store.ts";
 import type { Boot } from "./boot.ts";
 import type { BootFolders } from "./boot_folders.ts";
-import type { Hello, ImuBatch, MoveEnd, TofMessage, MoveStart } from "./wire.ts";
+import type { Corrected, Hello, ImuBatch, MoveEnd, TofMessage, MoveStart } from "./wire.ts";
 import { loadMounting, type Mounting } from "./mounting.ts";
 import { parseSnapshot, savePicture, type Snapshot } from "./snapshot.ts";
 
@@ -36,6 +36,7 @@ export function ingest(robot: RobotLink, store: Store, o: IngestOptions): { idle
   robot.on("tof", (f: TofMessage) => inOrder(`frame ${f.frame.number}`, b => { void store.tof(b, b.tof(f)); }));
   robot.on("imuBatch", (batch: ImuBatch) => inOrder(`an imu batch of move ${batch.move}`, b => { void store.imuBatch(b, b.imuBatch(batch)); }));
   robot.on("pose", (p: LivePose) => inOrder("a status", b => { void store.status(b, b.status(p)); }));
+  robot.on("corrected", (c: Corrected) => inOrder("a correction", b => { void store.corrected(b, b.corrected(c)); }));
   robot.on("snapshot", (bytes: Buffer) => {
     const ms = Date.now();
     let s: Snapshot;

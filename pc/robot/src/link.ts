@@ -205,6 +205,7 @@ export class RobotLink extends EventEmitter {
         }
         case "answer": this.emit("done", doneRecord(m)); break;
         case "map_cleared": this.emit("mapCleared"); break;
+        case "corrected": this.emit("corrected", withoutType(m)); break;
         case "move_start": this.emit("moveStart", withoutType(m)); break;
         case "move_end": this.emit("moveEnd", withoutType(m)); break;
         case "tof": this.emit("tof", withoutType(m)); break;

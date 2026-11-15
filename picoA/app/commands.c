@@ -6,6 +6,7 @@
 #include "units.h"
 #include "link.h"
 #include "body.h"
+#include "pose.h"
 #include "behaviour.h"
 #include "move.h"
 #include "tof.h"
@@ -26,7 +27,8 @@ static absolute_time_t greeting_time;
 
 static void greet(void) {
     printf("\nPicoA robot firmware. Commands, one per line: drive <cm>, rotate <deg>, goto <x cm> <y cm>,\n"
-           "watch <s>, snap, map, clear_map, config pre_ms|post_ms <ms>, mode idle|manual, stop, status\n");
+           "watch <s>, snap, map, clear_map, config pre_ms|post_ms <ms>, correct <x mm> <y mm> <yaw 0.01 deg>,\n"
+           "mode idle|manual, stop, status\n");
 }
 
 static void print_link(void) {
@@ -61,8 +63,16 @@ static void print_ram(void) {
     printf("RAM free %lu KB\n", (unsigned long)((uintptr_t)&__HeapLimit - (uintptr_t)&__end__) / 1024);
 }
 
+static void print_correction(void) {
+    float x, y, yaw;
+    body_correction(&x, &y, &yaw);
+    printf("Correction (the PC's): x %+.1f cm  y %+.1f cm  yaw %+.2f deg\n", (double)(x * 100), (double)(y * 100),
+           (double)(yaw * DEG_PER_RAD));
+}
+
 static void print_status(void) {
     print_body();
+    print_correction();
     print_link();
     link_pc_print_status();
     loop_statistics_print();
@@ -117,7 +127,7 @@ static bool send_map_window(void) {
 // One command line, its number already taken off. Moves and snapshots are answered
 // when they end (commands_update); the rest at once.
 static void run(const char *line, uint32_t n) {
-    int a, b, end = -1;
+    int a, b, c, end = -1;
     char word[8];
 #define IS(fmt, count, ...) (end = -1, sscanf(line, fmt "%n", __VA_ARGS__, &end) == (count) && end >= 0 && line[end] == 0)
 #define IS_WORD(name) (strcmp(line, name) == 0)
@@ -152,6 +162,19 @@ static void run(const char *line, uint32_t n) {
         move_set_still(pre ? a : move_pre_ms(), pre ? move_post_ms() : a);
         printf("Config: still %d ms before each move, %d ms after (from the next move on)\n", move_pre_ms(), move_post_ms());
         answer(n, WIRE_END_OK);
+    } else if (IS("correct %d %d %d", 3, &a, &b, &c) && within(a, -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM) &&
+               within(b, -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM) &&
+               within(c, -COMMAND_CORRECT_MAX_CDEG, COMMAND_CORRECT_MAX_CDEG) && !*move_running() &&
+               !link_pc_bulk_waiting() && !snapshot_busy()) {
+        // Nothing older waits in the bulk lane, so "corrected" (control, sent first) can't
+        // overtake a frame or snapshot made with the old correction.
+        wire_corrected_t k = {.x_m = (float)a / 1000, .y_m = (float)b / 1000, .yaw_rad = (float)c / 100 * RAD_PER_DEG};
+        pose_correct(k.x_m, k.y_m, k.yaw_rad);
+        print_correction();
+        uint8_t message[WIRE_HEADER + WIRE_CORRECTED_SIZE];
+        uint32_t len = wire_encode_corrected(&k, message);
+        link_pc_send_control(message, len);
+        answer(n, WIRE_END_OK);
     } else if (IS("mode %7s", 1, word) && (!strcmp(word, "idle") || !strcmp(word, "manual"))) {
         if (!strcmp(word, "idle")) stop();
         else mode_set(MODE_MANUAL);
@@ -163,7 +186,7 @@ static void run(const char *line, uint32_t n) {
         print_status();
         answer(n, WIRE_END_OK);
     } else {
-        printf("Command refused: \"%s\" (not a command, or a number out of range)\n", line);
+        printf("Command refused: \"%s\" (not a command, a number out of range, or correct during a move or while bulk messages wait)\n", line);
         answer(n, WIRE_END_REFUSED);
     }
 #undef IS

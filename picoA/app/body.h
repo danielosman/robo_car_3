@@ -25,6 +25,12 @@ uint32_t body_odometry_time_us(void);
 #define BODY_ODOMETRY_KEPT 16
 uint32_t body_odometry_count(void);
 bool body_odometry_get(uint32_t n, odometry_report_t *report, uint32_t *t_us);
+// The PC's correction (doc/OUTLINE_MAP_PLAN.md, step F; correction.h): from now on every
+// report's pose (body_odometry(), body_odometry_get()) is PicoB's corrected by it; the
+// reports kept are moved to it too. Replaces the one before (0 at power-up). Speeds,
+// pitch and roll stay as PicoB sent them. pose.h's pose_correct() calls it.
+void body_correct(float x_m, float y_m, float yaw_rad);
+void body_correction(float *x_m, float *y_m, float *yaw_rad); // the one applied now
 const status_report_t *body_status(void); // latest status (2 Hz); all zero until the first one
 // PicoB's imu records (104 a second), their t_us turned into PicoA's clock as they
 // arrive (as body_odometry_time_us()). Kept only once PicoB has greeted us with our

@@ -95,20 +95,23 @@ export async function cellMapAt(store: Store, maps: CellMaps, boot: string, sequ
 
 // A snapshot for the page: snapshotDetail, each zone with its reading in the world (x, y,
 // z, m; null without a pose or a valid reading), placed by the PC's cell map helper from
-// the snapshot's own ToF frame.
+// the snapshot's own ToF frame; its pose and its frame's as raw odometry (the page corrects them).
 export async function snapshotForPage(store: Store, maps: CellMaps, boot: string, sequence: number) {
   const d = await snapshotDetail(store, boot, sequence);
   if (!d) return null;
-  const [row] = await store.read(async c => (await c.runAndReadAll("SELECT bytes FROM snapshots WHERE boot_id = $1 AND sequence = $2",
+  const [row] = await store.read(async c => (await c.runAndReadAll("SELECT message_number, bytes FROM snapshots WHERE boot_id = $1 AND sequence = $2",
     [boot, sequence])).getRowObjects());
-  const frame = parseSnapshot(bytes(row.bytes)).tof;
+  const m = Number(row.message_number), sent = parseSnapshot(bytes(row.bytes)).tof, frame = sent && await store.rawPose(boot, m, sent);
   const rays = frame ? await maps.rays(boot, frame) : [];
   const round = (v: number) => Number(v.toFixed(3));
   const zones = d.zones.map((z): Record<string, unknown> => {
     const r = rays[zoneAt(Number(z.row), Number(z.col))];
     return { ...z, x: r ? round(r.point[0]) : null, y: r ? round(r.point[1]) : null, z: r ? round(r.point[2]) : null };
   });
-  return { ...d, zones };
+  // The snapshot's own pose raw too: the page corrects everything it draws (one rule).
+  const p = d.snapshot, pose = p.x === null || p.x === undefined ? null
+    : await store.rawPose(boot, m, { x: Number(p.x), y: Number(p.y), yaw: Number(p.yaw) });
+  return { ...d, snapshot: pose ? { ...p, ...pose } : p, zones };
 }
 
 // The map for the page: the columns it draws, without the robot's cell bytes.

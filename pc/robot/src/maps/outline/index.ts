@@ -16,6 +16,8 @@
 //                              the corrected pose; null if there is no such snapshot
 //   outlines.placement(boot, n) each frame's corrected pose up to snapshot n and the correction then,
 //                              for the PC's cell map (cell_map.ts placeBy); null if there is no such snapshot
+//   outlines.correction(boot, n) the correction at snapshot n (raw odometry to the best pose; the one sent
+//                              to the robot, api/corrections.ts); null if there is no such snapshot
 //   outlines.added(boot, n)    snapshot n has come: the map brought up to it; the correction goes in the log
 //   outlines.walls(boot, n)    each band's walls at snapshot n; writes the tables walls, wall_sightings and
 //                              frame_poses (the boot's rows, replaced)
@@ -80,6 +82,10 @@ export class OutlineMaps implements Placement {
       const poses = new Map(t.mapper.poses().slice(0, stage.poses).map(p => [p.frame, p.pose]));
       return { correction: stage.correction, poseOf: (frame: number) => poses.get(frame) };
     });
+  }
+
+  async correction(boot: string, sequence: number): Promise<Pose | null> {
+    return this.alone(boot, async b => (await this.upTo(b, boot, sequence))?.stages.get(sequence)?.correction ?? null);
   }
 
   // One log line: how far the corrected pose is from odometry's at the snapshot's last

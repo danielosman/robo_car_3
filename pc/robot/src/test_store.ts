@@ -11,6 +11,7 @@ import { loadMounting, type Mounting } from "./mounting.ts";
 import { BootFolders } from "./boot_folders.ts";
 import { WIRE_VERSION } from "./wire.ts";
 import type { Boot } from "./boot.ts";
+import type { Pose } from "./link.ts";
 
 export const FIRMWARE_SNAPSHOTS = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../../build/test_snapshot.snap");
 export const noFirmware = !existsSync(FIRMWARE_SNAPSHOTS) && "run ./run_tests.sh first";
@@ -33,8 +34,11 @@ export async function storeWithSnapshots(directory: string, mounting: Mounting =
 
 // The firmware's snapshot `sequence` stored again, as if it came now: after whatever the
 // boot sent since (frames stored meanwhile come before it, for the PC's cell map).
-export async function snapshotAgain(store: Store, boot: Boot, directory: string, sequence: number): Promise<void> {
-  const bytes = firmwareSnapshots().find(b => parseSnapshot(b).sequence === sequence)!, s = parseSnapshot(bytes), ms = Date.now();
+// pose: its pose as the robot sends it (step F: corrected by the correction it applies).
+export async function snapshotAgain(store: Store, boot: Boot, directory: string, sequence: number,
+                                    pose: (p: Pose) => Pose = p => p): Promise<void> {
+  const bytes = firmwareSnapshots().find(b => parseSnapshot(b).sequence === sequence)!, parsed = parseSnapshot(bytes), ms = Date.now();
+  const s = parsed.pose ? { ...parsed, pose: { ...parsed.pose, ...pose(parsed.pose) } } : parsed;
   await store.flush();
   await store.importSnapshot(boot, boot.stamp(ms).messageNumber, s, bytes, ms, savePicture(directory, new BootFolders(directory).folderForBoot(s.bootId, ms), s));
 }

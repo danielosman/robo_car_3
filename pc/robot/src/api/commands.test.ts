@@ -75,7 +75,9 @@ test("the robot's words: commands.c takes every command the PC sends, and nothin
   const robot = new Set([...c.matchAll(/IS\("(\w+)/g), ...c.matchAll(/IS_WORD\("(\w+)"\)/g)].map(m => m[1]));
   const pc = [...MOVES, ...Object.keys(ACTIONS).map(name => ({ name: name as CommandName, values: [] }))]
     .map(c => robotText({ name: c.name, values: c.name === "mode" || c.name === "config" ? [0] : [] }).split(" ")[0]);
-  assert.deepEqual([...robot].sort(), [...new Set([...pc, "map"])].sort()); // report is status; map is robot map --robot
+  // report is status; map is robot map --robot; correct is sent by api/corrections.ts
+  assert.deepEqual([...robot].sort(), [...new Set([...pc, "map", "correct"])].sort());
+  assert.match(readFileSync(new URL("./corrections.ts", import.meta.url), "utf8"), /`correct \$\{x\} \$\{y\} \$\{yaw\}`/);
   // the words some commands take: mode idle|manual, config pre_ms|post_ms
   const words = new Set([...c.matchAll(/strcmp\(word, "(\w+)"\)/g)].map(m => m[1]));
   assert.deepEqual([...words].sort(), Object.values(ACTIONS).flatMap(w => w ?? []).sort());

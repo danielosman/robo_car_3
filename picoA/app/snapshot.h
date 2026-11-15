@@ -44,3 +44,5 @@ void snapshot_update(void);       // call every loop iteration, after behaviour
 // packed for the snapshot use.
 void snapshot_tof(const posed_frame_t *frame);
 void snapshot_print_status(void); // one line for the status key
+// A snapshot is asked for or not all in the bulk lane yet (commands.c: no correct then).
+bool snapshot_busy(void);

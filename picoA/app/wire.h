@@ -18,6 +18,7 @@
 // | 0x05 | map cleared   | control      | none |
 // | 0x06 | move start    | control      | move n u32; command n u32; kind u8 (wire_move_kind_t); parameter f32 (drive m, turn rad, go to: m to the goal, watch s); t u64; pre_ms u16; post_ms u16; flags u8 (bit 0 refused: it ends at once, a running move goes on) (26 B) |
 // | 0x07 | move end      | control      | move n u32; end u8 (wire_end_t); t u64; frames sent u32; frames dropped u32; moved f32 m; rotated f32 rad; imu batches sent u32; imu batches dropped u32 (37 B) |
+// | 0x08 | corrected     | control      | x, y f32 m; yaw f32 rad: the PC's correction the robot applies from now on (commands.h, correct), before its answer (12 B) |
 // | 0x10 | snapshot part | bulk         | the next 1-1400 bytes of a snapshot (snapshot.h); a snapshot's parts in order |
 // | 0x11 | imu batch     | bulk         | move n u32; first record's t u64; period u16 µs; count u8 (1-10); then per record acceleration x, y, z, gyro x, y, z i16 (raw counts, link_messages.h) (15 + 12 × count B); only during a move (move.h) |
 // | 0x12 | map part      | bulk         | part u8 (0-8); origin_cx, origin_cy i16; then 1200 bytes of the robot's window (cell_map.h, 9 parts = 3 × 60 × 60 B in order) (1205 B) |
@@ -40,7 +41,7 @@
 #include "link_messages.h"
 #include "tof_format.h"
 
-#define WIRE_VERSION 5 // up when any payload or the table changes; the PC refuses another
+#define WIRE_VERSION 6 // up when any payload or the table changes; the PC refuses another
 
 #define WIRE_HEADER      3
 #define WIRE_PAYLOAD_MAX 1400 // the longest payload of any message (a snapshot part)
@@ -54,6 +55,7 @@ enum {
     WIRE_MAP_CLEARED = 0x05,
     WIRE_MOVE_START = 0x06,
     WIRE_MOVE_END = 0x07,
+    WIRE_CORRECTED = 0x08,
     WIRE_SNAPSHOT_PART = 0x10,
     WIRE_IMU_BATCH = 0x11,
     WIRE_MAP_PART = 0x12,
@@ -68,6 +70,7 @@ enum {
 #define WIRE_STATUS_SIZE   33
 #define WIRE_MOVE_START_SIZE 26
 #define WIRE_MOVE_END_SIZE 37
+#define WIRE_CORRECTED_SIZE 12
 #define WIRE_IMU_BATCH_HEADER 15
 #define WIRE_TOF_HEADER    12 // move n, t; the packed frame follows
 #define WIRE_IMU_RECORD    12
@@ -156,6 +159,12 @@ uint32_t wire_encode_status(const wire_status_t *s, uint8_t *out);
 bool wire_decode_status(const wire_message_t *m, wire_status_t *s);
 
 uint32_t wire_encode_map_cleared(uint8_t *out);
+
+// The correction the robot applies from now on (pose.h, pose_correct): sent when a correct
+// command has set it, before its answer, so the PC files every message after it as corrected.
+typedef struct { float x_m, y_m, yaw_rad; } wire_corrected_t;
+uint32_t wire_encode_corrected(const wire_corrected_t *c, uint8_t *out);
+bool wire_decode_corrected(const wire_message_t *m, wire_corrected_t *c);
 
 // A move (move.h): its start and its end.
 typedef enum { WIRE_MOVE_DRIVE, WIRE_MOVE_ROTATE, WIRE_MOVE_GOTO, WIRE_MOVE_WATCH, WIRE_MOVE_KINDS } wire_move_kind_t;

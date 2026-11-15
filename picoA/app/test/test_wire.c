@@ -1,6 +1,6 @@
 // Host test for picoA/app/wire.c: the message table (every type's lane and lengths;
 // the ToF frames' types from tof_format, a collision found), every message encoded
-// and decoded again (move start and end, a tof frame in its message too, imu batches
+// and decoded again (move start and end, corrected, a tof frame in its message too, imu batches
 // of 1 and 10 records: the int16 limits, a time past 2^32 µs, the period), the
 // envelope's errors (not whole yet, unknown type, too long, too short), what the
 // encoders and decoders refuse, and the golden bytes both sides check against
@@ -39,6 +39,7 @@ static void test_table(void) {
     assert(wire_info(WIRE_ANSWER, &i) && i.min == 34 && i.max == 34);
     assert(wire_info(WIRE_STATUS, &i) && i.min == 33 && i.max == 33);
     assert(wire_info(WIRE_MAP_CLEARED, &i) && i.max == 0);
+    assert(wire_info(WIRE_CORRECTED, &i) && i.lane == WIRE_LANE_CONTROL && i.min == WIRE_CORRECTED_SIZE && i.max == WIRE_CORRECTED_SIZE);
     // A move's start and end: control; their times u64.
     assert(wire_info(WIRE_MOVE_START, &i) && i.lane == WIRE_LANE_CONTROL && i.min == 26 && i.max == 26);
     assert(wire_info(WIRE_MOVE_END, &i) && i.lane == WIRE_LANE_CONTROL && i.min == 37 && i.max == 37);
@@ -127,6 +128,10 @@ static void test_round_trips(void) {
 
     m = take_whole(message, wire_encode_map_cleared(message));
     assert(m.type == WIRE_MAP_CLEARED && m.len == 0);
+
+    wire_corrected_t k = {.x_m = 0.12f, .y_m = -0.045f, .yaw_rad = -0.1833f}, k2;
+    m = take_whole(message, wire_encode_corrected(&k, message));
+    assert(m.type == WIRE_CORRECTED && wire_decode_corrected(&m, &k2) && k2.x_m == k.x_m && k2.y_m == k.y_m && k2.yaw_rad == k.yaw_rad);
 
     wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .parameter = 4.2f, .t_us = 4300000000ull,
                             .pre_ms = 200, .post_ms = 2000, .flags = WIRE_MOVE_REFUSED}, ms2;
@@ -282,6 +287,8 @@ static uint32_t samples(sample_t *out) {
     wire_status_t s = {.x_m = 1.25f, .y_m = -0.5f, .yaw_rad = 7.0f, .mode = "manual", .action = "goto", .rssi_dbm = -61};
     out[n] = (sample_t){.name = "status"}; out[n].len = wire_encode_status(&s, out[n].bytes); n++;
     out[n] = (sample_t){.name = "map_cleared"}; out[n].len = wire_encode_map_cleared(out[n].bytes); n++;
+    wire_corrected_t k = {.x_m = 0.12f, .y_m = -0.045f, .yaw_rad = -0.1833f};
+    out[n] = (sample_t){.name = "corrected"}; out[n].len = wire_encode_corrected(&k, out[n].bytes); n++;
     wire_move_start_t ms = {.move = 12, .command = 17, .kind = WIRE_MOVE_GOTO, .parameter = 4.2f, .t_us = 4300000000ull,
                             .pre_ms = 200, .post_ms = 300, .flags = WIRE_MOVE_REFUSED};
     out[n] = (sample_t){.name = "move_start"}; out[n].len = wire_encode_move_start(&ms, out[n].bytes); n++;

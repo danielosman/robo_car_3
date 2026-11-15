@@ -457,6 +457,8 @@ bool link_pc_send_control(const uint8_t *message, uint32_t len) {
     return true;
 }
 
+uint32_t link_pc_bulk_waiting(void) { return bulk_len; }
+
 bool link_pc_send_bulk(const uint8_t *message, uint32_t len) {
     wire_type_info_t info;
     if (len < WIRE_HEADER || len > WIRE_MESSAGE_MAX || !wire_info(wire_type(message), &info) || info.lane != WIRE_LANE_BULK)

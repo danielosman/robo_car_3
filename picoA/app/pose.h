@@ -2,7 +2,8 @@
 // Where the robot was at a given moment: PicoB's odometry reports of the last
 // ~1.3 s, interpolated, on PicoA's clock (time_us_32()). Lets a sensor frame be
 // placed where the robot was when it was measured, not when it was read.
-// Frame: odometry's (where PicoB started), also the map's. Yaw is not wrapped.
+// Frame: odometry's (where PicoB started), corrected by the PC (pose_correct), also the
+// map's. Yaw is not wrapped.
 #include <stdbool.h>
 #include <stdint.h>
 #include "tof_frame.h"
@@ -15,6 +16,12 @@ typedef struct {
 
 void pose_update(void); // call every loop iteration: takes body's new reports
 bool pose_now(pose_t *pose); // the latest report; false before the first one
+// The PC's correction (doc/OUTLINE_MAP_PLAN.md, step F): every pose from now on is PicoB's
+// odometry corrected by it (body_correct: the one place it is applied, as each report
+// arrives), and the history kept here is moved to it, so pose_at() of a moment before
+// gives the corrected pose too. Replaces the one before. Call it between moves: a move
+// started before measures from a pose of the old correction.
+void pose_correct(float x_m, float y_m, float yaw_rad);
 // false if t_us is before the history or more than 50 ms after the latest report
 // (after that, the robot's motion is extrapolated from its last speeds).
 bool pose_at(uint32_t t_us, pose_t *pose);

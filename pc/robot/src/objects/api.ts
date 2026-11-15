@@ -33,10 +33,12 @@ function objectOut(o: StoredObject) {
 type SnapshotId = Awaited<ReturnType<typeof findSnapshot>>;
 
 async function snapshotForDetect(ctx: ApiContext, id: SnapshotId) {
-  const [row] = await ctx.store.query(`SELECT image, x, y, yaw, pitch FROM snapshots WHERE snapshot_id = '${id.boot}-${id.sequence}'`);
+  const [row] = await ctx.store.query(`SELECT image, message_number, x, y, yaw, pitch FROM snapshots WHERE snapshot_id = '${id.boot}-${id.sequence}'`);
   if (!row?.image) throw new ReadError(`snapshot ${id.sequence} has no picture`);
   if (row.x === null) throw new ReadError(`snapshot ${id.sequence} has no pose (PicoB not connected), so nothing can be placed`);
-  const pose: SnapshotPoseLike = { x: Number(row.x), y: Number(row.y), yaw: Number(row.yaw), pitch: Number(row.pitch ?? 0) };
+  // Placed by raw odometry, as the maps are (the page corrects them).
+  const pose: SnapshotPoseLike = await ctx.store.rawPose(id.boot, Number(row.message_number),
+    { x: Number(row.x), y: Number(row.y), yaw: Number(row.yaw), pitch: Number(row.pitch ?? 0) });
   const mounting = await ctx.store.mountingOf(id.boot);
   if (!mounting) throw new ReadError(`boot ${id.boot} has no mounting in the database`);
   const camera: CameraGeometry = cameraGeometry(mounting); // the boot's own copy

@@ -50,5 +50,8 @@ bool link_pc_send_control(const uint8_t *message, uint32_t len);
 // A whole bulk message to the PC: false (counted) if not connected or no room.
 bool link_pc_send_bulk(const uint8_t *message, uint32_t len);
 
+// Bytes in the bulk lane not handed to TCP yet: a control message sent now goes out before them.
+uint32_t link_pc_bulk_waiting(void);
+
 // The next command from the PC; false if none is whole yet.
 bool link_pc_received(wire_command_t *c);

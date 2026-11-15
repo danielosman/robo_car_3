@@ -3,13 +3,14 @@
 // respecting PicoB's safety stops, PicoB restarting, the connection timeout,
 // keeping every report (several can arrive in one loop iteration), and PicoB's imu
 // records on PicoA's clock (dropped until the clock is known, both clocks wrapping,
-// the newest kept, the lost counted),
+// the newest kept, the lost counted), the PC's correction on every report,
 // against a fake link with the test playing PicoB. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon/test/fakes -Icommon -o build/test_body picoA/app/test/test_body.c && build/test_body
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "units.h"
 #include "../body.c"
 
 // The fake PicoB.
@@ -212,6 +213,32 @@ int main(void) {
     body_update();
     assert(!body_odometry_get(before + 3, &r, &t_us) && body_odometry_get(before + 4, &r, &t_us));
     printf("ok: every report kept and numbered, also several in one loop iteration\n");
+
+    // The PC's correction: turned 90° left, then 1 m along y. The latest and the kept
+    // reports move to it; a report arriving later comes corrected; a second correction
+    // replaces the first (it does not add to it); speeds stay as PicoB sent them.
+    b_odometry.x_m = 2.0f, b_odometry.y_m = 0.5f, b_odometry.yaw_rad = 0.25f, b_odometry.v_mps = 0.1f;
+    fake_link_deliver(MESSAGE_ODOMETRY, &b_odometry, sizeof b_odometry);
+    body_update();
+    uint32_t at = body_odometry_count();
+    body_correct(0, 1.0f, PI_F / 2);
+    float cx, cy, cyaw;
+    body_correction(&cx, &cy, &cyaw);
+    assert(cx == 0 && cy == 1.0f && cyaw == PI_F / 2);
+    const odometry_report_t *o = body_odometry();
+    assert(fabsf(o->x_m + 0.5f) < 1e-5f && fabsf(o->y_m - 3.0f) < 1e-5f && fabsf(o->yaw_rad - (0.25f + PI_F / 2)) < 1e-5f && o->v_mps == 0.1f);
+    assert(body_odometry_get(at, &r, &t_us) && fabsf(r.x_m + 0.5f) < 1e-5f && fabsf(r.y_m - 3.0f) < 1e-5f);
+    b_odometry.x_m = 3.0f;
+    fake_link_deliver(MESSAGE_ODOMETRY, &b_odometry, sizeof b_odometry);
+    body_update();
+    assert(fabsf(body_odometry()->x_m + 0.5f) < 1e-5f && fabsf(body_odometry()->y_m - 4.0f) < 1e-5f);
+    body_correct(0.1f, 0, 0);
+    assert(fabsf(body_odometry()->x_m - 3.1f) < 1e-5f && fabsf(body_odometry()->y_m - 0.5f) < 1e-5f &&
+           fabsf(body_odometry()->yaw_rad - 0.25f) < 1e-5f);
+    assert(body_odometry_get(at, &r, &t_us) && fabsf(r.x_m - 2.1f) < 1e-5f && fabsf(r.y_m - 0.5f) < 1e-5f);
+    body_correct(0, 0, 0);
+    assert(fabsf(body_odometry()->x_m - 3.0f) < 1e-5f);
+    printf("ok: the PC's correction: on every report, the kept ones moved, a new one replaces the old\n");
 
     // imu records. PicoB restarts: its clock isn't known until its first report, so a
     // record before that is dropped.

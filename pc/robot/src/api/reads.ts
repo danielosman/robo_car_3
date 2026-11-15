@@ -123,7 +123,8 @@ export const READS: Record<string, Read> = {
           "per height band (white: L1, 3-13 cm; yellow: L2, 13-23 cm; cyan: above) the closed border of the floor seen\n" +
           "free, and an island round each thing in it; bright: a wall, medium: a rough edge, faint: a guess (nothing\n" +
           "seen there yet). With --no-cells, the outlines alone. The PC's map and its pose are placed by the corrected\n" +
-          "pose; robot status, the moves' answers and goto use the robot's own (odometry).",
+          "pose, as goto points (robot steer g) and robot check take them; robot status and the moves' answers give\n" +
+          "the robot's own pose (the PC's correction as it last took it).",
     async run(ctx, args, flags) {
       atMostOne(args, this.usage);
       const withLines = flags.has("lines"), withCells = !flags.has("nocells");

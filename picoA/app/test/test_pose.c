@@ -1,7 +1,8 @@
 // Host test for picoA/app/pose.c: interpolation between odometry reports, the
 // history's limits, extrapolating a little past the latest report; stamping a ToF
 // frame: the pose at its middle (yaw wrapped), its turn over the frame's own
-// period, still only when PicoB said so on both sides, no pose before the history. The test
+// period, still only when PicoB said so on both sides, no pose before the history; the
+// PC's correction moving the history (body applies it to the reports). The test
 // provides body.h's functions as PicoB. Run from the repo root:
 //   cc -std=c11 -Wall -Wextra -Icommon/test/fakes -Icommon -o build/test_pose picoA/app/test/test_pose.c -lm && build/test_pose
 #include <assert.h>
@@ -20,6 +21,10 @@ bool body_odometry_get(uint32_t n, odometry_report_t *r, uint32_t *t_us) {
     *t_us = report_time_us;
     return true;
 }
+
+static float correction[3];
+void body_correction(float *x, float *y, float *yaw) { *x = correction[0]; *y = correction[1]; *yaw = correction[2]; }
+void body_correct(float x, float y, float yaw) { correction[0] = x; correction[1] = y; correction[2] = yaw; }
 
 // PicoA's clock: 2 s before it wraps, so the history below spans the wrap.
 #define T(us) (0u - 2000000u + (uint32_t)(us))
@@ -89,5 +94,15 @@ int main(void) {
     assert(!pf.pose_known && pf.x_m == 0 && pf.yaw_rad == 0 && pf.turn_rad == 0 && pf.frame.number == 9);
     printf("OK: stamping a frame: its middle's pose, yaw wrapped, its own period's turn, still, no turn past\n"
            "    the extrapolation limit, none before the history\n");
+        // The PC's correction: body gets it, and the history moves with it (here: 0.5 m along
+    // x); a second one replaces the first.
+    pose_t before, after;
+    assert(pose_at(T(3330000), &before));
+    pose_correct(0.5f, 0, 0);
+    assert(correction[0] == 0.5f && pose_at(T(3330000), &after));
+    assert(fabsf(after.x_m - before.x_m - 0.5f) < 1e-5f && after.y_m == before.y_m && after.yaw_rad == before.yaw_rad);
+    pose_correct(0, 0, PI_F);
+    assert(pose_at(T(3330000), &after) && fabsf(after.x_m + before.x_m) < 1e-5f && fabsf(after.yaw_rad - before.yaw_rad - PI_F) < 1e-5f);
+    printf("OK: the PC's correction moves the history\n");
     return 0;
 }

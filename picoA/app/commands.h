@@ -11,6 +11,11 @@
 //   clear_map
 //   config pre_ms <ms>     how long each move stands still before it acts (move.h), 0-2000
 //   config post_ms <ms>    ...and after; both 200 at power-up
+//   correct <x mm> <y mm> <yaw 0.01°>   the PC's correction of the pose, from now on (pose.h,
+//                          pose_correct; doc/OUTLINE_MAP_PLAN.md, step F): replaces the one before;
+//                          sends "corrected" (wire.h), then the answer; refused while a move runs,
+//                          a snapshot is asked for or going out, or the bulk lane holds anything
+//                          (control goes first: "corrected" would overtake it; the PC sends it again)
 //   mode idle|manual       idle also stops, as stop does
 //   stop                   motors off, mode idle
 //   status                 PicoA's and PicoB's state, printed (for a serial monitor)
@@ -30,6 +35,8 @@
 #define COMMAND_WATCH_MIN_S    1
 #define COMMAND_WATCH_MAX_S    600
 #define COMMAND_STILL_MAX_MS   2000 // config pre_ms / post_ms (move.h's MOVE_STILL_MAX_MS)
+#define COMMAND_CORRECT_MAX_MM 20000 // correct: each of x and y
+#define COMMAND_CORRECT_MAX_CDEG 18000 // correct: yaw, 0.01°
 
 #include "wire.h"
 

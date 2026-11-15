@@ -4,7 +4,8 @@
 // the outlines over the cells, or alone; the kept mapper is fed only the frames since
 // its last snapshot; the robot, path and snapshots come placed by the correction; the
 // log line; with drift (the simulator's frames, stored), the correction used everywhere,
-// also by the PC's cell map. Run with `npm test`.
+// also by the PC's cell map, and the robot taking it half way (its frames corrected
+// after that, step F) gives the same. Run with `npm test`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,6 +14,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { edgeRgb, OutlineMaps } from "./index.ts";
 import { corrected } from "./mapper.ts";
+import { NO_CORRECTION } from "../../correction.ts";
 import { run, SCENARIOS } from "../../sim/scenarios.ts";
 import { play } from "../../sim/play.ts";
 import { CellMaps } from "../cell_map.ts";
@@ -191,24 +193,50 @@ test("the kept mapper: fed only the frames since its last snapshot; the robot, p
   } finally { maps.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("a drive with drift (the simulator's square room, stored): the correction is used for the robot, the path, the log and the PC's cell map", { skip: noFirmware }, async () => {
-  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-drift-"));
-  const { store, boot } = await storeWithSnapshots(directory);
-  const maps = new CellMaps(store), plain = new CellMaps(store), notes: string[] = [], outlines = new OutlineMaps(store, maps, t => notes.push(t));
-  maps.placeBy(outlines);
-  try {
-    // A full turn on the spot in 30° steps; odometry ends about 10° off. Half before snapshot 2, half before 3.
-    const steps = run(SCENARIOS.find(s => s.name === "square")!), half = steps.length / 2;
-    const storeSteps = (from: number, to: number) => {
-      for (const { frame } of steps.slice(from, to).flatMap(s => s.frames))
-        void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: frame.robotClockUs, frame }));
+test("a drive with drift (the simulator's square room, stored): the correction is used for the robot, the path, the log and the PC's cell map; " +
+     "the robot taking it half way (step F) changes nothing on the PC", { skip: noFirmware }, async () => {
+  // A full turn on the spot in 30° steps; odometry ends about 10° off. Half before snapshot 2, half before 3.
+  // taking: after snapshot 2 the robot takes the PC's correction then (step F) and sends every
+  // frame, status and snapshot after it corrected by it, as the robot does.
+  const steps = run(SCENARIOS.find(s => s.name === "square")!), half = steps.length / 2;
+  async function drive(directory: string, taking: boolean) {
+    const { store, boot } = await storeWithSnapshots(directory);
+    const maps = new CellMaps(store), notes: string[] = [], outlines = new OutlineMaps(store, maps, t => notes.push(t));
+    maps.placeBy(outlines);
+    const storeSteps = (from: number, to: number, c = NO_CORRECTION) => {
+      for (const { frame } of steps.slice(from, to).flatMap(s => s.frames)) {
+        const sent = corrected(c, frame), yaw = Math.atan2(Math.sin(sent.yaw), Math.cos(sent.yaw));
+        void store.tof(boot, boot.tof({ format: "compact", move: 1, tUs: frame.robotClockUs, frame: { ...sent, yaw } }));
+      }
+      void store.status(boot, boot.status({ ...corrected(c, steps[to - 1].frames.at(-1)!.frame), mode: "manual", action: "", rssi: null, at: 0 }));
     };
     storeSteps(0, half);
     await snapshotAgain(store, boot, directory, 2);
-    storeSteps(half, steps.length);
-    await snapshotAgain(store, boot, directory, 3);
     await outlines.added(boot.id, 2);
+    const c2 = taking ? (await outlines.correction(boot.id, 2))! : NO_CORRECTION;
+    if (taking) void store.corrected(boot, boot.corrected(c2));
+    storeSteps(half, steps.length, c2);
+    await snapshotAgain(store, boot, directory, 3, p => corrected(c2, p));
     await outlines.added(boot.id, 3);
+    return { store, boot, maps, notes, outlines, c2 };
+  }
+  const directory = mkdtempSync(path.join(os.tmpdir(), "robocar-drift-")), without = mkdtempSync(path.join(os.tmpdir(), "robocar-drift-"));
+  const { store, boot, maps, notes, outlines, c2 } = await drive(directory, true), plain = new CellMaps(store);
+  const other = await drive(without, false);
+  try {
+    assert.ok(Math.abs(c2.yaw) > 0.005, JSON.stringify(c2));  // about 0.5° half way round
+    const raw = (await store.framesBetween(boot.id, 0, Infinity)).map(f => f.frame), sim = steps.flatMap(s => s.frames).map(f => f.frame);
+    assert.ok(raw.every((f, i) => Math.hypot(f.x - sim[i].x, f.y - sim[i].y) < 1e-6 && Math.abs(Math.sin(f.yaw - sim[i].yaw)) < 1e-6), "the frames back raw");
+    // The robot taking the correction changes nothing on the PC: the same view, path, cells as without.
+    const near = (a: unknown, b: unknown): boolean => typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 1e-6
+      : Array.isArray(a) && Array.isArray(b) ? a.length === b.length && a.every((v, i) => near(v, b[i]))
+      : a && b && typeof a === "object" && typeof b === "object" ? Object.keys(a).every(k => near((a as never)[k], (b as never)[k])) && Object.keys(a).length === Object.keys(b).length
+      : a === b;
+    const [v1, v2] = [await outlines.at(boot.id, 3), await other.outlines.at(other.boot.id, 3)];
+    assert.ok(near(v1, v2), "the outline view as without");
+    assert.ok(near(await store.path(boot.id, 3), await other.store.path(other.boot.id, 3)), "the path as without");
+    const [k1, k2] = [(await maps.viewAtSnapshot(boot.id, 3))!, (await other.maps.viewAtSnapshot(other.boot.id, 3))!];
+    assert.ok(near(k1.pose, k2.pose) && near(k1.view.columns, k2.view.columns), "the cell map as without");
     const view = (await outlines.at(boot.id, 3))!, end = steps.at(-1)!, deg = (r: number) => Math.abs(r) * 180 / Math.PI;
 
     // The pose at the end: corrected near the truth, odometry not; as the simulator's own run corrects it.
@@ -240,12 +268,13 @@ test("a drive with drift (the simulator's square room, stored): the correction i
     };
     assert.ok(onWalls(cells.view) > onWalls(odometryCells.view), `${onWalls(cells.view)} ${onWalls(odometryCells.view)}`);
 
-    // robot check asks in the robot's own frame: the snapshot's odometry pose, a place
-    // turned into the map's frame (a blocked column, found there).
+    // robot check asks in the map's frame, as goto points are given: the snapshot's corrected
+    // pose, a blocked column found where the page draws it.
     const i = cells.view.columns.findIndex(c => c === COLUMN.BLOCKED), v = cells.view;
     const [bx, by] = [(v.originX + Math.floor(i / v.cellsY) + 0.5) * 0.1, (v.originY + i % v.cellsY + 0.5) * 0.1];
-    const c = view.correction, cos = Math.cos(c.yaw), sin = Math.sin(c.yaw);
-    const own = { x: cos * (bx - c.x) + sin * (by - c.y), y: -sin * (bx - c.x) + cos * (by - c.y) };  // (bx, by) in the robot's frame
-    assert.deepEqual(await maps.atSnapshot(boot.id, 3, async (m, pose) => [pose, await m.obstacleWithin(own.x, own.y, 0.06)]), [snapshots[2].pose, true]);
-  } finally { maps.close(); plain.close(); rmSync(directory, { recursive: true, force: true }); }
+    assert.deepEqual(await maps.atSnapshot(boot.id, 3, async (m, pose) => [pose, await m.obstacleWithin(bx, by, 0.06)]), [robot, true]);
+  } finally {
+    maps.close(); plain.close(); other.maps.close();
+    rmSync(directory, { recursive: true, force: true }); rmSync(without, { recursive: true, force: true });
+  }
 });

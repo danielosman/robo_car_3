@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  HAS, IMU_RECORD_PERIOD_US, LANE, MAP_PART_CELLS, MAP_PART_SIZE, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeCommand, encodeConsole,
+  HAS, IMU_RECORD_PERIOD_US, LANE, MAP_PART_CELLS, MAP_PART_SIZE, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeCommand, encodeConsole, encodeCorrected,
   encodeHeartbeat, encodeHello, encodeImuBatch, encodeMapCleared, encodeMapPart, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus,
   encodeTof, take, typeInfo, wireCheck, type ImuBatch, type ImuRecord, type Message,
 } from "./wire.ts";
@@ -58,6 +58,7 @@ const samples: Record<string, { bytes: Buffer; message: Message }> = {
     message: { type: "status", x: 1.25, y: -0.5, yaw: 7, mode: "manual", action: "goto", rssi: -61 },
   },
   map_cleared: { bytes: encodeMapCleared(), message: { type: "map_cleared" } },
+  corrected: { bytes: encodeCorrected({ x: 0.12, y: -0.045, yaw: -0.1833 }), message: { type: "corrected", x: f(0.12), y: f(-0.045), yaw: f(-0.1833) } },
   move_start: {
     bytes: encodeMoveStart({ move: 12, command: 17, kind: "goto", parameter: 4.2, tUs: 4300000000, preMs: 200, postMs: 300, refused: true }),
     message: { type: "move_start", move: 12, command: 17, kind: "goto", parameter: f(4.2), tUs: 4300000000, preMs: 200, postMs: 300, refused: true },
@@ -149,6 +150,7 @@ test("every message encoded and decoded again", () => {
     { type: "answer", n: 0xffffffff, end: "picob_lost", has: 7, x: -1.5, y: 2.25, yaw: -3, moved: 0.5, rotated: 6.25, goal: 3, snapshot: 123456 },
     { type: "status", x: 0, y: 0, yaw: -12.5, mode: "idle", action: "", rssi: 0 },
     { type: "map_cleared" },
+    { type: "corrected", x: -2.5, y: 0.25, yaw: 0.5 },
     { type: "move_start", move: 1, command: 0, kind: "watch", parameter: 60, tUs: 0, preMs: 0, postMs: 2000, refused: false },
     { type: "move_end", move: 0xffffffff, end: "no_start", tUs: 0xffffffff, framesSent: 0, framesDropped: 9, moved: 0, rotated: -6.5,
       imuSent: 0, imuDropped: 0xffffffff },
@@ -166,6 +168,7 @@ test("every message encoded and decoded again", () => {
       case "answer": return encodeAnswer(m);
       case "status": return encodeStatus(m);
       case "map_cleared": return encodeMapCleared();
+      case "corrected": return encodeCorrected(m);
       case "move_start": return encodeMoveStart(m);
       case "move_end": return encodeMoveEnd(m);
       case "imu_batch": return encodeImuBatch(m);

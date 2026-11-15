@@ -2,11 +2,12 @@
 // connects to the server as PicoA does (ROBOT_PORT on 127.0.0.1) and speaks the wire
 // (wire.ts; picoA/app/commands.h, move.h, snapshot.h): hello first, then
 //  - replays a stored boot's messages from the database (store.ts replay: moves, tof
-//    frames, imu batches, statuses, snapshots, in the order they came, at their pace or
+//    frames, imu batches, statuses, corrections, snapshots, in the order they came, at their pace or
 //    faster), so the page shows that drive as it was;
 //  - takes command messages and answers each when it has ended, as a move with its
 //    start and end (no frames, no imu batches), sends its status 4 times a second and
-//    its console lines, and for `snap` the boot's next stored
+//    its console lines, takes the PC's correction as the robot does (its pose moved,
+//    "corrected" before the answer), and for `snap` the boot's next stored
 //    snapshot, one after another, in parts as the robot does. It drives its pose at
 //    the robot's speeds (10 cm/s, 29°/s); it knows no map, so it never meets an obstacle.
 //   npm run fakerobot -- <boot id> [--speed=<n>] [--no-replay]   (the database: ROBOT_DB, or recordings/robot2.duckdb)
@@ -15,10 +16,11 @@ import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { parseSnapshot } from "./snapshot.ts";
 import { ROBOT_PORT } from "./link.ts";
+import { corrected, NO_CORRECTION, uncorrected, type Planar } from "./correction.ts";
 import { DB_PATH, Store, type Replayed } from "./store.ts";
 import {
   HAS, MAP_PARTS, MAP_PART_CELLS, MOVE_KINDS, PART_MAX, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole,
-  encodeHello, encodeMapCleared, encodeMapPart, encodeImuBatch, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof,
+  encodeCorrected, encodeHello, encodeMapCleared, encodeMapPart, encodeImuBatch, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof,
 } from "./wire.ts";
 
 const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, GOTO_MAX_M = 3, STILL_MS = 200;
@@ -48,6 +50,7 @@ export class FakeRobot {
   private socket: net.Socket;
   private opts: Required<FakeRobotOptions>;
   private pose = { x: 0, y: 0, yaw: 0 };
+  private correction: Planar = NO_CORRECTION; // the PC's, as the robot keeps it (commands.h, correct)
   private mode = "manual";
   private next = 0;
   private moves = 0;       // numbered so far (the replay's too)
@@ -121,7 +124,8 @@ export class FakeRobot {
         const p = m.pose;
         this.pose = { x: p.x, y: p.y, yaw: p.yaw };
         this.socket.write(encodeStatus({ x: p.x, y: p.y, yaw: p.yaw, mode: p.mode, action: p.action, rssi: p.rssi ?? 0 }));
-      } else this.sendParts(m.bytes);
+      } else if (m.type === "corrected") this.socket.write(encodeCorrected(m.c));
+      else this.sendParts(m.bytes);
     }
     this.replaying = false;
     this.say(`Replay of boot ${this.opts.bootId} done; taking commands\n`);
@@ -207,7 +211,13 @@ export class FakeRobot {
       for (let part = 0; part < MAP_PARTS; part++) this.socket.write(encodeMapPart({ part, originCx: -30, originCy: -30, cells }));
       this.answer(n, "ok");
     } else if (text === "clear_map") { this.say("Map cleared\n"); this.socket.write(encodeMapCleared()); this.answer(n, "ok"); }
-    else if (/^config (pre|post)_ms \d+$/.test(text)) { this.say(`Config: ${text.slice(7)}\n`); this.answer(n, "ok"); }
+    else if ((v = num(/^correct (-?\d+) (-?\d+) (-?\d+)$/)) && !this.action) {
+      const c = { x: v[0] / 1000, y: v[1] / 1000, yaw: v[2] / 100 * Math.PI / 180 };
+      this.pose = corrected(c, uncorrected(this.correction, this.pose));
+      this.correction = c;
+      this.socket.write(encodeCorrected(c));
+      this.answer(n, "ok");
+    } else if (/^config (pre|post)_ms \d+$/.test(text)) { this.say(`Config: ${text.slice(7)}\n`); this.answer(n, "ok"); }
     else if (/^mode (idle|manual)$/.test(text)) {
       this.mode = text.slice(5);
       if (this.mode === "idle") this.end("stopped");
