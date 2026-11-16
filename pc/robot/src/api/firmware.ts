@@ -28,23 +28,23 @@ function header(file: string, names: readonly string[]): Record<string, number> 
 const c = header("app/commands.h", ["COMMAND_DRIVE_MAX_CM", "COMMAND_ROTATE_MAX_DEG", "COMMAND_GOTO_MAX_CM", "COMMAND_POINT_MAX_CM",
                                 "COMMAND_WATCH_MIN_S", "COMMAND_WATCH_MAX_S", "COMMAND_STILL_MAX_MS"]);
 const r = header("app/room.h", ["EDGE_M", "HALF_WIDTH_M"]);
-const b = header("app/behaviour.h", ["GOTO_MAX_M", "GOTO_THERE_M"]);
+const b = header("app/behaviour.h", ["GOTO_THERE_M"]);
 const m = header("app/motion.h", ["MOTION_SPEED_MPS", "MOTION_TURN_RADPS"]);
 const cam = header("drivers/camera.h", ["CAMERA_WIDTH", "CAMERA_HEIGHT"]);
 
-// What the robot takes (cm, degrees, seconds; the still times in ms). A goto's point: x and
-// y each at most gotoCm from where the robot is, and pointCm on the map (only so the numbers
-// stay plain).
+// What the robot takes (cm, degrees, seconds; the still times in ms). A goto's point: at
+// most gotoCm from where the robot is, and x, y within pointCm on the map (only so the
+// numbers stay plain).
 export const LIMITS = {
   driveCm: c.COMMAND_DRIVE_MAX_CM, rotateDeg: c.COMMAND_ROTATE_MAX_DEG, gotoCm: c.COMMAND_GOTO_MAX_CM, pointCm: c.COMMAND_POINT_MAX_CM,
   watchMinS: c.COMMAND_WATCH_MIN_S, watchMaxS: c.COMMAND_WATCH_MAX_S, stillMaxMs: c.COMMAND_STILL_MAX_MS,
 } as const;
 
 // The robot's front and back edges are edgeM from its centre, its sides halfWidthM; a goto
-// goes at most gotoMaxM, and not at all to a point closer than gotoThereM (m). Where a
+// doesn't go to a point closer than gotoThereM (m). Where a
 // move stops before an obstacle is the robot's own rule, asked through the helper.
 export const MOVE = {
-  edgeM: r.EDGE_M, halfWidthM: r.HALF_WIDTH_M, gotoMaxM: b.GOTO_MAX_M, gotoThereM: b.GOTO_THERE_M,
+  edgeM: r.EDGE_M, halfWidthM: r.HALF_WIDTH_M, gotoThereM: b.GOTO_THERE_M,
 } as const;
 
 // Full speed driving (m/s) and turning (rad/s).

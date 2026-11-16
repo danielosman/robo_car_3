@@ -27,7 +27,7 @@ import {
   encodeCorrected, encodeHello, encodeMapCleared, encodeMapPart, encodeImuBatch, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof,
 } from "./wire.ts";
 
-const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, GOTO_MAX_M = 3, STILL_MS = 200;
+const STEP_S = 0.05, SPEED_MPS = 0.1, TURN_RADPS = 0.5, STILL_MS = 200;
 
 export interface FakeSnapshot { bytes: Buffer; sequence: number; pose: { x: number; y: number; yaw: number } | null }
 
@@ -228,15 +228,15 @@ export class FakeRobot {
     else if ((v = num(/^rotate (-?\d+)$/))) this.begin("Rotate", "rotate", n, v[0] * Math.PI / 180, [this.turn(v[0] * Math.PI / 180)]);
     else if ((v = num(/^watch (\d+)$/))) this.begin("Watch", "watch", n, v[0], [this.wait(v[0])]);
     else if ((v = num(/^goto (-?\d+) (-?\d+)$/))) {
-      // As the robot (picoA/app/commands.c): x and y each within LIMITS.gotoCm of where it is.
-      if (Math.abs(v[0] - this.pose.x * 100) > LIMITS.gotoCm || Math.abs(v[1] - this.pose.y * 100) > LIMITS.gotoCm) {
+      // As the robot (picoA/app/commands.c): at most LIMITS.gotoCm from where it is.
+      if (Math.hypot(v[0] - this.pose.x * 100, v[1] - this.pose.y * 100) > LIMITS.gotoCm) {
         this.say(`Command refused: "${text}": too far from the robot\n`);
         this.answer(n, "out_of_range");
         return;
       }
       const dx = v[0] / 100 - this.pose.x, dy = v[1] / 100 - this.pose.y, d = Math.hypot(dx, dy), bearing = Math.atan2(dy, dx);
       const towards = Math.atan2(Math.sin(bearing - this.pose.yaw), Math.cos(bearing - this.pose.yaw));
-      this.begin("Go to", "goto", n, d, [this.turn(towards), this.drive(Math.min(d, GOTO_MAX_M))], d);
+      this.begin("Go to", "goto", n, d, [this.turn(towards), this.drive(d)], d);
     } else if (text === "snap") this.sendSnapshot(n);
     else if (text === "map") {
       const cells = Buffer.alloc(MAP_PART_CELLS);

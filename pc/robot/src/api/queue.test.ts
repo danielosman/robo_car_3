@@ -109,7 +109,7 @@ test("the runner: numbered lines, answers by number, not connected, no answer, a
   assert.deepEqual(await runner.run(drive), { result: "failed", why: "robot not connected" });
 });
 
-test("answers: limited, safety stops, refused with the reason, an action without a pose", async () => {
+test("answers: safety stops, refused with the reason, an action without a pose", async () => {
   const robot = new FakeRobot(), runner = new CommandRunner(robot, new StoredSnapshots());
   const run = async (c: Command, d: Partial<DoneRecord> & { end: string }) => {
     const going = runner.run(c);
@@ -117,8 +117,8 @@ test("answers: limited, safety stops, refused with the reason, an action without
     return going;
   };
   const move = (text: string) => (parseSteer(text) as { commands: Command[] }).commands[0];
-  assert.deepEqual(await run(move("g300,300"), { end: "ok", goalM: 4.24, movedM: 3, rotatedDeg: 45 }),
-                   { result: "limited", pose: { x: 43, y: -4, yaw: 30 }, moved: 300, rotated: 45 });
+  assert.deepEqual(await run(move("g300,0"), { end: "ok", goalM: 2.57, movedM: 2.57, rotatedDeg: 5 }),
+                   { result: "ok", pose: { x: 43, y: -4, yaw: 30 }, moved: 257, rotated: 5 });
   assert.deepEqual(await run(move("r30"), { end: "tilt", movedM: 0, rotatedDeg: 12 }),
                    { result: "safety_stop", why: "tilt", pose: { x: 43, y: -4, yaw: 30 }, moved: 0, rotated: 12 });
   assert.equal((await run(move("d30"), { end: "wheels" })).why, "wheels");
@@ -128,7 +128,7 @@ test("answers: limited, safety stops, refused with the reason, an action without
                    { result: "failed", why: 'refused by the robot: "drive 30" is not a command it knows (its firmware older than this server?)' });
   assert.equal((await run(move("d30"), { end: "out_of_range" })).why, 'refused by the robot: "drive 30": a number out of its range (-300 to 300 cm)');
   assert.equal((await run(move("g400,0"), { end: "out_of_range" })).why,
-               'refused by the robot: "goto 400 0": the point is 357.0 cm in x and 4.0 cm in y from the robot (at 43, -4 cm); a goto reaches at most 300 cm in each');
+               'refused by the robot: "goto 400 0": the point is 357.0 cm from the robot (at 43, -4 cm); a goto reaches at most 300 cm');
 });
 
 test("askMap: window and pose, concurrent calls serialized, refused, not connected", async () => {

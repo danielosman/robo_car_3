@@ -724,9 +724,8 @@ click (164, -169) became (320, -171), past the range. So two things together:
 
 - **The PC's correction had run away** (below), and goto points are turned by it even
   with the correction off.
-- **The goto range is measured from the power-up point, not from the robot.** At
-  x = 277 cm any point farther along x is out of reach, correction or not. In a room
-  larger than 3 m from the start, part of the room can't be clicked at all.
+- **The goto range was measured from the power-up point, not from the robot** (fixed
+  16 Nov): at x = 277 cm any point farther along x was out of reach.
 
 **Nobody said why.** The robot's line lists three possible reasons and names none; the
 answer said "refused by the robot (robot log says why)"; the page checked a different
@@ -767,13 +766,11 @@ on the robot was wrong:
    answer's end (`out_of_range`, `busy_move`, `busy_snapshot`, `busy_bulk`; `refused`:
    not a command); the PC's answer says it in words (`answers.ts` `refusal`), for a
    turned goto also the map's point and both corrections (`corrections.ts`).
-2. **A goto's range counts from the robot** (not flashed): x and y each within 300 cm
-   of where it is, checked on the robot only. Open (Daniel): this square, a 3 m
-   distance, or no range at all (a far point then goes 3 m towards it, `limited`).
-3. Open: with the correction off, should goto points be turned by it at all? The page
-   draws the corrected map, so a click is a place on it; a wrong correction then sends
-   the robot elsewhere. A simple option: with the correction off, the page draws and
-   clicks in odometry's frame.
+2. **A goto's point is at most 3 m from the robot** (not flashed; Daniel, 16 Nov):
+   farther is refused, checked on the robot only; no more `limited`.
+3. Goto points stay turned by the PC's correction, the page drawn by it (Daniel, 16
+   Nov: a click near the drawn robot lands right whatever the correction; the robot's
+   own map stops it before obstacles).
 4. How to keep the PC from distrusting odometry this far (open; part of "Options: more
    data, then the algorithm"). Leads, none decided: the pose doubt's growth measured on
    the robot instead of the simulator's 3.5 %; an unsure wall never moves a pose more

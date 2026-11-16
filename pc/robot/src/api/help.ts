@@ -16,7 +16,6 @@ const ANSWERS = `Every queued command answers one JSON line when it ends, in ord
 result is one of:
   ok           it did what was asked
   obstacle     a move stopped early, before an obstacle on the map
-  limited      a goto further than 3 m went 3 m
   stopped      robot stop ended it
   safety_stop  the robot stopped itself; why says tilt or wheels
   failed       why says what went wrong (a bad number, robot not connected, no answer...)

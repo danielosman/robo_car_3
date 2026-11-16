@@ -12,8 +12,8 @@
 //   Go to: a point on the map (its frame): turn in place towards it, then drive
 //          straight to it, steering a little to keep it ahead, and stop stop_m
 //          before it (measured along the way), or STOP_BEFORE_M before an obstacle
-//          on the map as Drive does. At most GOTO_MAX_M at once: a goal farther away
-//          is gone towards. The turn and the distance come from the robot's own pose.
+//          on the map as Drive does (commands.c refuses a goal past COMMAND_GOTO_MAX_CM).
+//          The turn and the distance come from the robot's own pose.
 // Each action is one move (move.h): the move switches the motors on and off, stands
 // still before and after, sends the move's start, end and frames, and ends it
 // exactly once, also when it can't start (a move blocked from the start, a goal
@@ -24,7 +24,6 @@
 
 // How far a move goes before an obstacle on the map: room.h. The PC's robot check reads
 // these (pc/robot/src/api/firmware.ts): plain numbers only.
-#define GOTO_MAX_M       3.0f      // a goal farther away: the robot goes this far towards it
 #define GOTO_THERE_M     0.05f     // a goal closer than this: already there
 
 void behaviour_drive(float distance_m, uint32_t command);

@@ -141,16 +141,14 @@ static void refuse(uint32_t n, const char *line, wire_end_t end, const char *why
     answer(n, end);
 }
 
-// Why a go to's point is out of range, or NULL: each of x and y at most
-// COMMAND_GOTO_MAX_CM from where the robot is now (not from where it was switched on).
+// Why a go to's point is out of range, or NULL: at most COMMAND_GOTO_MAX_CM from where
+// the robot is now (not from where it was switched on).
 static const char *goto_out_of_range(int x_cm, int y_cm, char *why, size_t size) {
     const odometry_report_t *o = body_odometry();
-    float dx = (float)x_cm - o->x_m * 100, dy = (float)y_cm - o->y_m * 100;
-    if (abs(x_cm) <= COMMAND_POINT_MAX_CM && abs(y_cm) <= COMMAND_POINT_MAX_CM &&
-        fabsf(dx) <= COMMAND_GOTO_MAX_CM && fabsf(dy) <= COMMAND_GOTO_MAX_CM) return NULL;
-    snprintf(why, size, "the point is %.1f cm in x and %.1f cm in y from the robot at %.0f, %.0f cm; "
-             "a goto reaches at most %d cm in each", (double)dx, (double)dy, (double)(o->x_m * 100),
-             (double)(o->y_m * 100), COMMAND_GOTO_MAX_CM);
+    float d = hypotf((float)x_cm - o->x_m * 100, (float)y_cm - o->y_m * 100);
+    if (abs(x_cm) <= COMMAND_POINT_MAX_CM && abs(y_cm) <= COMMAND_POINT_MAX_CM && d <= COMMAND_GOTO_MAX_CM) return NULL;
+    snprintf(why, size, "the point is %.1f cm from the robot at %.0f, %.0f cm; a goto reaches at most %d cm", (double)d,
+             (double)(o->x_m * 100), (double)(o->y_m * 100), COMMAND_GOTO_MAX_CM);
     return why;
 }
 

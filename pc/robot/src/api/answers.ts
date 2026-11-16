@@ -2,9 +2,9 @@
 // ended, always the same fields:
 //   command  as typed: "steer d50", "snap", "mode idle"
 //   result   ok, obstacle (a move stopped early before an obstacle on the map),
-//            limited (a goto further than 3 m went 3 m), stopped (by stop),
+//            stopped (by stop),
 //            safety_stop, failed, dropped (never ran: one before it didn't end ok)
-//   why      only when result isn't ok, obstacle or limited; for obstacle only when the stop was
+//   why      only when result isn't ok or obstacle; for obstacle only when the stop was
 //            floor not seen yet (UNSEEN_FLOOR), not a thing. A command the robot refused says
 //            which rule, which value, which limit (refusal), never only "refused"
 //   pose     where the robot is after it (moves, snap, stop): x, y cm, yaw degrees
@@ -12,11 +12,11 @@
 //   snapshot for a snap: its number
 // Units are cm and degrees, said once in the help.
 import type { DoneRecord, Pose } from "../link.ts";
-import { LIMITS, MOVE } from "./firmware.ts";
+import { LIMITS } from "./firmware.ts";
 import { isMove, MOVES, robotText, type Command } from "./commands.ts";
 
 export type Sender = "cli" | "page";
-export type Result = "ok" | "obstacle" | "limited" | "stopped" | "safety_stop" | "failed" | "dropped";
+export type Result = "ok" | "obstacle" | "stopped" | "safety_stop" | "failed" | "dropped";
 export interface PoseOut { x: number; y: number; yaw: number }
 export interface Answer {
   command: string; result: Result; why?: string; pose?: PoseOut; moved?: number; rotated?: number; snapshot?: number;
@@ -45,11 +45,11 @@ export const poseOut = (p: Pose): PoseOut => ({ x: Math.round(p.x * 100) + 0, y:
 const SAFETY: Record<string, string> = { tilt: "tilt", wheels: "wheels", no_drive: "no drive commands", safety: "unknown" };
 const FAILED: Record<string, string> = { picob_lost: "PicoB lost", no_start: "didn't start", replaced: "replaced by another command" };
 
-// A goto's point (cm, the robot's own frame) against where the robot is (m), as the robot's
-// out_of_range says it (the rule is the robot's: picoA/app/commands.c).
-const gotoFar = (point: { x: number; y: number }, robot: { x: number; y: number }) =>
-  `the point is ${(point.x - robot.x * 100).toFixed(1)} cm in x and ${(point.y - robot.y * 100).toFixed(1)} cm in y from ` +
-  `the robot (at ${Math.round(robot.x * 100)}, ${Math.round(robot.y * 100)} cm); a goto reaches at most ${LIMITS.gotoCm} cm in each`;
+// How far a goto's point (cm) is from the robot (m), as the robot's out_of_range says it
+// (the rule is the robot's: picoA/app/commands.c; robot check says it too).
+export const gotoFar = (point: { x: number; y: number }, robot: { x: number; y: number }) =>
+  `the point is ${Math.hypot(point.x - robot.x * 100, point.y - robot.y * 100).toFixed(1)} cm from the robot ` +
+  `(at ${Math.round(robot.x * 100)}, ${Math.round(robot.y * 100)} cm); a goto reaches at most ${LIMITS.gotoCm} cm`;
 
 // Why the robot refused a command (its end words, picoA/app/wire.h): the rule, the value,
 // the limit. text: the command as the robot got it ("goto 320 -171", "correct 5 0 120").
@@ -70,7 +70,7 @@ export function refusal(text: string, d: DoneRecord): string {
 const REFUSALS = new Set(["refused", "out_of_range", "busy_move", "busy_snapshot", "busy_bulk"]);
 
 export function outcome(c: Command, d: DoneRecord): Outcome {
-  const out: Outcome = d.end === "ok" ? { result: c.name === "goto" && (d.goalM ?? 0) > MOVE.gotoMaxM ? "limited" : "ok" }
+  const out: Outcome = d.end === "ok" ? { result: "ok" }
     : d.end === "obstacle" || d.end === "stopped" ? { result: d.end }
     : d.end === "unseen_floor" ? { result: "obstacle", why: UNSEEN_FLOOR }
     : d.end in SAFETY ? { result: "safety_stop", why: SAFETY[d.end] }

@@ -306,7 +306,7 @@ function clicked(x, y) {
     // outline map (still loading) the map is drawn by odometry: the place would be off.
     if (!outline && snapshots.length) { toast("The outline map isn't loaded yet: no goal by click"); return; }
     const cx = Math.round(x * 100), cy = Math.round(y * 100);
-    // Too far from the robot: the server says so in the log (corrections.ts), with the numbers.
+    // More than 3 m from the robot: refused, the answer's why (in the log) says how far.
     goal = { x, y, command: `steer g${cx},${cy}` };
     send("steer", `g${cx},${cy}`);
     draw();

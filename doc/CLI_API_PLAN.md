@@ -73,7 +73,7 @@ power-up, y to its left.
 | `stop` | stops at once: motors off, mode idle; skips the queue and drops what waits |
 
 - A move needs its numbers; there are no defaults. The limits (drive ±300 cm,
-  rotate ±720°, goto ±300 cm per axis from the robot, watch 1-600 s) are in one C header the API
+  rotate ±720°, goto at most 300 cm from the robot, watch 1-600 s) are in one C header the API
   reads (`picoA/app/commands.h`); the robot checks them again.
 - **auto_snap** (`robot config auto_snap on|off`, on by default): the server sends a
   `snap` after every move. It is a command like any other, with its own answer.
@@ -113,7 +113,7 @@ fields:
 ```
 
 - `command`: as typed. `result`: `ok`; `obstacle` (a move stopped early before an
-  obstacle on the map); `limited` (a goto further than 3 m went 3 m); `stopped` (by
+  obstacle on the map); `stopped` (by
   `stop`); `safety_stop` (`why`: tilt, wheels); `failed` (`why`: a bad number, robot
   not connected, no answer, PicoB lost, didn't start); `dropped` (never ran).
 - `pose` after moves, snap and stop; `moved` (cm straight from where it started)
@@ -274,7 +274,7 @@ through the queue.
 4. `snap` takes a snapshot; reading one is `map`, `tof`, `camera`, `light`, `features`.
 5. auto_snap (on by default, `robot config`): a snap after every move, as its own command with its own answer.
 6. Every answer is one JSON line with the same fields: `command` (as typed), `result`, `why` (when not ok), `pose`, `moved` and `rotated` (every move), `snapshot`.
-7. Results: ok, obstacle, limited, stopped, safety_stop, failed, dropped. An obstacle stop isn't a failure.
+7. Results: ok, obstacle, stopped, safety_stop, failed, dropped. An obstacle stop isn't a failure.
 8. No ids, no `queued` lines; no units in field names (the help says them once).
 9. Anything that isn't ok empties the queue; a move's own snap still runs first.
 10. The robot takes commands only from the API (the USB is for debugging).

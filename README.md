@@ -551,9 +551,8 @@ a piece of furniture 1-2 m away:
    against the spot (expected within a few cm plus odometry's error).
 3. Click behind the furniture: `"result":"obstacle"`; the gap from the front edge
    15-25 cm, as for a drive.
-4. `robot steer g400,0` is refused (out of range); from near the start, a click
-   ~3 m away and then `robot steer g300,300`: `"result":"limited"`, `moved` 300
-   (only where the room allows it; `robot stop` stops).
+4. A click more than 3 m from the robot, and `robot steer g400,0` from near the start:
+   `"result":"failed"`, the `why` says how far the point is and the 3 m limit.
 5. Drag the timeline back and click: the toast says it's an old snapshot, nothing
    moves.
 

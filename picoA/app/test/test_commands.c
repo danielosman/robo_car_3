@@ -186,16 +186,16 @@ int main(void) {
     loop(1);
     a = answer_sent(1);
     assert(a.n == 4 && a.end == WIRE_END_OK && a.has == (WIRE_HAS_MOVE | WIRE_HAS_GOAL) && a.goal_m == 4.2f);
-    // A go to's range: each of x and y at most 300 cm from where the robot is (43, -4 cm), not from 0, 0.
+    // A go to's range: at most 300 cm from where the robot is (43, -4 cm), not from 0, 0.
     started_n = 0;
-    pc_sends(30, "goto 340 290");  // 297 and 294 cm from the robot: taken, though past 300 from the start
+    pc_sends(30, "goto 340 -4");   // 297 cm from the robot: taken, though past 300 from the start
     loop(1);
     assert(!strcmp(started, "goto") && started_n == 30);
     move_ended((move_record_t){.command = 30, .kind = MOVE_GOTO, .how = MOVE_END_DONE}, WIRE_END_OK);
     loop(1);
     int at = out_n;
-    pc_sends(31, "goto -260 0");   // 303 cm from the robot in x: refused, out of range
-    pc_sends(32, "goto 0 297");    // 301 cm in y
+    pc_sends(31, "goto -260 -4");  // 303 cm from the robot: refused, out of range
+    pc_sends(32, "goto 260 210");  // 305 cm: x and y each under 300 from it, the distance counts
     loop(1);
     assert(started_n == 30 && out_n == at + 2 && answer_sent(at).n == 31 && answer_sent(at).end == WIRE_END_OUT_OF_RANGE &&
            answer_sent(at + 1).end == WIRE_END_OUT_OF_RANGE);

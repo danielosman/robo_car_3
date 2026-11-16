@@ -2,14 +2,14 @@
 // snapshot, each from where the one before would end, without moving (doc/CLI_API_PLAN.md).
 // Each is answered as the move itself would be. A drive, and a goto's drive, ends as the
 // robot's own rule ends it (picoA/app/room.h, asked through maps/cell_map.ts); a goto
-// turns towards the point first and goes at most gotoMaxM (behaviour.h). The robot
+// turns towards the point first; one more than LIMITS.gotoCm away fails (commands.c). The robot
 // doesn't check turns: a turn with an obstacle inside the circle it sweeps gets a
 // warning. After a move that wouldn't end ok, the rest would be dropped. watch can't be
 // checked.
 import type { Pose } from "../link.ts";
-import { MOVE } from "./firmware.ts";
+import { LIMITS, MOVE } from "./firmware.ts";
 import { commandText, type Command } from "./commands.ts";
-import { poseOut, UNSEEN_FLOOR, type Answer } from "./answers.ts";
+import { failed, gotoFar, poseOut, UNSEEN_FLOOR, type Answer } from "./answers.ts";
 import type { CellMap } from "../maps/cell_map.ts";
 
 export type CheckAnswer = Answer & { warning?: string };
@@ -36,9 +36,10 @@ async function checkOne(c: Command, map: CellMap, p: Pose): Promise<{ answer: Ch
   // goto
   const x = a / 100, y = b / 100, dist = Math.hypot(x - p.x, y - p.y);
   if (dist < MOVE.gotoThereM) return answer("ok", p, 0, 0);
+  if (dist * 100 > LIMITS.gotoCm) return { answer: { command, ...failed(gotoFar({ x: a, y: b }, p)) }, end: p };
   const bearing = Math.atan2(y - p.y, x - p.x), turn = Math.atan2(Math.sin(bearing - p.yaw), Math.cos(bearing - p.yaw));
-  const d = await drive(map, { ...p, yaw: p.yaw + turn }, Math.min(dist, MOVE.gotoMaxM));
-  return answer(d.result === "ok" && dist > MOVE.gotoMaxM ? "limited" : d.result, d.end, d.moved, turn, undefined, d.unseenFloor);
+  const d = await drive(map, { ...p, yaw: p.yaw + turn }, dist);
+  return answer(d.result, d.end, d.moved, turn, undefined, d.unseenFloor);
 }
 
 // One answer per move; only drive, rotate and goto.

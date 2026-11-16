@@ -32,7 +32,8 @@ test("check: drive, rotate, goto, each from where the one before ends", async ()
   assert.equal((await short("d76 d10"))[1], "steer d10 obstacle at -24,15,0 moved 0 rotated 0");
   assert.equal((await short("d-30"))[0], "steer d-30 ok at -130,15,0 moved 30 rotated 0");
   assert.deepEqual(await short("g-100,-185"), ["steer g-100,-185 ok at -100,-185,-90 moved 200 rotated -90"]);
-  assert.match((await short("g-250,250", { x: -2.5, y: -2.5, yaw: 0 }))[0], /^steer g-250,250 limited .* moved 300 rotated 90$/);
+  assert.deepEqual(await short("g-250,250", { x: -2.5, y: -2.5, yaw: 0 }),
+                   ["steer g-250,250 failed (the point is 500.0 cm from the robot (at -250, -250 cm); a goto reaches at most 300 cm)"]);
   assert.match((await short("d10", { x: 1, y: 0, yaw: 0 }))[0], /^steer d10 obstacle \(floor not seen yet: .*\) at 100,0,0 moved 0/);
   const [turn] = await checkMoves(steer("r90"), wall, { x: 0.05, y: 0, yaw: 0 });
   assert.match(turn.warning ?? "", /an obstacle within 15 cm/);

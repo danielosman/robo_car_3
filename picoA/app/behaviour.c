@@ -107,13 +107,6 @@ void behaviour_goto(float x_m, float y_m, float stop_m, uint32_t number) {
         move_refused(MOVE_GOTO, goal_m, number, MOVE_END_DONE);
         return;
     }
-    if (d - stop_m > GOTO_MAX_M) { // only so far towards it
-        float k = (GOTO_MAX_M + stop_m) / d;
-        printf("Go to: the goal is %.1f m away; going %.1f m towards it\n", (double)d, (double)GOTO_MAX_M);
-        x_m = o->x_m + k * dx;
-        y_m = o->y_m + k * dy;
-        d = GOTO_MAX_M + stop_m;
-    }
     begin(GOTO, d, goal_m, number);
     goal_x = x_m;
     goal_y = y_m;

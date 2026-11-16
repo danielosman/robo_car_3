@@ -441,7 +441,7 @@ drive, rotate, goto, watch.
 - **Go to** (`goto <x> <y>`, or a click on the page's map): turn in place towards the
   point, then drive straight to it at ≤ 10 cm/s, steering a little to keep it
   ahead, stopping where it is (measured along the way) or 15 cm before an obstacle
-  on the map, as Move. At most 3 m at once (a farther goal is gone towards). The
+  on the map, as Move. A goal more than 3 m from the robot is refused. The
   goal is a point in the map frame; the robot works out the turn and the distance
   from its own pose.
 

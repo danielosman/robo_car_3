@@ -4,8 +4,8 @@
 // debugging) one per line, "<command> [#<n>]". The robot does nothing by itself.
 //   drive <cm>             straight; negative = backwards
 //   rotate <deg>           on the spot; + = left
-//   goto <x cm> <y cm>     a point on the map (its frame); each of x and y at most
-//                          COMMAND_GOTO_MAX_CM from where the robot is now
+//   goto <x cm> <y cm>     a point on the map (its frame), at most COMMAND_GOTO_MAX_CM
+//                          from where the robot is now (farther: refused)
 //   watch <s>              turn towards movement for that long
 //   snap                   a snapshot to the server (snapshot.h)
 //   map                    the 6 x 6 m map window to the server (wire.h, map part)
@@ -35,7 +35,7 @@
 
 #define COMMAND_DRIVE_MAX_CM   300
 #define COMMAND_ROTATE_MAX_DEG 720
-#define COMMAND_GOTO_MAX_CM    300 // each of x and y, from where the robot is
+#define COMMAND_GOTO_MAX_CM    300 // how far a go to's point may be from the robot
 #define COMMAND_POINT_MAX_CM   100000 // a go to's x and y on the map: only so the numbers stay plain (1 km)
 #define COMMAND_WATCH_MIN_S    1
 #define COMMAND_WATCH_MAX_S    600

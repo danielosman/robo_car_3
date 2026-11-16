@@ -29,8 +29,8 @@ export const MOVES: readonly MoveSpec[] = [
   { name: "rotate", letter: "r", values: [range("degrees", LIMITS.rotateDeg)],
     does: "Turn on the spot. Positive turns left, negative right." },
   { name: "goto", letter: "g", values: [range("cm", LIMITS.pointCm), range("cm", LIMITS.pointCm)],
-    does: `Go to a point on the map: turn towards it, then drive there. x and y each at most ${LIMITS.gotoCm} cm ` +
-          "from where the robot is; at most 3 m; stops before obstacles." },
+    does: `Go to a point on the map: turn towards it, then drive there. At most ${LIMITS.gotoCm} cm from the robot ` +
+          "(farther: refused); stops before obstacles." },
   { name: "watch", letter: "w", values: [range("s", LIMITS.watchMaxS, LIMITS.watchMinS)],
     does: "For that many seconds, turn towards anything that moves." },
 ];
@@ -121,7 +121,7 @@ export function timeLimitMs(c: Command): number {
   const driveS = (cm: number) => Math.abs(cm) / 100 / SPEED.driveMps;
   const expectedS = c.name === "drive" ? driveS(c.values[0])
     : c.name === "rotate" ? turnS(c.values[0])
-    : c.name === "goto" ? turnS(180) + driveS(LIMITS.gotoCm * Math.SQRT2)
+    : c.name === "goto" ? turnS(180) + driveS(LIMITS.gotoCm)
     : c.name === "watch" ? c.values[0]
     : 0;
   return Math.round((2 * expectedS + 10) * 1000);

@@ -5,6 +5,13 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 16 Nov 2026: a goto's point at most 3 m from the robot (Daniel)
+
+- A goto farther than 3 m from the robot is refused (it used to drive 3 m towards it,
+  `limited`): the robot checks the distance, the clip and the result `limited` are gone,
+  `robot check` fails it the same way. Daniel also decided the page keeps drawing and
+  taking clicks by the PC's correction.
+
 ## 16 Nov 2026: refusals say why; a goto's range from the robot (wire 8, not flashed)
 
 - The two to-dos from the gotos refused after the second drive. The robot's refusals
