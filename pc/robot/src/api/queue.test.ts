@@ -109,7 +109,7 @@ test("the runner: numbered lines, answers by number, not connected, no answer, a
   assert.deepEqual(await runner.run(drive), { result: "failed", why: "robot not connected" });
 });
 
-test("answers: limited, safety stops, refused, an action without a pose", async () => {
+test("answers: limited, safety stops, refused with the reason, an action without a pose", async () => {
   const robot = new FakeRobot(), runner = new CommandRunner(robot, new StoredSnapshots());
   const run = async (c: Command, d: Partial<DoneRecord> & { end: string }) => {
     const going = runner.run(c);
@@ -123,7 +123,12 @@ test("answers: limited, safety stops, refused, an action without a pose", async 
                    { result: "safety_stop", why: "tilt", pose: { x: 43, y: -4, yaw: 30 }, moved: 0, rotated: 12 });
   assert.equal((await run(move("d30"), { end: "wheels" })).why, "wheels");
   assert.deepEqual(await run(action("config", "pre_ms 300")[0], { end: "ok" }), { result: "ok" });
-  assert.deepEqual(await run(move("d30"), { end: "refused" }), { result: "failed", why: "refused by the robot (robot log says why)" });
+  // Each refusal says why: the rule, the value, the limit (the robot at 43, -4 cm).
+  assert.deepEqual(await run(move("d30"), { end: "refused" }),
+                   { result: "failed", why: 'refused by the robot: "drive 30" is not a command it knows (its firmware older than this server?)' });
+  assert.equal((await run(move("d30"), { end: "out_of_range" })).why, 'refused by the robot: "drive 30": a number out of its range (-300 to 300 cm)');
+  assert.equal((await run(move("g400,0"), { end: "out_of_range" })).why,
+               'refused by the robot: "goto 400 0": the point is 357.0 cm in x and 4.0 cm in y from the robot (at 43, -4 cm); a goto reaches at most 300 cm in each');
 });
 
 test("askMap: window and pose, concurrent calls serialized, refused, not connected", async () => {

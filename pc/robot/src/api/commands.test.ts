@@ -27,7 +27,8 @@ test("moves: no number, out of range, not a move", () => {
   assert.equal(steer("d"), "error: d needs a number");
   assert.equal(steer("g120"), "error: g needs 2 numbers");
   assert.equal(steer("d400"), "error: d400: d takes -300 to 300");
-  assert.equal(steer("g120,400"), "error: g120,400: g takes -300 to 300");
+  assert.equal(steer("g120,400"), "steer g120,400", "a goto's range counts from the robot: checked when it is sent (corrections.ts)");
+  assert.equal(steer("g120,100001"), "error: g120,100001: g takes -100000 to 100000");
   assert.equal(steer("w0"), "error: w0: w takes 1 to 600");
   assert.equal(steer("d50 s"), "error: s is not a move (robot steer --help)");
   assert.equal(steer(""), "error: no moves (robot steer --help)");

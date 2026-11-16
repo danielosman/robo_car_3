@@ -24,7 +24,6 @@ const columnColor = Object.fromEntries(Object.entries(COLORS).map(([k, v]) => [k
 // and the command each sends.
 const MOVES = [["d", "drive", "cm", "50"], ["r", "rotate", "°", "30"], ["w", "watch", "s", "60"]];
 const ACTIONS = [["snap", "snap"], ["clear map", "clear_map"]];
-const GOTO_MAX_CM = 300; // goto's limit on each axis (picoA/app/commands.h)
 const WEAK = 2; // of 15: columns set less confidently count as unknown when "hide weak" is ticked (~10 %, as replay)
 const FOOT = { front: 0.095, back: -0.095, half: 0.1175 }; // the robot's footprint, m
 // The camera of the boot shown (its own copy of the mounting, /api/mounting?boot=):
@@ -307,7 +306,7 @@ function clicked(x, y) {
     // outline map (still loading) the map is drawn by odometry: the place would be off.
     if (!outline && snapshots.length) { toast("The outline map isn't loaded yet: no goal by click"); return; }
     const cx = Math.round(x * 100), cy = Math.round(y * 100);
-    if (Math.abs(cx) > GOTO_MAX_CM || Math.abs(cy) > GOTO_MAX_CM) { toast(`A goal is at most ${GOTO_MAX_CM} cm from the start on each axis`); return; }
+    // Too far from the robot: the server says so in the log (corrections.ts), with the numbers.
     goal = { x, y, command: `steer g${cx},${cy}` };
     send("steer", `g${cx},${cy}`);
     draw();

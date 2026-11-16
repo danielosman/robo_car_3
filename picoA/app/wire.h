@@ -41,7 +41,7 @@
 #include "link_messages.h"
 #include "tof_format.h"
 
-#define WIRE_VERSION 7 // up when any payload or the table changes; the PC refuses another
+#define WIRE_VERSION 8 // up when any payload or the table changes; the PC refuses another
 
 #define WIRE_HEADER      3
 #define WIRE_PAYLOAD_MAX 1400 // the longest payload of any message (a snapshot part)
@@ -134,6 +134,11 @@ typedef enum {
     WIRE_END_OK, WIRE_END_OBSTACLE, WIRE_END_STOPPED, WIRE_END_REPLACED, WIRE_END_TILT, WIRE_END_WHEELS,
     WIRE_END_NO_DRIVE, WIRE_END_PICOB_LOST, WIRE_END_NO_START, WIRE_END_REFUSED, WIRE_END_SAFETY, WIRE_END_ENDED,
     WIRE_END_UNSEEN_FLOOR, // a drive or go to stopped (or didn't start) for floor not seen yet, not for a thing (room.h)
+    // Refused (WIRE_END_REFUSED: not a command the robot knows), each reason its own end (commands.h):
+    WIRE_END_OUT_OF_RANGE,  // a number out of the command's range (a go to: x or y more than 300 cm from the robot)
+    WIRE_END_BUSY_MOVE,     // correct while a move runs
+    WIRE_END_BUSY_SNAPSHOT, // correct while a snapshot is asked for or going out
+    WIRE_END_BUSY_BULK,     // correct while the bulk lane holds anything; map: the bulk lane full
     WIRE_ENDS
 } wire_end_t;
 #define WIRE_HAS_MOVE     1 // moved and rotated: a move

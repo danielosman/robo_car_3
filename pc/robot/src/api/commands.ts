@@ -28,8 +28,9 @@ export const MOVES: readonly MoveSpec[] = [
     does: "Drive straight. Negative drives backwards. Stops before an obstacle on the map." },
   { name: "rotate", letter: "r", values: [range("degrees", LIMITS.rotateDeg)],
     does: "Turn on the spot. Positive turns left, negative right." },
-  { name: "goto", letter: "g", values: [range("cm", LIMITS.gotoCm), range("cm", LIMITS.gotoCm)],
-    does: "Go to a point on the map: turn towards it, then drive there. At most 3 m; stops before obstacles." },
+  { name: "goto", letter: "g", values: [range("cm", LIMITS.pointCm), range("cm", LIMITS.pointCm)],
+    does: `Go to a point on the map: turn towards it, then drive there. x and y each at most ${LIMITS.gotoCm} cm ` +
+          "from where the robot is; at most 3 m; stops before obstacles." },
   { name: "watch", letter: "w", values: [range("s", LIMITS.watchMaxS, LIMITS.watchMinS)],
     does: "For that many seconds, turn towards anything that moves." },
 ];

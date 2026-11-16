@@ -16,7 +16,7 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 - **Built:** steps 1-7, including the PC's whole-house cell map, PicoA's
   window-only, floor-first map, and the PC's line maps (step 7, PC only). Step 6 is
   not flashed. History is in [CHANGELOG.md](CHANGELOG.md), the 10 and 11 Nov entries.
-- **Current versions:** PicoA–PicoB link 7, robot–PC wire 7 (step F's "corrected"; the end "unseen_floor"), snapshot 3. PicoB reads
+- **Current versions:** PicoA–PicoB link 7, robot–PC wire 8 (step F's "corrected"; the end "unseen_floor"; a refusal's reason as its end), snapshot 3. PicoB reads
   the IMU at 416 Hz; the PC receives and stores averaged records at 104 Hz.
   Odometry, `drive` and PicoA's layout stay as they are; the deferred 4e/4g redesigns
   are not part of the remaining work. Their design ideas have a separate home in

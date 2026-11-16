@@ -21,6 +21,7 @@ import { packTof, unpackTof } from "./tof_format.ts";
 import { ROBOT_PORT } from "./link.ts";
 import { corrected, NO_CORRECTION, uncorrected, type Planar } from "./correction.ts";
 import { DB_PATH, Store, type Replayed } from "./store.ts";
+import { LIMITS } from "./api/firmware.ts";
 import {
   HAS, MAP_PARTS, MAP_PART_CELLS, MOVE_KINDS, PART_MAX, TYPE, WIRE_VERSION, WireReader, decode, encodeAnswer, encodeConsole,
   encodeCorrected, encodeHello, encodeMapCleared, encodeMapPart, encodeImuBatch, encodeMoveEnd, encodeMoveStart, encodeSnapshotPart, encodeStatus, encodeTof,
@@ -227,6 +228,12 @@ export class FakeRobot {
     else if ((v = num(/^rotate (-?\d+)$/))) this.begin("Rotate", "rotate", n, v[0] * Math.PI / 180, [this.turn(v[0] * Math.PI / 180)]);
     else if ((v = num(/^watch (\d+)$/))) this.begin("Watch", "watch", n, v[0], [this.wait(v[0])]);
     else if ((v = num(/^goto (-?\d+) (-?\d+)$/))) {
+      // As the robot (picoA/app/commands.c): x and y each within LIMITS.gotoCm of where it is.
+      if (Math.abs(v[0] - this.pose.x * 100) > LIMITS.gotoCm || Math.abs(v[1] - this.pose.y * 100) > LIMITS.gotoCm) {
+        this.say(`Command refused: "${text}": too far from the robot\n`);
+        this.answer(n, "out_of_range");
+        return;
+      }
       const dx = v[0] / 100 - this.pose.x, dy = v[1] / 100 - this.pose.y, d = Math.hypot(dx, dy), bearing = Math.atan2(dy, dx);
       const towards = Math.atan2(Math.sin(bearing - this.pose.yaw), Math.cos(bearing - this.pose.yaw));
       this.begin("Go to", "goto", n, d, [this.turn(towards), this.drive(Math.min(d, GOTO_MAX_M))], d);
@@ -236,7 +243,8 @@ export class FakeRobot {
       for (let part = 0; part < MAP_PARTS; part++) this.socket.write(encodeMapPart({ part, originCx: -30, originCy: -30, cells }));
       this.answer(n, "ok");
     } else if (text === "clear_map") { this.say("Map cleared\n"); this.socket.write(encodeMapCleared()); this.answer(n, "ok"); }
-    else if ((v = num(/^correct (-?\d+) (-?\d+) (-?\d+)$/)) && !this.action) {
+    else if ((v = num(/^correct (-?\d+) (-?\d+) (-?\d+)$/))) {
+      if (this.action) { this.say(`Command refused: "${text}": a move runs\n`); this.answer(n, "busy_move"); return; }
       const c = { x: v[0] / 1000, y: v[1] / 1000, yaw: v[2] / 100 * Math.PI / 180 };
       this.pose = corrected(c, uncorrected(this.correction, this.pose));
       this.correction = c;

@@ -16,6 +16,8 @@
 // nothing is sent; goto places are still turned by the correction the robot has. c_robot is also in the
 // store (robot_corrections, for its readers); both come from the same "corrected" message.
 // A goto before the server's first snapshot of a run (a server restarted mid-boot) goes as given.
+// The goto's range is the robot's to check (picoA/app/commands.c): a goto it doesn't take
+// says why (answers.ts), and here also the map's point and the corrections that turned it.
 //   new Corrections(runner, { live, snapshots, outlines, store, note })
 //   corrections.heard(boot, c)    the robot's "corrected" (main.ts)
 //   corrections.robotHas(boot)    c_robot as the robot last said it (from the store after a server restart)
@@ -23,7 +25,7 @@
 import type { DoneRecord, MapWindow, Pose } from "../link.ts";
 import { corrected, NO_CORRECTION, uncorrected, type Planar } from "../correction.ts";
 import { isMove, type Command } from "./commands.ts";
-import type { Outcome } from "./answers.ts";
+import { refusal, type Outcome } from "./answers.ts";
 import type { Runner } from "./runner.ts";
 
 const CORRECT_MS = 5000;   // how long the robot may take to answer a correct
@@ -43,6 +45,8 @@ function words(c: Planar): [number, number, number] {
   const yaw = Math.atan2(Math.sin(c.yaw), Math.cos(c.yaw));
   return [Math.round(c.x * 1000), Math.round(c.y * 1000), Math.round(yaw * 18000 / Math.PI)];
 }
+// "12 cm, -27.0°": a correction, for the log and the answers.
+const described = (c: Planar) => `${Math.round(Math.hypot(c.x, c.y) * 100)} cm, ${(c.yaw * 180 / Math.PI).toFixed(1)}°`;
 const same = (a: Planar, b: Planar) => words(a).every((v, i) => v === words(b)[i]);
 
 export class Corrections implements Runner {
@@ -76,15 +80,19 @@ export class Corrections implements Runner {
   }
 
   async run(c: Command): Promise<Outcome> {
-    let sent = c;
+    let sent = c, turned = "";
     if (isMove(c)) {
       const k = await this.sync();
       if (c.name === "goto" && k) {
         const t = corrected(k.robot, uncorrected(k.pc, { x: c.values[0] / 100, y: c.values[1] / 100, yaw: 0 }));
         sent = { ...c, values: [Math.round(t.x * 100), Math.round(t.y * 100)] };
+        if (sent.values.some((v, i) => v !== c.values[i]))
+          turned = `. The map's ${c.values.join(", ")} cm is ${sent.values.join(", ")} cm in the robot's own frame, ` +
+                   `turned by the PC's correction (${described(k.pc)}) and the robot's (${described(k.robot)})`;
       }
     }
     const out = await this.inner.run(sent);
+    if (out.result === "failed" && turned) return { ...out, why: out.why + turned };
     if (c.name === "snap" && out.result === "ok") await this.sync(out.snapshot);
     return out;
   }
@@ -106,9 +114,8 @@ export class Corrections implements Runner {
     const [x, y, yaw] = words(pc);
     const d = await this.inner.send(`correct ${x} ${y} ${yaw}`, CORRECT_MS);
     const now = await this.robotHas(boot);
-    // Refused: out of the robot's range, or something still waits on its bulk lane (commands.h).
     if (typeof d === "string" || d.end !== "ok") {
-      this.deps.note(`correction not taken by the robot (${typeof d === "string" ? d : d.end}): sent again before the next move`);
+      this.deps.note(`correction not taken (${typeof d === "string" ? d : refusal(`correct ${x} ${y} ${yaw}`, d)}): sent again before the next move`);
       return { pc, robot: now };
     }
     // How far the robot's own pose moved: where it is, by the old correction and the new.

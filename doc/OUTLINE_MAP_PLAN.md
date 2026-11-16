@@ -27,8 +27,8 @@ disagree, the less sure one gives way.
      tests checked; still to do.
   2. **The open options to collect more data** for the correction ("Options: more data,
      then the algorithm" near the end of this file). Nothing is decided: ask him which.
-  Also open from 15 Nov: "everything that can't happen says why", and why the robot
-  wouldn't move ("Driving by hand after the second drive").
+  Also open from 15 Nov: why the robot wouldn't move ("Driving by hand after the second
+  drive"): items 1 and 2 are built (16 Nov, wire 8, not flashed), 3 and 4 open.
 - **Steps S, then A to F in order:** all built and driven on the robot (15 Nov). The
   correction is off: it was worse than odometry.
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
@@ -714,10 +714,10 @@ robot's own coordinates using that wrong idea, so the robot got a point far off;
 point was outside the range a goto accepts, so the robot refused it, without saying so
 clearly. The robot itself (its odometry) knew well where it was.
 
-**What refused the clicks.** Each refusal was the robot's ("Command refused: \"goto 320
--171\" (not a command, a number out of range, or ...)"). A goto takes x and y within
-±300 cm of where the robot was powered up (`COMMAND_GOTO_MAX_CM`, commands.h). The
-page checks the click against ±300 cm on its own map, then the PC turns it into the
+**What refused the clicks** (the firmware of that day). Each refusal was the robot's
+("Command refused: \"goto 320 -171\" (not a command, a number out of range, or ...)").
+A goto then took x and y within ±300 cm of where the robot was powered up. The page
+checked the click against ±300 cm on its own map, then the PC turns it into the
 robot's frame (`api/corrections.ts`): `corrected(c_robot, uncorrected(c_pc, click))`.
 The correction was off, so c_robot was 0, but c_pc had run away to 164 cm and -27°: the
 click (164, -169) became (320, -171), past the range. So two things together:
@@ -761,18 +761,15 @@ on the robot was wrong:
   robot; on this one that, not the walls, did most of the harm. Still two drives in one
   room: a lead for the data drives, not a decided number.
 
-**To do, so this can't happen silently again:**
+**So this can't happen silently again:**
 
-1. **Everything that can't happen says why** (Daniel, 15 Nov), on the robot and on the
-   PC: which rule, which number, which limit. The robot's refusals each name their
-   reason (out of range: which value and the range; a move runs; bulk waits; not a
-   command). The PC checks what it can before sending and says it in the answer (a
-   goto past the robot's range: the point the robot would get, the range, and that the
-   correction turned it); the answer carries the robot's own reason, not "robot log
-   says why".
-2. **The goto range counts from the robot's current position** (Daniel, 15 Nov): a
-   point at most 3 m from where the robot is, not ±300 cm from where it was switched
-   on (PicoA `commands.c`/`commands.h`, the PC's `LIMITS` and the page's check).
+1. **Everything refused says why** (wire 8, not flashed): a refusal's reason is the
+   answer's end (`out_of_range`, `busy_move`, `busy_snapshot`, `busy_bulk`; `refused`:
+   not a command); the PC's answer says it in words (`answers.ts` `refusal`), for a
+   turned goto also the map's point and both corrections (`corrections.ts`).
+2. **A goto's range counts from the robot** (not flashed): x and y each within 300 cm
+   of where it is, checked on the robot only. Open (Daniel): this square, a 3 m
+   distance, or no range at all (a far point then goes 3 m towards it, `limited`).
 3. Open: with the correction off, should goto points be turned by it at all? The page
    draws the corrected map, so a click is a place on it; a wrong correction then sends
    the robot elsewhere. A simple option: with the correction off, the page draws and

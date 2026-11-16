@@ -5,6 +5,20 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 16 Nov 2026: refusals say why; a goto's range from the robot (wire 8, not flashed)
+
+- The two to-dos from the gotos refused after the second drive. The robot's refusals
+  each have their own end (`out_of_range`, `busy_move`, `busy_snapshot`, `busy_bulk`;
+  `refused` is now only "not a command"), and its line names the value and the limit.
+  The PC's answer says it in words, no longer "robot log says why".
+- A goto's x and y are checked against where the robot is (±300 cm each), not where it
+  was switched on; the PC's answer for a goto too far names the map's point, the point the robot would get and the corrections that
+  turned it. The page's own check against the start is gone. Tests on both sides; the
+  golden wire bytes written again.
+- Review: the PC's own check before sending used the last status pose, still in the old
+  correction's frame right after a correct, and rounded unlike the robot. Dropped: the
+  range is checked on the robot only; the PC explains the robot's refusal.
+
 ## 15 Nov 2026: the second drive (boot `da005bff`), correction off
 
 - PicoA flashed with the floor fix and message (wire 7). `rotate 0`, then a 1 m square

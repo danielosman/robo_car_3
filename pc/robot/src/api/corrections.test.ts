@@ -28,18 +28,19 @@ function setup(o: { stored?: Planar[]; answers?: boolean } = {}) {
   };
   let answers: boolean | "refuse" = o.answers ?? true;
   const inner = {
-    async run(c: Command): Promise<Outcome> { ran.push(c); return c.name === "snap" ? { result: "ok", snapshot: 3 } : { result: "ok" }; },
+    reply: null as Outcome | null,  // a move's answer, if not ok
+    async run(c: Command): Promise<Outcome> { ran.push(c); return c.name === "snap" ? { result: "ok", snapshot: 3 } : inner.reply ?? { result: "ok" }; },
     async send(text: string): Promise<DoneRecord | string> {
       sent.push(text);
       if (!answers) return "no answer";
-      if (answers === "refuse") return done("refused");
+      if (answers === "refuse") return done("busy_bulk");
       const [x, y, cdeg] = text.split(" ").slice(1).map(Number);
       corrections.heard("b1", { x: x / 1000, y: y / 1000, yaw: cdeg / 100 * Math.PI / 180 });
       return done("ok");
     },
   };
   const corrections = new Corrections(inner, deps);
-  return { corrections, sent, ran, notes, pc, deps, answer: (on: boolean | "refuse") => { answers = on; } };
+  return { corrections, sent, ran, notes, pc, deps, inner, answer: (on: boolean | "refuse") => { answers = on; } };
 }
 
 test("sent before a move when it differs, once; a goto's point as given once the robot has it; the log", async () => {
@@ -58,7 +59,7 @@ test("after a snap; no answer: the goto turned by the correction the robot has, 
   const { corrections, sent, ran, notes, pc, answer } = setup({ answers: false });
   await corrections.run({ name: "snap", values: [] });
   assert.deepEqual(sent, ["correct 100 -20 573"]);
-  assert.match(notes[0], /not taken by the robot \(no answer\)/);
+  assert.match(notes[0], /not taken \(no answer\)/);
   await corrections.run({ name: "goto", values: [100, 50] });
   assert.equal(sent.length, 2, "sent again");
   // The robot still has 0: the point goes as raw odometry, so it drives to the place meant.
@@ -91,11 +92,22 @@ test("refused by the robot (something still on its bulk lane): logged, c_robot k
   const { corrections, sent, notes, answer } = setup();
   answer("refuse");
   await corrections.run({ name: "drive", values: [20] });
-  assert.match(notes[0], /not taken by the robot \(refused\)/);
+  assert.equal(notes[0], 'correction not taken (refused by the robot: "correct 100 -20 573" waits until frames, a snapshot or the map ' +
+                         "have gone out): sent again before the next move");
   assert.deepEqual(await corrections.robotHas("b1"), { x: 0, y: 0, yaw: 0 });
   answer(true);
   await corrections.run({ name: "drive", values: [20] });
   assert.equal(sent.length, 2);
+});
+
+test("a goto the robot refuses: the answer adds the map's point and both corrections when they turned it", async () => {
+  const { corrections, deps, inner } = setup();
+  deps.config.correct = false;            // the robot keeps 0, the PC has 10 cm, 5.7°
+  inner.reply = { result: "failed", why: "refused by the robot: \"goto 400 -39\": the point is 300.4 cm in x ..." };
+  const out = await corrections.run({ name: "goto", values: [420, 0] });
+  assert.match(out.why ?? "", /^refused by the robot: .*\. The map's 420, 0 cm is 4\d\d, -\d+ cm in the robot's own frame, turned by the PC's correction \(10 cm, 5\.7°\) and the robot's \(0 cm, 0\.0°\)$/);
+  deps.config.correct = true;             // the robot takes it: the point goes as given, the answer as the robot's
+  assert.equal((await corrections.run({ name: "goto", values: [420, 0] })).why, inner.reply.why);
 });
 
 test("config correct off: nothing sent; a goto still turned by the correction the robot has", async () => {

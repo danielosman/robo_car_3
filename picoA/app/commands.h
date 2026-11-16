@@ -4,7 +4,8 @@
 // debugging) one per line, "<command> [#<n>]". The robot does nothing by itself.
 //   drive <cm>             straight; negative = backwards
 //   rotate <deg>           on the spot; + = left
-//   goto <x cm> <y cm>     a point on the map (its frame)
+//   goto <x cm> <y cm>     a point on the map (its frame); each of x and y at most
+//                          COMMAND_GOTO_MAX_CM from where the robot is now
 //   watch <s>              turn towards movement for that long
 //   snap                   a snapshot to the server (snapshot.h)
 //   map                    the 6 x 6 m map window to the server (wire.h, map part)
@@ -25,14 +26,17 @@
 // robot is, and for a move how far it went (from where it started: straight, and
 // how far it turned, + = left), for a go to also how far the point was, for a
 // snapshot its number (the pose is the snapshot's). How it ended: ok, obstacle,
-// stopped, replaced, tilt, wheels, no_drive, picob_lost, no_start, refused (not a
-// command, or a number out of range). clear_map also sends "map cleared".
+// stopped, replaced, tilt, wheels, no_drive, picob_lost, no_start, or refused, each
+// reason its own end (wire.h): refused (not a command), out_of_range, busy_move,
+// busy_snapshot, busy_bulk; the robot's line names the value and the limit too.
+// clear_map also sends "map cleared".
 // The server's API reads the limits below (pc/robot/src/api/firmware.ts): plain
 // numbers only.
 
 #define COMMAND_DRIVE_MAX_CM   300
 #define COMMAND_ROTATE_MAX_DEG 720
-#define COMMAND_GOTO_MAX_CM    300 // each of x and y
+#define COMMAND_GOTO_MAX_CM    300 // each of x and y, from where the robot is
+#define COMMAND_POINT_MAX_CM   100000 // a go to's x and y on the map: only so the numbers stay plain (1 km)
 #define COMMAND_WATCH_MIN_S    1
 #define COMMAND_WATCH_MAX_S    600
 #define COMMAND_STILL_MAX_MS   2000 // config pre_ms / post_ms (move.h's MOVE_STILL_MAX_MS)

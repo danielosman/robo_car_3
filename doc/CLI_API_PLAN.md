@@ -73,7 +73,7 @@ power-up, y to its left.
 | `stop` | stops at once: motors off, mode idle; skips the queue and drops what waits |
 
 - A move needs its numbers; there are no defaults. The limits (drive ±300 cm,
-  rotate ±720°, goto ±300 cm per axis, watch 1-600 s) are in one C header the API
+  rotate ±720°, goto ±300 cm per axis from the robot, watch 1-600 s) are in one C header the API
   reads (`picoA/app/commands.h`); the robot checks them again.
 - **auto_snap** (`robot config auto_snap on|off`, on by default): the server sends a
   `snap` after every move. It is a command like any other, with its own answer.

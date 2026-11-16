@@ -1,11 +1,12 @@
 // Host test for picoA/app/commands.c over the link to the PC: command messages in
 // (each with its number), answer messages out (how it ended, the pose, how far a
 // move went, a go to's goal, a snapshot's number), "map cleared" when clear_map
-// runs, a command refused, the safety stops named, the commands waiting for the
+// runs, a command refused with its reason (not a command, out of range, busy), the safety stops named, the commands waiting for the
 // greeting after a server connects, a line typed on USB still taken, config pre_ms
 // and post_ms (the moves' still times; out of range refused), and the status the PC
 // gets (pose, mode, the running move; no peaks since step 4c); correct: the pose
 // corrected, "corrected" sent before the answer, refused during a move or out of range;
+// a go to's range counts from where the robot is, not from where it was switched on;
 // "corrected" again on a new connection. The test plays link_pc.h,
 // body, behaviour, move, the map and snapshot. Run from the
 // repo root:
@@ -145,7 +146,7 @@ int main(void) {
     assert(sent(0).type == WIRE_MAP_CLEARED);
     wire_answer_t a = answer_sent(1);
     assert(a.n == 1 && a.end == WIRE_END_OK && a.has == 0 && a.x_m == 0.43f && a.yaw_rad == 0.5f);
-    // "map": sends the 9 parts of the window on the bulk lane, then answers ok (or refused if the lane is full).
+    // "map": sends the 9 parts of the window on the bulk lane, then answers ok (or busy_bulk if the lane is full).
     out_n = 0;
     fake_window[0] = 0x55;
     fake_window[sizeof fake_window - 1] = 0xaa;
@@ -163,7 +164,7 @@ int main(void) {
     out_n = 0;
     pc_sends(29, "map");
     loop(1);
-    assert(out_n == 1 && answer_sent(0).n == 29 && answer_sent(0).end == WIRE_END_REFUSED);
+    assert(out_n == 1 && answer_sent(0).n == 29 && answer_sent(0).end == WIRE_END_BUSY_BULK);
     printf("ok: commands wait for the greeting; clear_map: map cleared with pose; map: 9 parts on bulk\n");
 
     // A move: started with its number, answered when it ends, with how far it went.
@@ -185,6 +186,19 @@ int main(void) {
     loop(1);
     a = answer_sent(1);
     assert(a.n == 4 && a.end == WIRE_END_OK && a.has == (WIRE_HAS_MOVE | WIRE_HAS_GOAL) && a.goal_m == 4.2f);
+    // A go to's range: each of x and y at most 300 cm from where the robot is (43, -4 cm), not from 0, 0.
+    started_n = 0;
+    pc_sends(30, "goto 340 290");  // 297 and 294 cm from the robot: taken, though past 300 from the start
+    loop(1);
+    assert(!strcmp(started, "goto") && started_n == 30);
+    move_ended((move_record_t){.command = 30, .kind = MOVE_GOTO, .how = MOVE_END_DONE}, WIRE_END_OK);
+    loop(1);
+    int at = out_n;
+    pc_sends(31, "goto -260 0");   // 303 cm from the robot in x: refused, out of range
+    pc_sends(32, "goto 0 297");    // 301 cm in y
+    loop(1);
+    assert(started_n == 30 && out_n == at + 2 && answer_sent(at).n == 31 && answer_sent(at).end == WIRE_END_OUT_OF_RANGE &&
+           answer_sent(at + 1).end == WIRE_END_OUT_OF_RANGE);
     // The safety stops, named as move_wire_end() names them.
     const wire_end_t safety[] = {WIRE_END_TILT, WIRE_END_WHEELS, WIRE_END_NO_DRIVE};
     for (int i = 0; i < 3; i++) {
@@ -211,12 +225,12 @@ int main(void) {
     loop(1);
     a = answer_sent(0);
     assert(a.n == 5 && a.has == WIRE_HAS_SNAPSHOT && a.snapshot == 41 && a.x_m == 1.25f && a.yaw_rad == 0.75f);
-    // Refused: not a command, or out of range.
+    // Refused: not a command, or out of range (each its own end, so the PC can say which).
     pc_sends(6, "fly 3");
     pc_sends(7, "drive 301");
     loop(1);
     assert(answer_sent(1).n == 6 && answer_sent(1).end == WIRE_END_REFUSED);
-    assert(answer_sent(2).n == 7 && answer_sent(2).end == WIRE_END_REFUSED);
+    assert(answer_sent(2).n == 7 && answer_sent(2).end == WIRE_END_OUT_OF_RANGE);
     // config, mode, stop, status: answered at once. recording is gone (refused).
     pc_sends(8, "config pre_ms 500");
     pc_sends(9, "mode idle");
@@ -229,7 +243,8 @@ int main(void) {
     assert(pre == 500 && post == 0 && mode_get() == MODE_IDLE && stops == 1 && out_n == 10);
     assert(answer_sent(3).n == 8 && answer_sent(3).end == WIRE_END_OK && answer_sent(5).n == 10 && answer_sent(5).end == WIRE_END_OK);
     assert(answer_sent(6).n == 11 && answer_sent(6).end == WIRE_END_OK);
-    for (int i = 7; i < 10; i++) assert(answer_sent(i).end == WIRE_END_REFUSED);
+    assert(answer_sent(7).end == WIRE_END_OUT_OF_RANGE && answer_sent(8).end == WIRE_END_REFUSED &&
+           answer_sent(9).end == WIRE_END_REFUSED);
     printf("ok: a snapshot answered once it has gone; refused; config pre_ms / post_ms; the others at once\n");
 
     // correct: mm and 0.01°; "corrected" first, then the answer; refused out of range or during a move.
@@ -258,7 +273,9 @@ int main(void) {
     loop(1);
     snapshot_is_busy = false;
     assert(corrections == 1 && out_n == 8);
-    for (int i = 2; i < 8; i++) assert(answer_sent(i).end == WIRE_END_REFUSED);
+    assert(answer_sent(2).end == WIRE_END_OUT_OF_RANGE && answer_sent(3).end == WIRE_END_OUT_OF_RANGE &&
+           answer_sent(4).end == WIRE_END_REFUSED && answer_sent(5).end == WIRE_END_BUSY_MOVE &&
+           answer_sent(6).end == WIRE_END_BUSY_BULK && answer_sent(7).end == WIRE_END_BUSY_SNAPSHOT);
     printf("ok: correct: the pose corrected, \"corrected\" before the answer; refused out of range, during a move, "
            "while bulk waits or a snapshot is on its way\n");
     // A new connection: "corrected" again, the correction the robot has.

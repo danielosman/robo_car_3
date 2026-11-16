@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "pico/stdlib.h"
 #include "pico/stdio_usb.h"
 #include "units.h"
@@ -133,30 +134,60 @@ static bool send_map_window(void) {
     return true;
 }
 
+// A command not run: the robot's line says why (the value, the limit), the answer
+// names the reason (wire.h), so the PC can say it too.
+static void refuse(uint32_t n, const char *line, wire_end_t end, const char *why) {
+    printf("Command refused: \"%s\": %s\n", line, why);
+    answer(n, end);
+}
+
+// Why a go to's point is out of range, or NULL: each of x and y at most
+// COMMAND_GOTO_MAX_CM from where the robot is now (not from where it was switched on).
+static const char *goto_out_of_range(int x_cm, int y_cm, char *why, size_t size) {
+    const odometry_report_t *o = body_odometry();
+    float dx = (float)x_cm - o->x_m * 100, dy = (float)y_cm - o->y_m * 100;
+    if (abs(x_cm) <= COMMAND_POINT_MAX_CM && abs(y_cm) <= COMMAND_POINT_MAX_CM &&
+        fabsf(dx) <= COMMAND_GOTO_MAX_CM && fabsf(dy) <= COMMAND_GOTO_MAX_CM) return NULL;
+    snprintf(why, size, "the point is %.1f cm in x and %.1f cm in y from the robot at %.0f, %.0f cm; "
+             "a goto reaches at most %d cm in each", (double)dx, (double)dy, (double)(o->x_m * 100),
+             (double)(o->y_m * 100), COMMAND_GOTO_MAX_CM);
+    return why;
+}
+
 // One command line, its number already taken off. Moves and snapshots are answered
-// when they end (commands_update); the rest at once.
+// when they end (commands_update); the rest at once. A command not run is answered
+// with its reason (refuse).
 static void run(const char *line, uint32_t n) {
     int a, b, c, end = -1;
-    char word[8];
+    char word[8], why[160];
 #define IS(fmt, count, ...) (end = -1, sscanf(line, fmt "%n", __VA_ARGS__, &end) == (count) && end >= 0 && line[end] == 0)
 #define IS_WORD(name) (strcmp(line, name) == 0)
-    if (IS("drive %d", 1, &a) && within(a, -COMMAND_DRIVE_MAX_CM, COMMAND_DRIVE_MAX_CM)) {
+#define RANGE(what, lo, hi, unit) (snprintf(why, sizeof why, "%s takes %d to %d %s", what, lo, hi, unit), why)
+    if (IS("drive %d", 1, &a)) {
+        if (!within(a, -COMMAND_DRIVE_MAX_CM, COMMAND_DRIVE_MAX_CM))
+            { refuse(n, line, WIRE_END_OUT_OF_RANGE, RANGE("drive", -COMMAND_DRIVE_MAX_CM, COMMAND_DRIVE_MAX_CM, "cm")); return; }
         manual();
         behaviour_drive((float)a / 100, n);
-    } else if (IS("rotate %d", 1, &a) && within(a, -COMMAND_ROTATE_MAX_DEG, COMMAND_ROTATE_MAX_DEG)) {
+    } else if (IS("rotate %d", 1, &a)) {
+        if (!within(a, -COMMAND_ROTATE_MAX_DEG, COMMAND_ROTATE_MAX_DEG))
+            { refuse(n, line, WIRE_END_OUT_OF_RANGE,
+                          RANGE("rotate", -COMMAND_ROTATE_MAX_DEG, COMMAND_ROTATE_MAX_DEG, "degrees")); return; }
         manual();
         behaviour_rotate((float)a * RAD_PER_DEG, n);
-    } else if (IS("goto %d %d", 2, &a, &b) && within(a, -COMMAND_GOTO_MAX_CM, COMMAND_GOTO_MAX_CM) &&
-               within(b, -COMMAND_GOTO_MAX_CM, COMMAND_GOTO_MAX_CM)) {
+    } else if (IS("goto %d %d", 2, &a, &b)) {
+        if (goto_out_of_range(a, b, why, sizeof why)) { refuse(n, line, WIRE_END_OUT_OF_RANGE, why); return; }
         manual();
         behaviour_goto((float)a / 100, (float)b / 100, 0, n);
-    } else if (IS("watch %d", 1, &a) && within(a, COMMAND_WATCH_MIN_S, COMMAND_WATCH_MAX_S)) {
+    } else if (IS("watch %d", 1, &a)) {
+        if (!within(a, COMMAND_WATCH_MIN_S, COMMAND_WATCH_MAX_S))
+            { refuse(n, line, WIRE_END_OUT_OF_RANGE, RANGE("watch", COMMAND_WATCH_MIN_S, COMMAND_WATCH_MAX_S, "s")); return; }
         manual();
         behaviour_watch((float)a, n);
     } else if (IS_WORD("snap")) {
         snapshot_request(SNAPSHOT_COMMAND, n);
     } else if (IS_WORD("map")) {
-        answer(n, send_map_window() ? WIRE_END_OK : WIRE_END_REFUSED);
+        if (!send_map_window()) { refuse(n, line, WIRE_END_BUSY_BULK, "the bulk lane is full (frames or a snapshot going out)"); return; }
+        answer(n, WIRE_END_OK);
     } else if (IS_WORD("clear_map")) {
         const odometry_report_t *o = body_odometry();
         cell_map_clear(o->x_m, o->y_m);
@@ -165,18 +196,31 @@ static void run(const char *line, uint32_t n) {
         uint32_t n_message = wire_encode_map_cleared(message);
         link_pc_send_control(message, n_message);
         answer(n, WIRE_END_OK);
-    } else if (IS("config %7s %d", 2, word, &a) && (!strcmp(word, "pre_ms") || !strcmp(word, "post_ms")) &&
-               within(a, 0, COMMAND_STILL_MAX_MS)) {
+    } else if (IS("config %7s %d", 2, word, &a) && (!strcmp(word, "pre_ms") || !strcmp(word, "post_ms"))) {
+        if (!within(a, 0, COMMAND_STILL_MAX_MS))
+            { refuse(n, line, WIRE_END_OUT_OF_RANGE, RANGE("config pre_ms / post_ms", 0, COMMAND_STILL_MAX_MS, "ms")); return; }
         bool pre = !strcmp(word, "pre_ms");
         move_set_still(pre ? a : move_pre_ms(), pre ? move_post_ms() : a);
         printf("Config: still %d ms before each move, %d ms after (from the next move on)\n", move_pre_ms(), move_post_ms());
         answer(n, WIRE_END_OK);
-    } else if (IS("correct %d %d %d", 3, &a, &b, &c) && within(a, -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM) &&
-               within(b, -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM) &&
-               within(c, -COMMAND_CORRECT_MAX_CDEG, COMMAND_CORRECT_MAX_CDEG) && !*move_running() &&
-               !link_pc_bulk_waiting() && !snapshot_busy()) {
-        // Nothing older waits in the bulk lane, so "corrected" (control, sent first) can't
+    } else if (IS("correct %d %d %d", 3, &a, &b, &c)) {
+        if (!within(a, -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM) || !within(b, -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM))
+            { refuse(n, line, WIRE_END_OUT_OF_RANGE, RANGE("correct's x and y: each", -COMMAND_CORRECT_MAX_MM, COMMAND_CORRECT_MAX_MM, "mm")); return; }
+        if (!within(c, -COMMAND_CORRECT_MAX_CDEG, COMMAND_CORRECT_MAX_CDEG))
+            { refuse(n, line, WIRE_END_OUT_OF_RANGE, RANGE("correct's yaw", -COMMAND_CORRECT_MAX_CDEG, COMMAND_CORRECT_MAX_CDEG, "x 0.01 deg")); return; }
+        // Nothing older may wait in the bulk lane, so "corrected" (control, sent first) can't
         // overtake a frame or snapshot made with the old correction.
+        if (*move_running()) {
+            snprintf(why, sizeof why, "a move runs (%s); a correction waits until it has ended", move_running());
+            refuse(n, line, WIRE_END_BUSY_MOVE, why);
+            return;
+        }
+        if (snapshot_busy()) { refuse(n, line, WIRE_END_BUSY_SNAPSHOT, "a snapshot is asked for or going out"); return; }
+        if (link_pc_bulk_waiting()) {
+            snprintf(why, sizeof why, "%lu bytes still wait on the bulk lane (frames, a snapshot, the map)",
+                     (unsigned long)link_pc_bulk_waiting());
+            { refuse(n, line, WIRE_END_BUSY_BULK, why); return; }
+        }
         pose_correct((float)a / 1000, (float)b / 1000, (float)c / 100 * RAD_PER_DEG);
         print_correction();
         send_corrected();
@@ -192,11 +236,12 @@ static void run(const char *line, uint32_t n) {
         print_status();
         answer(n, WIRE_END_OK);
     } else {
-        printf("Command refused: \"%s\" (not a command, a number out of range, or correct during a move or while bulk messages wait)\n", line);
-        answer(n, WIRE_END_REFUSED);
+        refuse(n, line, WIRE_END_REFUSED, "not a command (drive, rotate, goto, watch, snap, map, clear_map, config, "
+                                          "correct, mode, stop, status)");
     }
 #undef IS
 #undef IS_WORD
+#undef RANGE
 }
 
 // A command's text: spaces at either end taken off.

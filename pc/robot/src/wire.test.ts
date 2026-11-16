@@ -180,7 +180,8 @@ test("every message encoded and decoded again", () => {
     }
   };
   for (const m of cases) assert.deepEqual(decodeWhole(encode(m)), m);
-  for (const end of ["ok", "obstacle", "stopped", "replaced", "tilt", "wheels", "no_drive", "picob_lost", "no_start", "refused", "safety", "ended", "unseen_floor"]) {
+  for (const end of ["ok", "obstacle", "stopped", "replaced", "tilt", "wheels", "no_drive", "picob_lost", "no_start", "refused", "safety", "ended", "unseen_floor",
+                     "out_of_range", "busy_move", "busy_snapshot", "busy_bulk"]) {
     const a = decodeWhole(encodeAnswer({ n: 1, end, has: 0, x: 0, y: 0, yaw: 0, moved: 0, rotated: 0, goal: 0, snapshot: 0 }));
     assert.equal(a.type === "answer" && a.end, end);
   }

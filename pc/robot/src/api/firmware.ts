@@ -25,16 +25,18 @@ function header(file: string, names: readonly string[]): Record<string, number> 
   }));
 }
 
-const c = header("app/commands.h", ["COMMAND_DRIVE_MAX_CM", "COMMAND_ROTATE_MAX_DEG", "COMMAND_GOTO_MAX_CM",
+const c = header("app/commands.h", ["COMMAND_DRIVE_MAX_CM", "COMMAND_ROTATE_MAX_DEG", "COMMAND_GOTO_MAX_CM", "COMMAND_POINT_MAX_CM",
                                 "COMMAND_WATCH_MIN_S", "COMMAND_WATCH_MAX_S", "COMMAND_STILL_MAX_MS"]);
 const r = header("app/room.h", ["EDGE_M", "HALF_WIDTH_M"]);
 const b = header("app/behaviour.h", ["GOTO_MAX_M", "GOTO_THERE_M"]);
 const m = header("app/motion.h", ["MOTION_SPEED_MPS", "MOTION_TURN_RADPS"]);
 const cam = header("drivers/camera.h", ["CAMERA_WIDTH", "CAMERA_HEIGHT"]);
 
-// What the robot takes (cm, degrees, seconds; the still times in ms).
+// What the robot takes (cm, degrees, seconds; the still times in ms). A goto's point: x and
+// y each at most gotoCm from where the robot is, and pointCm on the map (only so the numbers
+// stay plain).
 export const LIMITS = {
-  driveCm: c.COMMAND_DRIVE_MAX_CM, rotateDeg: c.COMMAND_ROTATE_MAX_DEG, gotoCm: c.COMMAND_GOTO_MAX_CM,
+  driveCm: c.COMMAND_DRIVE_MAX_CM, rotateDeg: c.COMMAND_ROTATE_MAX_DEG, gotoCm: c.COMMAND_GOTO_MAX_CM, pointCm: c.COMMAND_POINT_MAX_CM,
   watchMinS: c.COMMAND_WATCH_MIN_S, watchMaxS: c.COMMAND_WATCH_MAX_S, stillMaxMs: c.COMMAND_STILL_MAX_MS,
 } as const;
 
