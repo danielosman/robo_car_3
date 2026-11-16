@@ -2,7 +2,7 @@
 
 A web page that draws the robot's modules and the data that flows between them,
 from data files. It is for reviewing the design, now and as planned
-([DATA_FLOW_PLAN.md](../doc/DATA_FLOW_PLAN.md), [LINE_MAP_PLAN.md](../doc/LINE_MAP_PLAN.md)),
+([DATA_FLOW_PLAN.md](../doc/DATA_FLOW_PLAN.md), [OUTLINE_MAP_PLAN.md](../doc/OUTLINE_MAP_PLAN.md)),
 and for commenting on it. First iteration built 8 Nov: the modules on the first
 flows and those flows. This file is the page; [data/README.md](data/README.md) is
 the data (words, scope, shapes, the check, how to fill it).

@@ -236,5 +236,29 @@
         "code": "function outcome("
       }
     ]
+  },
+  {
+    "id": "api.corrections",
+    "name": "corrections",
+    "origin": "api",
+    "path": "pc/robot/src/api/corrections.ts",
+    "summary": "The PC's correction sent to the robot (only with robot config correct on; off by default), after each snap and before each move; a goto's point turned from the map's frame into the robot's.",
+    "members": [
+      {
+        "name": "Corrections",
+        "kind": "type",
+        "code": "export class Corrections implements Runner"
+      },
+      {
+        "name": "Corrections.run",
+        "kind": "function",
+        "code": "async run(c: Command): Promise<Outcome> {"
+      },
+      {
+        "name": "Corrections.heard",
+        "kind": "function",
+        "code": "heard(boot: string | null, c: Planar): void"
+      }
+    ]
   }
 ]

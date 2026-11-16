@@ -6,8 +6,10 @@ verified with the bring-up firmware and viewer described below. The robot
 firmware (`app/` per Pico) maps its surroundings with a ToF sensor, watches for
 movement and turns to follow it, and drives on command; PicoA (a Pico 2 W) sends
 its console, its moves with their ToF frames and imu records (PicoB's IMU, 104 a
-second) and its snapshots over WiFi to a server on the PC, which stores them in DuckDB. The code is the source
-of truth for configuration and protocol details.
+second) and its snapshots over WiFi to a server on the PC, which stores them in DuckDB
+and builds its own maps from them: the whole-house cell map and the outline maps,
+whose walls also correct the pose. The code is the source of truth for configuration
+and protocol details.
 
 **Start here:** [doc/ARCHITECTURE.md](doc/ARCHITECTURE.md) (how the robot works,
 module by module, and Daniel's decisions), [doc/TODO.md](doc/TODO.md) (what is
@@ -63,6 +65,8 @@ http://127.0.0.1:8081/, which share one queue and one log. Start the server
 ./robot --help                # everything: the commands, the answers, the units
 ./robot steer r30d50          # rotate 30° left, then drive 50 cm (two moves; a snap after each)
 ./robot check g120,40         # what going to (120, 40) would do on the map; nothing moves
+./robot map --png --lines     # the PC's map as a picture, the outline maps over it
+./robot walls                 # the outline maps' walls, how sure each is
 ./robot snap                  # take a snapshot
 ./robot status; ./robot map; ./robot camera
 ./robot frames <boot> 3       # move 3's ToF frames, from the database (--json for a program)
@@ -73,7 +77,7 @@ http://127.0.0.1:8081/, which share one queue and one log. Start the server
 
 Every answer is JSON, e.g. `{"command":"steer d50","result":"ok","pose":{"x":51,"y":0,"yaw":0},"moved":50,"rotated":0}`.
 After every move a snapshot (pose, camera picture and features, ToF frame,
-colour, its map) is stored; the page shows any of them back in time, with the path
+colour) is stored and the PC's maps are brought up to it; the page shows any of them back in time, with the path
 driven, and sends the robot where you click on the map. Each action is a move: the
 robot stands still 200 ms, acts, stands still 200 ms, and sends every ToF frame and
 imu record of the move; the server stores the moves, frames, imu records, statuses
@@ -103,28 +107,19 @@ shows a move's frames, `robot imu` its imu records). Typed on PicoA's USB serial
   `git checkout data-v1`, `npm ci && npm start` in `pc/robot/` (it opens the old
   file), then `git checkout main` (and `npm ci`) to come back. No converter.
 
-### The map as text (`robot map`)
+### The map (`robot map`)
 
-The 6 × 6 m window around the robot, 10 cm columns, x up (forward at power-up), y
-to the left; one character per column (`rows`), the top-left cell's x and y given
-(`x_top`, `y_left`). How to make it easier to read is open (doc/CLI_API_PLAN.md):
-
-| Symbol | Meaning |
-|---|---|
-| `.` | drivable: floor seen (a ray ended in the ground layer), 3-23 cm free |
-| `:` | free 3-23 cm, floor not seen (between the rings where rays end on the floor, or far) |
-| `#` | blocked: something 3-13 cm high |
-| `'` | overhang: something 13-23 cm high, nothing below it |
-| `?` | no floor: rays went through the ground layer (a drop, a dark floor) |
-| blank | unknown |
-| `R`, `*`, `o` | the robot, the point 30 cm ahead of it, the path driven since the map was last cleared |
+`robot map [n]` gives the PC's map at snapshot n as JSON: the 6 × 6 m window round
+the robot, 10 cm cells in three layers (G the floor, L1 3-13 cm, L2 13-23 cm) as cell
+bytes, and the whole-house tiles; its `format` says how to read them. `robot map
+--png` draws it as a picture (the robot and its path where the PC's walls corrected
+them to); `--lines` adds the outline maps; `--robot` asks the robot for its own window
+now. `robot map --help` says the colours.
 
 Standing still, the floor is seen in rings at each zone row's distance (computed for
-the ToF at 9 cm: ~25-33, 33-48, 48-95 cm from the centre, row 5 beyond; ~20, 30, 45,
-70 cm before the lift); driving fills the rest.
-
-A flat face often fills two cells (`##`): the map marks where the face was seen,
-not how thick the object is.
+the ToF at 9 cm: ~25-33, 33-48, 48-95 cm from the centre, row 5 beyond); driving
+fills the rest. A flat face often fills two cells: the map marks where the face was
+seen, not how thick the object is.
 
 ### Measured on the robot (waxed wood)
 
@@ -133,7 +128,7 @@ not how thick the object is.
 | Odometry after a 50 cm square | within ~1 cm and ~1° of the real end pose (the test overshoots each turn 0.5-1.8°, so it ends at ~363°) |
 | Encoder distance | +0.15 % over 2 m: `WHEEL_DIAMETER_M` 9.0 cm, no correction |
 | Gyro bias | ~−0.33 °/s, wandering < 0.01 °/s over 10 min; re-measured whenever still |
-| Gyro scale | 0.42 % low (~1.5° per full turn): no correction (M5's full-turn check will) |
+| Gyro scale | 0.42 % low (~1.5° per full turn; 11 Oct, a 360° test); about 1.3 % low on the 15 Nov drives. No correction on the robot; the PC's pose check learns it |
 | Effective track width | 28.6 cm (geometric 22.5 cm: the wheels skid) |
 | Turning in place | the body slides ~1.5 cm per turn, which odometry can't see; roll −3…−5° |
 | Floor rows 6 / 7 / 8 | before the lift (ToF at 7 cm): see the floor at ~47 / 31 / 21 cm along the ray; rows 7-8 steady to ±1-2 cm. At 9 cm computed ~61 / 37 / 27, not measured yet |
@@ -145,7 +140,7 @@ not how thick the object is.
 
 | | Value |
 |---|---|
-| RAM | ~51 KB free of 512 (7 Nov, computed from the build; `status` prints it): the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB came on top of 11 Oct's ~195 KB free, the ToF pipeline's frames 1.8 KB on 7 Nov; step 4a's link to the PC took ~54 KB more (the bulk lane 40 KB, lwIP's send buffer +12 KB, the snapshot's part buffers 2.8 KB); step 4b freed the recorder's ~5 KB; step 4c's imu records kept and the batch took ~0.5 KB net; everything static, no `malloc` linked. Step 6 frees ~31 KB |
+| RAM | ~87 KB free of 512 (computed from the build after step 6; `status` prints it): the snapshot buffer 22 KB, vision ~30 KB, the bulk lane 40 KB, the control lane 16 KB, lwIP's send buffer; no whole-house map on the robot (the PC's); everything static, no `malloc` linked |
 | Core-0 stack | ~6.4 KB worst case: main loop 4.8 KB (`watch_tof_add()` 4.3 KB, its blobs included), lwIP interrupt 0.75-1.3 KB, USB 0.25 KB. The SDK's 2 KB is nominal; the stack has 8 KB (both scratch banks) while core 1 is unused |
 
 `tools/stack_depth.py` recomputes the stack (how to build for it: the script's
@@ -154,9 +149,12 @@ header). Re-run it after adding big locals and before core 1 is started.
 ### Robot tests after the data-flow rework (run once, after the last step)
 
 The rework ([doc/DATA_FLOW_PLAN.md](doc/DATA_FLOW_PLAN.md)) is built step by step
-with host tests only; both Picos are flashed once at the end
-(`build/picoA/picoA_app.uf2`, `build/picoB/picoB_app.uf2`), then these run in order.
+with host tests only. PicoA last flashed 15 Nov (wire 7); wire 8 (16 Nov) is not
+flashed. PicoB is unchanged since it was flashed (10 Nov). Flash PicoA
+(`build/picoA/picoA_app.uf2`), then these run in order
+(the robot agent runs them, DATA_FLOW_PLAN.md section 2; Daniel runs the server).
 `./robot` in `pc/robot/`, `npm start` running, the page open. Paste the terminal.
+"RAM free" is about 87 KB since step 6.
 
 **Step 1: the mounting and the higher PCB** (both Picos; the ToF at 9 cm, the camera
 at 10.8 cm, `common/mounting.json`). Robot on the floor, nothing within 2 m ahead, battery on:
@@ -166,16 +164,16 @@ at 10.8 cm, `common/mounting.json`). Robot on the floor, nothing within 2 m ahea
    61 cm (computed; within ~10 %); row 5 ~180 cm or nothing. Before the lift they
    read 21 / 31 / 47 (the table above). Far off: the height or the ToF's tilt in `mounting.json` is
    wrong.
-2. `robot steer r390`, then `robot map` and the page: the walls where they are, no
-   `#` on the open floor, `.` in rings from ~25 cm out, `:` between them.
+2. `robot steer r390`, then `robot map --png` and the page: the walls where they
+   are, nothing blocked on the open floor, floor seen in rings from ~25 cm out.
 3. A box ~10 cm tall 50 cm ahead: `robot steer r30`, `robot steer r-30`, `robot
-   map`: the box blocked (`#`); `robot check d100` says `"result": "obstacle"`.
+   map --png`: the box blocked; `robot check d100` says `"result": "obstacle"`.
 
 **Step 2: 10 Hz** (PicoA; the ToF runs at 10 frames a second, watching counts in
 time). Robot on the floor, room around it, the page's log open:
 1. `robot status` (or `status` on USB): "ToF: 10 Hz set", about 10 frames a
    second; the loop's worst time no higher than before.
-2. `robot steer r390`: the turn as before; `robot map`: the walls where they are.
+2. `robot steer r390`: the turn as before; `robot map --png`: the walls where they are.
 3. `robot steer w60`, nobody moving, robot still for 20 s: no "Movement (ToF)"
    lines in the log (a few right after it stops is a fault).
 4. Then walk slowly across at ~1 m, left to right, and stop off to its right.
@@ -189,12 +187,12 @@ time). Robot on the floor, room around it, the page's log open:
 and unpacked, one target per zone; movement detection is now `watch`). Robot on
 the floor, a room around it, the page's log open:
 1. `robot status`: "ToF: 10 Hz set", about 10 frames a second; the loop's worst
-   time no higher than before; "RAM free" about 51 KB (after the steps that followed).
-2. A room's map: `robot clear_map`, `robot steer r390`, then `robot map` and the
-   page: the walls where they are, no `#` on the open floor, `.` in rings from
-   ~25 cm out. Walls farther than ~2.5 m may be fainter than before (they read
+   time no higher than before; "RAM free" about 87 KB.
+2. A room's map: `robot clear_map`, `robot steer r390`, then `robot map --png` and
+   the page: the walls where they are, nothing blocked on the open floor, floor seen
+   in rings from ~25 cm out. Walls farther than ~2.5 m may be fainter than before (they read
    "beyond 2.54 m" now: free up to there, not marked); nothing else should change.
-   Compared with before, fewer `#` behind walls and objects (no second targets).
+   Compared with before, fewer blocked cells behind walls and objects (no second targets).
 3. A box ~10 cm tall 50 cm ahead: `robot check d100` says `"result": "obstacle"`.
 4. A watch: `robot steer w60`, still for 20 s: no "Movement (ToF)" lines; then walk
    across at ~1 m: "Movement (ToF): … 1.00 m", "Target
@@ -216,7 +214,7 @@ the page open:
    or restart the other side.
 2. `robot status`: the answer as before; the robot's printout in the log has
    a line `Link: control 0 B waiting (0 console lines or status dropped, 0
-   refused); bulk 0 B waiting, 0 frames dropped`. "RAM free" about 51 KB (47 after 4a, 52 after 4b, 51 after 4c). The `Link:` line ends `; TCP refused 0 writes`.
+   refused); bulk 0 B waiting, 0 frames dropped`. "RAM free" about 87 KB. The `Link:` line ends `; TCP refused 0 writes`.
 3. `robot steer r30d30`: both moves answered (`"result": "ok"`, moved ~30), a snap
    after each, the page shows the new snapshots. Then `robot snap` five times
    quickly: five numbers, one after another, each picture on the page.
@@ -289,6 +287,44 @@ floor, the page open:
 6. The tilt stop still works: lift the robot's front by hand ~20° during `robot
    steer d50`: it stops, the answer says `safety_stop`, why `tilt`.
 
+**Steps 5 and 6: the PC's map, the robot's window, floor first** (PicoA; the PC builds
+the whole-house map from the stored frames, the robot keeps only its 6 × 6 m window
+and drives only onto floor it has seen). Robot on the floor, a room around it:
+1. `robot status`: "RAM free" about 87 KB; `robot steer r30` ×12 (a look round), then
+   `robot map --png` (the PC's whole building) and `robot map --robot --png` (the
+   robot's own window, asked now): the same room where both know it.
+2. Floor first: right after power-up `robot steer d50` drives (35 cm of floor seeded,
+   the rest seen on the way). Floor not seen yet: drive 50 cm straight, then
+   `robot steer r90` in one turn (the floor beside the path wasn't looked at) and
+   `robot check d50`: if the cells just ahead weren't seen, `obstacle` with why "floor
+   not seen yet ..."; then `robot steer r30 r-30` and it drives. (It may simply
+   drive: the floor was seen on the way; that is fine too.)
+3. A drop, held securely (the robot on a table edge, a hand ready): `robot steer d50`
+   towards the edge stops 15 cm before it (the edge's columns "no floor" on `robot
+   map --robot --png`).
+4. The window scrolls: drive 3-4 m along a hallway (gotos), then back. `robot map
+   --robot --png` shows the window moved by 2 m steps; what it drove out of is gone
+   from the robot's window but stays on the PC's `robot map --png`.
+
+**The outline map and the correction** (PicoA wire 8; [doc/OUTLINE_MAP_PLAN.md](doc/OUTLINE_MAP_PLAN.md)):
+1. Refusals say why: `robot steer g400,0` near the start: `"result": "failed"`, why
+   `refused by the robot: "goto 400 0": the point is ... cm from the robot (at x, y cm);
+   a goto reaches at most 300 cm`. After
+   driving 2 m along x, `robot steer g400,0` drives (the range counts from the
+   robot).
+2. The outline: after a look round, the page with "outline" ticked (and `robot map
+   --png --lines`): one closed outline per band round the floor seen, walls brighter
+   the surer they are; `robot walls` lists them. The log has "outline map, snapshot
+   n: pose corrected by ..." after each snapshot.
+3. A measured drive (the correction off, as by default): a tape mark at the start; a
+   look round, a 1 m square turning left (each corner `r30` four times, then `r-30`:
+   90° with a look past it, Daniel's rule), back to the start.
+   Daniel measures forward, sideways and heading at the end; the agent adds it to
+   `TRUTH` in `pc/robot/src/sim/score.ts` and runs `npm run score`.
+4. Only if Daniel wants the correction on the robot: `robot config correct on`, then
+   after each "correction sent" the robot's `robot status` pose equals the page's
+   robot to 1 cm and 0.5°; `robot config correct off` again.
+
 ### Robot tests (repeat after changes)
 
 Since 14 Oct the robot takes commands, not keys. The older tests below are written
@@ -336,8 +372,8 @@ battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot`
 2. `robot steer r390`: after ~14 s `{"command":"steer r390","result":"ok",…,
    "rotated":390}`, then `{"command":"snap","result":"ok",…,"snapshot":N}`. The
    page's log shows both lines with `[cli]`, and the new snapshot.
-3. `robot map`: the room around `R`, the walls where they are. `robot map --png`
-   gives a file; open it. `robot tof`, `robot camera` (open the file), `robot
+3. `robot map --png` gives a file; open it: the room round the robot, the walls
+   where they are. `robot tof`, `robot camera` (open the file), `robot
    light`, `robot features`.
 4. Facing a piece of furniture 40-70 cm away: `robot check d100` says `"result":
    "obstacle"` with `moved` N; `robot steer d100 r30`: `"result":"obstacle"`,
@@ -392,13 +428,14 @@ battery on, WiFi, `npm start` in `pc/robot/` restarted, the page open; `./robot`
    robot does nothing. Press `s`: "Scan: turning 390 deg left…". The robot turns
    ~14 s.
 3. Expected: "Scan done: … turned +390 deg", motors off. Press `m` for the map.
-4. Check the map against the room: walls and furniture legs where they are, `.`
-   rings and `:` around the robot, no `##` on open floor.
+4. Check the map (`robot map --png`) against the room: walls and furniture legs
+   where they are, floor rings around the robot, nothing blocked on open floor.
 5. `z` prints one ToF frame (cm as the robot sees it; `?N` = unsure, VL53 status N).
 6. Move and turn (`f`, `t`) and press `m`: walls and objects stay where they were,
    braking draws no obstacles. To see a removed object clear, scan again (`s`, `m`);
    `C` clears the map.
-7. At a table edge (held, motors off), `m`: `?` along the edge, `:` beyond it.
+7. At a table edge (held, motors off), `robot map --robot --png`: "no floor" along
+   the edge.
 
 **Camera** (M3a; only PicoA, motors not needed):
 1. Flash `picoA_app` onto PicoA, open the serial monitor. No "Camera not working"
@@ -500,33 +537,12 @@ facing ~2 m of room; `a` (watching) on. The tracker follows one target in the VL
 6. Power up without USB: the statuses show on the page, the robot waits; `s` on
    the page scans.
 
-**Recording** (both Picos, battery on, WiFi console working).
-Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
-1. Restart the server (`npm start` in `pc/robot/`) so it runs the new code.
-2. `p`: a line "Recording: off (R), server connected; 0 takes since power-up (boot
-   …), 0 datagrams, 0 refused". `5`: "Record: recording is off".
-3. `R`: "Recording: on; each action is recorded". `5`: "Record: 5 s…", then
-   "Record done", "Recorded take 1: … ToF frames sent, 0 failed; … datagrams, 0
-   refused; … KB". On the page: "recordings from boot …: saving to
-   raw/…-boot-….rec", then "take 1 (5 record, …): done; 5.0 s; ~50 ToF frames
-   (10/s; 15/s before Nov), 0 missing; … datagrams, 0 lost…".
-4. Robot on the floor with room: `s` (scan). Then `a` (watch) and walk around it
-   for the minute. Each ends with a "Recorded take" line and a take note on the
-   page. Expected: ~10 frames/s, no stalls; while turning, a few datagrams lost
-   (half frames and "missing" frames in the note); how many is what this test
-   measures.
-5. During a watch press `p`, then space: the take ends "stopped".
-6. `npm run decode -- recordings/raw/<the file>.rec` in `pc/robot/`: the same
-   takes, no CRC errors, no "cut off".
-7. Optional: stop the server during a take: the robot prints "take N cut" and
-   goes on; restart it, `R` is still on, the next action is recorded.
-
 **Snapshots and the viewer** (both Picos, battery on, WiFi, `npm start` in
 `pc/robot/` restarted for the new code). Paste the page's log (or
 `pc/robot/logs/`) and a screenshot of the page:
-1. Flash `picoA_app`. After power-up, `status` typed on USB: "RAM free" ≥ 40 KB
-   (computed: ~103), "Mode: manual", "Snapshots: 1 sent (the last ~31 KB)…" (one
-   goes when the server connects). No "Colour sensor not working".
+1. Flash `picoA_app`. After power-up, `status` typed on USB: "RAM free" about 87 KB,
+   "Mode: manual", "Snapshots: 1 sent (the last ~22 KB)…" (one goes when the server
+   connects). No "Colour sensor not working".
 2. The page shows the robot connected and, at once, snapshot #1: the camera
    picture with its features (small squares; `robot features` lists the same), the
    8 × 8 ToF grid as the robot sees it, the colour swatch and lux (a lamp or a
@@ -538,8 +554,8 @@ Paste the page's log (or `pc/robot/logs/`) and the `npm run decode` output:
    grid are those of the older snapshot; ▶ to the newest to come back.
 5. The page's Stop and the space key: "Stopped", "Mode: idle", `[page]
    {"command":"stop","result":"ok",…}`.
-6. Unplug the server (stop `npm start`) during a snapshot, start it again: the
-   snapshot comes again whole (the log says "snapshots from boot …").
+6. Stop the server (`npm start`) during a snapshot, start it again: the robot
+   connects again and sends a new snapshot (a cut one isn't sent again).
 
 **Go to a point** (both Picos, battery on, the viewer open). Room around the robot,
 a piece of furniture 1-2 m away:
@@ -557,13 +573,13 @@ a piece of furniture 1-2 m away:
    moves.
 
 **The map follows the robot** (both Picos, a hallway or two rooms, ≥ 4 m to drive):
-1. `s` at the start, then go-to clicks (or `f`) 3-4 m along the hallway; `s` there.
-   Expected: the dashed window on the page moves with the robot by 2 m steps; the
-   start's walls stay on the map outside it (from the whole-house map); `p`:
-   "… N tiles of the whole-house map".
-2. Drive back to the start: what was mapped there is still there; where the window
-   knows nothing now and a tile does, the column shows dimmed.
-3. `C`: map and whole-house map cleared; the next snapshot's map is empty.
+1. A look round at the start, then go-to clicks 3-4 m along the hallway; a look round
+   there. `robot map --robot --png`: the robot's window moved with it by 2 m steps;
+   the start is outside it (the robot forgets it). `robot map --png`: the PC's map
+   still has the start.
+2. Drive back to the start: the robot sees it anew; the PC's map is unchanged there.
+3. `robot clear_map`: the robot's window cleared (floor seeded round it); the PC's
+   map is not touched.
 
 **Thin legs on the map** (13 Oct; both Picos, the viewer open, manual mode). A chair
 or table with thin legs (2-4 cm) and a wall ~1 m behind them:
@@ -785,6 +801,13 @@ Local reference links assume this layout (this repo is `~/code/robo_car_3`):
   the camera's and the ToF's numbers as we take them, next to the data sheets'.
 - **[doc/OBJECTS_PLAN.md](doc/OBJECTS_PLAN.md)**: objects on the map from the camera
   (in progress); background in [doc/inspiration/](doc/inspiration/).
+- **[doc/DATA_FLOW_PLAN.md](doc/DATA_FLOW_PLAN.md)**: the data-flow rework (what the
+  robot sends, how, the maps), steps 1-9; **[doc/OUTLINE_MAP_PLAN.md](doc/OUTLINE_MAP_PLAN.md)**:
+  the PC's outline maps, walls and pose correction, and what is next for them (a
+  fresh session starts at its "For the fresh session");
+  **[doc/CLI_API_PLAN.md](doc/CLI_API_PLAN.md)**: the command API and the `robot` CLI.
+- **[architecture-diagram/](architecture-diagram/)**: the modules and data flows as a
+  page (`npm run dev` there), checked against the code (`npm run resolve`).
 - **[AGENTS.md](AGENTS.md)**: how AI agents answer (short, bullets, plain words).
 - **[doc/archive/](doc/archive/)**: the old plans and reviews, unchanged. TODO.md
   links into them where they hold a design not built yet.

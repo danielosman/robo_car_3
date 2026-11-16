@@ -5,6 +5,29 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 16 Nov 2026: step 9's doc part (DATA_FLOW_PLAN.md): the docs and the diagram brought up to date
+
+- ARCHITECTURE: the robot's window-only map and floor first, `room`, the map
+  command, snapshots version 3 without a map, wire 8 (corrected, map part, the
+  refusal ends), `correct`, the 3 m goto, RAM ~87 KB; the PC's maps (the cell map's
+  helper, the outline maps and the pose correction), `api/corrections.ts`, the store's
+  raw-odometry readers, `sim/` and `npm run score`; tests; Daniel's decisions of 15
+  and 16 Nov.
+- README: the robot tests for steps 5-6 and for the outline map and wire 8; stale
+  tests fixed or dropped ("Recording", the map's tiles on the robot, a snapshot sent
+  again whole); the memory table; the docs list.
+- TODO: a new "Next" (flash, the robot tests, measured drives); drift correction and
+  the full-turn check as they now are; what the imu training data lacks.
+- DATA_FLOW_PLAN: where we are, the maps, names and modules (outline maps, not line
+  maps).
+- The diagram: boxes `pc.correction`, `api.corrections`, members for the correction
+  on both sides and the outline maps; flows `outline-map`, `correction`, `corrected`
+  (39 modules, 16 flows, 474 references, clean). A fresh review's findings fixed (stale
+  `robot map` texts, PicoA alone to flash, byte counts, history out of the plan).
+- Left of step 9: the flash and the robot tests.
+- Daniel confirmed: the imu model needs only the IMU records and the 10 Hz poses; no
+  wheel counts, no faster odometry.
+
 ## 16 Nov 2026: the PC's correction beats odometry on the two measured drives (replayed)
 
 - Scored by a replay script (outside the repo): the two drives of 15 Nov against

@@ -1,8 +1,9 @@
 # RoboCar — architecture (as built)
 
 How the robot works today, module by module, and where the code is. Written from
-the code (11 Oct 2026; snapshots, the moving map, modes, go to a point and camera
-features added 12 Oct). Open work is in [TODO.md](TODO.md), history in
+the code (11 Oct 2026); brought up to date 16 Nov 2026 (the data-flow rework,
+[DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md); the outline maps and the pose correction,
+[OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)). Open work is in [TODO.md](TODO.md), history in
 [CHANGELOG.md](CHANGELOG.md), words in [GLOSSARY.md](GLOSSARY.md). Old plans and
 designs are in [archive/](archive/). How to build, run and test is in the
 [README](../README.md).
@@ -13,7 +14,8 @@ history goes here (that goes in the CHANGELOG), and no plans (they go in TODO.md
 ## 1. The whole robot
 
 - **PicoA** (Pico 2 W, the brain): the VL53L8CX ToF sensor, the HM0360 camera,
-  the OPT4048 colour sensor, WiFi. It keeps the map, watches for movement, finds and
+  the OPT4048 colour sensor, WiFi. It keeps a 6 × 6 m map around itself (to stop
+  before obstacles and before floor it hasn't seen), watches for movement, finds and
   follows camera features, runs the commands the server's API sends (one line
   each, answered when it has ended), prints its console on USB and over WiFi, and
   sends a snapshot of what it knows when a command asks.
@@ -22,15 +24,19 @@ history goes here (that goes in the CHANGELOG), and no plans (they go in TODO.md
   readings (104 a second), and stops the motors by itself when something is wrong.
 - **The PC** (`pc/robot`, Node): the command API with its one queue, which the
   `robot` CLI (an agent's or a person's) and the viewer and steering page both
-  use; the page (the robot's map at any snapshot with the path driven, its camera
-  picture with features, ToF, colour, pose; the log; steering); and DuckDB, the one
+  use; the page (the PC's map at any snapshot with the path driven, its camera
+  picture with features, ToF, colour, pose; the log; steering); DuckDB, the one
   store of what the robot sends: its moves, every ToF frame and imu record of a move,
-  its statuses and snapshots.
+  its statuses and snapshots; and the PC's own maps, built from the stored frames:
+  the whole-house cell map (the robot's C map code in a helper program) and the
+  outline maps with their walls, which also give a corrected pose.
 
 The two Picos talk over a UART link (1 Mbaud). PicoA talks to the PC over WiFi: one
 TCP connection with framed messages both ways (console lines, status, answers, moves
-with their ToF frames and imu batches, snapshots; commands back). Nothing is sent while no move runs
-but the console, the status and snapshots.
+with their ToF frames and imu batches, snapshots; commands back). The robot's
+measurements (ToF frames, imu batches) go only during moves; the rest (console,
+status, answers, snapshots, the map window when asked, "map cleared", "corrected")
+whenever it happens.
 
 **The robot does nothing by itself.** After power-up it is in manual mode with the
 motors off, joins the WiFi and waits for a command. Each command does one thing. A
@@ -52,7 +58,9 @@ server's commands, and their answers). `loop_statistics` times every stage. Core
 
 - Robot frame: x forward, y left, z up. Angles: + = left, nose up, left side up.
 - The map's frame is odometry's from power-up (where PicoB started). It never
-  moves: all moves of one power-up share it.
+  moves: all moves of one power-up share it. The PC may send a correction
+  (`correct`, below): from then on the robot's pose and everything it sends are
+  corrected by it. It is off by default (`robot config correct`).
 - Times are PicoA's `time_us_32()` (µs, wraps every 71.6 min). Both Picos start
   their clock 30 s before the wrap (`common/clock_start.h`), so every run and every
   host test crosses it; `common/stamp.h` takes differences across it.
@@ -250,27 +258,36 @@ clears the map. Unsure zones tell nothing.
 - **Columns:** blocked (L1 occupied), overhang (L2 occupied, L1 not), no floor (G
   free: a hole or a drop), drivable (floor seen, L1 and L2 free), open (L1 and L2
   free, G unknown), unknown.
-- **Queries:** `cell_map_column()`, `cell_map_obstacle_along()` (the nearest blocked
-  or overhang column on a path of a given width: what drive and go-to stop at; the
-  PC's `robot check` has a copy, tested against it), `cell_map_print()` (4 × 4 m as
-  text, for the tests). Outside the window they answer from
-  the whole-house map's columns.
+- **Floor first:** `cell_map_clear(x, y)` (at power-up the origin, on `clear_map` the
+  robot's pose) centres the window there and seeds floor 35 cm around it (the robot
+  stands on floor; row 8 first sees it ~25 cm ahead). Ground-layer passes count only
+  within 50 cm (farther, shiny floor reflects).
+- **Queries:** `cell_map_column()`, `cell_map_column_of()` (the one column rule: the
+  robot's and the PC's), `cell_map_stop_along()` (how far along a path the nearest
+  stop starts: an obstacle, blocked, overhang or no floor, in either direction; or,
+  driving forward, floor not seen yet within 25 cm, only under the robot's own width,
+  and whether the stop is that), `cell_map_print()` (4 × 4 m as text, for the tests).
+- **Where a drive stops** is `room` (`room.h`, pure; the PC's helper compiles it, so
+  `robot check` asks the same rule): 15 cm before the stop from the front (back)
+  edge, on a path the robot's width plus 5 cm each side; with less than 1 cm of room
+  it doesn't start. A stop for floor not seen yet says so (`room_unseen_floor()`: the
+  robot's line, the move's end `unseen_floor`, `robot check`).
 - **The window follows the robot** (`cell_map_follow()`, inside `cell_map_add()`): it is
-  3 × 3 tiles of 2 × 2 m of the whole-house map, the robot in the middle tile; when
-  the robot is more than 0.5 m out of the middle tile (within ~1.5 m of the
-  window's edge) it scrolls by a whole tile, so its corner is always on the 10 cm
-  grid and nothing is resampled. At power-up it is centred on the power-up point,
-  as before. The tiles that scroll out go into the whole-house map as columns; the
-  ones that scroll in start from it, each column as cells only 1/15 confident, so
-  any measurement overrides them.
-- **The whole-house map** (`house_map`): each 10 cm column's class (4 bits) in 2 × 2
-  m tiles, only the tiles seen (at most 100: a 20 × 20 m flat, 20 KB). **The window
-  is the truth where it knows something:** a known column overwrites the stored
-  one (a moved chair shows), an unknown one keeps it (the robot didn't look). Tiles
-  changed since they were last sent are dirty and go with the next snapshot; a new
-  server gets them all. `C` clears it with the window.
+  3 × 3 tiles of 2 × 2 m, the robot in the middle tile; when the robot is more than
+  0.5 m out of the middle tile (within ~1.5 m of the window's edge) it scrolls by a
+  whole tile, so its corner is always on the 10 cm grid and nothing is resampled.
+  **On the robot only the window is kept:** what scrolls out is forgotten, what
+  scrolls in starts unknown. `map` sends the window to the PC (9 map parts, bulk).
+- **The whole-house map** (`house_map`) runs only on the PC, in the helper program
+  (`cell_map_keep_tiles()` hooks it in): each 10 cm column's class in 2 × 2 m tiles;
+  what scrolls out is kept, what scrolls in starts from it (1/15 confident: any
+  measurement overrides it). The window is the truth where it knows something; an
+  unknown column keeps the stored one.
 - **Cost:** the worst frame ~27 ms on the robot (measured at 15 Hz; a frame now
   comes every 100 ms, so the map takes less of the loop).
+- **Known limits of floor first:** standing still the ToF can't see the floor closer
+  than ~27 cm ahead of the centre, nor much beside the robot from close; so a drive
+  may be refused for floor not seen yet: a 30° turn and back shows it (15 Nov).
 
 **Known limits:** under a table top ~0.8 m away a few false blocked columns
 (driving closer clears them); a small hole next to floor gets some floor hits;
@@ -367,21 +384,19 @@ API asks after every move) and when a server connects: the boot id and build (gi
 by `main.c`: `snapshot_init()`), the pose, the move that ended and how (its end word,
 as the answer's), the running move, the mode, the last ToF frame **as a compact frame
 packed for the snapshot use** (its pose in it; 277 B), the last camera frame
-(160 × 120) and its features, the colour sensor's last reading, the map window (all
-three layers, one byte a cell) with its corner, and the whole-house map's dirty
-tiles. No sensor geometry: the PC has the boot's mounting. ~30 KB without tiles. Built into one static 38 KB buffer; one asked for while the last
+(160 × 120) and its features, and the colour sensor's last reading. **No map:** the
+PC builds its maps from the stored ToF frames. No sensor geometry: the PC has the
+boot's mounting. ~21.7 KB. Built into one static 22 KB buffer; one asked for while the last
 is going out is built when it has gone; without a server none is built. A snapshot
 waits up to 0.3 s for `vision` to process the frame it shows, so the features are
 that picture's. It goes to the PC in snapshot parts (≤ 1400 B each) on `link_pc`'s
 bulk lane; a part the lane has no room for waits, none is dropped; a snapshot cut
-by a lost connection goes again whole on the next (also when every part had
-reached TCP but the connection went before the snapshot counted as sent). A
+by a lost connection is not sent again (the new connection gets its own). A
 command's snapshot is answered once every part has been handed to TCP on a
-connection that is still up, so on one connection its answer always follows it.
-The one bad case: the connection lost after that, before the parts arrived; the
-snapshot is gone, its answer arrives on the next connection, and the server's
-runner says "the snapshot wasn't stored". The layout is the `snapshot_*_t` structs in `snapshot.c` (sections, CRC-32
-from `common/crc32.h`; version 2), read by `pc/robot/src/snapshot.ts`, which refuses another version.
+connection that is still up, so on one connection its answer always follows it;
+if the connection goes before the parts arrived, the server's runner says "the
+snapshot wasn't stored". The layout is the `snapshot_*_t` structs in `snapshot.c` (sections, CRC-32
+from `common/crc32.h`; version 3), read by `pc/robot/src/snapshot.ts`, which refuses another version.
 
 ### Moves (`move`)
 
@@ -390,9 +405,9 @@ the action's own code (`behaviour`) runs inside the act phase, given to
 `move_start()` as three functions (begin, step, end), so `move` knows no action:
 - **start**: the motors on; the PC gets **move start** (move number, command number,
   kind, its parameter, PicoA's time, the still times) and from now until the end
-  every ToF frame (`move_tof()`, the map use's compact format, bulk lane) and every
-  imu record (`move_imu()`), 10 to an **imu batch** (bulk lane, under the move's
-  number). A gap between two records (one lost on the way from PicoB) or a step back
+  every ToF frame (`move_tof()`, the map use's compact format, bulk lane, under the
+  move's number) and every imu record (`move_imu()`), 10 to an **imu batch** (bulk
+  lane, under the move's number). A gap between two records (one lost on the way from PicoB) or a step back
   starts a new batch, so a batch's records are evenly spaced. The robot must stand
   still within 3 s, else the move ends "no_start".
 - **pre**: it stands still `pre_ms` (200 ms; `config pre_ms`), motors on, not driving.
@@ -401,8 +416,8 @@ the action's own code (`behaviour`) runs inside the act phase, given to
   still (at most 3 s). This is the only settling after an action.
 - **end**: the last imu batch goes, however few records it has; the motors off; the
   PC gets **move end**: how it ended (the answer's end word), the frames sent and
-  dropped (the bulk lane full, or no server), the first and last frame number sent,
-  how far it went and turned, the imu batches sent and dropped. The console says
+  dropped (the bulk lane full, or no server), how far it went and turned, the imu
+  batches sent and dropped. The console says
   "Drive 12: 41 ToF frames sent, 0 dropped; 43 imu batches sent, 0 dropped".
 
 A stop, PicoB lost or PicoB's safety stop ends a move at once, in any phase; a new
@@ -412,8 +427,7 @@ once, with no phases, frames or imu batches (`move_refused()`; its start says "r
 PC keeps the running move open); a running move goes on. One
 command is one move: a go to (turn, then drive) is one move; `robot steer r30 d50`
 is two commands, so two moves, each standing still before and after. A watch is a
-move like the others. Nothing goes to the PC while no move runs but the console,
-status and snapshots. `move_next_ended()` gives each ended move's record, oldest first (commands answer each:
+move like the others. `move_next_ended()` gives each ended move's record, oldest first (commands answer each:
 a refused move and the running one can end in the same loop); `move_endings()` the last
 one's (the snapshot's head names it); `move_running()` the running move's kind for
 the status.
@@ -426,11 +440,10 @@ ends done or before an obstacle it prints what odometry measured. Kinds in the d
 drive, rotate, goto, watch.
 
 - **Drive** (`drive <cm>`): straight, negative = back, at ≤ 10 cm/s, slowing near
-  the end. **Stops 15 cm before an obstacle on the map:**
-  from the front (back) edge to the nearest blocked or overhang cell on its path
-  (the robot's 23.5 cm plus 5 cm each side), checked every loop while driving,
-  slowing near the stop point; unknown cells count as free. Within 15 cm it doesn't
-  start. Backwards only what the map already has stops it (the VL53 looks forward).
+  the end. It stops where `room` says (the map section: before an obstacle, or
+  forward before floor not seen yet), checked every loop while driving, slowing near
+  the stop point. Backwards only what the map already has stops it (the VL53 looks
+  forward).
 - **Rotate** (`rotate <deg>`): in place, + = left. A scan is `rotate 390` (the map is
   fed from every frame anyway).
 - **Watch** (`watch <s>`): turns towards the biggest VL53 movement and follows
@@ -441,8 +454,7 @@ drive, rotate, goto, watch.
 - **Go to** (`goto <x> <y>`, or a click on the page's map): turn in place towards the
   point, then drive straight to it at ≤ 10 cm/s, steering a little to keep it
   ahead, stopping where it is (measured along the way) or 15 cm before an obstacle
-  on the map, as Move. A goal more than 3 m from the robot is refused. The
-  goal is a point in the map frame; the robot works out the turn and the distance
+  on the map, as Drive. The goal is a point in the map frame; the robot works out the turn and the distance
   from its own pose.
 
 Speeds come from `motion.h`. The decision "one owner of the wheels" isn't built
@@ -453,17 +465,28 @@ yet: `behaviour` drives, and `commands` switches the motors off on stop.
 One command message from the PC each (its number and its text, `drive 50`; from the
 server's API, which numbers them), or one line `"<command> [#<n>]"` typed on USB
 (for debugging); nothing is done or printed by itself. `drive <cm>`, `rotate
-<deg>`, `goto <x cm> <y cm>`, `watch <s>`, `snap`, `clear_map`, `config pre_ms
-<ms>` and `config post_ms <ms>` (the moves' still times, 0-2000, from the next move
-on), `mode idle|manual`, `stop` (motors off, mode idle), `status` (pose, PicoB link,
-WiFi and the lanes, loop time over 10 s, RAM free, mode, snapshots, moves ended and
-the still times, imu records from PicoB and those not taken in time: printed). The limits are in `commands.h` (the API
-reads them); a command out of range is refused. Each is answered when it has
-ended, by an answer message: its number, how it ended (ok, obstacle, stopped,
-replaced, tilt, wheels, no_drive, picob_lost, no_start, refused), the pose, and for a
-move how far it went and turned, for a go to the goal's distance, for a snapshot
-its number; a move is answered from its record (`move_endings()`), each command's
-before the next can end another. `clear_map` also sends "map cleared".
+<deg>`, `goto <x cm> <y cm>` (a point at most 3 m from the robot), `watch <s>`,
+`snap`, `map` (the window to the PC), `clear_map`, `config pre_ms <ms>` and `config
+post_ms <ms>` (the moves' still times, 0-2000, from the next move on), `correct <x mm>
+<y mm> <yaw 0.01°>` (the PC's correction, below), `mode idle|manual`, `stop` (motors
+off, mode idle), `status` (pose, the correction, PicoB link, WiFi and the lanes, loop
+time over 10 s, RAM free, mode, snapshots, moves ended and the still times, imu
+records from PicoB and those not taken in time: printed). The limits are in
+`commands.h` (the API reads them). Each is answered when it has ended, by an answer
+message: its number, how it ended (ok, obstacle, unseen_floor, stopped, replaced,
+tilt, wheels, no_drive, safety, picob_lost, no_start, ended; refused with its reason: refused (not a
+command), out_of_range, busy_move, busy_snapshot, busy_bulk; the robot's line names
+the value and the limit), the pose, and for a move how far it went and turned, for a
+go to the goal's distance, for a snapshot its number; a move is answered from its
+record (`move_endings()`), each command's before the next can end another.
+`clear_map` also sends "map cleared".
+- **`correct`** sets the correction the robot applies to every pose from then on
+  (`pose_correct()` moves its pose history, `body_correct()` the kept reports and
+  each new one: the one place); it replaces, never adds. It sends "corrected", then
+  the answer, so everything after "corrected" is corrected by it. Refused while a
+  move runs, a snapshot is asked for or going out, or the bulk lane holds anything
+  ("corrected" goes on control and would overtake older frames). Sent again on
+  every new connection (if not 0).
 `commands_status()` fills the status `link_pc` sends (pose, mode, running move).
 
 ### The link to the PC (`link_pc`, `wire`)
@@ -474,7 +497,7 @@ before the next can end another. `clear_map` also sends "map cleared".
 and `wire_check()` finds a collision). Pure functions. Its twin on the PC is
 `wire.ts`; both are checked against the same golden bytes
 (`picoA/app/test/data/wire_golden.hex`, a compact tof frame at its limits among
-them). `WIRE_VERSION` (3) is in hello.
+them). `WIRE_VERSION` (8) is in hello.
 
 | Type | Message | Lane | Payload |
 |---|---|---|---|
@@ -483,11 +506,13 @@ them). `WIRE_VERSION` (3) is in hello.
 | 0x03 | answer | control | command number, end, which fields, x, y, yaw, moved, rotated, goal, snapshot (34 B) |
 | 0x04 | status | control | x, y, yaw, mode, the running move, WiFi dBm (33 B) |
 | 0x05 | map cleared | control | none |
-| 0x06 | move start | control | move n, command n, kind, parameter, t_us, pre_ms, post_ms, flags (refused) (22 B) |
-| 0x07 | move end | control | move n, end, t_us, frames sent, dropped, first and last frame n, moved, rotated, imu batches sent, dropped (41 B) |
+| 0x06 | move start | control | move n, command n, kind, parameter, t_us, pre_ms, post_ms, flags (refused) (26 B) |
+| 0x07 | move end | control | move n, end, t_us, frames sent, dropped, moved, rotated, imu batches sent, dropped (37 B) |
+| 0x08 | corrected | control | the correction applied from now on: x, y, yaw (12 B) |
 | 0x10 | snapshot part | bulk | 1-1400 B of a snapshot |
-| 0x11 | imu batch | bulk | move n, the first record's t_us, period µs, count; per record acceleration and gyro x, y, z, int16 counts (11 + 12 × 1-10 B; only during a move) |
-| 0x40 | tof compact | bulk | a compact tof frame, the map use's (277 B; only during a move) |
+| 0x11 | imu batch | bulk | move n, the first record's t_us, period µs, count; per record acceleration and gyro x, y, z, int16 counts (15 + 12 × 1-10 B; only during a move) |
+| 0x12 | map part | bulk | part 0-8, the window's corner, 1200 cell bytes (1205 B; `map`) |
+| 0x40 | tof compact | bulk | move n, t_us, a compact tof frame, the map use's (12 + 277 B; only during a move) |
 | 0x20 | command | to the robot | number, text (≤ 46 B) |
 | 0x21 | heartbeat | to the robot | none |
 
@@ -527,25 +552,22 @@ added).
 - lwIP runs in the background interrupt (`lwipopts.h`): TCP's send buffer 16
   segments (~23 KB), `MEM_SIZE` 44000, `TCP_SND_QUEUELEN` 64, `MEMP_NUM_TCP_SEG` 66.
 - The UDP socket only hears the server's announcements; nothing goes out on it.
-- A move's end travels on control and can arrive before its last frames (bulk): it
-  carries the first and last frame number, so the PC files late frames under it. An
-  imu batch names its move itself. A batch's records are evenly spaced: record i at
+- A move's end travels on control and can arrive before its last frames (bulk): each
+  tof frame and imu batch names its move, so the PC files late ones right. A batch's records are evenly spaced: record i at
   the first's time + i × the period (the encoder takes it from the first and last
   record's times).
 
 ### Budgets
 
-- **RAM:** everything is static, no `malloc`. ~51 KB free of 512 (`status` prints it;
-  7 Nov, after the snapshot buffer 38 KB, vision ~30 KB, the whole-house map 20 KB,
-  the ToF pipeline's frames 1.8 KB, and step 4a's bulk lane 40 KB, lwIP's bigger send
-  buffer 12 KB and the snapshot's part buffers 2.8 KB; the recorder's buffers, ~5 KB,
-  freed in step 4b; the imu records kept and the batch ~0.8 KB, step 4c). Step 6
-  frees ~31 KB.
+- **RAM:** everything is static, no `malloc`. ~87 KB free of 512 (`status` prints
+  it; computed from the build after step 6: the snapshot buffer 22 KB, vision ~30 KB,
+  the bulk lane 40 KB, the control lane 16 KB, lwIP's send buffer; no whole-house
+  map on the robot).
 - **Loop:** mean ~60 µs, worst ~29 ms (a map frame, measured at 15 Hz); a ToF frame every 100 ms, DRIVE
   every 50 ms (PicoB stops after 250 ms), 16 odometry reports kept (320 ms), 32 imu
   records (~300 ms). The UART's receive buffer (1 KB) holds ~230 ms of PicoB's messages.
-- **To the PC while moving:** tof frames ~2.8 KB/s, imu batches ~1.4 KB/s (10 a
-  second, 134 B each), status ~0.1 KB/s.
+- **To the PC while moving:** tof frames ~2.9 KB/s, imu batches ~1.4 KB/s (10 a
+  second, 138 B each), status ~0.2 KB/s.
 - **Stack:** core 0 ~6.4 KB worst case of the 8 KB it can use (both scratch banks;
   `watch_tof_add()` keeps 4.3 KB on the stack, its blobs included; the pipeline's
   frames are static).
@@ -572,11 +594,8 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   order they came, and **its clock**: PicoA's 32-bit µs times (wrapping every 71.6
   min, 30 s after power-up first) turned into seconds since power-up that only grow
   (each time follows the one before; how long the PC waited counts the wraps while
-  it was away). A tof frame is filed under the move that ended and sent it (by the
-  move end's first and last frame number: frames can come after their move's end)
-  or else the open move (a refused move never becomes the open one). An imu batch
-  names its move itself, so a late one is filed right; each of its records gets its
-  time since power-up.
+  it was away). A tof frame and an imu batch name their move, so a late one (after
+  its move's end) is filed right; each imu record gets its time since power-up.
 - **`ingest.ts`**: link.ts' events stamped by the boot and written to the store, in
   the order they came; hello opens the boot (the store keeps where it left it, so a
   restarted server goes on; the same boot's hello on a new connection keeps it as it is); a snapshot's picture goes to `recordings/camera/`.
@@ -589,13 +608,17 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   zone: row, col 1-8, distance, kind, signal, sigma, targets), `imu` (one per imu
   record: move, its batch's message and place in it, time, `ax`…`gz` the raw counts in
   the sensor's axes; the boot's mounting turns them), `status` (the path driven: pose,
-  mode, action, WiFi), `snapshots` (with their bytes), `snapshot_zones` (each also in the world,
-  by the boot's mounting), `snapshot_features`, `snapshot_tiles`, the objects' tables.
-  Times: `t_us` PicoA's as sent, `t_s` since power-up, `arrived_at` the PC's;
+  mode, action, WiFi), `robot_corrections` (the correction the robot applies from a
+  message on), `snapshots` (with their bytes), `snapshot_zones` (placed in the world
+  when read, by the helper's rays), `snapshot_features`, the objects' tables, and
+  `walls`, `wall_sightings`, `frame_poses` (the outline maps' walls, written by `robot
+  walls`). Times: `t_us` PicoA's as sent, `t_s` since power-up, `arrived_at` the PC's;
   `message_number` the order they came. Opened per operation, so the `duckdb` command line can
   use it in between. Reads: a move's frames, its imu records, a boot's messages for a
-  replay, the path. No migration: `robot2.duckdb` is new with this rework (not yet
-  written on the robot); a database from before step 4c would need deleting.
+  replay, the path. **The PC works in raw odometry:** the readers for the maps
+  (`framesBetween`, `snapshotsUpTo`, `snapshotFrames`, `path`, `rawPose`) give every
+  pose back without the robot's correction (`correction.ts` `rawOf`); `moveFrames`
+  and the replay give them as sent.
 - **`api/`, `cli.ts`, `robot`**: the command API under `/api/robot/` (Hono) and the
   `robot` CLI that calls it ([CLI_API_PLAN.md](CLI_API_PLAN.md): the commands,
   answers and the design, module by module). One queue (`api/queue.ts`) for the
@@ -604,22 +627,45 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   every move (auto_snap). Every answer is a JSON line with the same fields.
   `api/runner.ts` numbers each command, sends it and waits for its answer;
   `api/commands.ts` is the command language (`robot steer r30d50`); `api/reads.ts`
-  the commands that run at once (status, map, tof, camera, light, features, frames,
-  imu, log, config) as JSON (`robot frames <boot> <move>` and `robot imu <boot> <move>`
+  the commands that run at once (status, map, walls, tof, camera, light, features,
+  frames, imu, log, config) as JSON (`robot frames <boot> <move>` and `robot imu <boot> <move>`
   as text, `--json` for a program: the move, its frames or its imu records, and the
   imu count in both: records stored, missing (two stored records more than 1.5
-  periods apart have round(gap / period) − 1 missing between them), batches; `api/frames.ts` formats them); `api/check.ts` `robot check` on the newest snapshot's map;
-  `api/firmware.ts` reads the limits and the move rules from the firmware's headers.
+  periods apart have round(gap / period) − 1 missing between them), batches; `api/frames.ts` formats them); `api/check.ts` `robot check` on the newest snapshot's map
+  (the robot's stop rule through the helper; a goto's range as on the robot);
+  `api/answers.ts` the answers, every refusal said in words (the rule, the value, the
+  limit); `api/firmware.ts` reads the limits and the move rules from the firmware's
+  headers; `api/corrections.ts` sends the PC's correction to the robot (after each
+  snap and before each move, only with `robot config correct on`, off by default) and
+  turns a goto's point from the map's frame into the robot's.
+- **`maps/`**: the PC's own maps, built from the stored frames (in raw odometry,
+  then placed by the corrected pose), the same after a server restart.
+  - `cell_map.ts` + `native/cell_map_helper.c`: the robot's C map code (`cell_map.c`,
+    `tof_rays.c`, `house_map.c`, `tof_format.c`, `room.c`) in a helper program built
+    with cc once per server run, one per boot with its mounting: the whole-house map at
+    any snapshot (`robot map [n]`, the page), the robot's stop rule for `robot check`,
+    and each zone placed in the world (`rays`) for the outline maps.
+  - `outline/`: one closed outline per height band (L1, L2, above) round the floor
+    the robot has seen free, with islands; long straight edges kept as **walls** with
+    how sure each is; a Kalman filter over the pose, the gyro's turn scale and band
+    above's walls corrects the pose on still frames ([OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md),
+    "How it fits the code" lists the files). One mapper per boot, fed each snapshot's
+    frames as it comes; the log says how far the pose was corrected.
+  - `correction.ts` (in `src/`): a correction (shift and turn) applied and taken off
+    (`corrected`, `uncorrected`); its C twin is `picoA/app/correction.h`.
+- **`sim/`**: the simulator for the map code: a made-up room, a robot with drifting
+  odometry and a noisy ToF, through the real mapper (`npm run sim -- <scenario>`
+  draws each step, a slider page); `npm run score` replays the stored drives with
+  measured truth and the scenarios at several drifts, and scores the corrected pose
+  against odometry.
 - **`log.ts`, `live.ts`**: the one log everyone sees (the robot's text, the server's
   notes, every answer with who sent it), kept for new pages and `robot log` and
   written to a file per run in `logs/`; the robot now (status, pose, the boot, the
   still times of its moves).
 - **`public/app.html`, `app.js`**: the viewer and steering page at
-  http://127.0.0.1:8081/. A 2D map (x up, y left, as `robot map`): the snapshot's window
-  over the whole-house map's tiles as they were then (where the window is unknown
-  and a tile knows the column, dimmed; "hide weak" hides columns under 10 %
-  confident), the path driven up to the snapshot (from the pose
-  lines) and where each snapshot was taken, the snapshot's ToF
+  http://127.0.0.1:8081/. A 2D map (x up, y left, as `robot map`): the PC's cell map
+  at the snapshot ("hide weak" hides columns under 10 % confident), the path driven
+  up to the snapshot (from the pose lines) and where each snapshot was taken, the snapshot's ToF
   zones (sure and less sure, by height), the robot then and now; over or instead of the
   cells (toggles "cells", "outline", and per band) the PC's outline maps
   ([OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)); the cells, the robot, the path and all
@@ -632,14 +678,11 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   colour reading as a swatch, the pose; the log; steering through the API: Idle /
   Manual, Stop (and space), drive, rotate and watch with a box for the number,
   snapshot, clear map, status. On the live view a click on the map
-  sends the robot there (`g<x>,<y>`). (The old console page, `/console`, went on
-  8 Nov: the viewer shows everything it showed.)
-- **`snapshot.ts`, `snapshots_api.ts`**: a snapshot read (version 2; the ToF section a
-  compact frame), stored with its bytes, each camera picture as
+  sends the robot there (`g<x>,<y>`; a refusal's why is in the log).
+- **`snapshot.ts`, `snapshots_api.ts`**: a snapshot read (version 3; the ToF section a
+  compact frame; no map), stored with its bytes, each camera picture as
   `recordings/camera/<folder>/<sequence>.png` (map pictures from `robot map --png` in
-  `recordings/map/<folder>/`). The API composes the map at any snapshot: the newest
-  of each tile up to it since the map was last cleared; `/api/mounting?boot=` gives
-  the boot's own mounting.
+  `recordings/map/<folder>/`). `/api/mounting?boot=` gives the boot's own mounting.
 - **`boot_folders.ts`**: the robot names each boot with a random 8-hex boot id (it
   has no clock); the folders under `recordings/` are named by when the PC first saw
   the boot, `YYYYMMDDHHMM` (local). `recordings/boots.json` maps boot id to folder
@@ -686,9 +729,9 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   messages (moves, frames, imu batches, statuses, snapshots, in the order they came; `--speed=`),
   then answers every command (hello, console lines, status, a move start and end
   for each move, map cleared), drives its pose at the robot's speeds, and sends the
-  boot's snapshots, in parts, one after another when asked for one (`FakeRobot`,
-  also used by `fakerobot.test.ts`). The 3D viewer of takes is gone with the
-  recordings (TODO: one on the stored frames).
+  boot's snapshots, in parts, one after another when asked for one; it takes `correct`
+  and refuses a goto out of range, as the robot (`FakeRobot`, also used by
+  `fakerobot.test.ts`).
 - `recordings/` is git-ignored.
 
 `pc/bringup/` is the bring-up viewer (camera, ToF, colour sensor over USB) for the
@@ -704,14 +747,15 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   map on five recorded scans (`test_map_replay`: the cup, box, chair and cupboard
   must be found; one target per zone, `frames_file.h`; data in `picoA/app/test/data/`), the window following the robot down
   a simulated hallway, camera features on synthetic frames (`test_vision`), and the
-  snapshots as the PC reads them (`test_snapshot`, whose file the PC's test reads,
-  and the map's obstacle check on it, which the PC's copy must match; its parts
-  waiting for room and sent again whole after a lost connection), the wire
+  snapshots as the PC reads them (`test_snapshot`, whose file the PC's test reads;
+  its parts waiting for room), the wire
   (`test_wire`: every message, the envelope's errors, the golden bytes
   `picoA/app/test/data/wire_golden.hex` that `wire.test.ts` checks too), the link to
   the PC (`test_link_pc`, against a fake WiFi chip and lwIP: hello first, the lanes'
   order, drops and counts, console under load, reconnecting) and the commands over
-  it (`test_commands`: answers, map cleared, config pre_ms / post_ms, status), a move's
+  it (`test_commands`: answers, each refusal's reason, a go to's range from the robot,
+  map cleared, config pre_ms / post_ms, correct, status), the floor-first stop
+  (`test_cell_map`), the correction on the robot (`test_body`, `test_pose`), a move's
   phases and messages (`test_move`: pre and post with the fake clock, frames in start,
   act and post, still before the
   motors drive, post the only settling, stops in pre and post, a watch as a move,
@@ -740,7 +784,15 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
   lost frames and batches), `ingest.ts` end to end (a refused move during a running
   one, the same boot's second hello, a late imu batch), and the fake robot end to end
   with the link and the runner, and replaying a stored boot (imu batches too) into a
-  second database.
+  second database; the PC's maps (`maps/cell_map.test.ts` against the robot's own
+  code; `maps/outline/*.test.ts`: sights, border, shape, walls, the pose check) and
+  the simulator's scenarios run as tests with numbers checked (`sim/sim.test.ts`:
+  outlines closed, walls on the true walls, the corrected pose against odometry, the
+  turn scale learnt, removal); the correction sent and taken (`api/corrections.test.ts`,
+  `correction.test.ts` with the C twin's shared sample).
+- `npm run score` in `pc/robot/`: the corrected pose against measured truth on the
+  stored drives, and the simulator at several drifts (not a pass/fail test: a change
+  to the pose check is kept if it scores better).
 - `tools/lint.sh`: cppcheck, ESLint, tsc.
 - `tools/stack_depth.py`: worst-case stack from GCC's call graph.
 
@@ -749,6 +801,10 @@ Node 24, TypeScript run directly; `npm start` serves http://127.0.0.1:8081/.
 Rules the code follows; change them only with Daniel's word.
 
 **The robot:**
+- **Floor first:** the robot drives forward only onto floor it has seen (within 25 cm,
+  under its own width); a 35 cm circle round it counts as seen at power-up and on
+  `clear_map`. The robot keeps only its 6 × 6 m window; the whole-house map is the
+  PC's.
 - Robot height 13 cm (measured 8 Nov, after the PCB was raised), no extra clearance margin. Footprint 23.5 cm wide × 19 cm
   long, front edge 9.5 cm ahead of the centre.
 - The ground band is −7…+3 cm: anything under 3 cm is ground and driven over.
@@ -769,9 +825,13 @@ Rules the code follows; change them only with Daniel's word.
   command, one operation, each with its number required; no test-only actions.
 - Motors off at the end of every action; stop stops (and empties the queue).
 - Commands come only from the API (USB typing is for debugging).
-- drive stops 15 cm before an obstacle on the map (blocked and overhang cells),
-  unknown cells count as free. Its braking and brief speed-up when a closer reading
-  moves the stop point back are fine as they are.
+- drive stops 15 cm before an obstacle on the map (blocked, overhang and no-floor
+  cells; forward also floor not seen yet), other unknown cells count as free. Its
+  braking and brief speed-up when a closer reading moves the stop point back are
+  fine as they are.
+- A go to's point is at most 3 m from the robot, else refused.
+- Whatever can't happen, the robot and the PC say why: which rule, which value,
+  which limit (15 Nov).
 
 **Movement and watching:**
 - Movement is detected while still and while turning, against a background kept
@@ -782,14 +842,18 @@ Rules the code follows; change them only with Daniel's word.
 
 **Data:**
 - After every move the API asks for a snapshot, which goes to the PC over TCP (14 Oct): pose, camera
-  picture and features, one VL53 frame (compact), the colour reading, the map window
-  with its anchor and the changed tiles.
+  picture and features, one VL53 frame (compact), the colour reading. No map: the PC
+  builds its maps from the stored frames.
 - Data flow (7 Nov, [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)): the robot sends what it
   measures only during moves (each still 200 ms before and after), packed small, on
   the one TCP connection; DuckDB is the one store, no raw files; a new data format
   gets a new database file. Hypotheses and map changes are tested on what is stored.
 - The map window is the truth over the whole-house map where it knows something;
-  unknown keeps the old column. Both the robot and the PC follow this rule.
+  unknown keeps the old column (the PC's helper).
+- The PC's pose correction from the walls is sent to the robot only with `robot
+  config correct on`; it is off (16 Nov): the robot avoids obstacles with its own
+  recent map, the correction is for the PC's map and places seen long ago. Past
+  frames are never moved by a correction.
 - Recordings stay out of git.
 - Camera pictures go to the server at 160 × 120, never larger (in snapshots); the
   server does all image recognition (not built yet). Camera

@@ -4,41 +4,119 @@
     "name": "Odometry",
     "description": "PicoB turns the IMU and the wheel counts into the pose, speeds and tilt, and reports them to PicoA 50 times a second; PicoA keeps them as a history to place each ToF frame.",
     "steps": [
-      { "at": "picoB.imu.imu_read", "dto": "picoB.imu.imu_sample_t",
-        "rate": { "text": "416 Hz", "path": "picoB/drivers/imu.c", "code": "write_reg(CTRL2_G, 0x60)" },
-        "path": "picoB/app/odometry.c", "code": "!imu_read(&s, &counts)" },
-      { "change": "turn", "name": "robot frame", "at": "picoB.odometry.odometry_update",
+      {
+        "at": "picoB.imu.imu_read",
+        "dto": "picoB.imu.imu_sample_t",
+        "rate": {
+          "text": "416 Hz",
+          "path": "picoB/drivers/imu.c",
+          "code": "write_reg(CTRL2_G, 0x60)"
+        },
+        "path": "picoB/app/odometry.c",
+        "code": "!imu_read(&s, &counts)"
+      },
+      {
+        "change": "turn",
+        "name": "robot frame",
+        "at": "picoB.odometry.odometry_update",
         "what": "the sensor's axes into the robot's (the mounting)",
-        "path": "picoB/app/odometry.c", "code": "to_robot_frame(&s, acceleration_g, gyro_dps);" },
-      { "change": "turn", "name": "heading", "at": "picoB.odometry.odometry_update",
+        "path": "picoB/app/odometry.c",
+        "code": "to_robot_frame(&s, acceleration_g, gyro_dps);"
+      },
+      {
+        "change": "turn",
+        "name": "heading",
+        "at": "picoB.odometry.odometry_update",
         "what": "gyro z, less its bias, into the heading",
-        "path": "picoB/app/odometry.c", "code": "update_heading(gyro_dps[2], dt);" },
-      { "change": "add", "name": "wheels", "at": "picoB.odometry.odometry_update",
+        "path": "picoB/app/odometry.c",
+        "code": "update_heading(gyro_dps[2], dt);"
+      },
+      {
+        "change": "add",
+        "name": "wheels",
+        "at": "picoB.odometry.odometry_update",
         "what": "the wheel counts (flow wheel-counts) into distance, speed and position",
-        "path": "picoB/app/odometry.c", "code": "update_wheels(dt);" },
-      { "change": "turn", "name": "tilt", "at": "picoB.odometry.odometry_update",
-        "what": "acceleration and gyro into pitch and roll (filter, 0.5 s)", "dto": "picoB.odometry.odometry_t",
-        "path": "picoB/app/odometry.c", "code": "update_tilt(acceleration_g, gyro_dps, dt);" },
-      { "at": "picoB.odometry.odometry_get",
-        "rate": { "text": "50 Hz", "path": "picoB/app/brain.c", "code": "next_odometry = make_timeout_time_us(LINK_ODOMETRY_PERIOD_US);" },
-        "path": "picoB/app/brain.c", "code": "const odometry_t *o = odometry_get();" },
-      { "change": "turn", "name": "report", "at": "picoB.brain.brain_update",
+        "path": "picoB/app/odometry.c",
+        "code": "update_wheels(dt);"
+      },
+      {
+        "change": "turn",
+        "name": "tilt",
+        "at": "picoB.odometry.odometry_update",
+        "what": "acceleration and gyro into pitch and roll (filter, 0.5 s)",
+        "dto": "picoB.odometry.odometry_t",
+        "path": "picoB/app/odometry.c",
+        "code": "update_tilt(acceleration_g, gyro_dps, dt);"
+      },
+      {
+        "at": "picoB.odometry.odometry_get",
+        "rate": {
+          "text": "50 Hz",
+          "path": "picoB/app/brain.c",
+          "code": "next_odometry = make_timeout_time_us(LINK_ODOMETRY_PERIOD_US);"
+        },
+        "path": "picoB/app/brain.c",
+        "code": "const odometry_t *o = odometry_get();"
+      },
+      {
+        "change": "turn",
+        "name": "report",
+        "at": "picoB.brain.brain_update",
         "what": "the fields PicoA needs, plus the motors' state and why they stopped",
         "dto": "common.link_messages.odometry_report_t",
-        "path": "picoB/app/brain.c", "code": "odometry_report_t r = {" },
-      { "at": "common.link.link_send", "path": "picoB/app/brain.c", "code": "link_send(MESSAGE_ODOMETRY, &r, sizeof r);" },
-      { "at": "common.link.link_receive", "path": "picoA/app/body.c", "code": "while (link_receive(&m)) on_message(&m);" },
-      { "change": "turn", "name": "PicoA's clock", "at": "picoA.body.body_update",
+        "path": "picoB/app/brain.c",
+        "code": "odometry_report_t r = {"
+      },
+      {
+        "at": "common.link.link_send",
+        "path": "picoB/app/brain.c",
+        "code": "link_send(MESSAGE_ODOMETRY, &r, sizeof r);"
+      },
+      {
+        "at": "common.link.link_receive",
+        "path": "picoA/app/body.c",
+        "code": "while (link_receive(&m)) on_message(&m);"
+      },
+      {
+        "change": "turn",
+        "name": "PicoA's clock",
+        "at": "picoA.body.body_update",
         "what": "learns PicoB's clock from each report's time, so its times can be read on PicoA's",
-        "path": "picoA/app/body.c", "code": "track_clock(time_us_32() - odometry.t_us, time_us_32());" },
-      { "at": "picoA.body.body_odometry_get", "path": "picoA/app/pose.c", "code": "if (!body_odometry_get(++taken, &o, &t_us)) continue;" },
-      { "change": "pick", "name": "history", "at": "picoA.pose.pose_update",
+        "path": "picoA/app/body.c",
+        "code": "track_clock(time_us_32() - odometry.t_us, time_us_32());"
+      },
+      {
+        "at": "picoA.body.body_odometry_get",
+        "path": "picoA/app/pose.c",
+        "code": "if (!body_odometry_get(++taken, &o, &t_us)) continue;"
+      },
+      {
+        "change": "pick",
+        "name": "history",
+        "at": "picoA.pose.pose_update",
         "what": "each report into the pose history (~1.3 s): roll and the motors' state dropped",
-        "keeps": ["x_m", "y_m", "yaw_rad", "pitch_rad", "v_mps", "w_radps", "stationary"], "bytes": 32,
-        "path": "picoA/app/pose.c", "code": ".pose = {o.x_m, o.y_m, o.yaw_rad, o.pitch_rad}," },
-      { "change": "turn", "name": "interpolate", "at": "picoA.pose.pose_stamp",
-        "what": "the history into the pose at the frame's middle (the private at(), not pose_at())", "dto": "picoA.pose.pose_t",
-        "path": "picoA/app/pose.c", "code": "out->pose_known = at(frame->t_us, &mid, &still);" }
+        "keeps": [
+          "x_m",
+          "y_m",
+          "yaw_rad",
+          "pitch_rad",
+          "v_mps",
+          "w_radps",
+          "stationary"
+        ],
+        "bytes": 32,
+        "path": "picoA/app/pose.c",
+        "code": ".pose = {o.x_m, o.y_m, o.yaw_rad, o.pitch_rad},"
+      },
+      {
+        "change": "turn",
+        "name": "interpolate",
+        "at": "picoA.pose.pose_stamp",
+        "what": "the history into the pose at the frame's middle (the private at(), not pose_at())",
+        "dto": "picoA.pose.pose_t",
+        "path": "picoA/app/pose.c",
+        "code": "out->pose_known = at(frame->t_us, &mid, &still);"
+      }
     ]
   },
   {
@@ -46,9 +124,15 @@
     "name": "Wheel counts",
     "description": "The four encoder counts, read by odometry each IMU sample and joined into the pose.",
     "steps": [
-      { "at": "picoB.encoder.encoder_count", "bytes": 16,
-        "path": "picoB/app/odometry.c", "code": "int32_t count = encoder_count(i);" },
-      { "at": "picoB.odometry.odometry_update" }
+      {
+        "at": "picoB.encoder.encoder_count",
+        "bytes": 16,
+        "path": "picoB/app/odometry.c",
+        "code": "int32_t count = encoder_count(i);"
+      },
+      {
+        "at": "picoB.odometry.odometry_update"
+      }
     ]
   },
   {
@@ -57,12 +141,28 @@
     "description": "PicoB switches the motors off when pitch or roll passes 15°; only the two angles are read out of odometry.",
     "parent": "odometry",
     "steps": [
-      { "at": "picoB.odometry.odometry_get",
-        "rate": { "text": "100 Hz", "path": "picoB/app/main.c", "code": "#define CONTROL_PERIOD_US" },
-        "path": "picoB/app/main.c", "code": "drive_update(odometry_get());" },
-      { "change": "pick", "name": "pitch, roll", "at": "picoB.drive.drive_update",
-        "keeps": ["pitch_rad", "roll_rad"], "bytes": 8,
-        "path": "picoB/app/drive.c", "code": "fabsf(odometry->pitch_rad) > MAX_TILT_RAD" }
+      {
+        "at": "picoB.odometry.odometry_get",
+        "rate": {
+          "text": "100 Hz",
+          "path": "picoB/app/main.c",
+          "code": "#define CONTROL_PERIOD_US"
+        },
+        "path": "picoB/app/main.c",
+        "code": "drive_update(odometry_get());"
+      },
+      {
+        "change": "pick",
+        "name": "pitch, roll",
+        "at": "picoB.drive.drive_update",
+        "keeps": [
+          "pitch_rad",
+          "roll_rad"
+        ],
+        "bytes": 8,
+        "path": "picoB/app/drive.c",
+        "code": "fabsf(odometry->pitch_rad) > MAX_TILT_RAD"
+      }
     ]
   },
   {
@@ -70,45 +170,134 @@
     "name": "IMU to the PC",
     "description": "The IMU's raw counts, averaged 4 to 1 on PicoB, carried through PicoA in batches of 10 during a move and stored on the PC as training data.",
     "steps": [
-      { "at": "picoB.imu.imu_read", "dto": "picoB.imu.imu_counts_t",
-        "rate": { "text": "416 Hz", "path": "picoB/drivers/imu.c", "code": "write_reg(CTRL2_G, 0x60)" },
-        "path": "picoB/app/odometry.c", "code": "!imu_read(&s, &counts)" },
-      { "change": "turn", "name": "average 4", "at": "picoB.odometry.odometry_update",
+      {
+        "at": "picoB.imu.imu_read",
+        "dto": "picoB.imu.imu_counts_t",
+        "rate": {
+          "text": "416 Hz",
+          "path": "picoB/drivers/imu.c",
+          "code": "write_reg(CTRL2_G, 0x60)"
+        },
+        "path": "picoB/app/odometry.c",
+        "code": "!imu_read(&s, &counts)"
+      },
+      {
+        "change": "turn",
+        "name": "average 4",
+        "at": "picoB.odometry.odometry_update",
         "what": "4 samples in a row averaged into one record, stamped with their middle time",
         "dto": "common.link_messages.imu_record_t",
-        "rate": { "text": "104 Hz", "path": "common/link_messages.h", "code": "#define IMU_RECORD_SAMPLES" },
-        "path": "picoB/app/odometry.c", "code": "static void update_record(" },
-      { "at": "picoB.odometry.odometry_imu_take", "path": "picoB/app/brain.c", "code": "while (odometry_imu_take(&r))" },
-      { "at": "common.link.link_send", "path": "picoB/app/brain.c", "code": "link_send(MESSAGE_IMU, &r, sizeof r);" },
-      { "at": "common.link.link_receive", "path": "picoA/app/body.c", "code": "while (link_receive(&m)) on_message(&m);" },
-      { "change": "turn", "name": "PicoA's clock", "at": "picoA.body.body_update",
+        "rate": {
+          "text": "104 Hz",
+          "path": "common/link_messages.h",
+          "code": "#define IMU_RECORD_SAMPLES"
+        },
+        "path": "picoB/app/odometry.c",
+        "code": "static void update_record("
+      },
+      {
+        "at": "picoB.odometry.odometry_imu_take",
+        "path": "picoB/app/brain.c",
+        "code": "while (odometry_imu_take(&r))"
+      },
+      {
+        "at": "common.link.link_send",
+        "path": "picoB/app/brain.c",
+        "code": "link_send(MESSAGE_IMU, &r, sizeof r);"
+      },
+      {
+        "at": "common.link.link_receive",
+        "path": "picoA/app/body.c",
+        "code": "while (link_receive(&m)) on_message(&m);"
+      },
+      {
+        "change": "turn",
+        "name": "PicoA's clock",
+        "at": "picoA.body.body_update",
         "what": "the record's time from PicoB's clock to PicoA's",
-        "path": "picoA/app/body.c", "code": "r->t_us = on_picoa_clock(r->t_us);" },
-      { "at": "picoA.body.body_imu_take", "path": "picoA/app/main.c", "code": "while (body_imu_take(&r)) move_imu(&r);" },
-      { "at": "picoA.move.move_imu" },
-      { "change": "turn", "name": "batch", "at": "picoA.move.move_imu",
+        "path": "picoA/app/body.c",
+        "code": "r->t_us = on_picoa_clock(r->t_us);"
+      },
+      {
+        "at": "picoA.body.body_imu_take",
+        "path": "picoA/app/main.c",
+        "code": "while (body_imu_take(&r)) move_imu(&r);"
+      },
+      {
+        "at": "picoA.move.move_imu"
+      },
+      {
+        "change": "turn",
+        "name": "batch",
+        "at": "picoA.move.move_imu",
         "what": "up to 10 records in a row into a batch with the move's number; a gap starts a new batch",
         "dto": "picoA.wire.wire_imu_batch_t",
-        "rate": { "text": "~10 Hz", "path": "picoA/app/wire.h", "code": "#define WIRE_IMU_BATCH_MAX" },
-        "path": "picoA/app/move.c", "code": "batch.records[batch.n++] = *r;" },
-      { "change": "turn", "name": "64-bit time", "at": "picoA.move.move_imu",
+        "rate": {
+          "text": "~10 Hz",
+          "path": "picoA/app/wire.h",
+          "code": "#define WIRE_IMU_BATCH_MAX"
+        },
+        "path": "picoA/app/move.c",
+        "code": "batch.records[batch.n++] = *r;"
+      },
+      {
+        "change": "turn",
+        "name": "64-bit time",
+        "at": "picoA.move.move_imu",
         "what": "the first record's time into µs since power-up (never wraps); the others by the period",
-        "path": "picoA/app/move.c", "code": "batch.t_us = clock_since_start_of(batch.records[0].t_us);" },
-      { "change": "turn", "name": "encode", "at": "picoA.wire.wire_encode_imu_batch",
+        "path": "picoA/app/move.c",
+        "code": "batch.t_us = clock_since_start_of(batch.records[0].t_us);"
+      },
+      {
+        "change": "turn",
+        "name": "encode",
+        "at": "picoA.wire.wire_encode_imu_batch",
         "what": "into the imu batch message: 15 B header, 12 B a record (the records' own times dropped)",
         "bytes": 135,
-        "path": "picoA/app/wire.c", "code": "uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out) {" },
-      { "at": "picoA.link_pc.link_pc_send_bulk", "path": "picoA/app/move.c", "code": "if (link_pc_send_bulk(message, n)) cur.imu_sent++;" },
-      { "at": "pc.wire.WireReader.push", "path": "pc/robot/src/link.ts", "code": "for (const raw of reader.push(chunk))" },
-      { "change": "turn", "name": "decode", "at": "pc.wire.decode",
-        "what": "the bytes into records, each with its own time again", "dto": "pc.wire.ImuBatch",
-        "path": "pc/robot/src/wire.ts", "code": "case TYPE.IMU_BATCH: {" },
-      { "at": "pc.link.RobotLink", "path": "pc/robot/src/link.ts", "code": "case \"imu_batch\": this.emit(\"imuBatch\", withoutType(m)); break;" },
-      { "at": "pc.ingest.ingest", "path": "pc/robot/src/ingest.ts", "code": "robot.on(\"imuBatch\", (batch: ImuBatch)" },
-      { "change": "turn", "name": "seconds", "at": "pc.boot.Boot.imuBatch",
-        "what": "numbered as the boot's next message; times in seconds", "dto": "pc.boot.ImuBatchRow",
-        "path": "pc/robot/src/boot.ts", "code": "imuBatch(batch: ImuBatch, atMs = Date.now()): ImuBatchRow {" },
-      { "at": "pc.store.Store.imuBatch" }
+        "path": "picoA/app/wire.c",
+        "code": "uint32_t wire_encode_imu_batch(const wire_imu_batch_t *b, uint8_t *out) {"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_send_bulk",
+        "path": "picoA/app/move.c",
+        "code": "if (link_pc_send_bulk(message, n)) cur.imu_sent++;"
+      },
+      {
+        "at": "pc.wire.WireReader.push",
+        "path": "pc/robot/src/link.ts",
+        "code": "for (const raw of reader.push(chunk))"
+      },
+      {
+        "change": "turn",
+        "name": "decode",
+        "at": "pc.wire.decode",
+        "what": "the bytes into records, each with its own time again",
+        "dto": "pc.wire.ImuBatch",
+        "path": "pc/robot/src/wire.ts",
+        "code": "case TYPE.IMU_BATCH: {"
+      },
+      {
+        "at": "pc.link.RobotLink",
+        "path": "pc/robot/src/link.ts",
+        "code": "case \"imu_batch\": this.emit(\"imuBatch\", withoutType(m)); break;"
+      },
+      {
+        "at": "pc.ingest.ingest",
+        "path": "pc/robot/src/ingest.ts",
+        "code": "robot.on(\"imuBatch\", (batch: ImuBatch)"
+      },
+      {
+        "change": "turn",
+        "name": "seconds",
+        "at": "pc.boot.Boot.imuBatch",
+        "what": "numbered as the boot's next message; times in seconds",
+        "dto": "pc.boot.ImuBatchRow",
+        "path": "pc/robot/src/boot.ts",
+        "code": "imuBatch(batch: ImuBatch, atMs = Date.now()): ImuBatchRow {"
+      },
+      {
+        "at": "pc.store.Store.imuBatch"
+      }
     ]
   },
   {
@@ -116,36 +305,102 @@
     "name": "ToF frame to the PC",
     "description": "Each ToF frame, placed where the robot was while it measured, packed small and sent to the PC during a move; the PC stores it.",
     "steps": [
-      { "at": "picoA.tof.tof_poll", "dto": "picoA.tof_frame.tof_frame_t",
-        "rate": { "text": "10 Hz", "path": "picoA/app/tof.h", "code": "#define TOF_DEFAULT_HZ" },
-        "path": "picoA/app/main.c", "code": "if (!tof_poll(&frame)) return;" },
-      { "at": "picoA.pose.pose_stamp", "path": "picoA/app/main.c", "code": "pose_stamp(&frame, &posed);" },
-      { "change": "add", "name": "pose", "at": "picoA.pose.pose_stamp",
+      {
+        "at": "picoA.tof.tof_poll",
+        "dto": "picoA.tof_frame.tof_frame_t",
+        "rate": {
+          "text": "10 Hz",
+          "path": "picoA/app/tof.h",
+          "code": "#define TOF_DEFAULT_HZ"
+        },
+        "path": "picoA/app/main.c",
+        "code": "if (!tof_poll(&frame)) return;"
+      },
+      {
+        "at": "picoA.pose.pose_stamp",
+        "path": "picoA/app/main.c",
+        "code": "pose_stamp(&frame, &posed);"
+      },
+      {
+        "change": "add",
+        "name": "pose",
+        "at": "picoA.pose.pose_stamp",
         "what": "the pose at the frame's middle, the turn during it, still or not (flow odometry)",
         "dto": "picoA.tof_frame.posed_frame_t",
-        "path": "picoA/app/pose.c", "code": "void pose_stamp(const tof_frame_t *frame, posed_frame_t *out) {" },
-      { "at": "picoA.move.move_tof", "path": "picoA/app/main.c", "code": "move_tof(&posed);" },
-      { "change": "turn", "name": "64-bit time", "at": "picoA.move.move_tof",
+        "path": "picoA/app/pose.c",
+        "code": "void pose_stamp(const tof_frame_t *frame, posed_frame_t *out) {"
+      },
+      {
+        "at": "picoA.move.move_tof",
+        "path": "picoA/app/main.c",
+        "code": "move_tof(&posed);"
+      },
+      {
+        "change": "turn",
+        "name": "64-bit time",
+        "at": "picoA.move.move_tof",
         "what": "the frame's time into µs since power-up (never wraps), for the message",
-        "path": "picoA/app/move.c", "code": "clock_since_start_of(f->frame.t_us), f, message);" },
-      { "change": "turn", "name": "encode", "at": "picoA.wire.wire_encode_tof",
+        "path": "picoA/app/move.c",
+        "code": "clock_since_start_of(f->frame.t_us), f, message);"
+      },
+      {
+        "change": "turn",
+        "name": "encode",
+        "at": "picoA.wire.wire_encode_tof",
         "what": "the move's number and the 64-bit time (12 B), then the frame packed for the map use (277 B: 8-bit distances)",
         "bytes": 289,
-        "path": "picoA/app/wire.c", "code": "uint32_t wire_encode_tof(tof_use_t use, uint32_t move, uint64_t t_us, const posed_frame_t *f, uint8_t *out) {" },
-      { "at": "picoA.link_pc.link_pc_send_bulk", "path": "picoA/app/move.c", "code": "if (link_pc_send_bulk(message, n)) cur.sent++;" },
-      { "at": "pc.wire.WireReader.push", "path": "pc/robot/src/link.ts", "code": "for (const raw of reader.push(chunk))" },
-      { "change": "turn", "name": "decode", "at": "pc.wire.decode",
+        "path": "picoA/app/wire.c",
+        "code": "uint32_t wire_encode_tof(tof_use_t use, uint32_t move, uint64_t t_us, const posed_frame_t *f, uint8_t *out) {"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_send_bulk",
+        "path": "picoA/app/move.c",
+        "code": "if (link_pc_send_bulk(message, n)) cur.sent++;"
+      },
+      {
+        "at": "pc.wire.WireReader.push",
+        "path": "pc/robot/src/link.ts",
+        "code": "for (const raw of reader.push(chunk))"
+      },
+      {
+        "change": "turn",
+        "name": "decode",
+        "at": "pc.wire.decode",
         "what": "the move's number and time read; the rest handed to unpackTof",
-        "path": "pc/robot/src/wire.ts", "code": "return { type: \"tof\", format: f.name," },
-      { "change": "turn", "name": "unpack", "at": "pc.tof_format.unpackTof",
-        "what": "the packed frame into zones and a pose, the robot's units", "dto": "pc.wire.TofMessage",
-        "path": "pc/robot/src/wire.ts", "code": "frame: unpackTof(f.name, p.subarray(TOF_HEADER))" },
-      { "at": "pc.link.RobotLink", "path": "pc/robot/src/link.ts", "code": "case \"tof\": this.emit(\"tof\", withoutType(m)); break;" },
-      { "at": "pc.ingest.ingest", "path": "pc/robot/src/ingest.ts", "code": "robot.on(\"tof\", (f: TofMessage)" },
-      { "change": "turn", "name": "seconds", "at": "pc.boot.Boot.tof",
-        "what": "numbered as the boot's next message; time in seconds", "dto": "pc.boot.TofRow",
-        "path": "pc/robot/src/boot.ts", "code": "tof(f: TofMessage, atMs = Date.now()): TofRow {" },
-      { "at": "pc.store.Store.tof" }
+        "path": "pc/robot/src/wire.ts",
+        "code": "return { type: \"tof\", format: f.name,"
+      },
+      {
+        "change": "turn",
+        "name": "unpack",
+        "at": "pc.tof_format.unpackTof",
+        "what": "the packed frame into zones and a pose, the robot's units",
+        "dto": "pc.wire.TofMessage",
+        "path": "pc/robot/src/wire.ts",
+        "code": "frame: unpackTof(f.name, p.subarray(TOF_HEADER))"
+      },
+      {
+        "at": "pc.link.RobotLink",
+        "path": "pc/robot/src/link.ts",
+        "code": "case \"tof\": this.emit(\"tof\", withoutType(m)); break;"
+      },
+      {
+        "at": "pc.ingest.ingest",
+        "path": "pc/robot/src/ingest.ts",
+        "code": "robot.on(\"tof\", (f: TofMessage)"
+      },
+      {
+        "change": "turn",
+        "name": "seconds",
+        "at": "pc.boot.Boot.tof",
+        "what": "numbered as the boot's next message; time in seconds",
+        "dto": "pc.boot.TofRow",
+        "path": "pc/robot/src/boot.ts",
+        "code": "tof(f: TofMessage, atMs = Date.now()): TofRow {"
+      },
+      {
+        "at": "pc.store.Store.tof"
+      }
     ]
   },
   {
@@ -154,14 +409,32 @@
     "description": "Each posed frame, packed and unpacked as the PC gets it, into the robot's 6 × 6 m window. Ground-layer ray passes beyond 50 cm are ignored, so distant floor reflections do not mark holes.",
     "parent": "tof-frame",
     "steps": [
-      { "at": "picoA.pose.pose_stamp" },
-      { "change": "turn", "name": "pack", "at": "picoA.tof_format.tof_format_pack",
-        "what": "into the map use's format (compact: 8-bit distances)", "bytes": 277,
-        "path": "picoA/app/main.c", "code": "uint32_t n_bytes = tof_format_pack(use, f, bytes);" },
-      { "change": "turn", "name": "unpack", "at": "picoA.tof_format.tof_format_unpack",
-        "what": "back into a frame: the same data the PC gets", "dto": "picoA.tof_frame.posed_frame_t",
-        "path": "picoA/app/main.c", "code": "return tof_format_unpack(tof_format_of(use), bytes, n_bytes, &unpacked) ? &unpacked : NULL;" },
-      { "at": "picoA.cell_map.cell_map_add", "path": "picoA/app/main.c", "code": "if (used) cell_map_add(used);" }
+      {
+        "at": "picoA.pose.pose_stamp"
+      },
+      {
+        "change": "turn",
+        "name": "pack",
+        "at": "picoA.tof_format.tof_format_pack",
+        "what": "into the map use's format (compact: 8-bit distances)",
+        "bytes": 277,
+        "path": "picoA/app/main.c",
+        "code": "uint32_t n_bytes = tof_format_pack(use, f, bytes);"
+      },
+      {
+        "change": "turn",
+        "name": "unpack",
+        "at": "picoA.tof_format.tof_format_unpack",
+        "what": "back into a frame: the same data the PC gets",
+        "dto": "picoA.tof_frame.posed_frame_t",
+        "path": "picoA/app/main.c",
+        "code": "return tof_format_unpack(tof_format_of(use), bytes, n_bytes, &unpacked) ? &unpacked : NULL;"
+      },
+      {
+        "at": "picoA.cell_map.cell_map_add",
+        "path": "picoA/app/main.c",
+        "code": "if (used) cell_map_add(used);"
+      }
     ]
   },
   {
@@ -170,14 +443,32 @@
     "description": "Each posed frame, packed and unpacked for the watch use, into watch, which looks for movement.",
     "parent": "tof-frame",
     "steps": [
-      { "at": "picoA.pose.pose_stamp" },
-      { "change": "turn", "name": "pack", "at": "picoA.tof_format.tof_format_pack",
-        "what": "into the watch use's format (today the same compact format)", "bytes": 277,
-        "path": "picoA/app/main.c", "code": "uint32_t n_bytes = tof_format_pack(use, f, bytes);" },
-      { "change": "turn", "name": "unpack", "at": "picoA.tof_format.tof_format_unpack",
-        "what": "back into a frame", "dto": "picoA.tof_frame.posed_frame_t",
-        "path": "picoA/app/main.c", "code": "return tof_format_unpack(tof_format_of(use), bytes, n_bytes, &unpacked) ? &unpacked : NULL;" },
-      { "at": "picoA.watch.watch_add", "path": "picoA/app/main.c", "code": "if (used) watch_add(used);" }
+      {
+        "at": "picoA.pose.pose_stamp"
+      },
+      {
+        "change": "turn",
+        "name": "pack",
+        "at": "picoA.tof_format.tof_format_pack",
+        "what": "into the watch use's format (today the same compact format)",
+        "bytes": 277,
+        "path": "picoA/app/main.c",
+        "code": "uint32_t n_bytes = tof_format_pack(use, f, bytes);"
+      },
+      {
+        "change": "turn",
+        "name": "unpack",
+        "at": "picoA.tof_format.tof_format_unpack",
+        "what": "back into a frame",
+        "dto": "picoA.tof_frame.posed_frame_t",
+        "path": "picoA/app/main.c",
+        "code": "return tof_format_unpack(tof_format_of(use), bytes, n_bytes, &unpacked) ? &unpacked : NULL;"
+      },
+      {
+        "at": "picoA.watch.watch_add",
+        "path": "picoA/app/main.c",
+        "code": "if (used) watch_add(used);"
+      }
     ]
   },
   {
@@ -185,34 +476,95 @@
     "name": "Command",
     "description": "A steering command from the viewer: through the server's queue to the robot, where it starts a move.",
     "steps": [
-      { "at": "browser.app.send", "bytes": 45,
-        "path": "pc/robot/public/app.js", "code": "fetch(`/api/robot/${command}?from=page&nowait`" },
-      { "at": "api.routes.POST /api/robot/:name" },
-      { "change": "turn", "name": "parse on the PC", "at": "api.commands.parseSteer",
-        "what": "\"steer d50\" into checked commands (one per letter)", "dto": "api.commands.Command",
-        "path": "pc/robot/src/api/routes.ts", "code": "const parsed: Parsed = name === \"steer\" || name === \"check\" ? parseSteer(arg)" },
-      { "change": "add", "name": "auto snap", "at": "api.commands.withSnaps",
+      {
+        "at": "browser.app.send",
+        "bytes": 45,
+        "path": "pc/robot/public/app.js",
+        "code": "fetch(`/api/robot/${command}?from=page&nowait`"
+      },
+      {
+        "at": "api.routes.POST /api/robot/:name"
+      },
+      {
+        "change": "turn",
+        "name": "parse on the PC",
+        "at": "api.commands.parseSteer",
+        "what": "\"steer d50\" into checked commands (one per letter)",
+        "dto": "api.commands.Command",
+        "path": "pc/robot/src/api/routes.ts",
+        "code": "const parsed: Parsed = name === \"steer\" || name === \"check\" ? parseSteer(arg)"
+      },
+      {
+        "change": "add",
+        "name": "auto snap",
+        "at": "api.commands.withSnaps",
         "what": "a snap after each move, when auto_snap is on (robot config auto_snap)",
-        "path": "pc/robot/src/api/routes.ts", "code": "withSnaps(parsed.commands, ctx.config.autoSnap)" },
-      { "at": "api.queue.CommandQueue.submit" },
-      { "at": "api.runner.CommandRunner.run" },
-      { "change": "turn", "name": "robot text", "at": "api.commands.robotText",
-        "what": "into the robot's words (\"drive 50\") with the next command number", "dto": "pc.wire.RobotCommand",
-        "path": "pc/robot/src/api/runner.ts", "code": "this.send(robotText(c), deadline - Date.now())" },
-      { "at": "pc.link.RobotLink.sendCommand" },
-      { "change": "turn", "name": "encode", "at": "pc.wire.encodeCommand",
-        "what": "into the command message: number and text (up to 46 characters)", "bytes": 50,
-        "path": "pc/robot/src/link.ts", "code": "const message = encodeCommand({ n, text });" },
-      { "at": "picoA.link_pc.link_pc_received" },
-      { "change": "turn", "name": "decode", "at": "picoA.wire.wire_decode_command",
-        "what": "the bytes back into number and text", "dto": "picoA.wire.wire_command_t",
-        "path": "picoA/app/link_pc.c", "code": "got = !heartbeat && n > 0 && wire_decode_command(&m, c);" },
-      { "at": "picoA.commands.commands_update", "path": "picoA/app/commands.c", "code": "while (link_pc_received(&c)) {" },
-      { "change": "turn", "name": "parse on the robot", "at": "picoA.commands.commands_update",
-        "what": "the text into an action and its numbers (cm into m)", "bytes": 8,
-        "path": "picoA/app/commands.c", "code": "run_text(c.text, c.n);" },
-      { "at": "picoA.behaviour.behaviour_drive", "path": "picoA/app/commands.c", "code": "behaviour_drive((float)a / 100, n);" },
-      { "at": "picoA.move.move_start", "path": "picoA/app/behaviour.c", "code": "move_start(kind_of[a], parameter, number, &behaviour_actor);" }
+        "path": "pc/robot/src/api/routes.ts",
+        "code": "withSnaps(parsed.commands, ctx.config.autoSnap)"
+      },
+      {
+        "at": "api.queue.CommandQueue.submit"
+      },
+      {
+        "at": "api.runner.CommandRunner.run"
+      },
+      {
+        "change": "turn",
+        "name": "robot text",
+        "at": "api.commands.robotText",
+        "what": "into the robot's words (\"drive 50\") with the next command number",
+        "dto": "pc.wire.RobotCommand",
+        "path": "pc/robot/src/api/runner.ts",
+        "code": "this.send(robotText(c), deadline - Date.now())"
+      },
+      {
+        "at": "pc.link.RobotLink.sendCommand"
+      },
+      {
+        "change": "turn",
+        "name": "encode",
+        "at": "pc.wire.encodeCommand",
+        "what": "into the command message: number and text (up to 46 characters)",
+        "bytes": 50,
+        "path": "pc/robot/src/link.ts",
+        "code": "const message = encodeCommand({ n, text });"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_received"
+      },
+      {
+        "change": "turn",
+        "name": "decode",
+        "at": "picoA.wire.wire_decode_command",
+        "what": "the bytes back into number and text",
+        "dto": "picoA.wire.wire_command_t",
+        "path": "picoA/app/link_pc.c",
+        "code": "got = !heartbeat && n > 0 && wire_decode_command(&m, c);"
+      },
+      {
+        "at": "picoA.commands.commands_update",
+        "path": "picoA/app/commands.c",
+        "code": "while (link_pc_received(&c)) {"
+      },
+      {
+        "change": "turn",
+        "name": "parse on the robot",
+        "at": "picoA.commands.commands_update",
+        "what": "the text into an action and its numbers (cm into m)",
+        "bytes": 8,
+        "path": "picoA/app/commands.c",
+        "code": "run_text(c.text, c.n);"
+      },
+      {
+        "at": "picoA.behaviour.behaviour_drive",
+        "path": "picoA/app/commands.c",
+        "code": "behaviour_drive((float)a / 100, n);"
+      },
+      {
+        "at": "picoA.move.move_start",
+        "path": "picoA/app/behaviour.c",
+        "code": "move_start(kind_of[a], parameter, number, &behaviour_actor);"
+      }
     ]
   },
   {
@@ -220,35 +572,105 @@
     "name": "Answer",
     "description": "How a move ended, from the robot back to the server, which answers the command and puts the answer in everyone's log.",
     "steps": [
-      { "at": "picoA.move.move_next_ended", "dto": "picoA.move.move_record_t",
-        "path": "picoA/app/commands.c", "code": "while (move_next_ended(&e)) {" },
-      { "change": "add", "name": "answer", "at": "picoA.commands.commands_update",
-        "what": "the move's record and the pose now (body_odometry) into the command's answer", "dto": "picoA.wire.wire_answer_t",
-        "path": "picoA/app/commands.c", "code": "wire_answer_t a = {.n = e.command" },
-      { "change": "turn", "name": "encode", "at": "picoA.wire.wire_encode_answer",
-        "what": "into the answer message", "bytes": 34,
-        "path": "picoA/app/commands.c", "code": "uint32_t n = wire_encode_answer(a, message);" },
-      { "at": "picoA.link_pc.link_pc_send_control", "path": "picoA/app/commands.c", "code": "link_pc_send_control(message, n);" },
-      { "at": "pc.wire.WireReader.push", "path": "pc/robot/src/link.ts", "code": "for (const raw of reader.push(chunk))" },
-      { "change": "turn", "name": "decode", "at": "pc.wire.decode",
-        "what": "the bytes into the answer", "dto": "pc.wire.RobotAnswer",
-        "path": "pc/robot/src/wire.ts", "code": "case TYPE.ANSWER:" },
-      { "change": "turn", "name": "done record", "at": "pc.link.doneRecord",
-        "what": "the end's number into its word; units kept", "dto": "pc.link.DoneRecord",
-        "path": "pc/robot/src/link.ts", "code": "case \"answer\": this.emit(\"done\", doneRecord(m)); break;" },
-      { "at": "api.runner.CommandRunner.run", "path": "pc/robot/src/api/runner.ts", "code": "robot.on(\"done\", d => this.waiting.get(d.n)?.(d));" },
-      { "change": "turn", "name": "outcome", "at": "api.answers.outcome",
-        "what": "into the API's answer: result word, pose in cm and degrees", "dto": "api.answers.Outcome",
-        "path": "pc/robot/src/api/runner.ts", "code": "return outcome(c, d);" },
-      { "change": "add", "name": "command text", "at": "api.queue.CommandQueue",
-        "what": "the command as it was asked (\"steer d50\") joins the outcome", "dto": "api.answers.Answer",
-        "path": "pc/robot/src/api/queue.ts", "code": "const answer: Answer = { command: commandText(job.command), ...(await this.runner.run(job.command)) };" },
-      { "at": "api.queue.CommandQueue.submit", "path": "pc/robot/src/api/queue.ts", "code": "return a => { onAnswer(a); this.everyone(a, sender); };" },
-      { "change": "turn", "name": "log line", "at": "pc.log.Log.answer",
-        "what": "into one line of text for the log, with who sent it", "bytes": 100,
-        "path": "pc/robot/src/main.ts", "code": "(a, sender) => log.answer(a, sender)" },
-      { "at": "pc.main.WebSocket /", "path": "pc/robot/src/main.ts", "code": "log.on(\"item\", item => broadcast({ type: item.kind, text: item.text, command: item.command }));" },
-      { "at": "browser.app.connect", "path": "pc/robot/public/app.js", "code": "else if (message.type === \"text\" || message.type === \"note\" || message.type === \"answer\") {" }
+      {
+        "at": "picoA.move.move_next_ended",
+        "dto": "picoA.move.move_record_t",
+        "path": "picoA/app/commands.c",
+        "code": "while (move_next_ended(&e)) {"
+      },
+      {
+        "change": "add",
+        "name": "answer",
+        "at": "picoA.commands.commands_update",
+        "what": "the move's record and the pose now (body_odometry) into the command's answer",
+        "dto": "picoA.wire.wire_answer_t",
+        "path": "picoA/app/commands.c",
+        "code": "wire_answer_t a = {.n = e.command"
+      },
+      {
+        "change": "turn",
+        "name": "encode",
+        "at": "picoA.wire.wire_encode_answer",
+        "what": "into the answer message",
+        "bytes": 34,
+        "path": "picoA/app/commands.c",
+        "code": "uint32_t n = wire_encode_answer(a, message);"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_send_control",
+        "path": "picoA/app/commands.c",
+        "code": "link_pc_send_control(message, n);"
+      },
+      {
+        "at": "pc.wire.WireReader.push",
+        "path": "pc/robot/src/link.ts",
+        "code": "for (const raw of reader.push(chunk))"
+      },
+      {
+        "change": "turn",
+        "name": "decode",
+        "at": "pc.wire.decode",
+        "what": "the bytes into the answer",
+        "dto": "pc.wire.RobotAnswer",
+        "path": "pc/robot/src/wire.ts",
+        "code": "case TYPE.ANSWER:"
+      },
+      {
+        "change": "turn",
+        "name": "done record",
+        "at": "pc.link.doneRecord",
+        "what": "the end's number into its word; units kept",
+        "dto": "pc.link.DoneRecord",
+        "path": "pc/robot/src/link.ts",
+        "code": "case \"answer\": this.emit(\"done\", doneRecord(m)); break;"
+      },
+      {
+        "at": "api.runner.CommandRunner.run",
+        "path": "pc/robot/src/api/runner.ts",
+        "code": "robot.on(\"done\", d => this.waiting.get(d.n)?.(d));"
+      },
+      {
+        "change": "turn",
+        "name": "outcome",
+        "at": "api.answers.outcome",
+        "what": "into the API's answer: result word, pose in cm and degrees",
+        "dto": "api.answers.Outcome",
+        "path": "pc/robot/src/api/runner.ts",
+        "code": "return outcome(c, d);"
+      },
+      {
+        "change": "add",
+        "name": "command text",
+        "at": "api.queue.CommandQueue",
+        "what": "the command as it was asked (\"steer d50\") joins the outcome",
+        "dto": "api.answers.Answer",
+        "path": "pc/robot/src/api/queue.ts",
+        "code": "const answer: Answer = { command: commandText(job.command), ...(await this.runner.run(job.command)) };"
+      },
+      {
+        "at": "api.queue.CommandQueue.submit",
+        "path": "pc/robot/src/api/queue.ts",
+        "code": "return a => { onAnswer(a); this.everyone(a, sender); };"
+      },
+      {
+        "change": "turn",
+        "name": "log line",
+        "at": "pc.log.Log.answer",
+        "what": "into one line of text for the log, with who sent it",
+        "bytes": 100,
+        "path": "pc/robot/src/main.ts",
+        "code": "(a, sender) => log.answer(a, sender)"
+      },
+      {
+        "at": "pc.main.WebSocket /",
+        "path": "pc/robot/src/main.ts",
+        "code": "log.on(\"item\", item => broadcast({ type: item.kind, text: item.text, command: item.command }));"
+      },
+      {
+        "at": "browser.app.connect",
+        "path": "pc/robot/public/app.js",
+        "code": "else if (message.type === \"text\" || message.type === \"note\" || message.type === \"answer\") {"
+      }
     ]
   },
   {
@@ -256,18 +678,40 @@
     "name": "Drive startup checked against the map",
     "description": "Before starting a drive, the robot checks its 6 × 6 m map for obstacles and drops across the requested distance, and on a forward drive for unidentified floor within 25 cm ahead, stopping 15 cm short. This flow shows startup refusal, not the repeated checks while moving.",
     "steps": [
-      { "at": "picoA.cell_map.cell_map_obstacle_along", "bytes": 4,
-        "path": "picoA/app/room.c", "code": "float along = cell_map_stop_along(" },
-      { "change": "turn", "name": "room", "at": "picoA.room.room_m",
-        "what": "less the robot's front or rear and the 15 cm stop margin", "bytes": 4,
-        "path": "picoA/app/room.c", "code": "return gap(x_m, y_m, yaw_rad, direction, look_m, &g, NULL) ? g - STOP_BEFORE_M : look_m;" },
-      { "change": "turn", "name": "drive limit", "at": "picoA.room.room_drive",
-        "what": "into how far the drive may go, and whether an obstacle stops it short", "dto": "picoA.room.room_drive_t",
-        "path": "picoA/app/room.c", "code": "return room < want ? (room_drive_t){room, true, unseen} : (room_drive_t){want, false, false};" },
-      { "at": "picoA.behaviour.behaviour_drive",
-        "path": "picoA/app/behaviour.c", "code": "room_drive_t r = room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m);" },
-      { "at": "picoA.move.move_refused",
-        "path": "picoA/app/behaviour.c", "code": "move_refused(MOVE_DRIVE, distance_m, number, r.unseen_floor ? MOVE_END_UNSEEN_FLOOR : MOVE_END_OBSTACLE);" }
+      {
+        "at": "picoA.cell_map.cell_map_obstacle_along",
+        "bytes": 4,
+        "path": "picoA/app/room.c",
+        "code": "float along = cell_map_stop_along("
+      },
+      {
+        "change": "turn",
+        "name": "room",
+        "at": "picoA.room.room_m",
+        "what": "less the robot's front or rear and the 15 cm stop margin",
+        "bytes": 4,
+        "path": "picoA/app/room.c",
+        "code": "return gap(x_m, y_m, yaw_rad, direction, look_m, &g, NULL) ? g - STOP_BEFORE_M : look_m;"
+      },
+      {
+        "change": "turn",
+        "name": "drive limit",
+        "at": "picoA.room.room_drive",
+        "what": "into how far the drive may go, and whether an obstacle stops it short",
+        "dto": "picoA.room.room_drive_t",
+        "path": "picoA/app/room.c",
+        "code": "return room < want ? (room_drive_t){room, true, unseen} : (room_drive_t){want, false, false};"
+      },
+      {
+        "at": "picoA.behaviour.behaviour_drive",
+        "path": "picoA/app/behaviour.c",
+        "code": "room_drive_t r = room_drive(o->x_m, o->y_m, o->yaw_rad, distance_m);"
+      },
+      {
+        "at": "picoA.move.move_refused",
+        "path": "picoA/app/behaviour.c",
+        "code": "move_refused(MOVE_DRIVE, distance_m, number, r.unseen_floor ? MOVE_END_UNSEEN_FLOOR : MOVE_END_OBSTACLE);"
+      }
     ]
   },
   {
@@ -275,15 +719,30 @@
     "name": "PC cell map",
     "description": "The PC builds a boot's whole-house cell map (6 × 6 m window and 2 × 2 m tiles) from the boot's stored ToF frames by running the robot's own C map code in a helper process.",
     "steps": [
-      { "at": "pc.store.Store.framesBetween", "dto": "pc.store.StoredFrame",
-        "path": "pc/robot/src/maps/cell_map.ts", "code": "const frames = await this.store.framesBetween(boot, b.fedUpTo, lastFrame);" },
-      { "change": "turn", "name": "pack for helper", "at": "pc.tof_format.packTof",
-        "what": "each stored frame into its 277 B compact bytes for the C helper", "bytes": 277,
-        "path": "pc/robot/src/maps/cell_map.ts", "code": "add(frame: PosedFrame): Promise<Buffer> { return this.ask(\"F\", packTof(\"compact\", frame)); }" },
-      { "change": "turn", "name": "build map", "at": "pc.cell_map.CellMaps.viewAtSnapshot",
+      {
+        "at": "pc.store.Store.framesBetween",
+        "dto": "pc.store.StoredFrame",
+        "path": "pc/robot/src/maps/cell_map.ts",
+        "code": "const frames = await this.store.framesBetween(boot, b.fedUpTo, lastFrame);"
+      },
+      {
+        "change": "turn",
+        "name": "pack for helper",
+        "at": "pc.tof_format.packTof",
+        "what": "each stored frame into its 277 B compact bytes for the C helper",
+        "bytes": 277,
+        "path": "pc/robot/src/maps/cell_map.ts",
+        "code": "add(frame: PosedFrame): Promise<Buffer> { return this.ask(\"F\", packTof(\"compact\", frame)); }"
+      },
+      {
+        "change": "turn",
+        "name": "build map",
+        "at": "pc.cell_map.CellMaps.viewAtSnapshot",
         "what": "the helper runs cell_map_add and house_map (2 × 2 m tiles), and returns the window, columns and tiles",
         "dto": "pc.cell_map.CellMapView",
-        "path": "pc/robot/src/maps/cell_map.ts", "code": "const view = kept ?? await this.upTo(boot, s.lastFrame, s.poseOf, m => m.view());" }
+        "path": "pc/robot/src/maps/cell_map.ts",
+        "code": "const view = kept ?? await this.upTo(boot, s.lastFrame, s.poseOf, m => m.view());"
+      }
     ]
   },
   {
@@ -291,29 +750,72 @@
     "name": "Robot's map on demand",
     "description": "When asked (robot map --robot), the robot sends its 6 × 6 m window in 9 bulk messages. Requests run one at a time. The PC waits for both the window and the command answer's live pose: the control answer may arrive before the bulk parts. The C helper classifies the columns; this does not use a snapshot or the PC's stored tiles.",
     "steps": [
-      { "at": "picoA.cell_map.cell_map_window", "bytes": 10804,
-        "path": "picoA/app/commands.c", "code": "const uint8_t *cells = cell_map_window(&ox, &oy);" },
-      { "change": "turn", "name": "encode part", "at": "picoA.wire.wire_encode_map_part",
-        "what": "1,200 cell bytes (1/9 of the window) and the window's origin into one map part message", "bytes": 1205,
-        "path": "picoA/app/commands.c", "code": "uint32_t len = wire_encode_map_part(part, (int16_t)ox, (int16_t)oy, cells + part * WIRE_MAP_PART_CELLS, message);" },
-      { "at": "picoA.link_pc.link_pc_send_bulk",
-        "path": "picoA/app/commands.c", "code": "if (!link_pc_send_bulk(message, len)) return false;" },
-      { "at": "pc.wire.WireReader.push",
-        "path": "pc/robot/src/link.ts", "code": "for (const raw of reader.push(chunk))" },
-      { "change": "turn", "name": "decode part", "at": "pc.wire.decode",
-        "what": "the bytes into one of the 9 map parts", "dto": "pc.wire.MapPart",
-        "path": "pc/robot/src/wire.ts", "code": "case TYPE.MAP_PART:" },
-      { "change": "turn", "name": "join 9 parts", "at": "pc.link.RobotLink",
-        "what": "the 9 parts in order into the 10,800 B window and its origin", "dto": "pc.link.MapWindow",
-        "path": "pc/robot/src/link.ts", "code": "this.emit(\"mapWindow\", { originX: mapOriginCx, originY: mapOriginCy, cellsX: 60, cellsY: 60, cells: Buffer.concat(mapParts) });" },
-      { "change": "add", "name": "live pose", "at": "api.runner.CommandRunner.askMap",
-        "what": "the map command's control answer (flow map-answer) supplies the live pose; return only when both answer and window have arrived", "bytes": 10816,
-        "path": "pc/robot/src/api/runner.ts", "code": "else if (d && w) finish({ window: w, pose: d.pose });" },
-      { "at": "api.queue.CommandQueue.askMap",
-        "path": "pc/robot/src/api/queue.ts", "code": "return this.runner.askMap ? this.runner.askMap() : Promise.resolve({ error: \"robot not connected\" });" },
-      { "change": "turn", "name": "columns", "at": "pc.cell_map.CellMaps.columnsOf",
-        "what": "the C helper's cell_map_column_of turns the 3 layers into 60 × 60 columns and confidence (--png)", "bytes": 7200,
-        "path": "pc/robot/src/maps/cell_map.ts", "code": "const b = await this.ask(\"K\", cells), colBytes = GRID * GRID;" }
+      {
+        "at": "picoA.cell_map.cell_map_window",
+        "bytes": 10804,
+        "path": "picoA/app/commands.c",
+        "code": "const uint8_t *cells = cell_map_window(&ox, &oy);"
+      },
+      {
+        "change": "turn",
+        "name": "encode part",
+        "at": "picoA.wire.wire_encode_map_part",
+        "what": "1,200 cell bytes (1/9 of the window) and the window's origin into one map part message",
+        "bytes": 1205,
+        "path": "picoA/app/commands.c",
+        "code": "uint32_t len = wire_encode_map_part(part, (int16_t)ox, (int16_t)oy, cells + part * WIRE_MAP_PART_CELLS, message);"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_send_bulk",
+        "path": "picoA/app/commands.c",
+        "code": "if (!link_pc_send_bulk(message, len)) return false;"
+      },
+      {
+        "at": "pc.wire.WireReader.push",
+        "path": "pc/robot/src/link.ts",
+        "code": "for (const raw of reader.push(chunk))"
+      },
+      {
+        "change": "turn",
+        "name": "decode part",
+        "at": "pc.wire.decode",
+        "what": "the bytes into one of the 9 map parts",
+        "dto": "pc.wire.MapPart",
+        "path": "pc/robot/src/wire.ts",
+        "code": "case TYPE.MAP_PART:"
+      },
+      {
+        "change": "turn",
+        "name": "join 9 parts",
+        "at": "pc.link.RobotLink",
+        "what": "the 9 parts in order into the 10,800 B window and its origin",
+        "dto": "pc.link.MapWindow",
+        "path": "pc/robot/src/link.ts",
+        "code": "this.emit(\"mapWindow\", { originX: mapOriginCx, originY: mapOriginCy, cellsX: 60, cellsY: 60, cells: Buffer.concat(mapParts) });"
+      },
+      {
+        "change": "add",
+        "name": "live pose",
+        "at": "api.runner.CommandRunner.askMap",
+        "what": "the map command's control answer (flow map-answer) supplies the live pose; return only when both answer and window have arrived",
+        "bytes": 10816,
+        "path": "pc/robot/src/api/runner.ts",
+        "code": "else if (d && w) finish({ window: w, pose: d.pose });"
+      },
+      {
+        "at": "api.queue.CommandQueue.askMap",
+        "path": "pc/robot/src/api/queue.ts",
+        "code": "return this.runner.askMap ? this.runner.askMap() : Promise.resolve({ error: \"robot not connected\" });"
+      },
+      {
+        "change": "turn",
+        "name": "columns",
+        "at": "pc.cell_map.CellMaps.columnsOf",
+        "what": "the C helper's cell_map_column_of turns the 3 layers into 60 × 60 columns and confidence (--png)",
+        "bytes": 7200,
+        "path": "pc/robot/src/maps/cell_map.ts",
+        "code": "const b = await this.ask(\"K\", cells), colBytes = GRID * GRID;"
+      }
     ]
   },
   {
@@ -322,9 +824,186 @@
     "description": "The map command's answer uses the same control-message path as other answers. Its command number selects the waiting request; its result and live pose join the bulk window in robot-map.",
     "parent": "answer",
     "steps": [
-      { "at": "pc.link.doneRecord" },
-      { "at": "api.runner.CommandRunner.askMap",
-        "path": "pc/robot/src/api/runner.ts", "code": "this.waiting.set(n, done => { d = done; check(); });" }
+      {
+        "at": "pc.link.doneRecord"
+      },
+      {
+        "at": "api.runner.CommandRunner.askMap",
+        "path": "pc/robot/src/api/runner.ts",
+        "code": "this.waiting.set(n, done => { d = done; check(); });"
+      }
+    ]
+  },
+  {
+    "id": "outline-map",
+    "name": "PC outline map",
+    "description": "The PC builds a boot's outline maps (one per height band), their walls and the corrected pose from the boot's stored ToF frames, snapshot by snapshot: each zone placed by the cell map's helper, turned into a wedge (sight), the pose checked against the walls on still frames.",
+    "steps": [
+      {
+        "at": "pc.store.Store.framesBetween",
+        "dto": "pc.store.StoredFrame",
+        "path": "pc/robot/src/maps/outline/index.ts",
+        "code": "for (const { frame } of await this.store.framesBetween(boot, t.last?.lastFrame ?? 0, s.lastFrame))"
+      },
+      {
+        "change": "turn",
+        "name": "rays",
+        "at": "pc.cell_map.CellMaps.rays",
+        "what": "each zone placed in the world by the robot's own geometry (tof_rays in the helper)",
+        "bytes": 2112,
+        "path": "pc/robot/src/maps/outline/index.ts",
+        "code": "await this.cellMaps.rays(boot, frame)"
+      },
+      {
+        "change": "turn",
+        "name": "sights",
+        "at": "pc.outline.sightsOf",
+        "what": "each zone as a flat wedge: free up to where it ended, its hit, its heights, how sure",
+        "dto": "pc.outline.Sight",
+        "path": "pc/robot/src/maps/outline/index.ts",
+        "code": "sightsOf(frame, await this.cellMaps.rays(boot, frame), t.zoneRad)"
+      },
+      {
+        "change": "turn",
+        "name": "map and check",
+        "at": "pc.outline.Mapper.add",
+        "what": "on still frames the pose checked against band above's walls (it learns the turn scale); the sights placed by the corrected pose into each band's squares and walls",
+        "path": "pc/robot/src/maps/outline/index.ts",
+        "code": "t.mapper.add(frame, sightsOf("
+      },
+      {
+        "change": "turn",
+        "name": "outlines",
+        "at": "pc.outline.OutlineMaps.at",
+        "what": "at each snapshot: each band's closed outline (wall, rough, guess edges) and the correction, kept for the page",
+        "dto": "pc.outline.BandOutline",
+        "path": "pc/robot/src/maps/outline/index.ts",
+        "code": "robot: s.pose && corrected(correction, s.pose), bands: t.mapper.outlines() };"
+      },
+      {
+        "at": "pc.outline.OutlineMaps.correction",
+        "dto": "pc.correction.Planar",
+        "path": "pc/robot/src/maps/outline/index.ts",
+        "code": "const correction = t.mapper.correction();"
+      }
+    ]
+  },
+  {
+    "id": "correction",
+    "name": "Correction to the robot",
+    "description": "The PC's correction (odometry to its corrected pose) sent to the robot as a command, only with robot config correct on (off by default), after each snap and before each move; the robot applies it to every pose from then on.",
+    "steps": [
+      {
+        "at": "pc.outline.OutlineMaps.correction",
+        "dto": "pc.correction.Planar"
+      },
+      {
+        "at": "api.corrections.Corrections.run",
+        "path": "pc/robot/src/api/corrections.ts",
+        "code": "[pc, robot] = await Promise.all([this.deps.outlines.correction(boot, n), this.robotHas(boot)]);"
+      },
+      {
+        "change": "turn",
+        "name": "correct text",
+        "at": "api.corrections.Corrections.run",
+        "what": "into the robot's words: correct x mm, y mm, yaw in 0.01°",
+        "dto": "pc.wire.RobotCommand",
+        "path": "pc/robot/src/api/corrections.ts",
+        "code": "const d = await this.inner.send(`correct ${x} ${y} ${yaw}`, CORRECT_MS);"
+      },
+      {
+        "at": "pc.link.RobotLink.sendCommand"
+      },
+      {
+        "change": "turn",
+        "name": "encode",
+        "at": "pc.wire.encodeCommand",
+        "what": "into the command message: number and text",
+        "bytes": 50,
+        "path": "pc/robot/src/link.ts",
+        "code": "const message = encodeCommand({ n, text });"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_received"
+      },
+      {
+        "change": "turn",
+        "name": "decode",
+        "at": "picoA.wire.wire_decode_command",
+        "what": "the bytes back into number and text",
+        "dto": "picoA.wire.wire_command_t",
+        "path": "picoA/app/link_pc.c",
+        "code": "got = !heartbeat && n > 0 && wire_decode_command(&m, c);"
+      },
+      {
+        "at": "picoA.commands.commands_update",
+        "path": "picoA/app/commands.c",
+        "code": "while (link_pc_received(&c)) {"
+      },
+      {
+        "change": "turn",
+        "name": "parse",
+        "at": "picoA.commands.commands_update",
+        "what": "mm and 0.01° into m and rad; refused (with its reason) while a move, a snapshot or bulk is busy",
+        "bytes": 12,
+        "path": "picoA/app/commands.c",
+        "code": "pose_correct((float)a / 1000, (float)b / 1000, (float)c / 100 * RAD_PER_DEG);"
+      },
+      {
+        "at": "picoA.pose.pose_correct"
+      },
+      {
+        "at": "picoA.body.body_correct",
+        "path": "picoA/app/pose.c",
+        "code": "body_correct(x_m, y_m, yaw_rad);"
+      }
+    ],
+    "parent": "outline-map"
+  },
+  {
+    "id": "corrected",
+    "name": "Corrected (the robot's reply)",
+    "parent": "correction",
+    "description": "The robot says which correction it applies from now on, before the command's answer: the PC stores it and files every later message by it (the store's readers give raw odometry back). main.ts also hands it to the correction sender (Corrections.heard), as the robot's correction.",
+    "steps": [
+      {
+        "at": "picoA.body.body_correct",
+        "path": "picoA/app/pose.c",
+        "code": "body_correct(x_m, y_m, yaw_rad);"
+      },
+      {
+        "at": "picoA.body.body_correction",
+        "path": "picoA/app/commands.c",
+        "code": "body_correction(&k.x_m, &k.y_m, &k.yaw_rad);"
+      },
+      {
+        "change": "turn",
+        "name": "encode",
+        "at": "picoA.wire.wire_encode_corrected",
+        "what": "the correction now applied: x, y, yaw",
+        "bytes": 12,
+        "path": "picoA/app/commands.c",
+        "code": "uint32_t len = wire_encode_corrected(&k, message);"
+      },
+      {
+        "at": "picoA.link_pc.link_pc_send_control",
+        "path": "picoA/app/commands.c",
+        "code": "link_pc_send_control(message, len);"
+      },
+      {
+        "change": "turn",
+        "name": "decode",
+        "at": "pc.wire.decode",
+        "what": "the bytes into x, y, yaw",
+        "dto": "pc.wire.Corrected",
+        "path": "pc/robot/src/wire.ts",
+        "code": "case TYPE.CORRECTED: need(CORRECTED_SIZE);"
+      },
+      {
+        "at": "pc.store.Store.corrected",
+        "path": "pc/robot/src/ingest.ts",
+        "code": "void store.corrected(b, b.corrected(c));"
+      }
     ]
   }
 ]

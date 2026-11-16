@@ -69,6 +69,16 @@
         "name": "body_drive",
         "kind": "function",
         "code": "void body_drive("
+      },
+      {
+        "name": "body_correct",
+        "kind": "function",
+        "code": "void body_correct("
+      },
+      {
+        "name": "body_correction",
+        "kind": "function",
+        "code": "void body_correction("
       }
     ]
   },
@@ -103,6 +113,11 @@
         "name": "pose_stamp",
         "kind": "function",
         "code": "void pose_stamp("
+      },
+      {
+        "name": "pose_correct",
+        "kind": "function",
+        "code": "void pose_correct("
       }
     ]
   },
@@ -539,6 +554,17 @@
         "name": "wire_type",
         "kind": "function",
         "code": "static inline uint8_t wire_type("
+      },
+      {
+        "name": "wire_corrected_t",
+        "kind": "type",
+        "code": "} wire_corrected_t;",
+        "bytes": 12
+      },
+      {
+        "name": "wire_encode_corrected",
+        "kind": "function",
+        "code": "uint32_t wire_encode_corrected("
       }
     ]
   },

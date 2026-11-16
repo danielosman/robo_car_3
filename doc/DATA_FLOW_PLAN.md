@@ -13,46 +13,33 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 
 ## 1. Where we are
 
-- **Built:** steps 1-7, including the PC's whole-house cell map, PicoA's
-  window-only, floor-first map, and the PC's line maps (step 7, PC only). Step 6 is
-  not flashed. History is in [CHANGELOG.md](CHANGELOG.md), the 10 and 11 Nov entries.
+- **Built:** steps 1-7 and the outline map (S-F), including the PC's whole-house cell
+  map, PicoA's window-only, floor-first map, and the PC's outline maps with the pose
+  correction. History is in [CHANGELOG.md](CHANGELOG.md).
 - **Current versions:** PicoA–PicoB link 7, robot–PC wire 8 (step F's "corrected"; the end "unseen_floor"; a refusal's reason as its end), snapshot 3. PicoB reads
   the IMU at 416 Hz; the PC receives and stores averaged records at 104 Hz.
   Odometry, `drive` and PicoA's layout stay as they are; the deferred 4e/4g redesigns
   are not part of the remaining work. Their design ideas have a separate home in
   [ARCHITECTURE_REFACTOR_PLAN.md](ARCHITECTURE_REFACTOR_PLAN.md), starting with
   PicoB's odometry acting as the IMU data distributor.
-- **Step 7, the line map:** built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)), but not
-  what Daniel wants: he wants one closed outline per band that is corrected over
-  time and used against pose drift.
-- **Next: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)**, agreed in general by Daniel
-  (11 Nov), being built (its table of steps says how far): a simulator first (its
-  step S), then the outline, the walls and the pose correction (A-D), the page
-  (E, the old step 8, done), then the correction sent to the robot (F, done, not
-  flashed). The line map's code is replaced by `maps/outline/`. A fresh
-  session starts at its "For the fresh session". Then 9 docs, the final flash,
-  the robot test.
-- **The robot now has** the firmware of commit `6583e88` (both Picos, flashed 10 Nov).
-  PicoA changes since then (step 5's `room.h`, step 6's map, snapshot v3 and wire v5)
-  are tested on the robot in step 9 (or flashed earlier if Daniel wants).
-- **Validation baseline:** the Step 6 code passed `./run_tests.sh`, `tools/lint.sh`,
-  `cmake --build build`, and the PC tests and typecheck. Re-run these after code
-  changes; this is not a robot-test result. `npm test` and the server build the
-  cell map helper themselves (`cc`, into `build/host/cell_map_helper`).
-- **Git baseline:** on `main`; Step 6 code, diagram and handoff docs belong to the
-  Step 6 implementation commit, after planning commit `17b3983` and Step 5's
-  `553d0dc`. Start with `git status` and `git log`; preserve any local work.
-  Review Step 7 against this implementation baseline, not the old planning commit.
+- **The PC's maps:** the cell map and the outline maps with the pose correction,
+  [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md) (a fresh session on them starts at its
+  "For the fresh session"). The line map ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)) is
+  gone; the outline maps took its place.
+- **The robot now has:** PicoA with wire 7, PicoB of commit `6583e88`. Wire 8
+  (refusals say why, a goto at most 3 m from the robot) is not flashed: the server
+  refuses wire 7. PicoB has not changed since it was flashed.
+- **Checks after code changes:** `./run_tests.sh`, `tools/lint.sh`, `cmake --build
+  build`, and in `pc/robot` `npm test` and `npm run typecheck` (they build the cell
+  map helper themselves, `cc`, into `build/host/cell_map_helper`). They are not a
+  robot test.
+- **Git:** on `main`. Start with `git status` and `git log`; preserve any local work.
   Commit and push only when Daniel says. No `Co-Authored-By` lines.
-- **Docs behind the code:** ARCHITECTURE, README and TODO don't show 4d-6 (the
-  README's robot tests still speak of `##` maps, link version 6, wire version 3;
-  nothing on the PC's cell map, `room.h`, or floor first). Where they disagree with this plan, this
-  plan and the code are right. They are brought up to date once, in step 9. The
-  CHANGELOG is up to date (history goes there, not here).
-- **Architecture diagram:** current through Step 6, independently reviewed:
-  37 modules, 13 flows, 438 checked references (the line map has no flow yet). It shows window/tile
-  ownership, floor rules, map-free snapshots, and the bulk-window/control-answer
-  pose join. `npm run resolve` and `npm run typecheck` pass in
+- **Docs:** ARCHITECTURE, README, TODO and the diagram are up to date with the code.
+  The CHANGELOG has the history (not this plan).
+- **Architecture diagram:** 39 modules, 16 flows, 474 checked references. It shows
+  window/tile ownership, floor rules, map-free snapshots, the bulk-window/control-answer
+  pose join, the outline map and the correction to the robot and back. `npm run resolve` and `npm run typecheck` pass in
   `architecture-diagram/`. Its separate UI follow-up is in its README, "Next".
 
 ## 2. How to continue
@@ -92,8 +79,6 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
     `robot frames <boot> <move>`, `robot imu <boot> <move>`;
   - to look round, turn in 30° steps (12 × `r30`), not one 390° turn: a camera picture
     every 30°, to plan and to check.
-- **Step 7 is built:** [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md) says how it works and
-  what is left.
 - **Otherwise commit only when Daniel says** (README).
 - Long test runs: cap them with a time limit, and never read large generated data
   into the agent's context.
@@ -119,7 +104,9 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
 **The IMU**
 - **Raw IMU at 104 Hz is sent and stored** during moves, as training data for a
   later model (inputs: IMU windows; answer: the pose change from the 10 Hz poses).
-  No wheel counts. PicoB's 416 Hz is not sent.
+  That is all the model needs: **no wheel counts and no faster odometry** (50 Hz) are
+  sent or stored for it (Daniel, 7 Nov, confirmed 16 Nov: don't propose them again).
+  PicoB's 416 Hz is not sent.
 - **No peaks** (jolt, tilt): nothing used them. PicoB's tilt stop reads pitch and
   roll and stays. Bump reactions later via the IMU's interrupts, not in this plan.
 - The PC gets processed data only when it is smaller than the raw data and the robot
@@ -146,17 +133,19 @@ Contents: 1 Where we are · 2 How to continue · 3 Decisions · 4 The picture ·
   not the earlier proposed 35 cm floor-check reach.
 - **One column rule:** `cell_map_column_of()` in C classifies columns for both
   robot and PC (helper commands `V` and `K`); do not add a TypeScript copy.
-- **The PC builds two maps**, in the odometry frame from power-up: the **cell map**
-  (the robot's C code in a helper program, whole house; also the free-floor map)
-  and the **line maps** (TypeScript, one per height band,
-  [LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). They share only the helper's zone
-  geometry. The page switches between them (step 8).
+- **The PC builds two maps**, from the stored frames in raw odometry, placed by its
+  corrected pose: the **cell map** (the robot's C code in a helper program, whole
+  house; also the free-floor map) and the **outline maps** (TypeScript, one per
+  height band, with walls and the pose correction,
+  [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)). They
+  share only the helper's zone geometry. The page shows either or both.
 - **`clear_map`** clears only the robot's 6 × 6 m map (and re-seeds the floor around
   it). The PC's maps are not touched; the robot sends "map cleared" for the log.
 - **Reads:** `robot map [n]` returns the PC's map at a snapshot; `--png` draws its
-  tiles and window together, with the path; `--png --lines` draws the line maps
+  tiles and window together, with the path; `--png --lines` draws the outline maps
   over it, `--png --lines --no-cells` the lines alone. `robot check` uses the newest
-  snapshot's cell map and pose, with the shared `room.h` stop rule.
+  snapshot's cell map and pose, with the shared `room.h` stop rule. `robot walls [n]`
+  lists the outline maps' walls.
   `robot map --robot [--png]` asks for the robot's live window and pose, without
   PC tiles. A snapshot number with `--robot` is an error. The live window covers
   every tile pixel beneath it, even where its cells are unknown.
@@ -172,7 +161,7 @@ VL53 ─► tof ─(tof_frame)─► pose_stamp ─(posed_frame)─► tof_forma
                                 ▲                      pack/unpack  ├─(watch use)─► watch
                         pose ───┘ pose_at(t)                       └─(bytes, during a move)─► link_pc ══TCP══► link ─► wire ─(posed_frame)─┬─► store
                                                                                                                                       ├─► cell_map (helper, read from the store)
-                                                                                                                                      └─► line_map (read from the store; zones placed by the helper)
+                                                                                                                                      └─► outline maps (read from the store; zones placed by the helper)
 ```
 
 **IMU and odometry** (PicoB → PicoA → PC)
@@ -212,9 +201,9 @@ Each name once; the same word in C (`snake_case_t`) and TS (`CamelCase`).
 | **pose** | x, y, yaw (wrapped ±180°), pitch, still, at a moment | `pose` (`pose_at`) | `pose_stamp`, `move` |
 | **posed_frame** | a tof_frame, the pose it was measured at, the turn during it | `pose_stamp()` in `pose.c` | `tof_format` |
 | **use** | what a frame is packed for: map, watch, snapshot | — | `tof_format` |
-| **rays** | a zone's rays in the world; its point, height span and **verdict** (floor / obstacle / unsure) | `tof_rays` | `cell_map`; on the PC also `line_map` (through the helper) |
+| **rays** | a zone's rays in the world; its point, height span and **verdict** (floor / obstacle / unsure) | `tof_rays` | `cell_map`; on the PC also the outline maps (through the helper) |
 | **cell_map** | 10 cm cells in layers G (ground), L1 (3-13 cm), L2 (13-23 cm) | `cell_map` | `move`, the page |
-| **line_map** | straight lines in bands L1, L2, above (over 23 cm), one map a band | `maps/line_map` (PC) | `robot map --png --lines`; the page (step 8) |
+| **outline** | the closed border of the floor seen free, one per band L1, L2, above (over 23 cm), with walls | `maps/outline` (PC) | `robot map --png --lines`, `robot walls`; the page |
 | **imu_sample** | one IMU reading, 416 Hz, float and raw counts, sensor frame | PicoB `imu` | `odometry` |
 | **wheel_counts** | the four encoder counts | PicoB `encoder` | `odometry` |
 | **odometry_report** | pose (x, y, yaw, pitch, roll), speeds, still, motors on, stop reason (37 B) | PicoB `odometry` | PicoA `body` → `pose` |
@@ -324,7 +313,7 @@ What each hides, and its interface. All built.
 | `wire` | the envelope and payloads (ToF bytes from `tof_format`) | pure encode / decode |
 | `link_pc` | WiFi, finding the server, TCP, the two lanes, drop counts | `link_pc_send_control()`, `link_pc_send_bulk()` (true or false), `link_pc_connection()`, `link_pc_received()` |
 | `snapshot` | its layout (camera, colour, features, compact tof frame; version 3) | `snapshot_request()`; parts to bulk |
-| `commands` | the command words | answers each ended move; `map`, `clear_map`, `config pre_ms|post_ms`; `commands_status()` |
+| `commands` | the command words | answers each ended move; `map`, `clear_map`, `config pre_ms|post_ms`, `correct`; each refusal's reason; `commands_status()` |
 
 `main.c` shows the pipelines: poll → stamp → pack/unpack per use → map, watch, move;
 `imu_pipeline()` hands records from `body` to `move`.
@@ -343,8 +332,9 @@ What each hides, and its interface. All built.
 | `fakerobot.ts` | a robot on the wire; replays a stored boot | |
 | `objects/place.ts` | camera placement | takes the boot's camera geometry |
 | `maps/cell_map.ts` + `native/cell_map_helper.c` | the helper program (robot `cell_map.c`, `tof_rays.c`, `house_map.c`, `tof_format.c`, `room.c`, built with cc once per server run), one per boot; built from the boot's stored frames when read; the last 16 maps read kept | `atSnapshot(boot, n, (m, pose) => ...)`: `drive` (room.h's rule), `obstacleWithin`, `view`; `viewAtSnapshot(boot, n)`; `rays(boot, frame)`; `columnsOf(cells)` |
-| `maps/line_map/` | lines per height band: zones as wedges, hits kept in 5 cm spots, see-through, straight lines through the spots when read (LINE_MAP_PLAN.md); built from the boot's stored frames on every read | `lineMapsAt(store, cellMaps, boot, n)` → each band's lines |
-| `api/map.ts`, `api/check.ts` | the map as a PNG (whole building, or the robot's window; the line maps over it or alone); check: a goto's turn and limit (`behaviour.h`'s numbers), a turn's warning; where a drive stops is the helper's (`room.h`) | |
+| `maps/outline/` | one outline per height band, its walls, the pose correction (OUTLINE_MAP_PLAN.md); one mapper per boot fed each snapshot's frames | `OutlineMaps`: `at(boot, n)`, `correction(boot, n)`, `walls(boot, n)` |
+| `api/map.ts`, `api/check.ts` | the map as a PNG (whole building, or the robot's window; the outlines over it or alone); check: a goto's turn and its 3 m limit (`commands.h`), a turn's warning; where a drive stops is the helper's (`room.h`) | |
+| `api/corrections.ts` | the PC's correction sent to the robot (off by default), goto points turned into the robot's frame | a runner round `CommandRunner` |
 
 ## 9. Budgets
 
@@ -369,9 +359,8 @@ Snapshots on top: ~20 KB each, one after each move. UART PicoB → PicoA: ~4.5 K
 
 ## 11. Steps left
 
-**7. The line map** (PC) — built ([LINE_MAP_PLAN.md](LINE_MAP_PLAN.md)). Daniel wants
-a closed outline and drift correction instead: [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)
-(agreed in general; its steps S, A-F; E, done, was step 8).
+**7. The PC's outline maps** (PC): replaced by [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md)
+(its steps S, A-F, built; what is left is there).
 
 Real-data limits to keep in mind:
 - Floor rows 8 / 7 / 6 meet the floor at about 27 / 37 / 60 cm with the 9 cm mount.
@@ -381,12 +370,10 @@ Real-data limits to keep in mind:
   often have unsure readings around 31-37 cm; do not assume every close point is
   a real obstacle. Odometry drifts; a commanded 30° turn is about 31°.
 
-**8. The map switch** (PC) — done as OUTLINE_MAP_PLAN.md step E: cell map and outline
-map on the page, two toggles that can both be on.
+**8. The map switch** (PC): OUTLINE_MAP_PLAN.md step E.
 
-**9. The flash and the robot test** (both Picos): docs final; the README list of robot
-tests for steps 1-6 checked; both Picos flashed once (`build/picoA/picoA_app.uf2`,
-`build/picoB/picoB_app.uf2`) with the new server. Daniel flashes and powers on;
+**9. The flash and the robot test** (PicoA): the docs and the README's robot tests are
+ready; left: PicoA flashed (`build/picoA/picoA_app.uf2`) with the new server. Daniel flashes and powers on;
 then the agent runs the tests via `./robot` (section 2).
 - Check window scrolling out and back; approaching a drop while held securely;
   `robot map --robot` against the PC's whole-building `robot map --png`.
@@ -400,7 +387,7 @@ then the agent runs the tests via `./robot` (section 2).
 - The page shows any snapshot's compact tof frame.
 - `fakerobot` replays a stored boot to a test server (README).
 - The PC's cell map rebuilds any boot's map at any snapshot from the store (`robot map
-  <n>`, the page's timeline); `robot map <n> --png --lines` draws the line maps too; `robot map --robot` asks the connected robot (or
+  <n>`, the page's timeline); `robot map <n> --png --lines` draws the outline maps too; `robot map --robot` asks the connected robot (or
   `fakerobot`) for its window right now.
 - Measure the robot's map code on stored data: a script with `CellMaps` (as in
   `maps/cell_map.test.ts`) on `recordings/robot2.duckdb`, boot `cc0e4e65`.
@@ -425,7 +412,7 @@ then the agent runs the tests via `./robot` (section 2).
 ## 14. Open questions for Daniel
 
 1. **Camera:** f 188 and tilt 0° are not measured since the lift (calibrate later).
-2. **Outline map:** [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md), "Open for Daniel": a
-   real drive, once its step C has passed in the simulator.
-3. **Step 6 robot validation** is still due in Step 9. Passing host tests and reviews
-   does not establish that floor-first driving is safe on the real floor.
+2. **Outline map:** [OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md), "Open for Daniel": the
+   data drives with measured truth.
+3. **Step 9's robot part** is still due: flash wire 8, then the README's robot tests
+   (the drop and hole tests not done yet).

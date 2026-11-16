@@ -277,6 +277,17 @@
         "name": "encodeHeartbeat",
         "kind": "function",
         "code": "const encodeHeartbeat ="
+      },
+      {
+        "name": "Corrected",
+        "kind": "type",
+        "code": "export interface Corrected",
+        "bytes": 12
+      },
+      {
+        "name": "encodeCorrected",
+        "kind": "function",
+        "code": "export function encodeCorrected("
       }
     ]
   },
@@ -572,6 +583,16 @@
         "name": "ImuCount",
         "kind": "type",
         "code": "interface ImuCount"
+      },
+      {
+        "name": "Store.corrected",
+        "kind": "function",
+        "code": "corrected(boot: Boot, row: CorrectedRow)"
+      },
+      {
+        "name": "Store.corrections",
+        "kind": "function",
+        "code": "async corrections(boot: string)"
       }
     ]
   },
@@ -673,18 +694,78 @@
     "name": "outline",
     "origin": "pc",
     "path": "pc/robot/src/maps/outline/index.ts",
-    "summary": "The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines and walls at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read: the closed border of the floor seen free, an island round each thing in it, and the walls remembered with how sure they are, the pose checked against them; robot walls also writes the tables walls, wall_sightings and frame_poses. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), mapper.ts (the object on top: per band a map and its walls; places each frame by the corrected pose), outline_map.ts (one band's 5 cm squares: seen free, hits, see-through), border.ts (the loops round the free squares), shape.ts (the loops as wall, rough and guess edges), walls.ts (the walls, their ends and corners, moved by each frame's hits on them), pose_check.ts (the pose and the walls of band \"above\" in one Kalman filter: each frame's pose corrected against the walls), kalman.ts (the Kalman step), pose.ts (how fast the pose's doubt grows), colours.ts (how the edges are drawn).",
+    "summary": "The PC's outline maps (doc/OUTLINE_MAP_PLAN.md): a boot's outlines and walls at a snapshot, one map per height band (L1, L2, above), built from the boot's stored frames when read: the closed border of the floor seen free, an island round each thing in it, and the walls remembered with how sure they are, the pose checked against them; robot walls also writes the tables walls, wall_sightings and frame_poses. In its folder: sights.ts (a frame's zones as flat wedges, from the cell map helper's rays), mapper.ts (the object on top: per band a map and its walls; places each frame by the corrected pose), outline_map.ts (one band's 5 cm squares: seen free, hits, see-through), border.ts (the loops round the free squares), shape.ts (the loops as wall, rough and guess edges), walls.ts (the walls, their ends and corners, moved by each frame's hits on them), pose_check.ts (the pose, the gyro's turn scale and the walls of band \"above\" in one Kalman filter: each still frame's pose corrected against the walls), kalman.ts (the Kalman step), pose.ts (how fast the pose's doubt grows), colours.ts (how the edges are drawn).",
     "members": [
       {
         "name": "BandOutline",
         "kind": "type",
         "path": "pc/robot/src/maps/outline/mapper.ts",
-        "code": "export interface BandOutline"
+        "code": "export interface BandOutline",
+        "bytes": 4000
       },
       {
         "name": "OutlineMaps",
         "kind": "type",
         "code": "export class OutlineMaps implements Placement"
+      },
+      {
+        "name": "sightsOf",
+        "kind": "function",
+        "path": "pc/robot/src/maps/outline/sights.ts",
+        "code": "export function sightsOf("
+      },
+      {
+        "name": "Sight",
+        "kind": "type",
+        "path": "pc/robot/src/maps/outline/sights.ts",
+        "code": "export interface Sight {",
+        "bytes": 120
+      },
+      {
+        "name": "Mapper.add",
+        "kind": "function",
+        "path": "pc/robot/src/maps/outline/mapper.ts",
+        "code": "add(frame: { number: number; still?: boolean } & Pose, sights: Sight[]): void {"
+      },
+      {
+        "name": "OutlineMaps.at",
+        "kind": "function",
+        "code": "async at(boot: string, sequence: number)"
+      },
+      {
+        "name": "OutlineMaps.correction",
+        "kind": "function",
+        "code": "async correction(boot: string, sequence: number)"
+      }
+    ]
+  },
+  {
+    "id": "pc.correction",
+    "name": "correction",
+    "origin": "pc",
+    "path": "pc/robot/src/correction.ts",
+    "summary": "A correction of the pose (a shift and a turn): applied and taken off; the store's readers give poses back as raw odometry by it (rawOf). Its C twin is picoA/app/correction.h.",
+    "members": [
+      {
+        "name": "Planar",
+        "kind": "type",
+        "code": "export interface Planar",
+        "bytes": 24
+      },
+      {
+        "name": "corrected",
+        "kind": "function",
+        "code": "export function corrected<"
+      },
+      {
+        "name": "uncorrected",
+        "kind": "function",
+        "code": "export function uncorrected<"
+      },
+      {
+        "name": "rawOf",
+        "kind": "function",
+        "code": "export function rawOf<"
       }
     ]
   }

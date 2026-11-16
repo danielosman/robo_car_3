@@ -1,6 +1,6 @@
 # RoboCar — what is left to do
 
-Open work only (14 Oct 2026). What is built is in [ARCHITECTURE.md](ARCHITECTURE.md);
+Open work only (brought up to date 16 Nov 2026). What is built is in [ARCHITECTURE.md](ARCHITECTURE.md);
 the old plans with the details are in [archive/](archive/). An idea needs Daniel's
 yes before it is built. When something is done, it leaves this file and goes into
 the [CHANGELOG](CHANGELOG.md).
@@ -13,68 +13,45 @@ so the count shows what to build first.
 
 ## Next
 
-The order agreed on 12 Oct was built the same day (host tests, the fake robot and
-a replayed drive; [CHANGELOG](CHANGELOG.md)). What is left of it is the robot:
+As of 16 Nov 2026:
 
-1. **Robot tests** of the new work, in the README's order: "Snapshots and the
-   viewer", "Manual mode, go to a point", "The map follows the robot", "Thin legs
-   on the map", "A slow link", "Camera features" (its frames/s and ms per frame decide whether
-   V3, core 1, comes soon). Until they pass, these stay here:
-   - Snapshots and the viewer (with the colour sensor now read by the app)
-   - Modes idle and manual (the start of Mode switching)
-   - Map follows the robot, and the whole-house map
-   - Drive to a point (go to, click on the map)
-   - Camera features V1 (on core 0, every 3rd frame)
-   - Thin legs on the map (13 Oct: detections marked whole, passes can't erase
-     them in the same frame, the second target). Two drives the same evening
-     (boots 31bcd26e, 5b0d72ab): small obstacles and legs found, the ground solid
-     after the floor fix. Left of the README test: steps 1-2 (`f` at a single leg,
-     on and off the middle line) and step 4 (the chair taken away).
-   - A slow link (13 Oct: the server closes only after 30 s, snapshots paced).
-     Drive 5b0d72ab had no drops and no "nothing from the robot" notes; the
-     weak-signal spot (step 2) and PicoA switched off (step 3) not tried yet.
-2. Then Daniel picks the next task from the list below.
+1. **Flash PicoA** (wire 8: refusals say why, a goto at most 3 m from the
+   robot; PicoB unchanged since it was flashed on 10 Nov), then the README's
+   "Robot tests after the data-flow rework", in order, through to "The outline map
+   and the correction". The agent runs them; Daniel runs the server and measures.
+2. **Measured drives for the pose correction**
+   ([OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md), "Options: more data, then the
+   algorithm"): rooms and drives Daniel picks, the end pose measured, scored with
+   `npm run score`. Next lead there: drive 2 of 15 Nov learns its turn scale wrong.
+   The correction stays off on the robot (Daniel, 16 Nov).
+3. **Older robot tests not run in full yet** (README order): "Snapshots and the
+   viewer", "Go to a point", "The map follows the robot", "Thin legs on the map"
+   steps 1-2 and 4, "A slow link" steps 2-3, "Camera features" (its frames/s and ms
+   per frame decide whether V3, core 1, comes soon).
+4. Then Daniel picks the next task from the list below.
 
-**Data-flow rework ([DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)), 7 Nov:** step 1 built
-(both Picos; the mounting in `common/mounting.json`, the PCB 2 cm higher: the ToF at 9 cm, the
-camera at 10.8 cm); host tests only. Its robot test is in the README's "Robot tests
-after the data-flow rework", run once after the last step. Open from it: calibrate
-the camera again (tilt taken as 0° since it was knocked; f 188 not checked since the
-lift); measure where rows 6-8 see the floor at 9 cm. Known: a table whose underside
-is ~13-15 cm up (6 cm or less above the ToF; 16 cm is still an overhang) shows
-blocked, not overhang, seen from ~0.6 m (`test_cell_map`); drive stops the same.
-Step 2 built (PicoA; the ToF at 10 Hz, a setting; watching's frame counts are
-times); host tests only, its robot test with step 1's. Step 3 built (PicoA; the
-ToF pipeline: `tof`, the stamp, `tof_format`, `tof_rays`; one target per zone; the
-map and `watch` read frames packed and unpacked; `rangefinder` and `surroundings`
-gone, movement detection renamed `watch`); host tests only, its robot test with
-the others. Known since step 3: watch doesn't see movement beyond ~2.54 m (its format's limit;
-accepted, it may get its own format). Step 4a built (PicoA, PC; framed messages: `wire`
-on both sides, `link_pc` with the control and bulk lanes, `link.ts`; hello with the
-wire version; the snapshot in parts on bulk; the status is `link_pc`'s); host
-tests only, its robot test with the others. Step 4b built (PicoA, PC; moves with
-still times, ToF frames over bulk during moves, the new DuckDB file, `boot.ts`,
-`robot frames`, the fake robot's replay; the recorder and its tools gone); host
-tests only, its robot test with the others. Step 4c built (both Picos, PC; the IMU:
-raw imu records at 104 a second sent and stored during moves, `robot imu`; the jolt
-and tilt peaks gone); host tests only, its robot test with the others. Open from 4c:
-- A model or tool that uses the imu records (the training data): what to learn
-  from them, and whether the PC turns them into the robot's axes once at storing.
-- Bump reactions from the IMU's own interrupts (the plan's "later", not this rework).
+**Open from the data-flow rework ([DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md)):**
+- Calibrate the camera again (tilt taken as 0° since it was knocked; f 188 not
+  checked since the lift); measure where rows 6-8 see the floor at 9 cm.
+- A table whose underside is ~13-15 cm up shows blocked, not overhang, seen from
+  ~0.6 m (`test_cell_map`); drive stops the same.
+- Watch doesn't see movement beyond ~2.54 m (its format's limit; accepted, it may
+  get its own format).
+- **A model trained on the imu records** (the training data is stored: the IMU raw,
+  104 a second, during moves, and the pose in every ToF frame, 10 a second; inputs:
+  IMU windows; answer: the pose change). Left: what to learn, and whether the PC turns
+  the records into the robot's axes once at storing. Not needed (Daniel, 7 and 16
+  Nov): wheel counts, odometry faster than 10 Hz.
+- Bump reactions from the IMU's own interrupts.
 - An imu record lost on the UART or in PicoB's queue shows only as a gap between
-  batches (their times); count it on PicoA if gaps show up in the data.
-Open from 4b:
-- A viewer for the stored frames (the 3D take viewer went with the recordings): a
-  move's or a boot's frames as points (by row, signal, kind, height), the path, on a
-  time slider; later the PC's cell map beside it.
-- A frame sent but lost with its connection (the bulk lane emptied) counts as sent on
-  the robot; the PC sees fewer frames than the move end says. Fine for now; count
-  them if it happens.
-- The store opens DuckDB for each write (~10 a second while moving, batched): check
-  the server's CPU and the write time on a long watch; keep one connection open if
-  it is slow.
-- `tof_rays_set_floor_margin()` was for the replay tools; keep for the PC helper
-  (step 5) or remove.
+  batches; count it on PicoA if gaps show up in the data.
+- A viewer for the stored frames: a move's or a boot's frames as points (by row,
+  signal, kind, height), the path, on a time slider.
+- A frame sent but lost with its connection counts as sent on the robot; count them
+  if it happens.
+- The store opens DuckDB for each write (~10 a second while moving): check the
+  server's CPU and write time on a long watch.
+- `tof_rays_set_floor_margin()` is used only by a host test: keep or remove.
 
 **18 Oct:** `robot detect` uses `gemma-4-31b` (`.env`), the best local model tried (Opus 5.5
 through `detect_save` was better, not local)
@@ -329,17 +306,11 @@ Once the BT_SNS wire is fitted, stop below 6.4 V and switch the motors off below
 
 ### Drift correction (2)
 
-Correct drift in heading and position over minutes. There are two sources: the
-ToF against the map ([archive/ROBOT_PLAN.md](archive/ROBOT_PLAN.md) §5.5), and the
-camera features against the ones the server saw near the same pose before (see
-"Features on the server"). It could later become a Kalman filter (x, y, heading)
-inside `pose`, tuned from logs. First measure the drift:
-- From snapshots: compare two windows from different times where they overlap; the
-  shift that lines up the same wall best is the drift between them. This needs no
-  full telemetry.
-- In the whole 11 Oct drive (boot 54564d43; old data: `git checkout data-v1`, its 3D viewer): how far odometry drifted
-  between the first and the last scan (a wall seen twice), and which cells are
-  false.
+Built on the PC from the ToF: the outline maps' walls correct the pose with a Kalman
+filter that also learns the gyro's turn scale ([OUTLINE_MAP_PLAN.md](OUTLINE_MAP_PLAN.md));
+it can be sent to the robot but is off (Daniel, 16 Nov). Left: measured drives to
+judge it, graph SLAM if it isn't enough (the plan's "Alternatives for later"), and
+the camera features as a second source (see "Features on the server").
 
 ### Features on the server (2)
 
@@ -351,12 +322,14 @@ correction. Without WiFi, the robot corrects by the ToF and the map only.
 
 ### Full-turn heading check (2)
 
-Correct the heading using the overlap of the 390° scan; the gyro reads ~1.5° low per
-full turn ([archive/ROBOT_PLAN.md](archive/ROBOT_PLAN.md) §4.6).
+Correct the heading using the overlap of a look round; the gyro reads ~1.3 % low
+(15 Nov drives). The PC's pose check now learns this scale from the walls (Drift
+correction); a check on the robot itself is still open
+([archive/ROBOT_PLAN.md](archive/ROBOT_PLAN.md) §4.6).
 
 ### Path planning (2)
 
-Find a path around obstacles (A* on the whole-house map) and drive it as a series of
+Find a path around obstacles (A* on the PC's whole-house map) and drive it as a series of
 "drive to a point" steps.
 
 ### Places catalogue (2)
@@ -489,10 +462,8 @@ speed, so that a blip causes only a small twitch. (Not answered.)
   (the server closes only after 30 s), not gone.
 - The robot's uplink loses packets in places (13 Oct near (166, 61) cm: 11 KB
   unacknowledged for ~2 s, the congestion window halved, the server's `\0` still
-  arriving). Watch the "nothing from the robot" notes and `p` there; a recording
-  (`R`) of such a stretch has the TCP state every 0.5 s.
-- RAM free is ~103 KB (12 Oct) after the snapshot buffer, vision and the
-  whole-house map: watch it with V3's stacks and ring.
+  arriving). Watch the "nothing from the robot" notes and `robot report` there.
+- RAM free is ~87 KB (after step 6): watch it with V3's stacks and ring.
 - `p` right after a power-up, to confirm the link's "lost" messages come from the
   start-up.
 - M1 tests not yet done: the encoder distance backwards and the carpet (README

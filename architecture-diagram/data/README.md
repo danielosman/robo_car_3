@@ -237,7 +237,7 @@ Found so far:
 - By hand or by an agent reading the code, then `npm run resolve` until it is clean.
 - **First:** only the modules the first flows pass through, each with all its
   members; then those flows. The other modules after Daniel's first look. Done
-  8 Nov (updated through step 6): 37 modules (1 planned), 13 flows.
+  8 Nov; now 39 modules, 16 flows.
 - **First flows** (done, with `wheel-counts` for odometry's add and `tof-map`,
   `tof-watch` branching off `tof-frame`): `odometry` and `tilt-stop` (above, with the
   part on PicoA); the
@@ -245,7 +245,8 @@ Found so far:
   `move` → imu batch → the store); a ToF frame to the map, watch and the PC; a
   command from the viewer to a move and its answer; a drive checked against the map
   (`drive-check`), the PC's cell map (`pc-cell-map`), and the robot's map on demand
-  (`robot-map`, with `map-answer` supplying its live pose).
-- **Planned parts** (DATA_FLOW_PLAN.md sections 4 and 8): none now. The outline map
-  (`maps/outline/`, OUTLINE_MAP_PLAN.md) is being built; it has no flow of its own yet.
+  (`robot-map`, with `map-answer` supplying its live pose); the PC's outline maps
+  (`outline-map`), the correction sent to the robot (`correction`, branching off
+  it) and the robot's reply (`corrected`).
+- **Planned parts** (DATA_FLOW_PLAN.md sections 4 and 8): none now.
 - **After a code change:** `tools/lint.sh` runs the check; fix what it reports.
