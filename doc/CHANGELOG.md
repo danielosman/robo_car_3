@@ -5,6 +5,41 @@ dropped, and how things were fixed. Only history: how things are now is in
 [ARCHITECTURE.md](ARCHITECTURE.md), what is left in [TODO.md](TODO.md). Links in
 older entries point to the plans of their day, now in [archive/](archive/).
 
+## 16 Nov 2026: the PC's correction beats odometry on the two measured drives (replayed)
+
+- Scored by a replay script (outside the repo): the two drives of 15 Nov against
+  Daniel's truth (three points), and the simulator's scenarios at turn drifts of 3, 1
+  and 0.3 %, 3 seeds. Sum of cm and degrees off, real drives: odometry 17.5, as built
+  38.6, now 13.3. Simulator: as built 60 / 49 / 45, now 36 / 21 / 22 (odometry 185 /
+  66 / 26).
+- Kept: (1) the turn scale learnt in the filter's state (2 % unsure at the start), the
+  rest of odometry's error random; (2) only still frames check the pose, the still
+  frames of one stand counted as one. Each alone: (2) without (1) 24.7 on the real
+  drives; (1) without (2) 75.8 (drive 1's one wall, from far hits on two surfaces,
+  taught a 5.6 % scale while turning; drive 1 ended 35° off).
+- Tried, dropped: a new wall's direction doubt from its hits, and a frame's hits
+  counting less when they fit their line badly (no change on the real drives, mixed
+  in the simulator); checking also on frames driving straight (real drives 28.5); a
+  turn scale 3 % unsure at the start (a first look round with noise and no drift
+  slid 8.7°; with 2 %, 4°).
+- Daniel decided: the correction stays off (the robot's own recent map is enough
+  against obstacles); a wall corrects what it can, no waiting for two walls.
+- Tried on 15 Nov on the first drive's replay, none kept (moved here from the plan; end
+  against the truth, odometry 2 cm, 3°):
+
+  | Change | Heading after the look round (truth 18°) | End |
+  |---|---|---|
+  | none (as built then) | 23.4° | 15 cm, 3.8° off |
+  | a new wall's doubt from its hits, and one measurement a stand | 22.3° | 16 cm, 25° off |
+  | the same, and the pose's turn doubt 1 % (not 3.5 %) | 15.6° | 10 cm, 1.7° off |
+  | only the turn doubt 1 % | 15.8° | 9 cm, 2.9° off |
+- Review fixes: a stand's frames weighted after the gate (it asks each frame alone);
+  the learnt scale forgotten a little with each turn; the lengthen-only rule moved into
+  `Walls.measure`; a test that the scale is learnt either way (turns 3 % larger, 2 %
+  smaller); `mapper.turnScale()`. The scoring script went into the repo
+  (`npm run score`). Learnt on the real drives: 0.78 % (drive 1), −0.24 % (drive 2,
+  where the truth says about +1.3 %).
+
 ## 16 Nov 2026: a goto's point at most 3 m from the robot (Daniel)
 
 - A goto farther than 3 m from the robot is refused (it used to drive 3 m towards it,

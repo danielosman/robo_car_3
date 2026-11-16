@@ -1,8 +1,9 @@
 // The robot's pose and how sure it is (doc/OUTLINE_MAP_PLAN.md, idea 3). Odometry drifts,
-// so the pose gets less sure with every turn and every centimetre driven. The doubt is a
-// spread that adds up (the drift is mostly a steady 3 % of each turn, not random), as one
-// spread for the position and one for the heading. Step C makes it surer again at each
-// check against the walls.
+// so the pose gets less sure with every turn and every centimetre driven. Here the simple
+// model: a spread that adds up (as if every turn were 3.5 % off, never learnt), one for the
+// position and one for the heading. Used without the pose check, and for how long the pose
+// stays well fixed (mapper.ts, fixedWithout). The pose check has its own model: the turn
+// scale learnt, the rest random (pose_check.ts).
 //   NO_DOUBT                      at the start: the map's frame is the start pose
 //   growth(from, to)              how much the doubt grows from one pose to the next
 //   grown(doubt, from, to)        the doubt after odometry moved from one pose to the next

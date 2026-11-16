@@ -11,6 +11,7 @@
 //   mapper.poses()              every frame's pose: odometry's, corrected, how sure
 //   mapper.removed()            the walls taken as gone (seen through while the pose was well fixed), as they were
 //   mapper.correction()         the correction now: odometry's pose to the corrected one (corrected(c, pose))
+//   mapper.turnScale()          the turn scale's error learnt (0.013: turns 1.3 % larger than odometry's); null without the check
 //   corrected(c, pose)          an odometry pose moved by a correction
 //   fixedWithout(fix, known, w) is the pose well fixed without wall w (the rule for removal)
 // The pose is checked against the walls of one band, "above": a wall stands in every band,
@@ -35,6 +36,11 @@ export interface FramePose { frame: number; odometry: Pose; pose: Pose; doubt: P
 // New walls are looked for in the outline every this many frames: outline() is too slow for every frame.
 const FIND_EVERY = 10;
 const POSE_BAND: BandName = "above";
+// Only a still frame checks the pose: one taken moving lags and smears on the robot
+// (doc/OUTLINE_MAP_PLAN.md, "How the pose is checked"). The still frames of one stand see
+// the same thing with the same errors: together they count as about one (the robot has
+// about 3, the simulator 5), not as new evidence each.
+const STAND_FRAMES = 3;
 // The pose is well fixed while, since its last check against two walls at FIXED_RAD or more
 // to each other, odometry added at most this much doubt (frame by frame: about an 85° turn or 2 m).
 const FIXED_RAD = 45 * Math.PI / 180, FIXED_XY_M = 0.02, FIXED_YAW_RAD = 3 * Math.PI / 180;
@@ -76,15 +82,21 @@ export class Mapper {
   add(frame: { number: number; still?: boolean } & Pose, sights: Sight[]): void {
     const odometry = { x: frame.x, y: frame.y, yaw: frame.yaw }, last = this.placed.at(-1);
     let pose = this.place(odometry), own = sights.map(s => this.placeSight(s));
-    if (last && this.check) this.check.moved(last.pose, pose);
+    if (last && this.check) {
+      // The turn scale learnt so far: the heading turned that much more, about the robot.
+      const more = this.check.moved(last.pose, pose);
+      if (more) { pose = { ...pose, yaw: pose.yaw + more }; this.reshift(odometry, pose); own = sights.map(s => this.placeSight(s)); }
+    }
     if (last && this.fix) { const g = growth(last.pose, pose); this.fix.added = { xyM: this.fix.added.xyM + g.xyM, yawRad: this.fix.added.yawRad + g.yawRad }; }
     else if (last) this.doubt = grown(this.doubt, last.odometry, odometry);
     const poseBand = this.bands.find(b => b.band.name === POSE_BAND)!;
     if (this.check) {
       // Check the pose against the pose band's walls; the walls take their share.
-      const before = this.check.doubt(), ms = poseBand.walls.measure(pose, before, inBand(own, poseBand.band));
+      // Only a still frame checks the pose; one taken moving still lengthens the walls and places their ends.
+      const before = this.check.doubt(), still = frame.still ?? true;
+      const ms = poseBand.walls.measure(pose, before, inBand(own, poseBand.band), { lengthenOnly: !still });
       if (ms.length) {
-        const check = this.check.check(ms), [dx, dy, dYaw] = check.pose;
+        const check = this.check.check(ms, STAND_FRAMES), [dx, dy, dYaw] = check.pose;
         const placed = { x: pose.x + dx, y: pose.y + dy, yaw: pose.yaw + dYaw };
         const by = check.used.filter(m => m.z.length).map(m => m.wall);
         if (by.some(a => by.some(b => between(a.angle, b.angle) >= FIXED_RAD))) this.fix = { walls: by, added: NO_DOUBT };
@@ -96,9 +108,7 @@ export class Mapper {
                                             ends: m.ends.map(e => { const [x, y] = moved(e.x, e.y); return { ...e, x, y }; }) }));
         for (const s of poseBand.walls.apply(frame.number, placed, before, used, check.walls)) this.seen.push({ ...s, band: POSE_BAND });
         pose = placed;
-        this.shift.yaw += dYaw;
-        const [x, y] = this.turned(odometry);
-        this.shift.x = pose.x - x; this.shift.y = pose.y - y;
+        this.reshift(odometry, pose);
         own = sights.map(s => this.placeSight(s));
       }
     }
@@ -122,6 +132,13 @@ export class Mapper {
         walls.found(map.outline(walls).flatMap(l => l.edges), frame.number, pose, this.poseDoubt, inBand(own, band));
   }
 
+  // The correction that places this odometry pose at pose.
+  private reshift(odometry: Pose, pose: Pose): void {
+    this.shift.yaw += pose.yaw - this.place(odometry).yaw;
+    const [x, y] = this.turned(odometry);
+    this.shift.x = pose.x - x; this.shift.y = pose.y - y;
+  }
+
   private turned(p: { x: number; y: number }): [number, number] {
     const c = Math.cos(this.shift.yaw), s = Math.sin(this.shift.yaw);
     return [c * p.x - s * p.y, s * p.x + c * p.y];
@@ -138,6 +155,7 @@ export class Mapper {
   poses(): readonly FramePose[] { return this.placed; }
   removed(): readonly RemovedWall[] { return this.gone; }
   correction(): Pose { return { ...this.shift }; }
+  turnScale(): number | null { return this.check?.turnScale() ?? null; }
 
   sightings(): BandSighting[] {
     const walls = new Map(this.bands.map(b => [b.band.name, b.walls]));

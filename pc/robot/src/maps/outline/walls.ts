@@ -149,7 +149,9 @@ export class Walls {
 
   // The frame's hits on each wall (each hit on the wall it fits best, if any), as one
   // measurement a wall: their middle across it and, if they span enough, their slope.
-  measure(pose: Pose, doubt: PoseDoubt, sights: Sight[]): Measurement[] {
+  // lengthenOnly: the hits only lengthen the walls and place their ends; they measure nothing
+  // (a frame taken moving: mapper.ts checks the pose on still frames only).
+  measure(pose: Pose, doubt: PoseDoubt, sights: Sight[], options: { lengthenOnly?: boolean } = {}): Measurement[] {
     const taken = new Map<Wall, Taken[]>();
     for (const s of sights) {
       if (!s.hit) continue;
@@ -177,7 +179,10 @@ export class Walls {
       const best = fits.reduce((a, b) => (beyond(b) < beyond(a) ? b : a));
       taken.set(best.w, [...(taken.get(best.w) ?? []), best.t]);
     }
-    return [...taken].filter(([, hits]) => hits.length >= MIN_HITS).map(([w, hits]) => ({ ...measured(w, hits, pose), ends: endsSeen(w, hits, sights, this.band) }));
+    return [...taken].filter(([, hits]) => hits.length >= MIN_HITS).map(([w, hits]) => {
+      const m = { ...measured(w, hits, pose), ends: endsSeen(w, hits, sights, this.band) };
+      return options.lengthenOnly ? { ...m, z: [], hw: [], hp: [], r: [] } : m;
+    });
   }
 
   // The walls moved by their changes (pose_check.ts: those measured, and with the pose

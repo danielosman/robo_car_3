@@ -18,6 +18,7 @@ import { drive, MEASURED_DRIFT, movesOf, NO_DRIFT, randomOf, type Moment, type P
 import { ALL_NOISE, NO_NOISE, tofFrame, ZONE_RAD, type Noise } from "./tof.ts";
 import { run, SCENARIOS, type Scenario } from "./scenarios.ts";
 import { play } from "./play.ts";
+import { Mapper } from "../maps/outline/mapper.ts";
 import { closed, floorError, offFaces, poseError, wallErrors } from "./measure.ts";
 import { sureOf, type Wall } from "../maps/outline/walls.ts";
 
@@ -267,8 +268,20 @@ test("the pose check, with the measured drift and all noise: the pose ends far c
   }
 });
 
+test("the pose check learns the turn scale from the walls, either way", () => {
+  // Turns 3 % larger than odometry's, and 2 % smaller; a look round, no noise (odometry's random part stays).
+  for (const [turnScale, lo, hi] of [[1.03, 0.02, 0.04], [0.98, -0.025, -0.01]]) {
+    const mapper = new Mapper();
+    for (const step of run(scenario("square", { noise: NO_NOISE, drift: { ...MEASURED_DRIFT, turnScale } }))) for (const f of step.frames) mapper.add(f.frame, f.sights);
+    const learnt = mapper.turnScale()!;
+    assert.ok(learnt > lo && learnt < hi, `turns ${turnScale}: learnt ${learnt}`);
+  }
+});
+
 test("the pose check, with noise but no drift: it may push the pose off a little, never far", () => {
-  // A known weak spot (doc/OUTLINE_MAP_PLAN.md): a still robot's frames count as new each time.
+  // A known weak spot (doc/OUTLINE_MAP_PLAN.md): in a first look round the turn scale learns
+  // small biases of the far readings (board-stays: about 4°, back under 1° once the first
+  // wall is seen again).
   for (const sc of SCENARIOS)
     for (const { step, corrected } of play(scenario(sc.name, { drift: NO_DRIFT }))) {
       const off = poseError(corrected, step.truth);
@@ -289,11 +302,13 @@ test("the pose check, without noise or drift: the square room's walls end at its
 // The board of "board-removed" and "board-stays": a wall at x = 1.1 (sim/scenarios.ts).
 const onBoard = (w: Wall) => Math.abs(w.x - 1.1) < 0.08 && Math.abs(Math.cos(w.angle)) < 0.3;
 
-test("removal, without noise or drift: the board's walls go the first time the robot looks there with the pose fixed; staying, they stay", () => {
+test("removal, without noise or drift: the board's walls go when the robot looks there with the pose fixed; staying, they stay", () => {
   const removed = play(scenario("board-removed", EXACT)), stays = play(scenario("board-stays", EXACT)).at(-1)!;
   assert.deepEqual(BANDS.map(b => removed[11].walls[b.name].filter(onBoard).length), [1, 1, 1]);
-  // It goes at step 12, while the robot turns past the empty place (steps 12 and 13).
-  assert.deepEqual(BANDS.map(b => removed[13].walls[b.name].filter(onBoard).length), [0, 0, 0]);
+  // L1 and L2 at step 12, while the robot turns past the empty place (steps 12 and 13); above,
+  // whose pose is fixed on still frames only, the next time round (step 22).
+  assert.deepEqual(BANDS.map(b => removed[13].walls[b.name].filter(onBoard).length), [0, 0, 1]);
+  assert.deepEqual(BANDS.map(b => removed[22].walls[b.name].filter(onBoard).length), [0, 0, 0]);
   assert.deepEqual(removed.at(-1)!.removed.map(r => r.band), ["L1", "L2", "above"]);
   assert.ok(removed.at(-1)!.removed.every(r => onBoard(r.wall)));
   assert.deepEqual(BANDS.map(b => stays.walls[b.name].filter(onBoard).length), [1, 1, 1]);

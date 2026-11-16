@@ -21,16 +21,29 @@ disagree, the less sure one gives way.
 
 ## For the fresh session
 
-- **First, remind Daniel of two open things** (he asked for this, 15 Nov):
-  1. **Step 9 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md) (the cleanup):** the docs
+- **First, remind Daniel of these open things** (he asked for this, 15 and 16 Nov):
+  1. **Flash PicoA before the next drive.** Wire 8 (16 Nov) is built and tested, not
+     flashed; the server refuses the old firmware. It brings: every refusal says why;
+     a goto's point at most 3 m from the robot, else refused.
+  2. **Step 9 of [DATA_FLOW_PLAN.md](DATA_FLOW_PLAN.md) (the cleanup):** the docs
      (ARCHITECTURE, README, TODO) brought up to date with steps 4d-F, the README's robot
      tests checked; still to do.
-  2. **The open options to collect more data** for the correction ("Options: more data,
-     then the algorithm" near the end of this file). Nothing is decided: ask him which.
-  Also open from 15 Nov: why the robot wouldn't move ("Driving by hand after the second
-  drive"): items 1 and 2 are built (16 Nov, wire 8, not flashed), 3 and 4 open.
+  3. **Measured drives:** each drive with the end pose measured (forward, sideways,
+     heading from the start mark) is one more case for `npm run score`; three points
+     are few. Which rooms and how many: ask him ("Options: more data, then the
+     algorithm").
+  4. **Whether to add the hand drive's last point** (`da005bff`, driven back to the
+     start by odometry; Daniel to confirm where it truly ended).
 - **Steps S, then A to F in order:** all built and driven on the robot (15 Nov). The
-  correction is off: it was worse than odometry.
+  correction is off (Daniel, 16 Nov: the robot doesn't need it). Since 16 Nov the PC's
+  correction beats odometry on the two measured drives, replayed ("How the pose is
+  checked"). Next lead: drive 2 learns its turn scale wrong (below).
+- **How a change to the correction is judged:** `npm run score` (`pc/robot/src/sim/score.ts`)
+  replays the drives with truth (the truth table is in the script) and the simulator's
+  scenarios at turn drifts of 3, 1 and 0.3 %. Keep a change only if the real drives'
+  sum goes down and the simulator doesn't get worse. The real drives' frames are read
+  from the store once (`ROBOT_DB`; the server must not hold the database: copy it) and
+  kept in `recordings/score/` (not in git).
 - **Read first:** this file; AGENTS.md; DATA_FLOW_PLAN.md sections 1-3; then
   `pc/robot/src/maps/outline/` and `pc/robot/src/sim/` with their tests.
 - **Rules as in DATA_FLOW_PLAN.md section 2:** tests first where they make sense, a
@@ -369,10 +382,26 @@ How the pose is checked (step C, as built):
   would count it three times. "above" finds the most walls; things on the floor are
   mostly below it. L1 and L2 walls then see the frame from the corrected pose, each
   wall alone, as in step B.
-- **One covariance over the pose and the band's walls** (`PoseCheck`). Odometry
-  moving the pose grows its doubt (and turns the heading's doubt into position
+- **One covariance over the pose, the turn scale and the band's walls** (`PoseCheck`).
+  Odometry moving the pose grows its doubt (and turns the heading's doubt into position
   doubt along the way driven); a new wall placed from the pose shares its error.
-  Each frame: the hits on each wall give a measurement (offset of their middle,
+- **The turn scale is learnt** (16 Nov). A turn comes out a steady fraction off the
+  gyro's (the robot about 1.3 %, the simulator's default 3 %). It is part of the state,
+  2 % unsure at the start; each turn is corrected by it as learnt so far, and the
+  heading's doubt grows with the net turn, not every turn. The rest of odometry's
+  error is random: spreads growing with the square root of the turn (0.006 rad, 4 mm
+  a √rad) and of the way driven (0.015 rad, 1 cm a √m).
+- **Only still frames check the pose** (16 Nov). Frames taken moving lengthen the
+  walls and place their ends, nothing more (`Walls.measure(..., { lengthenOnly })`): on
+  the robot their readings lag and smear (CHANGELOG, 16 Nov). The still frames of one
+  stand count as about one (each a third, after the gate: `check(ms, 3)`).
+- The learnt scale is forgotten a little with each turn (0.05 % a √rad), so a scale
+  learnt wrong, or one that changes (battery, floor), can be unlearnt.
+  `mapper.turnScale()` gives it; `npm run score` prints it per drive: drive 1 0.78 %,
+  **drive 2 −0.24 %** though the truth says about +1.3 % (odometry 15°, truth about
+  20°, after about 375° turned). That is why drive 2's end is the one point still worse
+  than odometry: the next thing to look at.
+- Each still frame: the hits on each wall give a measurement (offset of their middle,
   slope if they span 20 cm); one Kalman step gives the pose's change and every
   wall's, also walls not in view. The frame's sights are then placed by the
   corrected pose (`mapper.ts` keeps the shift from odometry).
@@ -402,22 +431,30 @@ How the pose is checked (step C, as built):
 - `new Mapper({ correct: false })` and `npm run sim -- <name> --no-correction` give
   step B's behaviour, to compare.
 
-What the pose check does (simulator, all noise and the measured drift; mean of the
-end error over 5 seeds):
+What the pose check does. The real drives of 15 Nov, replayed, against Daniel's truth:
 
-| Scenario | Odometry | Corrected |
+| Point | Odometry | Corrected |
 |---|---|---|
-| `square` (a full turn on the spot) | 1 cm, 10.7° | 1 cm, 1.4° |
-| `things` | 1 cm, 10.7° | 1 cm, 0.8° |
-| `box-stays` (two turns) | 1 cm, 21.1° | 1 cm, 1.4° |
-| `loop` (round a room, back to the start) | 27 cm, 12.0° | 9 cm, 2.0° |
-| `door` (two rooms) | 55 cm, 21.2° | 23 cm, 4.4° |
+| Drive 1 (`0a203718`), after the look round | 0 cm, 4.9° | 0 cm, 2.4° |
+| Drive 1, at the end | 2 cm, 3.2° | 1 cm, 1.9° |
+| Drive 2 (`da005bff`), end of the square (truth "about 20°") | 3 cm, 4.8° | 3 cm, 5.7° |
+
+The simulator, all noise, end error, mean of 3 seeds, at three turn drifts:
+
+| Scenario | 3 %: odometry | corrected | 1 %: odometry | corrected | 0.3 %: odometry | corrected |
+|---|---|---|---|---|---|---|
+| `square` | 1 cm, 10.9° | 1 cm, 2.1° | 1 cm, 3.7° | 1 cm, 0.7° | 1 cm, 1.2° | 1 cm, 0.4° |
+| `box-stays` (two turns) | 1 cm, 20.9° | 1 cm, 0.4° | 1 cm, 6.5° | 1 cm, 0.2° | 1 cm, 1.5° | 1 cm, 0.3° |
+| `loop` | 28 cm, 12.5° | 10 cm, 5.7° | 11 cm, 5.3° | 6 cm, 3.2° | 5 cm, 2.8° | 7 cm, 2.5° |
+| `door` | 55 cm, 21.3° | 8 cm, 1.9° | 18 cm, 6.9° | 4 cm, 0.1° | 6 cm, 1.9° | 5 cm, 0.6° |
 
 - Without noise or drift the pose stays exact (under 1 cm and 0.1° all the way).
-- **Weak spot:** with noise but no drift the check alone can push the pose off, up
-  to about 30 cm and 7° (`door`, 5 seeds; a test caps seed 1 at 25 cm and 7°). It
-  happens while driving through the door: moving frames shift the pose 3-8 cm each
-  and its doubt shrinks while the error grows.
+- **Weak spots:** at a tiny drift `loop` ends a little worse than odometry (7 cm
+  against 5). With noise but no drift a first look round teaches the turn scale small
+  biases of the far readings: up to 4° off (`board-stays`), back under 1° once the
+  first wall is seen again; a test caps it at 25 cm and 7°.
+- The scores: `npm run score` (16 Nov). The removal table below was not run again
+  after the change (its test, 10 seeds, still passes: nothing standing removed).
 - With drift the walls are far closer to the truth than in B (`loop` 7-8 cm against
   16-23 cm). In `square` the walls end within 1 cm of the corners without noise,
   1-7 cm with noise.
@@ -446,7 +483,7 @@ What removal does (simulator, all noise and the measured drift):
 |---|---|
 | Walls removed that still stand (9 scenarios, 10 seeds) | 0 |
 | `board-removed`: the board's walls all gone at the end (10 seeds) | 7 of 10 (else one L2 wall stays) |
-| Without noise or drift: the board's walls go | at steps 12-13, the first look there with the pose fixed |
+| Without noise or drift: the board's walls go | L1, L2 at steps 12-13 (the first look there with the pose fixed); above at step 22 (its pose is fixed on still frames only) |
 | The stored drive (boot `cc0e4e65`) | nothing removed; walls as before (L1 5, L2 2, above 2); 2.8 s |
 
 - **The rule only acts where the pose gets fixed by two walls.** In a look round on
@@ -466,8 +503,6 @@ From the reviews of steps C, D and E; none blocks step F.
 - A frame with 1-2 hits on a wall neither resets its count of frames seen through nor
   stops that frame counting.
 - The weak spot above: moving frames through a door push the pose off.
-- The odometry's doubt growth reads the pose's current doubt ("adds up"); a turn
-  scale error kept as part of the state would be the principled form.
 - `corners()` overrides the end filter without asking its spread; an end's spread
   never grows again (it could freeze).
 - The mapper sequences measure → check → apply itself; one `walls.checkPose(...)`
@@ -496,6 +531,18 @@ From the reviews of steps C, D and E; none blocks step F.
   mid-boot, about 1 s) goes unturned.
 - Step F: the C and TS transforms are twins, held together only by one shared sample
   (`test_body.c`, `correction.test.ts`).
+- 16 Nov review of the turn scale and still frames:
+  - the mapper still sequences measure → check → apply and applies the turn the scale
+    adds (`moved()` returns it, the mapper reshifts); one `walls.checkPose(...)` or a
+    `PoseCheck.place(...)` would keep the rule in one place;
+  - two drift models: `pose.ts` (adds up, 3.5 %) decides how long the pose stays fixed
+    for removal (`fixedWithout`), `pose_check.ts` (learnt scale, random rest) the
+    filter's doubt; one model would be cleaner;
+  - moving frames lengthen walls without the measurement gate (only the per-hit gate);
+  - `STAND_FRAMES` is fixed at 3 (the robot has about 3 still frames a stand, the
+    simulator 5);
+  - the position's random doubt is small (4 mm for a full turn on the spot);
+  - the hand drive (snapshots 27-46 of `da005bff`) not replayed with the new model.
 
 ### How the page and the PC's maps work (step E, as built)
 
@@ -622,6 +669,15 @@ To look at, on a real drive:
   a pose: a move queued before it would make a pose wrong; not a change: sending it
   twice does no harm); the robot's own cell map and steering use it. Past frames,
   cells and dots are not moved.
+
+## Decided (Daniel, 16 Nov)
+
+- The correction stays off: the robot avoids obstacles with its own recent map; the
+  correction is for the PC's map and for places seen long ago.
+- A wall corrects the pose in the directions it can (its turn, the distance across
+  it); no waiting for two walls. Correct when sure.
+- A goto's point at most 3 m from the robot, else refused. The page keeps drawing and
+  taking clicks by the PC's correction.
 
 ## Decided (Daniel, 15 Nov)
 
@@ -771,11 +827,9 @@ on the robot was wrong:
 3. Goto points stay turned by the PC's correction, the page drawn by it (Daniel, 16
    Nov: a click near the drawn robot lands right whatever the correction; the robot's
    own map stops it before obstacles).
-4. How to keep the PC from distrusting odometry this far (open; part of "Options: more
-   data, then the algorithm"). Leads, none decided: the pose doubt's growth measured on
-   the robot instead of the simulator's 3.5 %; an unsure wall never moves a pose more
-   than the wall itself is sure of; a correction that moves the pose by more than its
-   own doubt is taken as a sign that something is wrong, logged, and not applied.
+4. The PC no longer distrusts odometry this far: the turn scale is learnt and the
+   heading's doubt grows with the net turn ("How the pose is checked"). Not yet
+   replayed on the hand drive (snapshots 27-46 of `da005bff`, no truth there).
 
 ## What the two drives say, and what they don't
 
@@ -794,7 +848,7 @@ on the robot was wrong:
 
 ## Options: more data, then the algorithm
 
-Open: Daniel decides which, and when. One way to go:
+Open: Daniel decides which rooms, and when.
 
 1. **Data drives with the correction off**, each with the truth measured. Odometry
    drives the robot, the PC's correction is computed and kept, both are scored against
@@ -806,37 +860,20 @@ Open: Daniel decides which, and when. One way to go:
      loop of 3-5 m; a drive out and straight back. Corners as 4 × `r30`, then `r-30`
      (Daniel), so the floor around is seen.
    - **Truth:** a tape mark at the start; Daniel measures forward, sideways and
-     heading at the end, and where it helps after a look round or a side. Written into
-     a file next to the drive (`recordings/truth.json`: boot, snapshot, x, y, yaw).
-2. **A scoring replay** (`npm run score`, PC only): every drive in `truth.json` replayed
-   through the mapper; for each measured point, odometry's error and the corrected
-   pose's, and the sum over all drives. Any change to the algorithm (wall rules, how
-   sure walls and odometry are) is kept only if it lowers the corrected error over all
-   drives, and stays at least as good as odometry on each. The simulator's scenarios,
-   at several drifts, must not get worse either.
-3. **Then the algorithm.** First what the replays point at (the two-surface wall, how
-   sure a new wall and odometry are). If no change gets the corrected pose to
-   odometry's on these drives, the approach itself is in question (for example, correct
-   only when two walls at an angle agree, or graph SLAM: "Alternatives for later").
-4. Done, not flashed before the second drive: the floor-first rule checks floor not seen
-   yet only under the robot's own width, not in the 5 cm margin; a stop for it says
-   "floor not seen yet" in the robot's line, the answer (end `unseen_floor`, wire 7)
-   and `robot check`. Both flashed on 15 Nov, before the second drive.
-
-Tried on the first drive's replay, none kept (end position against the truth; odometry
-2 cm, 3°):
-
-| Change | Heading after the look round (truth 18°) | End |
-|---|---|---|
-| none (as built) | 23.4° | 15 cm, 3.8° off |
-| a new wall's doubt from its hits, and one measurement a stand | 22.3° | 16 cm, 25° off |
-| the same, and the pose's turn doubt 1 % (not 3.5 %) | 15.6° | 10 cm, 1.7° off |
-| only the turn doubt 1 % | 15.8° | 9 cm, 2.9° off |
+     heading at the end, and where it helps after a look round or a side. Added to
+     `TRUTH` in `pc/robot/src/sim/score.ts` (boot, snapshot, x, y cm, heading °).
+2. **The scoring replay** is built: `npm run score` ("For the fresh session").
+3. **Then the algorithm,** by what the replays point at. Next: why drive 2 learns its
+   turn scale wrong (−0.24 % against about +1.3 %). If no change keeps the corrected
+   pose at least as good as odometry on the drives, graph SLAM ("Alternatives for
+   later").
 
 ## Open for Daniel
 
 1. **The data drives** ("Options: more data, then the algorithm"): which rooms are at
-   hand, and how many drives; Daniel measures the truth at each.
+   hand, and how many drives; Daniel measures the truth at each (forward, sideways,
+   heading at the end; it goes into `score.ts`'s truth table).
+2. Flash PicoA (wire 8) before the next drive.
 
 ## Open technical points
 

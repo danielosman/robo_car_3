@@ -23,7 +23,7 @@ const X_WALL: Edge = { ax: 1, ay: -0.5, bx: 1, by: 0.5, kind: "wall" }, Y_WALL: 
 const frame = (placed: Pose, facing: number, at: number): Sight[] =>
   row(b => at / Math.cos(b - placed.yaw - facing), facing + placed.yaw, { x: placed.x, y: placed.y });
 // Known walls, made from the true pose and seen there 10 times (sure); then, unless `still`,
-// the pose's doubt grows by a full turn.
+// the pose's doubt grows by a full turn and a drive of 1 m out and back.
 function known(edges: Edge[], still = false): { check: PoseCheck; walls: Walls } {
   const check = new PoseCheck(), walls = new Walls(ABOVE, check);
   walls.found(edges, 0, AT, check.doubt(), edges.flatMap(along));
@@ -31,6 +31,8 @@ function known(edges: Edge[], still = false): { check: PoseCheck; walls: Walls }
   if (still) return { check, walls };
   check.moved(AT, { x: 0, y: 0, yaw: Math.PI });
   check.moved({ x: 0, y: 0, yaw: Math.PI }, { x: 0, y: 0, yaw: 2 * Math.PI });
+  check.moved(AT, { x: 1, y: 0, yaw: 0 });
+  check.moved({ x: 1, y: 0, yaw: 0 }, AT);
   return { check, walls };
 }
 
@@ -52,7 +54,7 @@ test("two walls at an angle correct the whole pose", () => {
   close(dYaw, -3 * DEG, 0.5 * DEG);
   close(dx, -0.05, 0.015);
   close(dy, 0.04, 0.015);
-  assert.ok(check.doubt().xyM < 0.02 && check.doubt().yawRad < 2 * DEG, JSON.stringify(check.doubt())); // from 6 cm and 12.6°
+  assert.ok(check.doubt().xyM < 0.02 && check.doubt().yawRad < 2 * DEG, JSON.stringify(check.doubt())); // from 2 cm and 10.9°
 });
 
 test("a measurement too far off for the doubts is left out: a thing moved", () => {
